@@ -26,7 +26,7 @@ from geoutils.pointcloud.pointcloud import PointCloud
 
 
 def _make_point_frame(point_count: int = 6) -> gpd.GeoDataFrame:
-    """Create deterministic points with duplicate labels for positional row checks."""
+    """Create a small point dataframe with repeated index labels."""
 
     positions = np.arange(point_count)
     frame = gpd.GeoDataFrame(
@@ -39,32 +39,39 @@ def _make_point_frame(point_count: int = 6) -> gpd.GeoDataFrame:
 
 
 class TestPointDataframe:
-    """Test module for eager metadata, output construction, positional assignment and row selection."""
+    """
+    Test module for point dataframe operations: metadata, output construction, assignment and row selection.
+
+    The Dask and multiprocessing tests are gathered in TestPointDataframeChunked further below.
+    """
 
     def test_dataframe_attrs__eager_mapping(self) -> None:
-        """Checks that eager metadata is updated without sharing the caller's mapping."""
+        """Checks that metadata is copied from the input dictionary and that later updates add to it."""
 
-        # Add metadata through the common helper, then mutate the caller's dictionary
+        # Start with one metadata entry and save it on the dataframe
         frame = _make_point_frame()
         attrs = {"source": "fixture"}
         _set_dataframe_attrs(frame, attrs)
+
+        # Change the original dictionary after saving it, then add another entry to the dataframe
         attrs["source"] = "changed"
         _set_dataframe_attrs(frame, {"quality": "checked"})
 
-        # Check that Pandas owns the stored values and later updates keep existing metadata
+        # The saved source stays "fixture" (changing the original dictionary had no effect)
+        # The second call adds quality without deleting source
         assert _get_dataframe_attrs(frame) == {"source": "fixture", "quality": "checked"}
 
     @pytest.mark.parametrize("as_dataframe", [False, True])
     def test_build_pointcloud_output__eager_metadata(self, as_dataframe: bool) -> None:
-        """Checks that eager outputs receive current metadata and the requested public type."""
+        """Checks that eager output metadata matches its rows and that the requested output type is returned."""
 
-        # Supply stale spatial metadata so output construction must replace values tied to point locations
+        # Start with the wrong point count and old bounds so the result has to replace both
         frame = _make_point_frame()
         source_bounds = BoundingBox(-1, -2, 20, 30)
         attrs = {"source": "fixture", "point_count": 100, "bounds": source_bounds}
         original_attrs = attrs.copy()
 
-        # Build either the dataframe accessor representation or a PointCloud object
+        # Return the dataframe itself when requested, otherwise wrap in a PointCloud
         result = _build_pointcloud_output(
             frame,
             data_column="height",
@@ -73,7 +80,8 @@ class TestPointDataframe:
         )
         output_frame = result if as_dataframe else result.ds
 
-        # Check the output type and metadata derived from the current eager rows
+        # The current rows give the point count, CRS and geometry type, and height is saved as the data column
+        # Bounds are reset to None because this call does not say that the point locations stayed the same
         assert (result is frame) if as_dataframe else isinstance(result, PointCloud)
         assert _get_dataframe_attrs(output_frame) == {
             "source": "fixture",
@@ -86,14 +94,14 @@ class TestPointDataframe:
         assert attrs == original_attrs
 
     def test_build_pointcloud_output__preserve_eager_locations(self) -> None:
-        """Checks that unchanged eager locations keep bounds while their row count is refreshed."""
+        """Checks that preserve_locations=True keeps known bounds but updates the point count."""
 
-        # Describe the known point locations with deliberately stale row-count metadata
+        # Start with correct bounds for these coordinates but the wrong number of points
         frame = _make_point_frame()
         source_bounds = BoundingBox(0, 1, 5, 6)
         attrs = {"point_count": 100, "bounds": source_bounds}
 
-        # Mark the output as having the same ordered X/Y coordinates
+        # Tell the output builder that the X/Y coordinates stayed in the same order
         result = _build_pointcloud_output(
             frame,
             data_column="height",
@@ -102,7 +110,7 @@ class TestPointDataframe:
             preserve_locations=True,
         )
 
-        # Eager rows provide an exact count, while their cached bounds remain valid
+        # Six rows give the new point count, while the bounds still describe the unchanged coordinates
         output_attrs = _get_dataframe_attrs(result)
         assert output_attrs["point_count"] == len(frame)
         assert output_attrs["bounds"] == source_bounds
@@ -110,15 +118,15 @@ class TestPointDataframe:
     def test_assign_point_values__position_with_duplicate_labels(self) -> None:
         """Checks that eager values follow row positions when dataframe labels repeat."""
 
-        # Keep only point geometry and prepare values whose order is easy to recognize
+        # Keep only the geometry and use values whose row order is easy to see (0, 10, 20, ...)
         frame = _make_point_frame()
         geometry = frame[["geometry"]]
         values = np.arange(len(frame)) * 10
 
-        # Assign two columns at the matching point positions
+        # Add both columns by row number: the first value goes to the first point, etc.
         result = _assign_point_values(geometry, {"self": values, "other": values + 1})
 
-        # Duplicate labels must not duplicate or reorder values through Pandas index alignment
+        # Repeated labels can confuse normal Pandas alignment, so also check the original row order and geometry
         assert result is not geometry
         assert np.array_equal(result.index, frame.index)
         assert np.array_equal(result.geometry, frame.geometry)
@@ -127,13 +135,13 @@ class TestPointDataframe:
         assert list(geometry.columns) == ["geometry"]
 
     def test_assign_point_values__empty_mapping(self) -> None:
-        """Checks that assigning no values returns the original dataframe unchanged."""
+        """Checks the edge case that an empty value dictionary returns the exact same dataframe."""
 
-        # Use object identity to establish that the no-op path does not make an unnecessary copy
+        # An empty dictionary has no columns to add, so there is no reason to copy the dataframe
         frame = _make_point_frame()
         result = _assign_point_values(frame, {})
 
-        # No columns or metadata need rebuilding when the mapping is empty
+        # Check object identity (not just equal rows) to show that no copy was made
         assert result is frame
 
     @pytest.mark.parametrize(
@@ -144,13 +152,13 @@ class TestPointDataframe:
         ],
     )
     def test_select_point_rows__eager_position(self, indices: NDArray[Any], expected_positions: list[int]) -> None:
-        """Checks that eager masks and row numbers select positions independently of labels."""
+        """Checks that eager masks and row numbers select positions even when index labels repeat."""
 
-        # Select duplicate-indexed rows using either a boolean mask or ordered integer positions
+        # Select rows with either a six-value boolean mask or an ordered list of row numbers
         frame = _make_point_frame()
         result = _select_point_rows(frame, indices)
 
-        # Compare with an independent iloc selection, including its repeated requested row
+        # Compare with iloc, which also uses row positions: in the integer case, position 2 must appear twice
         expected = frame.iloc[expected_positions]
         assert_geodataframe_equal(result, expected)
 
@@ -159,46 +167,46 @@ class TestPointDataframeChunked:
     """
     Test module for lazy metadata, output construction, partition alignment, assignment and row selection.
 
-    Every computed result is compared with the same positional operation on an eager GeoDataFrame.
+    Every test that computes rows compares them with the same operation on an in-memory GeoDataFrame.
     """
 
     def test_dataframe_attrs__dask_private_copy(self) -> None:
-        """Checks that Dask metadata is private, copied and available without running the graph."""
+        """Checks that Dask metadata is copied and can be read without running any tasks."""
 
         dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
         from dask.callbacks import Callback
 
-        # Construct a lazy point table without GeoUtils metadata
+        # Make a lazy point table and check that it starts with no GeoUtils metadata
         lazy = dgpd.from_geopandas(_make_point_frame(), npartitions=3, sort=False)
         assert _get_dataframe_attrs(lazy) == {}
         attrs = {"source": "fixture"}
 
-        # Store and read metadata while recording any Dask tasks
+        # Save and read the metadata inside a callback that records every Dask task that runs
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(args[0])):
             _set_dataframe_attrs(lazy, attrs)
             output_attrs = _get_dataframe_attrs(lazy)
         attrs["source"] = "changed"
 
-        # The metadata must be independent of the caller and must not evaluate point rows
+        # No tasks ran, and changing the original dictionary did not change the saved source value
         assert tasks == []
         assert output_attrs == {"source": "fixture"}
 
     @pytest.mark.parametrize("preserve_locations", [False, True])
     def test_build_pointcloud_output__dask_metadata(self, preserve_locations: bool) -> None:
-        """Checks that lazy dataframe outputs update metadata without computing point partitions."""
+        """Checks that lazy output metadata changes without reading any Dask partitions."""
 
         dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
         from dask.callbacks import Callback
 
-        # Supply location metadata from an earlier six-point dataframe
+        # Start with a known point count and bounds for the input coordinates
         frame = _make_point_frame()
         lazy = dgpd.from_geopandas(frame, npartitions=3, sort=False)
         source_bounds = BoundingBox(0, 1, 5, 6)
         attrs = {"source": "fixture", "point_count": len(frame), "bounds": source_bounds}
         original_attrs = attrs.copy()
 
-        # Build the lazy output while checking that metadata access does not execute the graph
+        # Build the output and read its metadata while recording any Dask tasks that run
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(args[0])):
             result = _build_pointcloud_output(
@@ -210,7 +218,8 @@ class TestPointDataframeChunked:
             )
             output_attrs = _get_dataframe_attrs(result)
 
-        # Location-dependent metadata is reused only under the explicit caller guarantee
+        # With preserve_locations=True, the same X/Y coordinates keep their count and bounds
+        # With False, either may have changed, so both values are reset to None without reading the rows
         assert tasks == []
         assert result is lazy and is_dask_dataframe(result)
         assert output_attrs == {
@@ -224,18 +233,18 @@ class TestPointDataframeChunked:
         assert attrs == original_attrs
 
     def test_build_pointcloud_output__dask_to_pointcloud(self) -> None:
-        """Checks that object output computes lazy rows and constructs an equivalent eager PointCloud."""
+        """Checks that asking for a PointCloud computes Dask rows and returns the same eager data."""
 
         dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
 
-        # Split a point table so object construction must collect its lazy partitions
+        # Split the rows into three partitions so making an eager PointCloud has work to compute
         frame = _make_point_frame()
         lazy = dgpd.from_geopandas(frame, npartitions=3, sort=False)
 
-        # Request the object interface, which is eager by design
+        # Build a PointCloud (store an eager GeoDataFrame, not Dask)
         result = _build_pointcloud_output(lazy, data_column="height", as_dataframe=False)
 
-        # The PointCloud contains the same ordered rows and current eager metadata
+        # The PointCloud should have the same ordered rows, height column and point count
         assert isinstance(result, PointCloud)
         assert_geodataframe_equal(result.ds, frame)
         assert result.data_column == "height"
@@ -244,7 +253,7 @@ class TestPointDataframeChunked:
     @pytest.mark.parametrize("partitions", [2, 5])
     @pytest.mark.parametrize("native_series", [False, True])
     def test_point_rows__reuse_partition_layout(self, partitions: int, native_series: bool) -> None:
-        """Checks that duplicate labels and known row counts do not start Dask computation."""
+        """Checks that Dask assignment and row selection stay lazy with repeated labels and known row counts."""
 
         import_optional("dask")
         import dask.array as da
@@ -252,7 +261,7 @@ class TestPointDataframeChunked:
 
         dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
 
-        # Create duplicate labels and uneven partitions so label-based alignment would change selected rows
+        # Repeat index labels and use uneven partitions (matching by label would put values on the wrong rows)
         positions = np.arange(40)
         frame = gpd.GeoDataFrame(
             {"height": positions}, geometry=gpd.points_from_xy(positions, positions + 1), crs=32632
@@ -262,9 +271,12 @@ class TestPointDataframeChunked:
         geometry = lazy[["geometry"]]
         lengths = None if native_series else _point_partition_lengths(geometry)
 
-        # Matching Series need no counts; arrays with other chunks can reuse one earlier partition-length summary
+        # A Series from this dataframe already has matching partitions and needs no row counts
+        # Arrays use chunks of 7/9, so both operations reuse the point partition lengths found above
         values = lazy["height"] if native_series else da.from_array(positions, chunks=7)
         mask = lazy["height"] % 3 == 0 if native_series else da.from_array(positions % 3 == 0, chunks=9)
+
+        # Build the assignment + selection graphs while recording any Dask task that actually runs
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(args[0])):
             assigned = _assign_point_values(geometry, {"self": values, "other": values * 2}, partition_lengths=lengths)
@@ -272,7 +284,7 @@ class TestPointDataframeChunked:
         assert tasks == []
         assert is_dask_dataframe(result)
 
-        # Compare original positions and geometry after computing only the requested lazy result
+        # Compute the final selection and compare it with the same boolean mask on the eager dataframe
         output = result.compute()
         expected = frame.iloc[positions % 3 == 0]
         assert np.array_equal(output.index, expected.index)
@@ -282,87 +294,87 @@ class TestPointDataframeChunked:
         assert is_dask_dataframe(lazy) and is_dask_dataframe(result)
 
     def test_assign_point_values__dask_values_to_eager_rows(self) -> None:
-        """Checks that lazy value arrays are computed before positional assignment to eager rows."""
+        """Checks that Dask values are computed before they are added to an eager dataframe."""
 
         import_optional("dask")
         import dask.array as da
 
-        # Use chunks that do not follow the eager dataframe's row layout
+        # Put the values in Dask chunks of 4 + 2
         frame = _make_point_frame()
         values = da.from_array(np.arange(len(frame)) * 2, chunks=4)
 
-        # Eager point rows require an eager output even when values originated in Dask
+        # Add the values to rows that are already in memory, which requires an eager output
         result = _assign_point_values(frame[["geometry"]], {"value": values})
 
-        # Values still follow point positions and the output remains a GeoDataFrame
+        # The result is a GeoDataFrame, and each doubled value stays with its original row number
         assert isinstance(result, gpd.GeoDataFrame)
         assert not is_dask_dataframe(result)
         assert np.array_equal(result["value"], np.arange(len(frame)) * 2)
 
     def test_assign_point_values__empty_dask_dataframe(self) -> None:
-        """Checks that an empty lazy point table accepts an empty value array with its declared dtype."""
+        """Checks that an empty Dask point table accepts an empty value array and keeps its dtype."""
 
         import_optional("dask")
         import dask.array as da
 
         dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
 
-        # Build the zero-row case that has no array blocks to align with point partitions
+        # Make a zero-row point table that still has geometry/CRS, plus an empty int16 value array
         frame = _make_point_frame(0)
         lazy = dgpd.from_geopandas(frame, npartitions=1, sort=False)
         values = da.from_array(np.array([], dtype=np.int16), chunks=1)
 
-        # Assigning the empty column should keep a valid lazy geospatial table
+        # Add the empty column and then compute the one empty partition
         result = _assign_point_values(lazy, {"value": values})
         output = result.compute()
 
-        # The result retains geometry metadata and the requested numeric dtype
+        # The result stays lazy until compute, then has the same empty geometry and an int16 value column
         assert is_dask_dataframe(result)
         assert_geodataframe_equal(output.drop(columns="value"), frame)
         assert output["value"].dtype == np.int16
         assert output.empty
 
     def test_assign_point_values__unknown_array_length(self) -> None:
-        """Checks that lazy arrays with unknown chunk lengths are aligned to point partitions."""
+        """Checks that a Dask array with an unknown length is split to match the point partitions."""
 
         dask = import_optional("dask")
         import dask.array as da
 
         dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
 
-        # Hide the array length behind a delayed task while keeping its expected dtype explicit
+        # Put the values behind a delayed task, so Dask reports the array length as unknown
         frame = _make_point_frame()
         lazy = dgpd.from_geopandas(frame, npartitions=3, sort=False)
         delayed_values = dask.delayed(np.arange)(len(frame))
         values = da.from_delayed(delayed_values, shape=(np.nan,), dtype=np.int64)
 
-        # Discover chunk sizes and then align the values with the point partitions
+        # Let the helper find the values and split them across the same three point partitions
         result = _assign_point_values(lazy[["geometry"]], {"value": values})
 
-        # The computed rows must match positional eager assignment exactly
+        # Compare the computed rows with adding 0..5 directly to the eager dataframe
         output = result.compute()
         expected = frame[["geometry"]].copy()
         expected["value"] = np.arange(len(frame))
         assert_geodataframe_equal(output, expected)
 
     def test_select_point_rows__integer_partition_boundaries(self) -> None:
-        """Checks that sorted row numbers select across lazy partition boundaries and keep repeats."""
+        """Checks that sorted row numbers cross Dask partitions and keep a row requested twice."""
 
         dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
         from dask.callbacks import Callback
 
-        # Choose rows on both sides of partition boundaries, including one requested twice
+        # Pick rows from all three two-row partitions, and ask for position 2 twice
         frame = _make_point_frame()
         lazy = dgpd.from_geopandas(frame, npartitions=3, sort=False)
         positions = np.array([0, 2, 2, 3, 5])
         lengths = _point_partition_lengths(lazy)
 
-        # Construct the positional selection from known lengths without evaluating point partitions again
+        # Give the known partition lengths and record whether building the selection runs any point tasks
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(args[0])):
             result = _select_point_rows(lazy, positions, partition_lengths=lengths)
 
-        # Dask keeps the graph lazy and returns the same ordered rows as eager iloc
+        # No tasks ran while building the graph; after compute, the rows match frame.iloc[positions]
         assert tasks == []
         assert is_dask_dataframe(result)
         assert_geodataframe_equal(result.compute(), frame.iloc[positions])
@@ -373,12 +385,12 @@ class TestPointDataframeErrors:
 
     @pytest.mark.parametrize("values", [np.arange(5), np.arange(12).reshape(6, 2)])
     def test_assign_point_values__error_invalid_shape(self, values: NDArray[Any]) -> None:
-        """Checks that eager assignment rejects missing rows and multidimensional values."""
+        """Checks that eager assignment rejects five values for six rows and a two-dimensional array."""
 
-        # Assign invalid values to a six-row point table
+        # Try either five values for six points or a 6 x 2 array with two values per point
         frame = _make_point_frame()
 
-        # Every assigned column must provide exactly one scalar for each ordered point
+        # A new column needs one value per point (six values in one dimension)
         with pytest.raises(ValueError, match="one value per dataframe row"):
             _assign_point_values(frame, {"value": values})
 
@@ -394,55 +406,55 @@ class TestPointDataframeErrors:
     def test_select_point_rows__error_invalid_integer_positions(
         self, positions: NDArray[Any], error: type[Exception], message: str
     ) -> None:
-        """Checks that lazy row selection rejects invalid shapes, order and bounds."""
+        """Checks that lazy row selection rejects 2D, unsorted and out-of-range row numbers."""
 
         dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
 
-        # Apply invalid global positions to a known six-row, three-partition table
+        # Try a 2D array, decreasing row numbers, -1 or 6 on a dataframe with rows 0..5
         lazy = dgpd.from_geopandas(_make_point_frame(), npartitions=3, sort=False)
         lengths = _point_partition_lengths(lazy)
 
-        # Positional selection requires a sorted one-dimensional array within the dataframe
+        # Valid row numbers must be a sorted 1D array and stay between 0 and 5
         with pytest.raises(error, match=message):
             _select_point_rows(lazy, positions, partition_lengths=lengths)
 
     @pytest.mark.parametrize("lengths", [(6,), (2, -1, 5)])
     def test_point_array_partitions__error_invalid_partition_lengths(self, lengths: tuple[int, ...]) -> None:
-        """Checks that lazy array alignment rejects missing and negative partition lengths."""
+        """Checks that array alignment rejects a missing partition count and a negative row count."""
 
         import_optional("dask")
         import dask.array as da
 
         dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
 
-        # Pair a valid six-value array with an invalid description of three point partitions
+        # Pair six valid values with either one count for three partitions or the counts (2, -1, 5)
         lazy = dgpd.from_geopandas(_make_point_frame(), npartitions=3, sort=False)
         values = da.from_array(np.arange(6), chunks=2)
 
-        # Each point partition needs one nonnegative row count
+        # All three point partitions need their own row count, and no count can be negative
         with pytest.raises(ValueError, match="one nonnegative row count"):
             _point_array_partitions(lazy, [values], partition_lengths=lengths)
 
     @pytest.mark.parametrize("values", [np.arange(5), np.arange(12).reshape(6, 2)])
     def test_point_array_partitions__error_invalid_value_shape(self, values: NDArray[Any]) -> None:
-        """Checks that lazy array alignment rejects missing rows and multidimensional values."""
+        """Checks that array alignment rejects five values for six rows and a two-dimensional array."""
 
         dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
 
-        # Align invalid values against a six-row point table with known partition lengths
+        # Try either five values for six points or a 6 x 2 array with two values per point
         lazy = dgpd.from_geopandas(_make_point_frame(), npartitions=3, sort=False)
 
-        # A value column must contain one scalar for every point row
+        # The three point partitions contain 2 + 2 + 2 rows, so the value array must have six scalar values
         with pytest.raises(ValueError, match="one value per dataframe row"):
             _point_array_partitions(lazy, [values], partition_lengths=(2, 2, 2))
 
     @pytest.mark.parametrize("kind", ["dataframe", "partitions"])
     def test_assign_point_values__error_invalid_dask_series(self, kind: str) -> None:
-        """Checks that lazy Series assignment requires one matching partition per point partition."""
+        """Checks that Dask values must be a Series with the same three partitions as the points."""
 
         dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
 
-        # Derive either a two-dimensional dataframe or a Series with the wrong partition count
+        # Pass either a 2D dataframe or a Series split into two partitions instead of three
         lazy = dgpd.from_geopandas(_make_point_frame(), npartitions=3, sort=False)
         values: Any
         if kind == "dataframe":
@@ -450,19 +462,19 @@ class TestPointDataframeErrors:
         else:
             values = lazy.repartition(npartitions=2)["height"]
 
-        # Native lazy values must have one dimension and follow the point partition layout
+        # A value column must be one-dimensional and have one matching piece for each point partition
         with pytest.raises(ValueError, match="must follow the dataframe's partition layout"):
             _assign_point_values(lazy[["geometry"]], {"value": values})
 
     def test_select_point_rows__error_invalid_dask_mask(self) -> None:
-        """Checks that a lazy boolean Series must match the point dataframe partition layout."""
+        """Checks that a Dask boolean mask must have the same partitions as the point dataframe."""
 
         dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
 
-        # Repartition a native mask so its partitions no longer correspond to point partitions
+        # Split the mask into two partitions while the point dataframe still has three
         lazy = dgpd.from_geopandas(_make_point_frame(), npartitions=3, sort=False)
         mask = (lazy.repartition(npartitions=2)["height"] > 11).astype(bool)
 
-        # Reject the mask before adding an invalid partitionwise selection to the graph
+        # Reject the mask before adding a selection that would pair the wrong pieces of each dataframe
         with pytest.raises(ValueError, match="must follow the dataframe's partition layout"):
             _select_point_rows(lazy, mask)

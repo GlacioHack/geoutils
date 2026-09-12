@@ -1143,7 +1143,6 @@ class TestGroupedStatsChunked:
             assert isinstance(source.data, da.Array)
             assert isinstance(mask_data, da.Array)
 
-    @pytest.mark.filterwarnings("ignore:Overriding 3D points:UserWarning")
     @pytest.mark.parametrize("source_type", ["pointcloud", "dataframe", "dask"])
     @pytest.mark.parametrize("size", [1, 3])
     def test_stats__point_mask_rows_and_geometry(self, source_type: str, size: int) -> None:
@@ -1233,7 +1232,7 @@ class TestGroupedStatsChunked:
 
 
 class TestGroupedStatsErrors:
-    """Test module for validation errors and warnings raised by grouped statistics."""
+    """Test module for errors and warnings raised by grouped statistics."""
 
     @pytest.mark.parametrize(
         "by,bins,categories,message",
@@ -1275,7 +1274,8 @@ class TestGroupedStatsErrors:
         values = np.arange(6, dtype=float)
         grouping = {"by": {"zone": np.arange(6) % 2}, "categories": {"zone": [0, 1]}}
 
-        # Reject global statistics, group masks, sampling within groups, multiprocessing and GeoUtils strategies
+        # Raise errors for global statistics, group masks, sampling within groups,
+        # multiprocessing and GeoUtils strategies
         with pytest.raises(ValueError, match="requires grouped statistics"):
             gu.stats.stats(values, "mean", backend="flox")
         for options in (
@@ -1297,17 +1297,7 @@ class TestGroupedStatsErrors:
         raster = gu.Raster.from_array(np.arange(6, dtype=float).reshape(2, 3), Affine.identity(), 32631)
         groups = np.arange(6).reshape(2, 3) % 2 == 0
 
-        # Calculate the grouped mean and check the warning is raised before spatial values are selected
+        # Calculate the grouped mean and check the warning is raised before values are selected
         with pytest.warns(UserWarning, match="loads Raster and PointCloud inputs"):
             result = raster.stats("mean", by={"zone": groups}, backend="flox")
         assert result[("band_1", "count")].tolist() == [3, 3]
-
-    def test_stats__pointcloud_data_column_warning(self) -> None:
-        """Checks that selecting a column warns before replacing three-dimensional point heights."""
-
-        # Give one point distinct geometry height and active column values
-        dataframe = gpd.GeoDataFrame({"height": [1]}, geometry=gpd.points_from_xy([0], [0], [100]), crs=32631)
-
-        # Constructing a point cloud warns that the selected values replace its geometry heights
-        with pytest.warns(UserWarning, match="Overriding 3D points"):
-            gu.PointCloud(dataframe, data_column="height")

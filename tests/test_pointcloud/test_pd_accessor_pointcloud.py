@@ -447,7 +447,7 @@ class TestPointCloudElevationMetadata:
             assert not source.pc.is_loaded and not result.pc.is_loaded
 
     def test_data_column__explicit_geometry_elevations(self) -> None:
-        """Checks that 3D geometry stays selected for elevations when auxiliary columns are present."""
+        """Checks that 3D points can switch between geometry heights and a named data column."""
 
         # Keep elevations in 3D geometry and a distinct auxiliary column that must not become the main data
         frame = gu.PointCloudAccessor.from_xyz([1.0, 2.0], [3.0, 4.0], [10.0, 20.0], crs=32633, use_z=True)
@@ -455,11 +455,13 @@ class TestPointCloudElevationMetadata:
         assert frame.pc.data_column is None
         np.testing.assert_array_equal(frame.pc.data, [10.0, 20.0])
 
-        # Two accessors over the same dataframe must observe the same current elevation selection
+        # Select intensity through another accessor; the shared dataframe keeps the new choice without changing Z
         other = gu.PointCloudAccessor(frame)
-        with pytest.warns(UserWarning, match="Overriding 3D points"):
-            other.set_data_column("intensity")
+        other.set_data_column("intensity")
         assert frame.pc.data_column == "intensity"
+        np.testing.assert_array_equal(frame.geometry.z, [10.0, 20.0])
+
+        # Switch back to geometry height and check that a copied accessor sees the same active values
         other.set_data_column(None)
         assert frame.pc.data_column is None
         np.testing.assert_array_equal(frame.pc.copy().pc.data, [10.0, 20.0])

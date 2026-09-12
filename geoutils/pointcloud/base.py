@@ -161,21 +161,18 @@ class PointCloudBase(VectorBase):
         """
         Select the dataframe column used as point-cloud values.
 
+        Selecting a named column for 3D points does not change the Z coordinates stored in their geometry.
+
         :param new_data_column: Column to use, or None to use Z coordinates stored in 3D point geometry.
         """
 
-        if self._has_z:
-            if new_data_column is None:
-                self._data_column = None
-                if self._is_pd or self.is_loaded:
-                    attrs = _get_dataframe_attrs(self.ds)
-                    attrs["data_column"] = None
-                    _set_dataframe_attrs(self.ds, attrs)
-                return
-            warnings.warn(
-                f"Overriding 3D points with with data column '{new_data_column}'. Set data_column "
-                f"to None to use the 3D point geometries instead."
-            )
+        if self._has_z and new_data_column is None:
+            self._data_column = None
+            if self._is_pd or self.is_loaded:
+                attrs = _get_dataframe_attrs(self.ds)
+                attrs["data_column"] = None
+                _set_dataframe_attrs(self.ds, attrs)
+            return
 
         if new_data_column is None:
             raise ValueError("A data column name must be passed for a point cloud with 2D point geometries.")

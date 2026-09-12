@@ -14,7 +14,6 @@ Note: This module is inspired from logic originally developed in xDEM for coregi
 
 from __future__ import annotations
 
-import warnings
 from collections.abc import Iterable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -333,17 +332,13 @@ def _align_cosample_inputs_for_raster_support(
                 dataframe = _assign_point_values(geometry, {name: raw})
 
                 # Select the array column while keeping the owner's coordinates and spatial metadata
-                with warnings.catch_warnings():
-                    warnings.filterwarnings(
-                        "ignore", message="Overriding 3D points with with data column", category=UserWarning
-                    )
-                    copied = _build_pointcloud_output(
-                        dataframe,
-                        data_column=name,
-                        as_dataframe=pointcloud._is_pd,
-                        attrs=_get_dataframe_attrs(pointcloud.ds),
-                        preserve_locations=True,
-                    )
+                copied = _build_pointcloud_output(
+                    dataframe,
+                    data_column=name,
+                    as_dataframe=pointcloud._is_pd,
+                    attrs=_get_dataframe_attrs(pointcloud.ds),
+                    preserve_locations=True,
+                )
                 pointcloud = _get_pointcloud_interface(copied)
 
             # Select point columns without copying or loading the source, then calculate one raster band
@@ -904,11 +899,7 @@ def _cosample_on_points(
     # Build the point output with self as its active column and metadata for the selected rows
     # Accessor calls keep Dask data chunked; PointCloud calls load the result into memory
     as_dataframe = getattr(first, "_is_xr", False) or getattr(first, "_is_pd", False)
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore", message="Overriding 3D points with with data column 'self'", category=UserWarning
-        )
-        result = _build_pointcloud_output(output, data_column="self", as_dataframe=as_dataframe)
+    result = _build_pointcloud_output(output, data_column="self", as_dataframe=as_dataframe)
 
     # Check for empty results only when loaded, so Dask does not run the final interpolation yet
     if not is_dask_dataframe(result) and get_geo_attr(result, "point_count", ("pc",)) == 0:

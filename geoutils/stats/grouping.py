@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import copy
 import math
-import warnings
 import weakref
 from collections.abc import Hashable, Iterable, Iterator, Mapping, Sequence
 from contextlib import ExitStack
@@ -853,16 +852,13 @@ class _GroupMasks(Mapping[Hashable, Any]):
 
             # Preserve every coordinate and assign masks by row position, including single-point inputs
             output = _assign_point_values(dataframe, {column: mask})
-            with warnings.catch_warnings():
-                # The mask intentionally selects its boolean column instead of the preserved geometry Z
-                warnings.filterwarnings("ignore", message="Overriding 3D points with with data column")
-                return _build_pointcloud_output(
-                    output,
-                    data_column=column,
-                    as_dataframe=pointcloud._ACCESSOR_OUTPUT,
-                    attrs=_get_dataframe_attrs(dataframe),
-                    preserve_locations=True,
-                )
+            return _build_pointcloud_output(
+                output,
+                data_column=column,
+                as_dataframe=pointcloud._ACCESSOR_OUTPUT,
+                attrs=_get_dataframe_attrs(dataframe),
+                preserve_locations=True,
+            )
         raise TypeError("Group masks require array, raster or point cloud support.")
 
     def __iter__(self) -> Iterator[Hashable]:

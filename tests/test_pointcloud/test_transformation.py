@@ -17,17 +17,16 @@ from geoutils.multiproc import MultiprocConfig
 from geoutils.multiproc.cluster import MpCluster
 
 
-@pytest.mark.filterwarnings("ignore:Overriding 3D points with with data column 'intensity':UserWarning")
 class TestReprojectChunked:
     """
     Test module for reproject() for point clouds.
 
     - Eager, Dask and Multiproc outputs have the same coordinates and attributes, with file results not loaded.
-    - LAS, LAZ and GeoPackage outputs preserve the values their formats can represent.
+    - LAS, LAZ and GeoPackage outputs keep the values that those file formats can store exactly.
     - Empty inputs, in-place calls and invalid output choices are checked separately.
     """
 
-    # Give heights values distinct from active intensity values so writing the wrong quantity as LAS Z is visible
+    # Use different height and intensity values, so the test catches intensity being written to LAS Z by mistake
     positions = np.arange(11)
     heights = 20 + positions / 8
     points = gpd.GeoDataFrame(
@@ -44,15 +43,15 @@ class TestReprojectChunked:
     @pytest.mark.parametrize("loaded", [False, True])
     def test_reproject__chunked_backends_equal(self, chunks: int, loaded: bool, tmp_path: Path) -> None:
         """
-        Checks that every backend returns the same coordinates and attributes.
+        Checks that eager, Dask and multiprocessing reprojection return the same rows and metadata.
 
-        File inputs and the Multiproc output are not loaded.
+        File-backed inputs keep their original loaded/unloaded state, and the new file output stays unloaded.
         """
 
         dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
 
-        # 1/ Prepare independent eager and file sources with an incomplete final row chunk
-        # Eleven points split unevenly for both chunk sizes, exposing lost or duplicated rows at chunk edges
+        # 1/ Prepare eager, accessor, Dask and multiprocessing inputs from the same 11 points
+        # Chunks of 4 or 6 both leave a shorter final chunk, which helps catch dropped/duplicated rows at the joins
         filename = tmp_path / "points.gpkg"
         self.points.to_file(filename, index=False)
         source = gu.PointCloud(self.points.copy(), data_column="intensity")
@@ -65,8 +64,8 @@ class TestReprojectChunked:
         assert multiproc.is_loaded == loaded
         assert not lazy.pc.is_loaded
 
-        # 2/ Reproject each interface to the same neighboring UTM zone
-        # GeoPandas provides an independent coordinate reference and preserves the original geometry heights
+        # 2/ Reproject every input to the neighboring UTM zone
+        # Use GeoPandas for the expected X/Y coordinates; its result also keeps the original Z heights
         target_crs = CRS.from_epsg(32632)
         expected = self.points.to_crs(target_crs)
         eager_result = source.reproject(crs=target_crs)
@@ -77,7 +76,7 @@ class TestReprojectChunked:
             configuration = MultiprocConfig(chunks=chunks, outfile=str(outfile), cluster=cluster)
             multiproc_result = multiproc.reproject(crs=target_crs, mp_config=configuration)
 
-        # 3/ Check metadata and loading before reading the partitioned results
+        # 3/ Check the output types, metadata and loaded state before reading any partitioned result
         assert isinstance(eager_result, gu.PointCloud) and eager_result.is_loaded
         assert isinstance(accessor_result, gpd.GeoDataFrame)
         assert isinstance(lazy_result, dgpd.GeoDataFrame) and not lazy_result.pc.is_loaded
@@ -89,15 +88,16 @@ class TestReprojectChunked:
         assert not multiproc_result.is_loaded
         assert multiproc.is_loaded == loaded
 
-        # 4/ Compare complete rows, including order, attributes and geometry Z after output files are closed
-        # GeoPackage can normalize integer widths, so compare attribute values without requiring identical dtypes
+        # 4/ Read each result and compare all rows (same order, attributes, X/Y and Z)
+        # GeoPackage may change an integer width, so equal values are enough even if the dtypes differ
         computed_lazy = lazy_result.compute()
         for frame in (eager_result.ds, accessor_result, computed_lazy, multiproc_result.ds):
             assert_geodataframe_equal(frame, expected, check_dtype=False)
             np.testing.assert_array_equal(frame.geometry.z, self.heights)
             np.testing.assert_array_equal(frame["intensity"], self.points["intensity"])
 
-        # Reading an output must not load its original source or replace the Dask graph with eager values
+        # Reading the outputs must not change whether the original file source was loaded
+        # The Dask input and output also remain Dask dataframes after lazy_result.compute()
         assert multiproc.is_loaded == loaded
         assert not lazy.pc.is_loaded and not lazy_result.pc.is_loaded
         assert source.crs == multiproc.crs == lazy.pc.crs == self.points.crs
@@ -106,13 +106,13 @@ class TestReprojectChunked:
     def test_reproject__las_coordinates_and_attributes(
         self, source_suffix: str, output_suffix: str, tmp_path: Path
     ) -> None:
-        """Checks that LAS and LAZ output contain the same elevations and attributes for any active value column."""
+        """Checks that LAS/LAZ keep elevations and attributes when intensity is the active value column."""
 
         laspy = import_optional("laspy")
         if output_suffix == ".laz":
             import_optional("lazrs")
 
-        # Write either 3D vector geometry or native LAS elevations independently of the reprojection implementation
+        # Create both kinds of input used here: GeoPackage keeps height in geometry, while LAS keeps it in Z
         filename = tmp_path / ("source" + source_suffix)
         if source_suffix == ".gpkg":
             self.points.to_file(filename, index=False)
@@ -131,7 +131,7 @@ class TestReprojectChunked:
             records.quality, records.row_id = self.points["quality"].to_numpy(), self.positions
             records.write(filename)
 
-        # Project uneven row chunks while retaining the active intensity column and unloaded source
+        # Reproject the 11 points in chunks of four and keep intensity active without loading the source object
         source = gu.PointCloud(filename, data_column="intensity")
         expected = self.points.to_crs(32632)
         outfile = tmp_path / ("projected" + output_suffix)
@@ -142,7 +142,8 @@ class TestReprojectChunked:
         assert result.data_column == "intensity"
         assert result.crs == expected.crs and result.point_count == len(expected)
 
-        # Read the written LAS records independently and allow only the file's coordinate quantization error
+        # Open the written file with laspy and compare X/Y/Z within half of the LAS storage scale
+        # Other attributes are stored exactly and should match without a tolerance
         records = laspy.read(outfile)
         tolerance = records.header.scales / 2 + 1e-8
         np.testing.assert_allclose(records.x, expected.geometry.x, rtol=0, atol=tolerance[0])
@@ -153,15 +154,15 @@ class TestReprojectChunked:
         np.testing.assert_array_equal(records.row_id, self.positions)
         assert records.header.parse_crs() == expected.crs
 
-        # Loading active values uses intensity rather than the independent elevations stored in native LAS Z
+        # Loading PointCloud.data returns intensity, the separate height values remain in the LAS Z field
         np.testing.assert_array_equal(result.data, self.points["intensity"])
         assert not source.is_loaded
 
     @pytest.mark.parametrize("target_crs", [32633, 4326])
     def test_reproject__reference_and_default_output_format(self, target_crs: int, tmp_path: Path) -> None:
-        """Checks that reference reprojection writes an unloaded GeoPackage even when the target CRS is unchanged."""
+        """Checks that ref= sets the CRS and an output without a suffix becomes an unloaded GeoPackage."""
 
-        # Use a separate reference object and file-backed source so neither needs a full read to choose its CRS
+        # Write the points once, then make a reference object in the requested CRS (including the unchanged CRS case)
         filename = tmp_path / "source.gpkg"
         self.points.to_file(filename, index=False)
         source = gu.PointCloud(filename, data_column="intensity")
@@ -169,7 +170,8 @@ class TestReprojectChunked:
         reference = gu.Vector(expected)
         outfile = tmp_path / "projected"
 
-        # Infer GeoPackage for an output path without a suffix and inspect its unloaded result metadata
+        # Leave off the output suffix; reprojection should create a GeoPackage
+        # Its CRS and other metadata should be available without loading any rows
         configuration = MultiprocConfig(chunks=4, outfile=str(outfile))
         result = source.reproject(ref=reference, mp_config=configuration)
         assert outfile.exists()
@@ -177,22 +179,22 @@ class TestReprojectChunked:
         assert not result.is_loaded and not source.is_loaded
         assert result.crs == reference.crs
 
-        # Reuse the extensionless file as an unloaded source for another projection before inspecting its data
+        # Use that first output as an unloaded source and project it back to the starting CRS
         second_configuration = MultiprocConfig(chunks=4, outfile=str(tmp_path / "reprojected.gpkg"))
         second_result = result.reproject(crs=self.points.crs, mp_config=second_configuration)
         assert not result.is_loaded and not second_result.is_loaded
         assert_geodataframe_equal(second_result.ds, expected.to_crs(self.points.crs), check_dtype=False)
         assert not result.is_loaded
 
-        # Both written outputs agree with the equivalent GeoPandas transformations, leaving the source unloaded
+        # Both files match the same GeoPandas CRS changes, and reading them did not load the original source
         assert_geodataframe_equal(result.ds, expected, check_dtype=False)
         assert not source.is_loaded
 
     @pytest.mark.parametrize("loaded", [False, True])
     def test_reproject__empty_point_cloud(self, loaded: bool, tmp_path: Path) -> None:
-        """Checks that empty inputs write point files with the same attributes and CRS without loading them."""
+        """Checks that an empty output keeps its columns/CRS and a file source stays unloaded."""
 
-        # Write a typed empty point layer so file metadata identifies its geometry without any point records
+        # Write zero rows but keep the point geometry type, columns and CRS in the file metadata
         frame = self.points.iloc[:0].copy()
         filename = tmp_path / "empty.gpkg"
         frame.to_file(filename, geometry_type="Point", index=False)
@@ -200,7 +202,7 @@ class TestReprojectChunked:
         expected = frame.to_crs(32632)
         configuration = MultiprocConfig(chunks=4, outfile=str(tmp_path / "projected.gpkg"))
 
-        # Reprojection must write an empty point schema instead of skipping output or inventing a placeholder row
+        # Reproject the empty input; the output still needs a valid point schema and must not add a placeholder row
         result = source.reproject(crs=32632, mp_config=configuration)
         assert not result.is_loaded and source.is_loaded == loaded
         assert result.point_count == 0
@@ -208,20 +210,20 @@ class TestReprojectChunked:
         assert list(result.columns) == list(frame.columns)
         assert not result.is_loaded
 
-        # Reading the output returns every empty attribute column while the original source is not loaded
+        # Reading the result gives the expected empty columns and does not change the source's loaded state
         assert_geodataframe_equal(result.ds, expected, check_dtype=False)
         assert source.is_loaded == loaded
 
     def test_reproject__multiprocessing_accessor_dataframe_output(self, tmp_path: Path) -> None:
-        """Checks that multiprocessing through a GeoDataFrame accessor returns the same dataframe family."""
+        """Checks that multiprocessing through the accessor returns a GeoDataFrame with intensity still active."""
 
-        # Store active values in a named column separate from the source's three-dimensional geometry
+        # Make intensity the active values while the point heights remain in the 3D geometry
         source = self.points.copy()
         source.pc.set_data_column("intensity")
         expected = self.points.to_crs(32632)
         configuration = MultiprocConfig(chunks=4, outfile=str(tmp_path / "projected.gpkg"))
 
-        # The accessor reads the completed point file into a GeoDataFrame with the original active column
+        # The accessor reads the written file back into a GeoDataFrame and keeps intensity as the data column
         result = source.pc.reproject(crs=32632, mp_config=configuration)
         assert isinstance(result, gpd.GeoDataFrame)
         assert result.pc.data_column == "intensity"
@@ -232,25 +234,26 @@ class TestReprojectChunked:
     def test_reproject__las_accessor_attributes_and_active_values(
         self, data_column: str | None, tmp_path: Path
     ) -> None:
-        """Checks that LAS accessor output contains every input attribute and selects intensity or native Z."""
+        """Checks that LAS accessor output keeps all attributes and makes intensity or LAS Z active."""
 
         laspy = import_optional("laspy")
 
-        # Select either an auxiliary attribute or geometry heights without removing the other point values
+        # Select intensity, or select geometry height with None; the other point attributes should still be written
         source = self.points.copy()
         source.pc.set_data_column(data_column)
         outfile = tmp_path / "projected.las"
         configuration = MultiprocConfig(chunks=4, outfile=str(outfile))
         result = source.pc.reproject(crs=32632, mp_config=configuration)
 
-        # LAS stores geometry heights in its native Z column, which becomes active when geometry was selected
+        # LAS stores geometry height in Z, so Z becomes active when data_column=None selected the geometry values
         assert isinstance(result, gpd.GeoDataFrame)
         expected_column = "Z" if data_column is None else data_column
         assert result.pc.data_column == expected_column
         for column in ("intensity", "quality", "row_id"):
             np.testing.assert_array_equal(result[column], self.points[column])
 
-        # Allow only the written Z scale's rounding error and preserve the caller's original active selection
+        # LAS rounds Z to its storage scale, so allow half a scale step when checking heights/active values
+        # The source dataframe must still have the data column chosen above
         with laspy.open(outfile) as reader:
             tolerance = reader.header.scales[2] / 2 + 1e-8
         expected_values = self.heights if data_column is None else self.points["intensity"]
@@ -260,9 +263,9 @@ class TestReprojectChunked:
 
     @pytest.mark.parametrize("attribute_kind", ["nullable_integer", "millisecond_datetime"])
     def test_reproject__gpkg_representable_attributes(self, attribute_kind: str, tmp_path: Path) -> None:
-        """Checks that GeoPackage output contains exact small integers and millisecond datetime values."""
+        """Checks that GeoPackage keeps small integers and millisecond datetimes exactly."""
 
-        # Use values representable by the file format so precision checks do not reject valid point attributes
+        # Use small integers and times rounded to milliseconds, because GeoPackage can store both exactly
         frame = self.points.iloc[:3].copy()
         if attribute_kind == "nullable_integer":
             column = "identifier"
@@ -273,13 +276,14 @@ class TestReprojectChunked:
         source = gu.PointCloud(frame, data_column="intensity")
         configuration = MultiprocConfig(chunks=1, outfile=str(tmp_path / "projected.gpkg"))
 
-        # Use single-row chunks and place a nodata value in the middle chunk to check schema consistency
+        # Write one row per chunk; the nullable integer case puts nodata alone in the middle chunk
+        # This checks that all chunks still use one compatible output column type
         result = source.reproject(crs=32632, mp_config=configuration)
         assert not result.is_loaded
         actual = result.ds[column]
         expected = frame[column]
 
-        # Compare value precision independently of the reader's integer-null or datetime dtype representation
+        # The file reader may choose another dtype, so convert both sides before comparing the stored values
         if attribute_kind == "nullable_integer":
             actual_values = actual.to_numpy(dtype=float, na_value=np.nan)
             expected_values = expected.to_numpy(dtype=float, na_value=np.nan)
@@ -288,7 +292,6 @@ class TestReprojectChunked:
             np.testing.assert_array_equal(actual.to_numpy(dtype="datetime64[ns]"), expected.to_numpy())
 
 
-@pytest.mark.filterwarnings("ignore:Overriding 3D points with with data column 'intensity':UserWarning")
 class TestReprojectErrors:
     """Test module for validation errors raised by eager, Dask, and multiprocessing reprojection."""
 
@@ -296,9 +299,9 @@ class TestReprojectErrors:
     heights = TestReprojectChunked.heights
 
     def test_reproject__error_inplace_with_chunked_execution(self, tmp_path: Path) -> None:
-        """Checks that multiprocessing rejects in-place replacement while eager reprojection still supports it."""
+        """Checks that multiprocessing rejects inplace before writing, while eager reprojection updates the object."""
 
-        # Use an unloaded MP source so rejection happens before its data or the output file are touched
+        # Start with an unloaded file source and a new output path, then request inplace + multiprocessing
         filename = tmp_path / "source.gpkg"
         self.points.to_file(filename, index=False)
         source = gu.PointCloud(filename, data_column="intensity")
@@ -309,26 +312,26 @@ class TestReprojectErrors:
         assert not source.is_loaded and not outfile.exists()
         assert source.crs == self.points.crs
 
-        # Without multiprocessing, the same public option updates the source and returns None
+        # The eager version accepts inplace, returns None and changes the source coordinates
         eager = gu.PointCloud(self.points.copy(), data_column="intensity")
         expected = self.points.to_crs(32632)
         assert eager.reproject(crs=32632, inplace=True) is None
         assert_geodataframe_equal(eager.ds, expected)
 
     def test_reproject__error_dask_with_multiprocessing(self, tmp_path: Path) -> None:
-        """Checks that Dask and multiprocessing cannot be combined or execute partitions before rejection."""
+        """Checks that Dask + multiprocessing is rejected before any Dask partition runs."""
 
         import_optional("dask_geopandas", package_name="dask-geopandas")
         from dask.callbacks import Callback
 
-        # Build a file-backed Dask source with several row partitions
+        # Open the file as a Dask dataframe split into several row partitions
         filename = tmp_path / "source.gpkg"
         self.points.to_file(filename, index=False)
         source = gu.open_pointcloud(str(filename), data_column="intensity", chunks=4)
         outfile = tmp_path / "projected.gpkg"
         configuration = MultiprocConfig(chunks=4, outfile=str(outfile))
 
-        # Reject competing execution backends before computing any of the source partitions
+        # Request multiprocessing too, and record any Dask task that runs before the expected error
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(args[0])):
             with pytest.raises(ValueError, match="Dask"):
@@ -340,9 +343,9 @@ class TestReprojectErrors:
         "invalid_option", ["driver", "suffix", "driver_suffix", "chunks", "extensionless_las", "extensionless_laz"]
     )
     def test_reproject__error_invalid_output_options(self, invalid_option: str, tmp_path: Path) -> None:
-        """Checks that unsupported output formats and raster-shaped chunks fail before reading the source."""
+        """Checks that bad formats and 2D chunk sizes fail before the point source is read."""
 
-        # Use a valid point source and vary only the output option that is incompatible with point reprojection
+        # Start with one valid point file, then change one output setting to an unsupported choice
         filename = tmp_path / "source.gpkg"
         self.points.to_file(filename, index=False)
         source = gu.PointCloud(filename, data_column="intensity")
@@ -361,18 +364,18 @@ class TestReprojectErrors:
             driver=driver,
         )
 
-        # No output should be created and the input metadata must still describe the original unloaded file
+        # The error happens before writing or loading rows, and the source CRS stays unchanged
         with pytest.raises(ValueError):
             source.reproject(crs=32632, mp_config=configuration)
         assert not outfile.exists() and not source.is_loaded
         assert source.crs == self.points.crs
 
     def test_reproject__error_las_without_elevations(self, tmp_path: Path) -> None:
-        """Checks that LAS output rejects two-dimensional points whose active values do not define elevations."""
+        """Checks that LAS output rejects 2D points even when they have an active intensity column."""
 
         import_optional("laspy")
 
-        # Remove geometry heights but leave intensity present; it must not silently become the output LAS Z
+        # Remove Z from the geometry but leave intensity present; intensity must not be used as height by accident
         frame = gpd.GeoDataFrame(
             self.points.drop(columns="geometry"),
             geometry=gpd.points_from_xy(self.points.geometry.x, self.points.geometry.y),
@@ -382,7 +385,7 @@ class TestReprojectErrors:
         outfile = tmp_path / "projected.las"
         configuration = MultiprocConfig(chunks=4, outfile=str(outfile))
 
-        # Require a geometry height or native LAS Z column before a point file can be written
+        # Writing LAS needs a geometry height or an existing LAS Z column, so no output file should be created
         with pytest.raises(ValueError, match="elevation|Z|3D"):
             source.reproject(crs=32632, mp_config=configuration)
         assert not outfile.exists()
@@ -393,16 +396,16 @@ class TestReprojectErrors:
         ["nullable_integer", "submillisecond_datetime", "fractional_intensity", "out_of_range_intensity"],
     )
     def test_reproject__error_lossy_attribute_storage(self, attribute_kind: str, tmp_path: Path) -> None:
-        """Checks that unrepresentable attribute values raise before replacing an existing output file."""
+        """Checks that values a file cannot store exactly raise before an existing output is replaced."""
 
-        # Give three points values that the destination format would otherwise round or wrap without an error
+        # Give three points values that GeoPackage/LAS would have to round, wrap or convert to another value
         frame = self.points.iloc[:3].copy()
         if attribute_kind == "nullable_integer":
-            # Integer columns with nodata can force a float conversion that cannot represent values above 2**53 exactly
+            # Nodata can turn an integer column into floats, which cannot store every integer above 2**53 exactly
             column, suffix = "identifier", ".gpkg"
             frame[column] = pd.Series([2**53 + 1, pd.NA, 2**53 + 3], dtype="Int64")
         elif attribute_kind == "submillisecond_datetime":
-            # GeoPackage datetime storage cannot represent these nanoseconds below the millisecond boundary
+            # GeoPackage stores milliseconds, so these extra nanoseconds would be lost
             column, suffix = "observed_at", ".gpkg"
             frame[column] = pd.date_range("2024-01-01T00:00:00.123456789", periods=3, freq="s")
         else:
@@ -413,7 +416,7 @@ class TestReprojectErrors:
             else:
                 frame[column] = np.array([0, 65536, 70000], dtype=np.uint32)
 
-        # Stage one row per worker task to expose conversions that depend on an individual row's nodata value
+        # Send one row to each worker task, so the nodata row is converted in a chunk by itself
         source = gu.PointCloud(frame, data_column="intensity")
         original_values = frame[column].copy()
         outfile = tmp_path / ("projected" + suffix)
@@ -421,7 +424,7 @@ class TestReprojectErrors:
         outfile.write_bytes(original_output)
         configuration = MultiprocConfig(chunks=1, outfile=str(outfile))
 
-        # A failed encoding must identify its attribute and leave both the existing output and source unchanged
+        # The error names the bad column, keeps the old output bytes and leaves the source values unchanged
         with pytest.raises(ValueError, match=column):
             source.reproject(crs=32632, mp_config=configuration)
         assert outfile.read_bytes() == original_output
