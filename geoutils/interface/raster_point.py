@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Functionalities at the interface of rasters and point clouds."""
+"""Exact conversions between rasters and point clouds, without gridding or interpolation."""
 
 from __future__ import annotations
 
@@ -32,11 +32,15 @@ from geoutils._dispatch import get_geo_attr, has_geo_attr
 from geoutils._typing import NDArrayNum
 from geoutils.raster.array import get_mask_from_array
 from geoutils.raster.referencing import _default_nodata, _xy2ij
-from geoutils.stats.sampling import _subsample_numpy
 
 if TYPE_CHECKING:
     from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
     from geoutils.raster.base import RasterType
+
+
+##################################
+# 1/ REGULAR POINT CLOUD TO RASTER
+##################################
 
 
 def _regular_pointcloud_to_raster(
@@ -120,6 +124,11 @@ def _regular_pointcloud_to_raster(
     return raster_arr, out_transform, gdf_pc.crs, out_nodata, area_or_point
 
 
+#########################
+# 2/ RASTER TO POINT CLOUD
+#########################
+
+
 def _raster_to_pointcloud(
     source_raster: RasterType,
     data_column_name: str = "b1",
@@ -188,6 +197,12 @@ def _raster_to_pointcloud(
         all_bands = [data_band]
         all_column_names = [data_column_name]
 
+    # Point sampling returns a compact eager result, so compute a separate copy of a Dask source
+    # Loading the caller's DataArray here would replace its lazy graph with an in-memory array
+    if source_raster._chunks is not None:
+        source_raster = source_raster.copy(deep=False).rst
+        source_raster.load()
+
     # If subsample is the entire array, load it to optimize speed
     if subsample == 1 and not source_raster.is_loaded:
         source_raster.load()
@@ -219,6 +234,8 @@ def _raster_to_pointcloud(
             valid_mask = np.ones(source_raster.data[0, :].shape, dtype=bool)
 
     # Get subsample on valid mask
+    from geoutils.sampling.subsampling import _subsample_numpy
+
     # Build a low memory boolean masked array with invalid values masked to pass to subsampling
     ma_valid = np.ma.masked_array(data=np.ones(np.shape(valid_mask), dtype=bool), mask=~valid_mask)
     # Take a subsample within the valid values

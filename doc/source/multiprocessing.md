@@ -105,7 +105,7 @@ from typing import Any
 # Compute mean
 
 def compute_statistics(raster: gu.Raster) -> dict[str, np.floating[Any]]:
-    return raster.get_stats(stats_name=["mean", "valid_count"])
+    return raster.stats(["mean", "valid_count"])
 
 stats_results = map_blocks(compute_statistics, filename_rast, config_basic)
 total_count = sum([stats["valid_count"] for stats in stats_results])

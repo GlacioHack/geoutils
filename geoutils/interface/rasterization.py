@@ -527,6 +527,9 @@ def _rasterize(
     mp_backend = mp_config is not None
     # A Dask reference keeps its chunked representation unless Multiprocessing is requested
     ref_chunks = get_geo_attr(ref, "_chunks") if ref is not None and has_geo_attr(ref, "_chunks") else None
+    if ref_chunks is not None:
+        # Match only spatial chunks when the reference also has a band dimension
+        ref_chunks = ref_chunks[-2:]
     dask_backend = bool(dask) or (da is not None and ref_chunks is not None)
 
     if mp_backend and dask_backend:
@@ -695,25 +698,15 @@ def _create_mask_pointcloud_dask(source_vector: Vector, points: Any, as_array: b
     # Each point partition becomes an equally partitioned boolean point cloud
     out = points_in_crs.map_partitions(_mask_pointcloud_partition, source_geom, source_vector.crs, meta=meta)
 
-    # Import at runtime because the point-cloud base also uses rasterization through its vector parent
-    from geoutils.pointcloud.base import _set_dataframe_attrs
-
-    # Restore the metadata expected by the GeoUtils ``pc`` accessor
-    _set_dataframe_attrs(
-        out,
-        {
-            "crs": source_vector.crs,
-            "bounds": None,
-            "point_count": None,
-            "data_column": "z",
-            "geometry_type": "Point",
-        },
-    )
-
     if as_array:
-        # Return a lazy value array while keeping point partitions uncomputed
+        # Return mask values as a Dask array
         return out["z"].to_dask_array(lengths=True)
-    return out
+
+    # Import after package initialization because the point cloud package also imports rasterization
+    from geoutils.pointcloud.dataframe import _build_pointcloud_output
+
+    # Set point output metadata without computing the mask values
+    return _build_pointcloud_output(out, data_column="z", as_dataframe=True)
 
 
 def _create_mask_raster(

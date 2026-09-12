@@ -157,11 +157,11 @@ See {ref}`core-array-funcs` for more details.
 
 ## Statistics
 
-Statistics of a point cloud, optionally subsetting to an inlier mask, can be computed using {func}`~geoutils.PointCloud.get_stats`.
+Statistics of a point cloud can be computed using {func}`~geoutils.PointCloud.stats`.
 
 ```{code-cell} ipython3
 # Get mean, max and STD of the point cloud
-pc.get_stats(["mean", "max", "std"])
+pc.stats(["mean", "max", "std"])
 ```
 
 A point cloud can also be quickly subsampled using {func}`~geoutils.PointCloud.subsample`, which considers only valid values, and returns either a point

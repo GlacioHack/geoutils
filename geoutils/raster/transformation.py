@@ -686,6 +686,10 @@ def _wrapper_multiproc_reproject_per_block(
     # Call reproject per block
     dst_block_arr = _reproject_per_block(*src_arrs, block_ids=block_ids, combined_meta=combined_meta, **kwargs)
 
+    # Store logical masks as integers so the writer can fill missing cells with nodata rather than True
+    if dst_block_arr.dtype == np.bool_:
+        dst_block_arr = dst_block_arr.astype("uint8")
+
     return dst_block_arr, (dst_block_id["ys"], dst_block_id["ye"], dst_block_id["xs"], dst_block_id["xe"])
 
 
@@ -759,7 +763,7 @@ def _multiproc_reproject(
         "count": rst.count,
         "crs": dst_crs,
         "transform": dst_transform,
-        "dtype": dtype,
+        "dtype": "uint8" if np.dtype(dtype) == np.bool_ else dtype,
         "nodata": dst_nodata,
     }
 
@@ -943,6 +947,10 @@ def _crop(
         # Squeeze first axis for single-band
         if crop_img.ndim == 3 and crop_img.shape[0] == 1:
             crop_img = crop_img.squeeze(axis=0)
+
+        # Restore logical mask values from their on-disk integer representation, keeping missing cells masked
+        if source_raster.is_mask:
+            crop_img = crop_img.astype(bool)
 
     return crop_img, tfm
 

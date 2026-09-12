@@ -84,7 +84,7 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
   - ✅
   - Rasterio / GeoPandas
 
-* - {meth}`~geoutils.Raster.get_stats()`
+* - {meth}`~geoutils.Raster.stats()`
   - Compute statistics of valid values over a valid mask.
   - ❌
   - NumPy / SciPy

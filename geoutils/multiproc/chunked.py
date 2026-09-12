@@ -16,8 +16,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 """Module defining array and configuration routines for chunked operations with Multiprocessing."""
 
+from collections.abc import Iterator
+from itertools import product
 from typing import Any, Literal, TypeVar, cast
 
 import geopandas as gpd
@@ -250,10 +253,10 @@ def _chunks2d_from_chunksizes_shape(
 
 def normalize_chunks(chunks: ChunkSpec, shape: tuple[int, int]) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """
-    Normalize a Dask-like chunk specification into explicit 2D chunks.
+    Normalize the chunk user input into explicit 2D chunks, as in Dask.
 
-    Supports a single integer, a ``(y, x)`` chunk-size tuple, or an already-normalized
-    ``((y0, y1, ...), (x0, x1, ...))`` tuple.
+    Supports a single integer, a chunksize tuple for X/Y dimension, or a tuple containing chunksize in X/Y along the
+    full array ((x1, x2, ...),  (y1, y2, ...)).
     """
 
     if isinstance(chunks, int):
@@ -280,6 +283,20 @@ def normalize_chunks(chunks: ChunkSpec, shape: tuple[int, int]) -> tuple[tuple[i
         raise ValueError("Explicit chunks must sum to the array shape.")
 
     return normalized_chunks
+
+
+def iter_chunk_slices(shape: tuple[int, ...], chunks: int | tuple[int, ...]) -> Iterator[tuple[slice, ...]]:
+    """Divide an array shape into contiguous slices with principle row order."""
+
+    lengths = (chunks,) * len(shape) if isinstance(chunks, int) else chunks
+    slices = [
+        [
+            slice(start, min(start + lengths[axis % len(lengths)], size))
+            for start in range(0, size, lengths[axis % len(lengths)])
+        ]
+        for axis, size in enumerate(shape)
+    ]
+    yield from product(*slices)
 
 
 def cached_cumsum(chunks: tuple[int, ...], initial_zero: bool = True) -> tuple[int, ...]:

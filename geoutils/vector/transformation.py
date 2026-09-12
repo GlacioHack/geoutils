@@ -69,12 +69,11 @@ def _crop(source_vector: Any, bbox: Any, clip: bool) -> Any:
     return _crop_geodataframe(source_vector.ds, bounds=bounds, clip=clip)
 
 
-def _reproject(
-    source_vector: Any,
+def _get_reproject_crs(
     ref: RasterLike | VectorLike | None = None,
     crs: CRS | str | int | None = None,
-) -> gpd.GeoDataFrame:
-    """Reproject a vector. See Vector.reproject() for more details."""
+) -> CRS:
+    """Resolve a target CRS from exactly one reference object or explicit CRS."""
 
     # Check that either ref or crs is provided
     if (ref is not None and crs is not None) or (ref is None and crs is None):
@@ -91,6 +90,17 @@ def _reproject(
         # Determine user-input target CRS
         crs = CRS.from_user_input(crs)
 
-    new_ds = source_vector.ds.to_crs(crs=crs)
+    return crs
+
+
+def _reproject(
+    source_vector: Any,
+    ref: RasterLike | VectorLike | None = None,
+    crs: CRS | str | int | None = None,
+) -> gpd.GeoDataFrame:
+    """Reproject a vector. See Vector.reproject() for more details."""
+
+    target_crs = _get_reproject_crs(ref=ref, crs=crs)
+    new_ds = source_vector.ds.to_crs(crs=target_crs)
 
     return new_ds

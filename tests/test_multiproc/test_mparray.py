@@ -5,10 +5,12 @@ Tests for multiprocessing functions
 import os
 import warnings
 from multiprocessing import cpu_count
+from pathlib import Path
 from typing import Any, Iterator
 
 import numpy as np
 import pytest
+import rasterio as rio
 import scipy
 from numpy import floating
 
@@ -59,6 +61,24 @@ def _custom_func_stats(raster: RasterType) -> dict[str, floating[Any]]:
 def _custom_func_mask(raster: RasterType) -> gu.Raster:
     mask_array = raster.get_mask()
     return gu.Raster.from_array(mask_array, raster.transform, raster.crs)
+
+
+def _custom_func_bands(raster: Raster, n_bands: int) -> Raster:
+    """
+    Return the first source band with known offsets, custom metadata and the worker's process identifier.
+    """
+
+    # Add a distinct constant to each output band so nodata or misordered bands are visible
+    first_band = raster.data[0] if raster.count > 1 else raster.data
+    bands = np.ma.stack([first_band + index for index in range(n_bands)])
+    tags: dict[str, Any] = {
+        "operation": "band offsets",
+        "long_name": tuple(f"band_{index}" for index in range(n_bands)),
+    }
+    tags["worker_pid"] = os.getpid()
+
+    # Use the tile's grid but deliberately change its pixel interpretation to check result metadata
+    return Raster.from_array(bands, raster.transform, raster.crs, nodata=-99999, area_or_point="Point", tags=tags)
 
 
 class TestTiling:
@@ -205,6 +225,37 @@ class TestMultiproc:
             MultiprocConfig(chunks=(0, 25))
         with pytest.raises(TypeError, match="integer or a tuple of two integers"):
             MultiprocConfig(chunks=(40, 25.0))  # type: ignore
+
+    def test_multiproc_config__temporary_outputs(self, tmp_path: Path) -> None:
+        """
+        Checks that temporary configurations isolate and clean files without replacing the original worker cluster.
+        """
+
+        # Use a final output path separate from two intermediates needed by the same operation
+        config = MultiprocConfig(chunks=(4, 5), outfile=str(tmp_path / "final.tif"))
+        original = config.copy()
+        with pytest.raises(RuntimeError, match="operation failed"):
+            with config.temporary() as first, config.temporary() as second:
+                paths = [Path(first.outfile), Path(second.outfile)]
+                assert first.outfile != second.outfile
+                for temporary in (first, second):
+                    assert temporary.chunks == config.chunks
+                    assert temporary.driver == config.driver
+                    assert temporary.cluster is config.cluster
+
+                # Simulate a driver writing a main file and a sidecar before the enclosing operation fails
+                for path in paths:
+                    path.write_text("intermediate")
+                    path.with_suffix(".aux.xml").write_text("metadata")
+                raise RuntimeError("operation failed")
+
+        # Remove both complete directories and leave the original configuration and cluster usable
+        assert all(not path.parent.exists() for path in paths)
+        assert config.outfile == original.outfile
+        assert config.chunks == original.chunks
+        assert config.driver == original.driver
+        assert config.cluster is original.cluster
+        assert config.cluster.submit(abs, -3) == 3
 
     def test_deprecated_map_names_preserve_signatures(self, tmp_path: Any) -> None:
         """Forward the former top-level map functions with explicit deprecation warnings."""
@@ -389,3 +440,54 @@ class TestMultiproc:
         tiled_mean = np.nansum([stats["mean"] * stats["valid_count"] for stats in list_stats]) / tiled_count
         assert abs(total_stats["mean"] - tiled_mean) < tiled_mean * 1e-5
         assert total_stats["valid_count"] == tiled_count
+
+
+class TestMapOverlapChunked:
+    """Test module for map_overlap() loading behavior and exact equality with eager raster calculations."""
+
+    @pytest.mark.parametrize("source_bands, output_bands", [(1, 3), (3, 1)])
+    @pytest.mark.parametrize("execution_mode", ["basic", "multiprocessing"])
+    def test_map_overlap__changed_bands_and_metadata(
+        self, tmp_path: Path, source_bands: int, output_bands: int, execution_mode: str
+    ) -> None:
+        """
+        Checks that map_overlap() changes band count, returns the expected metadata and does not load the source.
+        """
+
+        # 1/ Write a small raster with uneven edge tiles and metadata distinct from the function's output
+        base = np.arange(99, dtype=np.float32).reshape(9, 11)
+        values = np.stack([base + index * 100 for index in range(source_bands)])
+        transform = rio.transform.from_origin(500_000, 4_500_000, 10, 10)
+        source_file = tmp_path / "source.tif"
+        output_file = tmp_path / "mapped.tif"
+        Raster.from_array(values, transform, 32633, area_or_point="Area", tags={"operation": "source"}).to_file(
+            source_file
+        )
+        source = Raster(source_file)
+        expected = _custom_func_bands(Raster(source_file), output_bands)
+
+        # 2/ Run synchronous and real process workers through the same shared block writer
+        with ClusterGenerator(execution_mode, nb_workers=1) as cluster:
+            config = MultiprocConfig(chunks=(4, 5), outfile=str(output_file), cluster=cluster)
+            result = map_overlap(_custom_func_bands, source, config, output_bands)
+        assert not source.is_loaded
+        assert not result.is_loaded
+
+        # Check metadata before reading data, including types preserved on the returned object
+        assert result.count == output_bands
+        assert result.area_or_point == "Point"
+        assert result.tags["operation"] == "band offsets"
+        assert result.tags["long_name"] == tuple(f"band_{index}" for index in range(output_bands))
+        assert (result.tags["worker_pid"] == os.getpid()) == (execution_mode == "basic")
+        assert result.raster_equal(expected)
+
+        # 3/ Verify every output band and inspect the actual file metadata independently of the returned Raster
+        expected = np.stack([base + index for index in range(output_bands)])
+        np.testing.assert_array_equal(result.data, expected.squeeze())
+        assert result.transform == transform
+        with rio.open(output_file) as dataset:
+            assert dataset.count == output_bands
+            assert dataset.tags()["AREA_OR_POINT"] == "Point"
+            assert dataset.tags()["operation"] == "band offsets"
+            assert dataset.nodata == -99999
+            np.testing.assert_array_equal(dataset.read(), expected)

@@ -64,7 +64,7 @@ Accessing {attr}`~geoutils.Raster.data`, or calling operations that require the 
 print(f"Is raster loaded before data operation? {ds.rst.is_loaded}")
 
 # We compute statistics, which loads the array
-ds.rst.get_stats()
+ds.rst.stats()
 
 # The raster is now loaded
 print(f"Is raster loaded after data operation? {ds.rst.is_loaded}")

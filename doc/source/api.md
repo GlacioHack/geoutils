@@ -141,7 +141,7 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
     :toctree: gen_modules/
     :template: raster_method.rst
 
-    ~raster.base.RasterBase.get_stats
+    ~raster.base.RasterBase.stats
 ```
 
 ### Data manipulation
@@ -590,7 +590,7 @@ documentation](https://shapely.readthedocs.io/en/stable/properties.html).
 .. autosummary::
     :toctree: gen_modules/
 
-    PointCloud.get_stats
+    PointCloud.stats
     PointCloud.subsample
 ```
 

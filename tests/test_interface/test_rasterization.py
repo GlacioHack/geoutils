@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -56,6 +56,46 @@ class TestRasterVectorInterface:
     everest_outlines_path = gu.examples.get_path_test("everest_rgi_outlines")
     aster_dem_path = gu.examples.get_path_test("exploradores_aster_dem")
     aster_outlines_path = gu.examples.get_path_test("exploradores_rgi_outlines")
+
+    @pytest.mark.parametrize("method", ["rasterize", "create_mask"])
+    @pytest.mark.parametrize("input_type", ["raster", "xarray", "dask"])
+    def test_rasterize_create_mask__multi_band(
+        self,
+        method: Literal["rasterize", "create_mask"],
+        input_type: Literal["raster", "xarray", "dask"],
+    ) -> None:
+        """Checks that vector rasterization returns one spatial layer from every multi-band reference type."""
+
+        pytest.importorskip("dask")
+        import dask.array as da
+
+        # Create equivalent native, Xarray and chunked Xarray references with two bands
+        raster = gu.Raster.from_array(np.zeros((2, 4, 4)), (1, 0, 8, 0, -1, 12), 4326)
+        if input_type == "raster":
+            reference = raster
+        else:
+            reference = raster.to_xarray()
+            if input_type == "dask":
+                reference = reference.chunk({"band": 1, "y": 3, "x": 2})
+        # Rasterize the vector or create a mask from the selected reference
+        output = getattr(self.vector, method)(ref=reference)
+
+        # Check that the result has one spatial layer and keeps Dask chunk sizes when applicable
+        assert output.shape == (4, 4)
+        if input_type == "dask":
+            assert isinstance(output, xr.DataArray)
+            assert isinstance(output.data, da.Array)
+            assert isinstance(reference, xr.DataArray)
+            assert isinstance(reference.data, da.Array)
+            assert output.data.chunks == reference.data.chunks[-2:]
+        else:
+            assert isinstance(output, gu.Raster)
+
+        # The unit polygon occupies exactly the pixel centred on (10.5, 10.5)
+        expected = np.zeros((4, 4))
+        expected[1, 2] = 1
+        actual = output.to_numpy() if isinstance(output, xr.DataArray) else output.data
+        np.testing.assert_array_equal(actual, expected)
 
     def test_rasterize(self) -> None:
         """Test rasterizing an EPSG:3426 dataset into a projection."""

@@ -106,6 +106,20 @@ class TestPointCloud:
         assert np.array_equal(pc.data, self.gdf1["b1"].values)
         assert pc.is_loaded
 
+    def test_has_z__unloaded_3d_file(self) -> None:
+        """Checks that _has_z detects 3D file metadata without loading point geometries."""
+
+        # Write a point file with 3D geometry
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filename = os.path.join(temp_dir, "points_3d.gpkg")
+            self.gdf3.to_file(filename)
+
+            # Read the geometry type from file metadata without loading the points
+            point_cloud = PointCloud(filename)
+
+            assert point_cloud._has_z
+            assert not point_cloud.is_loaded
+
     def test_init_las(self) -> None:
         # Import optional laspy or skip test
         pytest.importorskip("laspy")
@@ -278,49 +292,44 @@ class TestPointCloud:
             pc[mask]
 
     def test_data_column(self) -> None:
-        """Test the setting and getting of the main data column."""
+        """Checks that named columns and geometry Z can be selected as point values."""
 
-        # Assert column is set properly at instantiation
+        # Select b1 when making a 2D point cloud and return its values through PointCloud.data
         pc = PointCloud(self.gdf1, data_column="b1")
         assert pc.data_column == "b1"
         assert np.array_equal(pc.data, self.gdf1["b1"].values)
 
-        # And can be reset to another name if it exists
+        # Change a second point cloud from b1 to b2 through the property, then back through set_data_column()
         pc2 = PointCloud(self.gdf2, data_column="b1")
         assert pc2.data_column == "b1"
         assert np.array_equal(pc2.data, self.gdf2["b1"].values)
-
-        # First syntax
         pc2.data_column = "b2"
         assert pc2.data_column == "b2"
         assert np.array_equal(pc2.data, self.gdf2["b2"].values)
-
-        # Equivalent syntax
         pc2.set_data_column("b1")
         assert pc2.data_column == "b1"
         assert np.array_equal(pc2.data, self.gdf2["b1"].values)
 
-        # Assert no data column is set for 3D points, using the Z coordinates instead
+        # Leave the data column unset for 3D points, which makes geometry Z the active values
         pc3 = PointCloud(self.gdf3)
         assert pc3.data_column is None
         assert np.array_equal(pc3.data, self.gdf3.geometry.z.values)
 
-    def test_data_column__errors(self) -> None:
-        """Test errors raised during setting of data column."""
+        # A named column can be selected for 3D points without changing their geometry heights
+        pc4 = PointCloud(self.gdf32, data_column="b2")
+        assert pc4.data_column == "b2"
+        assert np.array_equal(pc4.data, self.gdf32["b2"].values)
+        assert np.array_equal(pc4.geometry.z, self.gdf32.geometry.z)
 
+    def test_data_column__errors(self) -> None:
+        """Checks that both ways of selecting a data column reject a missing name."""
+
+        # Try the property and set_data_column() with a name that is not present in the dataframe
         pc = PointCloud(self.gdf1, data_column="b1")
-        # If the data column does not exist
         with pytest.raises(ValueError, match="Data column column_that_does_not_exist not found*"):
             pc.data_column = "column_that_does_not_exist"
-        # Equivalent syntax
         with pytest.raises(ValueError, match="Data column column_that_does_not_exist not found*"):
             pc.set_data_column("column_that_does_not_exist")
-
-        # If a data column name is passed for 3D points
-        with pytest.warns(UserWarning, match="Overriding 3D points with*"):
-            pc4 = PointCloud(self.gdf32, data_column="b2")
-            assert pc4.data_column == "b2"
-            assert np.array_equal(pc4.data, self.gdf32["b2"].values)
 
     def test_data(self) -> None:
         """Test the setting and getting of the main data, depending on input geometry."""

@@ -26,6 +26,7 @@ from geoutils._dispatch import (  # Level-1 checks (match reference object)
     _grid_from_bounds_res,
     _grid_from_bounds_shape,
     _grid_from_coords,
+    get_geo_interface,
 )
 from geoutils.exceptions import (
     IgnoredGridWarning,
@@ -36,6 +37,28 @@ from geoutils.exceptions import (
     InvalidResolutionError,
     InvalidShapeError,
 )
+
+
+class TestGeoInterface:
+    """Test module for spatial metadata shared by an object or accessor and its geospatial operations."""
+
+    @pytest.mark.parametrize("representation", ["raster", "accessor", "dataarray"])
+    def test_get_geo_interface__raster_metadata(self, representation: str) -> None:
+        """Checks that raster band count and spatial shape stay distinct from native Xarray methods and dimensions."""
+
+        # Include two bands so native Xarray shape differs from the two-dimensional raster grid
+        raster = gu.Raster.from_array(np.ones((2, 3, 4)), rio.transform.from_origin(0, 3, 1, 1), crs=32633)
+        array = raster.to_xarray()
+        source = {"raster": raster, "accessor": array.rst, "dataarray": array}[representation]
+
+        # Resolve one interface and read both metadata fields from it
+        interface = get_geo_interface(source, "ij2xy", accessors=("rst",))
+        assert interface.count == 2
+        assert interface.shape == (3, 4)
+        assert interface.transform == raster.transform
+
+        # Plain arrays have no spatial interface and cannot supply a reference grid
+        assert get_geo_interface(np.ones((3, 4)), "ij2xy", accessors=("rst",)) is None
 
 
 class TestDispatchLevelZero:

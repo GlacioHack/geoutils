@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from importlib.util import find_spec
 
 import numpy as np
 import pytest
@@ -236,3 +237,39 @@ class TestRasterPointInterface:
             ValueError, match="Either grid coordinates or both geotransform and shape must be provided."
         ):
             gu.Raster.from_pointcloud_regular(pc1)
+
+
+@pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
+class TestToPointcloudChunked:
+    """
+    Test module for comparing to_pointcloud() outputs from eager and Dask rasters.
+
+    These tests cover the currently eager point outputs and keep the source Dask array. Expand them to cover lazy
+    outputs when to_pointcloud() returns lazy point data.
+    """
+
+    @pytest.mark.parametrize("subsample", [1, 11])
+    @pytest.mark.parametrize("as_array", [False, True])
+    def test_to_pointcloud__eager_samples_keep_lazy_source(self, subsample: int, as_array: bool) -> None:
+        """Checks that point sampling returns exact eager values without loading or replacing the Dask source."""
+
+        import dask.array as da
+
+        # Include a missing pixel and uneven chunks to check the mask and deterministic sample order
+        values = np.arange(63, dtype=np.float32).reshape((7, 9))
+        values[2, 3] = np.nan
+        transform = rio.transform.from_origin(500000, 8600000, 20, 20)
+        eager = gu.Raster.from_array(values, transform, 32633, nodata=-9999)
+        source = gu.RasterAccessor.from_array(da.from_array(values, chunks=(3, 4)), transform, 32633, nodata=-9999)
+        source_array = source.data
+        options = {"subsample": subsample, "as_array": as_array, "random_state": 42}
+
+        # Sample eager point values while keeping the input array available for lazy operations
+        expected = eager.to_pointcloud(**options)
+        actual = source.rst.to_pointcloud(**options)
+        if as_array:
+            np.testing.assert_array_equal(expected, actual)
+        else:
+            assert expected.pointcloud_equal(actual)
+        assert source.data is source_array
+        assert not source._in_memory

@@ -60,7 +60,8 @@ if TYPE_CHECKING:
 
 
 VectorBaseType = TypeVar("VectorBaseType", bound="VectorBase")
-VectorBaseLike = Union["VectorBase", gpd.GeoDataFrame]
+# Accept Vector subclasses and accessors, as well as GeoDataFrames
+VectorLike = Union["VectorBase", gpd.GeoDataFrame]
 
 
 def _as_geodataframe(obj: Any) -> gpd.GeoDataFrame:
@@ -293,7 +294,7 @@ class VectorBase(ABC):
 
     def plot(
         self,
-        ref_crs: RasterLike | VectorBaseLike | CRS | int | None = None,
+        ref_crs: RasterLike | VectorLike | CRS | int | None = None,
         cmap: matplotlib.colors.Colormap | str | None = None,
         vmin: float | int | None = None,
         vmax: float | int | None = None,
@@ -407,7 +408,7 @@ class VectorBase(ABC):
     @overload
     def crop(
         self: VectorBaseType,
-        bbox: RasterLike | VectorBaseLike | tuple[float, float, float, float],
+        bbox: RasterLike | VectorLike | tuple[float, float, float, float],
         clip: bool,
         *,
         inplace: Literal[False] = False,
@@ -417,7 +418,7 @@ class VectorBase(ABC):
     @overload
     def crop(
         self: VectorBaseType,
-        bbox: RasterLike | VectorBaseLike | tuple[float, float, float, float],
+        bbox: RasterLike | VectorLike | tuple[float, float, float, float],
         clip: bool,
         *,
         inplace: Literal[True],
@@ -427,7 +428,7 @@ class VectorBase(ABC):
     @overload
     def crop(
         self: VectorBaseType,
-        bbox: RasterLike | VectorBaseLike | tuple[float, float, float, float],
+        bbox: RasterLike | VectorLike | tuple[float, float, float, float],
         clip: bool,
         *,
         inplace: bool = False,
@@ -437,7 +438,7 @@ class VectorBase(ABC):
     @profiler.profile("geoutils.vector.base.crop", memprof=True)
     def crop(
         self: VectorBaseType,
-        bbox: RasterLike | VectorBaseLike | tuple[float, float, float, float] = None,
+        bbox: RasterLike | VectorLike | tuple[float, float, float, float] = None,
         clip: bool = False,
         *,
         inplace: bool = False,
@@ -467,7 +468,7 @@ class VectorBase(ABC):
     @overload
     def reproject(
         self: VectorBaseType,
-        ref: RasterLike | VectorBaseLike | None = None,
+        ref: RasterLike | VectorLike | None = None,
         crs: CRS | str | int | None = None,
         *,
         inplace: Literal[False] = False,
@@ -476,7 +477,7 @@ class VectorBase(ABC):
     @overload
     def reproject(
         self: VectorBaseType,
-        ref: RasterLike | VectorBaseLike | None = None,
+        ref: RasterLike | VectorLike | None = None,
         crs: CRS | str | int | None = None,
         *,
         inplace: Literal[True],
@@ -485,7 +486,7 @@ class VectorBase(ABC):
     @overload
     def reproject(
         self: VectorBaseType,
-        ref: RasterLike | VectorBaseLike | None = None,
+        ref: RasterLike | VectorLike | None = None,
         crs: CRS | str | int | None = None,
         *,
         inplace: bool = False,
@@ -494,7 +495,7 @@ class VectorBase(ABC):
     @profiler.profile("geoutils.vector.base.reproject", memprof=True)
     def reproject(
         self: VectorBaseType,
-        ref: RasterLike | VectorBaseLike | None = None,
+        ref: RasterLike | VectorLike | None = None,
         crs: CRS | str | int | None = None,
         inplace: bool = False,
     ) -> VectorBaseType | gpd.GeoDataFrame | None:
@@ -699,7 +700,7 @@ class VectorBase(ABC):
 
     @classmethod
     def from_bounds_projected(
-        cls, raster_or_vector: RasterType | VectorBaseLike, out_crs: CRS | None = None, densify_points: int = 5000
+        cls, raster_or_vector: RasterType | VectorLike, out_crs: CRS | None = None, densify_points: int = 5000
     ) -> VectorBaseType | gpd.GeoDataFrame:
         """Create a vector polygon from projected bounds of a raster or vector.
 

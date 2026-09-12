@@ -383,6 +383,40 @@ class TestRaster:
         assert np.array_equal(rst.data.data, rio_ds.read().squeeze())
         assert np.array_equal(rst.data.mask, rio_ds.read(masked=True).mask.squeeze())
 
+    @pytest.mark.parametrize("method", ["to_rio_dataset", "to_xarray"])
+    @pytest.mark.parametrize("loaded", [False, True])
+    @pytest.mark.parametrize("area_or_point", ["Area", "Point"])
+    def test_to_rio_dataset_to_xarray__loading_metadata(
+        self, tmp_path: pathlib.Path, method: str, loaded: bool, area_or_point: str
+    ) -> None:
+        """Checks that exports load the source and maintain exact values, custom tags and pixel interpretation."""
+
+        # Write test file with missing pixel and custom metadata to test conversion
+        values = np.arange(35, dtype=np.float32).reshape(5, 7)
+        values[2, 3] = np.nan
+        reference = gu.Raster.from_array(
+            values,
+            rio.transform.from_origin(500000, 8600000, 20, 20),
+            32633,
+            nodata=-9999,
+            area_or_point=area_or_point,
+            tags={"survey": "synthetic"},
+        )
+        path = tmp_path / "conversion.tif"
+        reference.to_file(path)
+        source = gu.Raster(path, load_data=loaded)
+        assert source.is_loaded is loaded
+
+        # Both to_rio_dataset and to_xarray use an in-memory Rasterio dataset and therefore load raster values
+        result = getattr(source, method)()
+        assert source.is_loaded
+        converted = gu.Raster(result) if method == "to_rio_dataset" else result.rst.to_geoutils()
+
+        # Every original tag and georeferenced value must survive (even though Xarray adds encoding attributes)
+        assert source.raster_equal(converted, strict_masked=False, warn_failure_reason=True)
+        for name, value in source.tags.items():
+            assert converted.tags[name] == value
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_to_xarray(self, example: str) -> None:
         """Test the export to a xarray dataset"""

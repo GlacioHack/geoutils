@@ -45,6 +45,10 @@ from geoutils._misc import (
 from geoutils.interface.gridding import GriddingEngine, GriddingMethod
 from geoutils.profiler import ProfileMetrics, profile_call
 
+###################################
+# Configuration and measurements  #
+###################################
+
 
 # Keep input sizes, worker settings and measured results consistent across ASV, GDAL and large-data tests
 @dataclass
@@ -65,6 +69,8 @@ class BenchmarkConfig:
     polygon_regions_per_axis: int = 1
     vector_features_per_axis: int = 1
     point_features_per_axis: int = 5
+    grouped_regions_per_axis: int = 8
+    grouped_layout: Literal["local", "interleaved"] = "local"
     operation_method: str | None = None
     calculation_engine: CalculationEngine | None = None
     operation_strategy: OperationStrategyName | None = None
@@ -116,6 +122,11 @@ class BenchmarkResult(ProfiledResult):
         return self.worker_pids_before != self.worker_pids_after
 
 
+##############################
+# Size and output helpers    #
+##############################
+
+
 # Calculate memory limits and read one output pixel without loading a complete raster
 def logical_raster_size_mb(config: BenchmarkConfig) -> float:
     """Return the uncompressed float32 raster size in decimal megabytes."""
@@ -154,6 +165,11 @@ def read_raster_center(filename: str) -> float:
         row = dataset.height // 2
         col = dataset.width // 2
         return float(dataset.read(1, window=rio.windows.Window(col, row, 1, 1))[0, 0])
+
+
+##############################
+# Deterministic source files #
+##############################
 
 
 # Write deterministic test rasters, polygons and points without allocating the complete raster in memory
@@ -285,6 +301,11 @@ def _write_point_source(filename: str, points_per_axis: int = 5) -> None:
         crs=4326,
     )
     points.to_file(filename, driver="GPKG")
+
+
+############################################
+# Worker lifecycle and complete operations #
+############################################
 
 
 # Prepare the shared inputs, start the selected execution mode and force each operation to produce a complete output
@@ -659,6 +680,66 @@ class BenchmarkRunner:
         y = rng.uniform(45.01, 45.99, size=self.config.ninterp)
         return x, y
 
+    def _grouped_statistics(self, raster: Any, method: str, strategy: str | None) -> float:
+        """Compute grouped moments or exact robust estimates on deterministic values with independent gaps.
+
+        Local groups occupy rectangular regions; interleaved groups span the entire input. Dask builds all value
+        and membership arrays lazily. Multiprocessing benchmarks the current array interface, which loads values
+        in the client before tiling them for workers. The returned fingerprint checks complete finite counts.
+        """
+
+        # Generate coordinates with the same execution backend as the input raster
+        height, width = self.config.shape
+        if self.backend == "dask":
+            import_optional("dask", extra_name="benchmark")
+            import dask.array as da
+
+            rows = da.arange(height, chunks=self.config.chunks[0])[:, None]
+            columns = da.arange(width, chunks=self.config.chunks[1])[None, :]
+        else:
+            rows = np.arange(height)[:, None]
+            columns = np.arange(width)[None, :]
+        regions = self.config.grouped_regions_per_axis
+        if regions < 1 or regions > min(height, width):
+            raise ValueError("Grouped regions per axis must fit within the raster dimensions.")
+
+        # Separate localized membership from groups repeated through every chunk
+        if self.config.grouped_layout == "local":
+            groups = (rows * regions // height) * regions + columns * regions // width
+        else:
+            groups = (rows % regions) * regions + columns % regions
+        positions = rows * width + columns
+        base = raster.data.squeeze()
+        signal = base + (rows % 97) * 0.125 + (columns % 53) * 0.25
+        values = {
+            "signal": np.where(positions % 17 != 0, signal, np.nan),
+            "offset": np.where(positions % 29 != 0, 2 * signal + 10, np.nan),
+        }
+
+        # Measure the complete public calculation, including exact group gathering when requested
+        from geoutils.stats import stats
+
+        statistics = ["mean", "std", "min", "max"] if method == "moments" else ["median", "nmad"]
+        config = self._multiproc_config("grouped_stats") if self.backend == "multiprocessing" else None
+        result = stats(
+            values,
+            by={"zone": groups},
+            categories={"zone": range(regions**2)},
+            statistics=statistics,
+            strategy=cast(Literal["auto", "dense", "sparse", "groupwise"], strategy or "auto"),
+            mp_config=config,
+        )
+
+        # Every pixel belongs to a group; missing values follow independent, analytically known periods
+        count = height * width
+        for name, period in (("signal", 17), ("offset", 29)):
+            expected = count - (count + period - 1) // period
+            if result[(name, "count")].sum() != expected:
+                raise AssertionError(f"Grouped benchmark lost finite observations in {name!r}.")
+            if not np.isfinite(result[name].to_numpy()).all():
+                raise AssertionError(f"Grouped benchmark returned invalid estimates in {name!r}.")
+        return 1.0
+
     def _execute(self, operation: OperationName) -> float:
         """Build and fully compute one named benchmark operation."""
 
@@ -742,9 +823,13 @@ class BenchmarkRunner:
             import_optional("dask", extra_name="benchmark")
             import dask
 
-            statistics = raster.rst.get_stats(["mean", "std", "valid count"])
+            statistics = raster.rst.stats(["mean", "std", "valid count"])
             mean, _, _ = dask.compute(*statistics.values())
             return float(mean)
+
+        if operation == "grouped_stats":
+            assert operation_method is not None
+            return self._grouped_statistics(raster, operation_method, operation_strategy)
 
         if operation == "subsample":
             # Return only a fixed-size selection from the much larger raster

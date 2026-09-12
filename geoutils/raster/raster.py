@@ -992,6 +992,9 @@ class Raster(RasterBase):
             else:
                 ds.write(self.data)
 
+            # Preserve custom tags and pixel interpretation when exporting through an in-memory file
+            ds.update_tags(**self.tags)
+
         # Then open as a DatasetReader
         return mfh.open()
 
