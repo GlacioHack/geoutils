@@ -32,6 +32,25 @@ class TestAccessor:
     def test_open_raster(self) -> None:
         pass
 
+    @pytest.mark.parametrize("shape", [(1, 3), (3, 1), (1, 1)])
+    @pytest.mark.parametrize("bands", [1, 2])
+    def test_open_raster__single_row_or_column(self, tmp_path: Path, shape: tuple[int, int], bands: int) -> None:
+        """Checks that opening a raster returns spatial dimensions of length one and every requested band."""
+
+        # A single row or column is still a two-dimensional grid, including for several bands
+        values = np.arange(bands * np.prod(shape), dtype=np.float32).reshape((bands, *shape))
+        path = tmp_path / "narrow.tif"
+        transform = from_origin(0, 3, 1, 1)
+        gu.Raster.from_array(values, transform, 32631).to_file(path)
+
+        # Opening removes only a single band dimension, while retaining the grid coordinates and values
+        result = open_raster(str(path))
+        expected = values[0] if bands == 1 else values
+        assert result.dims == (("y", "x") if bands == 1 else ("band", "y", "x"))
+        assert result.rst.shape == shape
+        assert result.rst.transform == transform
+        np.testing.assert_array_equal(result.data, expected)
+
     @pytest.mark.parametrize("path_raster", [landsat_b4_path, aster_dem_path])
     def test_copy(self, path_raster: str) -> None:
 

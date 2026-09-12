@@ -66,7 +66,7 @@ glaciers = gu.Vector(gu.examples.get_path("exploradores_rgi_outlines"))
 (sampling-subsample)=
 ## Subsampling
 
-{meth}`~geoutils.Raster.subsample`
+{meth}`~geoutils.Raster.subsample` or {meth}`~geoutils.PointCloud.subsample`.
 
 Subsampling selects a **random subset of valid values, without replacement**.
 
@@ -79,8 +79,20 @@ sample = rast.subsample(subsample=2000, random_state=42, strategy="topk")
 sample[:5]
 ```
 
+Pass `mask` to restrict eligible locations **before calculating the sample size**. Boolean arrays keep True values,
+while vector outlines keep locations inside their geometries. Missing mask entries are excluded. For raster
+sampling, mask rasters must share the source grid. For point sampling, point masks must follow the source points'
+ordered coordinates and CRS; raster masks must share their CRS and are read with nearest interpolation.
+
+```{code-cell} ipython3
+# Select 10% of valid elevations inside glacier outlines
+glacier_sample = rast.subsample(0.1, mask=glaciers, random_state=42)
+glacier_sample[:5]
+```
+
 Use `return_indices=True` to get **sample locations instead of values**, for example to select the same cells in
 several aligned arrays. Raster indexes are rows and columns; point cloud indexes are positions in the original table.
+Masks do not change these index positions, and sampled values keep the source dtype.
 
 ```{code-cell} ipython3
 # Recover the same raster cells with the same sample size, strategy and seed
@@ -196,6 +208,12 @@ at_points.ds[["self", "other", "geometry"]].head()
 A raster keeps its grid, with unsampled cells masked. A point cloud contains only selected points and keeps their
 original index labels and order. To compare two rasters on a point set, pass that point cloud as `at`.
 
+Use one object family throughout a call: Raster/PointCloud objects, or DataArray/GeoDataFrame objects accessed
+through `.rst` and `.pc`. This also applies to spatial auxiliaries, explicit `at`, and raster or point masks.
+DataArrays and GeoDataFrames may mix eager and Dask storage. Plain arrays and vector outlines work with either
+family. For point output, all point inputs must share the same ordered horizontal coordinates; this is checked
+before raster alignment or interpolation. Point inputs may have different locations when gridded onto a raster.
+
 An explicit `at` selects exact locations and determines the conversion direction when the mode is omitted.
 When both are specified, they must agree. With an explicit mode and no `at`, exactly one primary input must supply
 the requested spatial type; otherwise choose `at` explicitly. Omitting both retains the defaults described above.
@@ -220,15 +238,18 @@ belong in `resample_kwargs`. Target locations and method names use the explicit 
 `resample_method="reduce"` is reserved for reducing raster windows around point coordinates. It currently raises
 `NotImplementedError` because its integration requires revision of {meth}`~geoutils.Raster.reduce_points`.
 That existing method remains available separately. Co-sampling now uses `resample_method` in place of its previous
-`interpolation` argument; the `grouped_stats` interpolation argument is unchanged.
+`interpolation` argument; the `stats` interpolation argument for grouped calculations is unchanged.
 
 ### Auxiliary variables
 
 Auxiliary variables carry **additional values at the same common locations**, such as terrain attributes or
 measurement weights. Locations must be valid in both primary datasets and every auxiliary variable.
 
-Spatial objects supply their own georeferencing. For plain arrays, `auxiliary_at` identifies the input whose grid
-or point ordering they follow:
+Spatial objects supply their own georeferencing and use the first raster band or active point values by default.
+Select another band with `auxiliary={"slope": (slope_raster, 2)}` or a point column with
+`auxiliary={"intensity": (points, "intensity")}`. For plain arrays, `auxiliary_at` identifies the input whose grid
+or point ordering they follow. Raster arrays must match one input band's shape; point arrays must be one-dimensional
+with one value per input point:
 
 ```{code-cell} ipython3
 # Carry an aligned elevation predictor through the same selection
@@ -248,7 +269,7 @@ as the active data column. Use the usual `.data`, `.ds` or `.split_bands()` meth
 
 ```{code-cell} ipython3
 # Use native Xarray bands for the same grid comparison
-native = coarse.to_xarray().rst.cosample(coarse)
+native = coarse.to_xarray().rst.cosample(coarse.to_xarray())
 native.isel(band=0) - native.isel(band=1)
 ```
 
@@ -320,16 +341,23 @@ two strategies:
 - `"sequential"` draws from the sequence of valid values. It is the default for `subsample()` and can depend on chunk layout.
 - `"topk"` selects the same cells regardless of chunk layout. It is the default for raster `cosample()` and grouped statistics.
 
-For `grouped_stats()`, pass this choice as **`subsampling_strategy`**. Its separate `strategy` argument controls
+For grouped `stats()`, pass this choice as **`subsampling_strategy`**. Its separate `strategy` argument controls
 aggregation across chunks; see {ref}`stats-grouped`.
 
 This guarantee applies to the `topk` raster sampler. Pair-sampling has its own strategies; for example,
 `"chunk_anchors"` uses the chunk layout to select pairs.
 
-**Raster sampling supports chunked execution with Dask.** Co-sampling scans validity to select common locations,
-then keeps raster output bands lazy when called through a Dask backed Xarray accessor. Its output still has the
-complete grid, even when `subsample` limits the selected cells.
+**Co-sampling supports Dask and multiprocessing through its spatial operations.** Dask accessor calls keep raster
+bands or point partitions lazy. Counts and sample positions are computed during preparation, including a check for
+an empty common selection. Final point interpolation and removal of missing values stay lazy; computing the result
+can therefore leave fewer points, or none, when interpolation spreads nodata into the selected locations. Raster
+output keeps the complete grid, even when `subsample` limits the selected cells; point output preserves the selected
+row order and index labels.
 
-Point co-sampling reads the point coordinates and returns selected rows in memory. Pair-sampling returns an
-in-memory pair dataset and, for point clouds, currently reads all source coordinates and values. Use an absolute
-sample count to limit the returned rows or pairs. See {ref}`scalability-logic` for the chunked algorithms.
+Pass `mp_config` directly to `cosample()` to use multiprocessing with eager or unloaded inputs. Raster output is
+written by tiles to `mp_config.outfile`, and temporary intermediate files are cleaned automatically. Point output is
+collected after interpolating the selected rows. Dask inputs and `mp_config` cannot be combined.
+
+Pair-sampling returns an in-memory pair dataset and, for point clouds, currently reads all source coordinates and
+values. Use an absolute sample count to limit the returned rows or pairs. See {ref}`scalability-logic` for the chunked
+algorithms.

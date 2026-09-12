@@ -84,12 +84,12 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
   - ✅
   - Rasterio / GeoPandas
 
-* - {meth}`~geoutils.Raster.get_stats()`
+* - {meth}`~geoutils.Raster.stats()`
   - Compute statistics of valid values over a valid mask.
   - ❌
   - NumPy / SciPy
 
-* - {meth}`~geoutils.Raster.grouped_stats()`
+* - {meth}`~geoutils.Raster.stats()` with ``by``
   - Compute statistics by continuous bins, discrete categories or vector zones (zonal statistics).
   - ✅
   - Pandas / NumPy / Dask

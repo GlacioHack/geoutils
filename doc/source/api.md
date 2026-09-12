@@ -144,8 +144,7 @@ See {ref}`stats` for estimators, grouping by intervals or categories, and variog
     :toctree: gen_modules/
     :template: raster_method.rst
 
-    ~raster.base.RasterBase.get_stats
-    ~raster.base.RasterBase.grouped_stats
+    ~raster.base.RasterBase.stats
     ~raster.base.RasterBase.variogram
 ```
 
@@ -612,8 +611,7 @@ See {ref}`stats` for the same statistical workflows on point cloud values.
 .. autosummary::
     :toctree: gen_modules/
 
-    PointCloud.get_stats
-    PointCloud.grouped_stats
+    PointCloud.stats
     PointCloud.variogram
 ```
 
@@ -662,14 +660,14 @@ methods are listed under {ref}`api-raster-statistics` and {ref}`api-point-statis
 ### Grouped statistics and plotting
 
 **Zonal statistics are grouped statistics with bins defined by vector features.** Use
-`raster.grouped_stats(by={"zone": (zones, "id")})`, or the same point cloud method, to calculate statistics by
+`raster.stats(by={"zone": (zones, "id")})`, or the same point cloud method, to calculate statistics by
 feature ID. See {ref}`stats-zonal` for examples. The array function below handles already aligned values and groupers.
 
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
 
-    stats.grouped_stats
+    stats.stats
     stats.plot_grouped_stats
 ```
 
@@ -679,6 +677,7 @@ feature ID. See {ref}`stats-zonal` for examples. The array function below handle
 .. autosummary::
     :toctree: gen_modules/
 
+    stats.variogram
     Variogram
 ```
 

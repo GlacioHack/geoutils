@@ -84,6 +84,23 @@ def is_dask_geodataframe(obj: Any) -> bool:
 #################################################################################
 
 
+def get_geo_interface(obj: Any, attr_name: str, accessors: Sequence[str] = ("rst", "vct", "pc")) -> Any:
+    """
+    Return the object or accessor providing a requested geospatial operation, or None if absent.
+
+    Arguments follow get_geo_attr(). Use this when several operations and metadata fields must come from the
+    same interface, avoiding collisions with native Xarray or Pandas names such as count and shape.
+    """
+
+    if hasattr(obj, attr_name):
+        return obj
+    for accessor_name in accessors:
+        accessor = getattr(obj, accessor_name, None)
+        if accessor is not None and hasattr(accessor, attr_name):
+            return accessor
+    return None
+
+
 def get_geo_attr(obj: Any, attr_name: str, accessors: Sequence[str] = ("rst", "vct", "pc")) -> Any:
     """Retrieve an attribute from an object, or one of its accessors."""
 
@@ -117,6 +134,40 @@ def has_geo_attr(obj: Any, attr_name: str, accessors: Sequence[str] = ("rst", "v
             return True
 
     return False
+
+
+# Helpers for recognizing spatial inputs and selecting their GeoUtils interfaces
+#################################################################################
+
+
+def _get_raster_interface(obj: Any) -> Any:
+    """Return the object or rst accessor providing raster coordinate conversion, or None if absent."""
+
+    return get_geo_interface(obj, "ij2xy", accessors=("rst",))
+
+
+def _get_pointcloud_interface(obj: Any) -> Any:
+    """Return the object or pc accessor providing ordered point coordinate comparison, or None if absent."""
+
+    return get_geo_interface(obj, "georeferenced_coords_equal", accessors=("pc",))
+
+
+def _is_raster(obj: Any) -> bool:
+    """Check for raster operations on an object or its rst accessor, without requiring a specific class."""
+
+    return _get_raster_interface(obj) is not None
+
+
+def _is_pointcloud(obj: Any) -> bool:
+    """Check for point cloud operations on an object or its pc accessor, without requiring a specific class."""
+
+    return _get_pointcloud_interface(obj) is not None
+
+
+def _is_vector(obj: Any) -> bool:
+    """Check for rasterization on an object or its vct accessor, including point clouds with vector operations."""
+
+    return has_geo_attr(obj, "rasterize", accessors=("vct",))
 
 
 # Level 0 checks: directly on user input

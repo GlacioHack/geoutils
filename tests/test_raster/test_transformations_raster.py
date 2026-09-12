@@ -729,6 +729,38 @@ class TestMaskGeotransformations:
         mask_orig_pix.icrop(bbox2_pixel, inplace=True)
         assert mask_orig.raster_equal(mask_orig_pix)
 
+    @pytest.mark.parametrize("method", ["crop", "icrop"])
+    def test_crop__unloaded_mask_boolean_values(self, tmp_path: Any, method: str) -> None:
+        """
+        Checks that crop() and icrop() return exact boolean values and nodata cells without loading the source mask.
+        """
+
+        # Write integer mask values with one nodata cell inside the window being cropped
+        values = (np.arange(30).reshape(5, 6) % 2).astype("uint8")
+        values[2, 2] = 255
+        masked_values = np.ma.masked_equal(values, 255)
+        transform = rio.transform.from_origin(100, 200, 10, 10)
+        path = tmp_path / "mask.tif"
+        gu.Raster.from_array(masked_values, transform, 32633, nodata=255).to_file(path)
+        unloaded = gu.Raster(path, is_mask=True)
+        loaded = gu.Raster(path, is_mask=True, load_data=True)
+
+        # Select rows 1:4 and columns 1:5 through both public coordinate conventions
+        if method == "crop":
+            output = unloaded.crop((110, 160, 150, 190))
+            expected = loaded.crop((110, 160, 150, 190))
+        else:
+            output = unloaded.icrop((1, 1, 5, 4))
+            expected = loaded.icrop((1, 1, 5, 4))
+
+        # Match the full-load path and verify logical values and nodata cells independently
+        assert not unloaded.is_loaded
+        assert output.is_mask
+        assert output.data.dtype == bool
+        assert output.raster_equal(expected, strict_masked=True)
+        np.testing.assert_array_equal(output.data.data, values[1:4, 1:5].astype(bool))
+        np.testing.assert_array_equal(np.ma.getmaskarray(output.data), values[1:4, 1:5] == 255)
+
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])
     def test_reproject(self, mask: gu.Raster) -> None:
         # Test 1: with a classic resampling (bilinear)
@@ -798,6 +830,43 @@ class TestReprojectChunked:
 
     pytest.importorskip("dask")
     import dask.array as da
+
+    @pytest.mark.parametrize("load_source", [False, True])
+    def test_reproject__multiprocessing_logical_mask(self, tmp_path: Any, load_source: bool) -> None:
+        """
+        Checks that multiprocessing reprojection returns exact mask values and nodata cells on a shifted grid.
+        """
+
+        # Write both boolean states and one nodata cell, then shift the target to leave an uncovered column
+        rows, columns = np.indices((6, 7))
+        values = ((rows + columns) % 2).astype("uint8")
+        values[2, 3] = 255
+        transform = rio.transform.from_origin(0, 6, 1, 1)
+        source_path = tmp_path / "mask_source.tif"
+        data = np.ma.masked_equal(values, 255)
+        gu.Raster.from_array(data, transform, 32633, nodata=255).to_file(source_path)
+        reference = gu.Raster.from_array(np.zeros((6, 7)), rio.transform.from_origin(1, 6, 1, 1), 32633)
+
+        # Compare a complete in-memory reprojection with windows read through the multiprocessing backend
+        loaded = gu.Raster(source_path, is_mask=True, load_data=True)
+        expected = loaded.reproject(ref=reference, resampling="nearest")
+        source = gu.Raster(source_path, is_mask=True, load_data=load_source)
+        config = MultiprocConfig(chunks=(3, 4), outfile=str(tmp_path / "mask_reprojected.tif"))
+        output = source.reproject(ref=reference, resampling="nearest", mp_config=config)
+
+        # Check that the input loading state is unchanged and restore boolean interpretation before reading the output
+        assert source.is_loaded == load_source
+        assert not output.is_loaded
+        assert output.is_mask
+        assert output.data.dtype == bool
+        assert output.transform == reference.transform
+
+        # Check the internal hole and uncovered column independently, then compare the known true/false values
+        expected_missing = np.zeros((6, 7), dtype=bool)
+        expected_missing[2, 2] = True
+        expected_missing[:, -1] = True
+        np.testing.assert_array_equal(np.ma.getmaskarray(output.data), expected_missing)
+        np.testing.assert_array_equal(output.data.compressed(), expected.data.compressed())
 
     def test_reproject__small_chunked_grid_matches_base(self, tmp_path: Any) -> None:
         """Regression test for small-grid Dask/Multiprocessing block placement during reprojection."""

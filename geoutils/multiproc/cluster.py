@@ -20,8 +20,50 @@
 """This module defines the cluster configurations."""
 
 import multiprocessing
+from collections.abc import Iterable, Iterator
 from multiprocessing.pool import Pool
 from typing import Any, Callable, Dict, Optional
+
+
+def _map_bounded(
+    cluster: "AbstractCluster",
+    function: Callable[..., Any],
+    arguments: Iterable[tuple[Any, ...]],
+    max_pending: int = 8,
+) -> Iterator[tuple[int, Any]]:
+    """
+    Run a function for many inputs without submitting all the work at once.
+
+    Submit up to ``max_pending`` calls, wait for their results, and then start the next batch. This limits how many
+    jobs and input values the cluster must keep at one time. Return results in the same order as the inputs, together
+    with the position of each input.
+
+    :param cluster: Cluster used to run the function calls.
+    :param function: Function to call for each set of arguments.
+    :param arguments: Sets of positional arguments passed to the function in order.
+    :param max_pending: Largest number of calls submitted before waiting for their results.
+
+    :returns: Input positions and their function results, in input order.
+    """
+
+    # Check the batch size before reading any inputs
+    if max_pending <= 0:
+        raise ValueError("Argument ``max_pending`` must be a positive integer.")
+
+    # Submit one small batch at a time
+    pending: list[tuple[int, Any]] = []
+    for index, args in enumerate(arguments):
+        pending.append((index, cluster.submit(function, *args)))
+        if len(pending) == max_pending:
+            # Wait for the batch and return its results in input order
+            results = cluster.gather([future for _, future in pending])
+            yield from ((task_index, result) for (task_index, _), result in zip(pending, results))
+            pending = []
+
+    # Finish the last, smaller batch
+    if pending:
+        results = cluster.gather([future for _, future in pending])
+        yield from ((task_index, result) for (task_index, _), result in zip(pending, results))
 
 
 class ClusterGenerator:

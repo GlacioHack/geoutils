@@ -50,7 +50,8 @@ def open_raster(filename: str, is_mask: bool = False, **kwargs: Any) -> xr.DataA
     ds = rioxr.open_rasterio(filename, masked=True, **kwargs)
 
     # Remove the band dimension if there is only one
-    ds = ds.squeeze()  # Delete band coordinate (only one dimension)
+    if ds.sizes.get("band") == 1:
+        ds = ds.squeeze("band")  # Delete band coordinate (only one dimension)
 
     # If input needs to be interpreted as a boolean mask
     if is_mask:

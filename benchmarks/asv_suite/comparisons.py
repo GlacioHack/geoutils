@@ -10,6 +10,10 @@ from typing import Literal, cast
 from benchmarks.asv_suite import asv_parameter_values, asv_pr_check_enabled
 from benchmarks.gdal_comparison.commands import ComparisonOperation
 from benchmarks.gdal_comparison.runner import GdalRunner
+from benchmarks.workflows.grouped_reference import (
+    compute_grouped_reference,
+    prepare_grouped_reference,
+)
 from benchmarks.workflows.registry import (
     OPERATION_METHODS,
     OPERATION_STRATEGIES,
@@ -19,11 +23,19 @@ from benchmarks.workflows.registry import (
     OperationStrategyName,
 )
 from benchmarks.workflows.runner import BenchmarkConfig, BenchmarkRunner
+from geoutils._misc import import_optional
+from geoutils.multiproc import MultiprocConfig
+from geoutils.multiproc.cluster import MpCluster
+from geoutils.profiler import profile_call
+
+#########################################
+# Comparison dimensions and case helpers #
+#########################################
 
 # Comparisons vary one GeoUtils choice at a time: method, calculation engine, chunk strategy or execution mode
 # The label dictionaries give the stored values readable names in plots
 ComparisonDimension = Literal["method", "calculation_engine", "strategy", "execution_mode"]
-ExternalReference = Literal["gdal_cli"]
+ExternalReference = Literal["gdal_cli", "flox"]
 GDAL_CLI_LABEL = "GDAL CLI"
 
 EXECUTION_MODE_LABELS: dict[ExecutionMode, str] = {
@@ -99,12 +111,13 @@ class ExternalReferenceCase:
     external_reference: ExternalReference
     pr_check: bool = False
     strategy: None = None
+    execution_mode: ExecutionMode | None = None
 
     @property
     def benchmark_class(self) -> str:
         """Return the generated public ASV class name for this reference."""
 
-        values = (self.external_reference, self.method, self.comparison_group)
+        values = (self.external_reference, self.execution_mode, self.method, self.comparison_group)
         return "".join(_class_token(value) for value in values if value is not None)
 
 
@@ -246,6 +259,10 @@ def _external_case(
     return ExternalReferenceCase(comparison_group, operation, method, "gdal_cli", pr_check=pr_check)
 
 
+##############################
+# Registered operation cases #
+##############################
+
 # Define the cases needed to compare each operation across execution modes, calculation engines, methods or strategies
 # Each helper changes only that choice and keeps the other operation settings fixed
 _INTERPOLATION_MODES = _execution_cases("interpolation-point-count", "interp_points", "linear", "scipy")
@@ -291,6 +308,32 @@ _GROUPED_ROBUST_MODES = _execution_cases(
     "numpy",
     strategy="groupwise",
     pr_modes=("dask", "multiprocessing"),
+)
+
+# Compare the same prepared arrays with an optional external library, across input size and group count
+_GROUPED_FLOX_MODES = {
+    scenario: _execution_cases(
+        scenario,
+        "grouped_stats",
+        "moments",
+        "numpy",
+        strategy="auto",
+        execution_modes=("eager", "dask", "multiprocessing"),
+        pr_modes=("eager", "dask", "multiprocessing"),
+    )
+    for scenario in ("grouped-flox-raster-size", "grouped-flox-group-count")
+}
+_GROUPED_FLOX_REFERENCES = tuple(
+    ExternalReferenceCase(
+        scenario,
+        "grouped_stats",
+        "moments",
+        "flox",
+        pr_check=True,
+        execution_mode=cast(ExecutionMode, execution_mode),
+    )
+    for scenario in _GROUPED_FLOX_MODES
+    for execution_mode in ("eager", "dask")
 )
 
 # Check each distinct layout and the automatic sparse threshold with a bounded pull-request workload
@@ -362,6 +405,7 @@ BENCHMARK_CASES = _merge_cases(
     _GROUPED_MODES,
     *tuple(_GROUPED_STRATEGIES.values()),
     _GROUPED_ROBUST_MODES,
+    *tuple(_GROUPED_FLOX_MODES.values()),
     _INTERPOLATION_MODES,
     _REPROJECTION_MODES,
     _FILTER_MODES,
@@ -398,11 +442,17 @@ EXTERNAL_REFERENCE_CASES = (
     _RASTERIZATION_REFERENCE,
     *_GRID_REFERENCES.values(),
     _GRID_POINT_REFERENCE,
+    *_GROUPED_FLOX_REFERENCES,
 )
 
 # Map each generated ASV class name back to the operation settings needed during setup
 BENCHMARK_CASE_BY_CLASS = {case.benchmark_class: case for case in BENCHMARK_CASES}
 EXTERNAL_REFERENCE_CASE_BY_CLASS = {case.benchmark_class: case for case in EXTERNAL_REFERENCE_CASES}
+
+
+##############################
+# Report labels and plots    #
+##############################
 
 
 def _series_label(case: BenchmarkCase, dimension: ComparisonDimension) -> str:
@@ -447,6 +497,7 @@ class Comparison:
     workload_template: str
     logarithmic_x: bool = False
     documentation: bool = True
+    summary: bool = True
     series_dimension: ComparisonDimension = "execution_mode"
     calculation_engine: CalculationEngine | None = None
     strategy: OperationStrategyName | None = None
@@ -465,6 +516,50 @@ _GRID_POINTS_PER_AXIS = {"nearest": 17, "linear": 17, "idw": 17, "mean": 17}
 
 # Define the report plots, including their displayed series and the operation settings held fixed
 COMPARISONS: tuple[Comparison, ...] = (
+    *tuple(
+        Comparison(
+            slug=scenario,
+            title=title,
+            description=(
+                "Compares GeoUtils stats() with Flox on two prebuilt float64 arrays, the same boolean mask and "
+                "declared categories. Both return finite count, mean and population standard deviation (ddof=0), "
+                "including completed Dask results and dataframe construction. Dask uses one threaded worker; "
+                "GeoUtils multiprocessing uses one persistent process initialized before the arrays. Both use "
+                "256 × 256 tiles. Worker startup is excluded, while tile serialization and merging are timed. "
+                "Flox uses its default engine and map-reduce for lazy group labels."
+            ),
+            parameter_label=parameter_label,
+            series=(
+                *_comparison_series(_GROUPED_FLOX_MODES[scenario], "execution_mode"),
+                *tuple(
+                    (f"Flox ({EXECUTION_MODE_LABELS[case.execution_mode]})", case.benchmark_class)
+                    for case in _GROUPED_FLOX_REFERENCES
+                    if case.comparison_group == scenario and case.execution_mode is not None
+                ),
+            ),
+            operation="grouped_stats",
+            method="moments",
+            calculation_engine="numpy",
+            strategy="auto",
+            workload_template=workload,
+            documentation=False,
+            summary=False,
+        )
+        for scenario, title, parameter_label, workload in (
+            (
+                "grouped-flox-raster-size",
+                "GeoUtils and Flox grouped statistics by raster size",
+                "Size of raster (pixels per side)",
+                "{parameter} × {parameter} raster; 256 local groups; two masked float64 values",
+            ),
+            (
+                "grouped-flox-group-count",
+                "GeoUtils and Flox grouped statistics by group count",
+                "Number of groups per axis",
+                "1,024 × 1,024 raster; {parameter} × {parameter} interleaved groups; two masked float64 values",
+            ),
+        )
+    ),
     Comparison(
         slug="grouped-stats-execution-size",
         title="Grouped moments by raster size and execution mode",
@@ -714,6 +809,11 @@ COMPARISONS: tuple[Comparison, ...] = (
         documentation=False,
     ),
 )
+
+
+#####################################
+# ASV measurements and input sizes  #
+#####################################
 
 
 # The classes below define which numeric input changes, such as raster size, chunk size or point count
@@ -999,14 +1099,115 @@ class _GroupedStatsGroupCount(_ComparisonBenchmark):
         return BenchmarkConfig(shape=(size, size), chunks=(128, 128), grouped_regions_per_axis=parameter)
 
 
+class _GroupedFloxRasterSize(_ComparisonBenchmark):
+    """Compare complete grouped results after preparing identical in-memory NumPy or Dask inputs."""
+
+    param_names = ["raster_size"]
+    params = [asv_parameter_values([256, 1024, 4096], pr_check_value=256)]
+
+    def make_config(self, parameter: int) -> BenchmarkConfig:
+        """Vary raster size around 256 local groups and fixed spatial chunks."""
+
+        return BenchmarkConfig(shape=(parameter, parameter), chunks=(256, 256), grouped_regions_per_axis=16)
+
+    def setup(self, parameter: int) -> None:
+        """Prepare common arrays and load optional libraries outside the measurement."""
+
+        # Select the same execution mode for GeoUtils and its corresponding Flox reference
+        benchmark_class = type(self).__name__
+        case = BENCHMARK_CASE_BY_CLASS.get(benchmark_class)
+        reference = EXTERNAL_REFERENCE_CASE_BY_CLASS.get(benchmark_class)
+        selected = case or reference
+        assert selected is not None and selected.execution_mode is not None
+        self.implementation: Literal["geoutils", "flox"] = "geoutils" if reference is None else "flox"
+        if reference is not None:
+            try:
+                import_optional("flox", extra_name="benchmark")
+            except ImportError as exc:
+                raise NotImplementedError("Install optional flox to run this comparison") from exc
+
+        # Fix the scheduler for both libraries and construct all observations before timing starts
+        self.dask = import_optional("dask", extra_name="benchmark")
+        config = self.make_config(parameter)
+
+        # Start one persistent worker before building arrays so it receives only serialized tiles
+        self.mp_cluster: MpCluster | None = None
+        self.mp_config: MultiprocConfig | None = None
+        if selected.execution_mode == "multiprocessing":
+            self.mp_cluster = MpCluster({"nb_workers": 1, "max_tasks_per_child": None})
+            self.mp_config = MultiprocConfig(chunks=config.chunks, cluster=self.mp_cluster)
+
+        # Keep complete prepared inputs in the client, with identical logical tiles for both worker backends
+        self.inputs = prepare_grouped_reference(
+            config.shape[0],
+            config.grouped_regions_per_axis,
+            config.grouped_layout,
+            selected.execution_mode,
+        )
+
+    def teardown(self, parameter: int) -> None:
+        """Stop worker processes and release arrays after each independent ASV measurement."""
+
+        cluster = getattr(self, "mp_cluster", None)
+        if cluster is not None:
+            cluster.close()
+        if hasattr(self, "inputs"):
+            del self.inputs
+
+    def time_operation(self, parameter: int) -> None:
+        """Compute every requested result with one threaded or multiprocessing worker."""
+
+        with self.dask.config.set(scheduler="threads", num_workers=1):
+            compute_grouped_reference(*self.inputs, implementation=self.implementation, mp_config=self.mp_config)
+
+    def track_end_to_end_time_s(self, parameter: int) -> float:
+        """Measure masking, grouping and complete output construction from prepared inputs."""
+
+        start = time.perf_counter()
+        self.time_operation(parameter)
+        return time.perf_counter() - start
+
+    def track_peak_process_tree_mem_mb(self, parameter: int) -> float:
+        """Measure peak process memory while the complete grouped result is calculated."""
+
+        _, metrics = profile_call(self.time_operation, parameter, dask=False, include_children=True)
+        assert metrics.peak_process_tree_mem_mb is not None
+        return metrics.peak_process_tree_mem_mb
+
+
+class _GroupedFloxGroupCount(_GroupedFloxRasterSize):
+    """Compare grouped reductions as interleaved group count crosses the sparse threshold."""
+
+    param_names = ["groups_per_axis"]
+    params = [asv_parameter_values([4, 16, 65], pr_check_value=65)]
+
+    def make_config(self, parameter: int) -> BenchmarkConfig:
+        """Vary declared groups on a fixed raster with membership repeated across chunks."""
+
+        size = 256 if asv_pr_check_enabled() else 1024
+        return BenchmarkConfig(
+            shape=(size, size), chunks=(256, 256), grouped_regions_per_axis=parameter, grouped_layout="interleaved"
+        )
+
+
+setattr(_GroupedFloxRasterSize.track_end_to_end_time_s, "unit", "seconds")
+setattr(_GroupedFloxRasterSize.track_peak_process_tree_mem_mb, "unit", "MB")
+
+
 class _NumbaWorkerIntegration(_GriddingRasterSize):
     """Exercise each Numba kernel once in Dask and multiprocessing workers."""
 
     params = [asv_parameter_values([1024], pr_check_value=512)]
 
 
+#####################################
+# Public ASV class registration     #
+#####################################
+
 # Select the input axis and fixture configuration used by each named comparison group
 _SCENARIO_BASES: dict[str, type[_ComparisonBenchmark]] = {
+    "grouped-flox-raster-size": _GroupedFloxRasterSize,
+    "grouped-flox-group-count": _GroupedFloxGroupCount,
     "grouped-stats-raster-size": _GroupedStatsRasterSize,
     "grouped-stats-chunk-size": _GroupedStatsChunkSize,
     "grouped-stats-interleaved-chunks": _GroupedStatsInterleavedChunks,

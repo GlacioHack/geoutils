@@ -4,11 +4,13 @@ This directory contains repeatable performance measurements and pass/fail large 
 
 ## Organization
 
-- `workflows/` defines deterministic inputs, operation methods, calculation engines, chunk strategies, execution modes
-  and result computation shared by every suite (ASV benchmark + large data tests),
+- `workflows/registry.py` lists operation methods, calculation engines, chunk strategies and supported execution modes,
+- `workflows/runner.py` prepares files and computes complete outputs shared by ASV and large data tests; focused
+  workflows such as `grouped_reference.py` and `variography.py` prepare arrays for individual comparisons,
 - `asv_suite/operations.py` measures operations without a dedicated scaling comparison at one fixed configuration,
 - `asv_suite/comparisons.py` defines one-axis comparisons and generates their valid ASV cases and classes, with fixed
-  Numba worker checks and the GDAL CLI kept as a separate external reference,
+  Numba worker checks and GDAL CLI/Flox kept as separate external references,
+- `asv_suite/variography.py` measures raster and point pair sampling, reduction of prepared pairs and complete variograms,
 - `asv_suite/render_results.py` renders the raw measurements into method, engine, strategy and execution-mode
   comparisons and the two concise graphics used by the documentation,
 - `gdal_comparison/` contains the GDAL CLI equivalent operations for performance comparison,
@@ -46,6 +48,8 @@ GEOUTILS_ASV_PR_CHECK=1 asv run --quick --show-stderr -E existing --bench <bench
 
 Omit `GEOUTILS_ASV_PR_CHECK=1` to use the complete parameter ranges.
 
+### Compare revisions and view results
+
 To compare a new implementation with the `main` branch: commit current changes, then use:
 
 ```bash
@@ -80,10 +84,10 @@ python -m benchmarks.asv_suite.render_results --doc-only --doc-dir benchmarks/re
 
 ### Benchmark structure and parameters
 
-Benchmarks use two structures. `OperationBenchmarks` measures operations without a dedicated scaling comparison at one
-fixed configuration. Its `case` parameter combines the execution mode and operation, such as `dask-reproject`.
-Comparison benchmarks vary one input at a time. Their class names identify the fixed execution mode, method and
-calculation engine. For example, `EagerIdwNumbaGriddingRasterSize` varies `raster_size` while keeping eager execution,
+The shared operation benchmarks use two structures. `OperationBenchmarks` measures operations without a dedicated scaling
+comparison at one fixed configuration. Its `case` parameter combines the execution mode and operation, such as
+`dask-reproject`. The generated classes in `comparisons.py` vary one input at a time and identify the fixed execution
+mode, method and calculation engine. For example, `EagerIdwNumbaGriddingRasterSize` varies `raster_size` while keeping eager execution,
 IDW and Numba fixed.
 
 #### Input parameters
@@ -113,6 +117,56 @@ Comparison series vary one implementation choice while keeping the others fixed:
 
 The GDAL CLI remains a separate external reference. Quick runs validate execution and reporting rather than repeatable
 performance differences. The user statistics guide explains the memory limits of the grouped-statistics strategies.
+
+### Grouped statistics and Flox
+
+The optional Flox comparison uses prepared arrays and measures finite counts, mean and population standard deviation
+through complete dataframe output. Both libraries receive the same float64 values, missing observations, boolean mask
+and declared categories. Dask runs with one threaded worker and 256 × 256 spatial chunks. The GeoUtils multiprocessing
+series uses the same tile size and one real process. Its pool starts before input construction so workers receive only
+serialized tiles. Worker recycling is disabled for this comparison: startup stays outside the measurements, while
+tiling, transfers, merging and complete output remain inside. Existing file-based multiprocessing comparisons continue
+to measure worker initialization separately. Flox uses its default engine and map-reduce for lazy labels. Install
+`flox` separately to include these references; ASV skips them when it is absent.
+
+```bash
+asv run --quick --show-stderr -E existing --bench 'GroupedFlox'
+```
+
+These comparisons vary raster size from 256 × 256 to 4096 × 4096 with 256 local groups, and vary interleaved group count
+from 16 to 4225 on a fixed 1024 × 1024 raster. Input construction stays outside the measurements. The results appear
+beside the existing grouped statistics plots in the generated ASV report.
+
+### Pair sampling and variography
+
+The dedicated `asv_suite/variography.py` module separates pair generation from reduction, then measures their combined
+cost through the public `variogram()` function. Every case records elapsed time and peak process memory. Inputs are
+prepared before measurement, while spatial search construction, pair sampling and complete output construction are
+included where applicable.
+
+| Benchmark class | Changing input | Fixed workload |
+| --- | --- | --- |
+| `VariogramPairCount` | 10,000–1,000,000 pairs; Matheron or Dowd estimator | 24 distance bins |
+| `VariogramLagCount` | 24–256 distance bins; Matheron or Dowd estimator | 100,000 prepared pairs |
+| `RasterPairSampling` | 1,000–100,000 pairs; five sampling methods; eager or Dask | 1024 × 1024 raster |
+| `RasterPairSamplingSize` | 256–4096 pixels per side; eager or Dask | 10,000 pairs; chunk anchors |
+| `PointPairSamplingSize` | 1,000–100,000 source points; three search strategies | 2,000 pairs; constant point density |
+| `RasterVariogramSize` | 256–4096 pixels per side; eager or Dask | 10,000 pairs; 24 Dowd estimates |
+
+Raster fixtures contain scattered missing cells and smoothly varying values. Dask uses one thread and 256 × 256 chunks
+from prepared arrays, so these cases measure scheduling and selected value reads without disk throughput. Pair sampling
+does not currently accept a multiprocessing configuration. Point searches load all coordinates and therefore use eager
+inputs here. The prepared pair reduction cases isolate the numerical work from these spatial access costs.
+
+Install `geoutils[geostat]` to include the named estimators; ASV skips those cases if SciKit-GStat is absent. Estimator
+imports and initial compilation stay outside timing. Pair sampling itself needs no geostatistics package.
+
+```bash
+GEOUTILS_ASV_PR_CHECK=1 asv run --quick --show-stderr -E existing --bench 'asv_suite.variography'
+```
+
+Omit the pull-request flag to measure the full ranges. These standalone measurements appear in native ASV history,
+accessible from the combined report's history link. They do not enter the GDAL comparison graphics.
 
 ### Continuous integration and published reports
 

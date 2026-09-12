@@ -18,6 +18,6 @@
 
 """Statistical functionalities: grouped/zonal/global stats, specific estimators, and variography/geostats. """
 from geoutils.stats.estimators import *  # noqa
-from geoutils.stats.grouped import *  # noqa
+from geoutils.stats.grouping import *  # noqa
 from geoutils.stats.stats import *  # noqa
 from geoutils.stats.variography import *  # noqa

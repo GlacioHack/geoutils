@@ -24,7 +24,7 @@ Three types of statistical operations are supported:
 - **Variography** describes **spatial variability as a function of distance**.
 
 **Zonal statistics are a special case of grouped statistics: vector features define the bins.** For example,
-`grouped_stats()` can calculate the mean elevation of each glacier or catchment using its outline.
+`stats()` can calculate the mean elevation of each glacier or catchment using its outline.
 
 ```{note}
 Statistical operations can select samples directly, for example when estimating a variogram or grouped statistics.
@@ -35,8 +35,7 @@ See {ref}`sampling` to select observations for other analyses, and {ref}`api-sta
 
 | Operation | Calculation | Result |
 | --- | --- | --- |
-| {meth}`~geoutils.Raster.get_stats` | Statistics of valid values | Number or dictionary |
-| {meth}`~geoutils.Raster.grouped_stats` | Statistics by bins, categories or vector zones | {class}`pandas.DataFrame`, optionally with group masks |
+| {meth}`~geoutils.Raster.stats` | Statistics of all valid values or by bins, categories, or vector zones | Number, dictionary, or {class}`pandas.DataFrame` |
 | {meth}`~geoutils.Raster.variogram` | Spatial variability across distances | {class}`~geoutils.Variogram` |
 
 ```{code-cell} ipython3
@@ -67,7 +66,7 @@ glaciers = gu.Vector(gu.examples.get_path("exploradores_rgi_outlines"))
 (stats-estimators)=
 ## Summary statistics
 
-{meth}`geoutils.Raster.get_stats` or {meth}`geoutils.PointCloud.get_stats`.
+{meth}`geoutils.Raster.stats` or {meth}`geoutils.PointCloud.stats`.
 
 Summary statistics describe **central values, spread and valid counts**. For rasters, they use the selected band;
 for point clouds, they use the active {attr}`~geoutils.PointCloud.data_column` or the geometry's Z coordinate.
@@ -75,18 +74,18 @@ Built-in estimators exclude nodata.
 
 ```{code-cell} ipython3
 # Compute the default summary statistics
-rast.get_stats()
+rast.stats()
 ```
 
 Request **one statistic for a number**, or **several statistics for a dictionary**. Use `"all"` to request every
 available estimator and count.
 
 ```{code-cell} ipython3
-rast.get_stats("mean")
+rast.stats("mean")
 ```
 
 ```{code-cell} ipython3
-rast.get_stats(["mean", "median", "std", "nmad"])
+rast.stats(["mean", "median", "std", "nmad"])
 ```
 
 ```{dropdown} Available estimators and counts
@@ -123,15 +122,15 @@ def count_high_elevations(data: np.ndarray) -> int:
     values = np.ma.asarray(data).compressed()
     return int(np.count_nonzero(np.isfinite(values) & (values > 1500)))
 
-rast.get_stats(count_high_elevations)
+rast.stats(count_high_elevations)
 ```
 
-For rasters, use `inlier_mask` to **restrict the statistics to selected locations**:
+Use `mask` to **restrict the statistics to selected locations**:
 
 ```{code-cell} ipython3
 # Summarize elevations inside all glacier outlines together
 glacier_mask = glaciers.create_mask(rast)
-rast.get_stats(["mean", "std", "valid count"], inlier_mask=glacier_mask)
+rast.stats(["mean", "std", "valid count"], mask=glacier_mask)
 ```
 
 To calculate a separate statistic for each glacier, use {ref}`zonal statistics<stats-zonal>` below.
@@ -139,8 +138,7 @@ To calculate a separate statistic for each glacier, use {ref}`zonal statistics<s
 (stats-grouped)=
 ## Grouped statistics
 
-{meth}`geoutils.Raster.grouped_stats`, {meth}`geoutils.PointCloud.grouped_stats` or
-{func}`geoutils.stats.grouped_stats`.
+{meth}`geoutils.Raster.stats`, {meth}`geoutils.PointCloud.stats` or {func}`geoutils.stats.stats` with ``by``.
 
 Grouped statistics describe **values within bins or categories of one or more variables**. Bins can be continuous
 intervals, such as elevation bands, or discrete categories, such as land-cover classes or vector zones.
@@ -157,11 +155,11 @@ Use `bins` to define **intervals of a continuous variable**. For example, summar
 ```{code-cell} ipython3
 # Divide the first raster band into explicit elevation intervals
 elevation_edges = [0, 1000, 2000, 3000, 4000]
-elevation_stats, elevation_masks = rast.grouped_stats(
+elevation_stats, elevation_masks = rast.stats(
+    ("mean", "min", "max"),
     by={"elevation": 1},
     values={"elevation": 1},
     bins={"elevation": elevation_edges},
-    statistics=("mean", "min", "max"),
     return_masks=True,
 )
 elevation_stats
@@ -198,7 +196,7 @@ and the final upper edge. Pass a {class}`pandas.IntervalIndex` to choose which e
 ```{code-cell} ipython3
 # Assign boundary elevations to the interval ending at that elevation
 right_closed = pd.IntervalIndex.from_breaks(elevation_edges, closed="right")
-rast.grouped_stats(by={"elevation": 1}, bins={"elevation": right_closed})
+rast.stats(by={"elevation": 1}, bins={"elevation": right_closed})
 ```
 
 ### Discrete categories
@@ -208,11 +206,11 @@ inside and outside the outlines:
 
 ```{code-cell} ipython3
 # Compare elevation distributions inside and outside glaciers
-glacier_stats = rast.grouped_stats(
+glacier_stats = rast.stats(
+    ("mean", "min", "max", "nmad"),
     by={"glacier": glacier_mask},
     values={"elevation": 1},
     categories={"glacier": [False, True]},
-    statistics=("mean", "min", "max", "nmad"),
 )
 glacier_stats
 ```
@@ -231,10 +229,10 @@ For example, the glacier inventory's `RGIId` column identifies each glacier:
 
 ```{code-cell} ipython3
 # Calculate separate elevation statistics for each glacier outline
-glacier_zonal_stats = rast.grouped_stats(
+glacier_zonal_stats = rast.stats(
+    ("mean", "std", "min", "max"),
     by={"glacier": (glaciers, "RGIId")},
     values={"elevation": 1},
-    statistics=("mean", "std", "min", "max"),
     observed=False,
 )
 glacier_zonal_stats.sort_values(("elevation", "count"), ascending=False).head()
@@ -249,7 +247,7 @@ The same grouping applies to point measurements:
 ```{code-cell} ipython3
 # Summarize a sample of point elevations within each glacier
 points = rast.to_pointcloud(data_column_name="elevation", subsample=2000, random_state=42)
-points.grouped_stats(by={"glacier": (glaciers, "RGIId")}, statistics=("mean", "std")).head()
+points.stats(("mean", "std"), by={"glacier": (glaciers, "RGIId")}).head()
 ```
 
 Raster cells are assigned by their centres, and points by their coordinates. Grouping assigns each location to one
@@ -268,12 +266,12 @@ glacier membership to compare elevation distributions inside and outside glacier
 
 ```{code-cell} ipython3
 # Retain empty combinations so the complete comparison grid remains visible
-joint_stats = rast.grouped_stats(
+joint_stats = rast.stats(
+    ("median", "nmad"),
     by={"elevation": 1, "glacier": glacier_mask},
     values={"elevation": 1},
     bins={"elevation": elevation_edges},
     categories={"glacier": [False, True]},
-    statistics=("median", "nmad"),
     observed=False,
 )
 joint_stats
@@ -342,6 +340,27 @@ for a fixed seed, while `"sequential"` follows the ordinary sampling workflow. S
 enter the estimates; the reduction strategy controls how those selected observations are combined. Small floating
 point differences can arise from different summation orders across chunk layouts.
 
+Set **`subsample_per_group=True`** to sample within each group. For example, this uses at most 1,000 eligible
+locations per land-cover category:
+
+```python
+rast.stats(
+    ["mean", "std", "nmad"],
+    by={"landcover": landcover},
+    categories={"landcover": classes},
+    subsample=1000,
+    subsample_per_group=True,
+    random_state=42,
+)
+```
+
+With multiple grouping variables, the limit applies to each combined group. A fraction such as `subsample=0.1`
+keeps ten percent of each group's eligible locations, rounded down; very small groups may receive no sample.
+`subsample=1` keeps all eligible locations. Smaller groups keep all their locations when the requested maximum
+exceeds their size. Every selected value column uses the same sampled locations, so missing values can lower its
+finite count. Returned masks and observed group rows still describe membership before sampling. Without `by`,
+the option uses the ordinary global sample.
+
 The ASV grouped-statistics comparisons vary raster size, chunk size, group count and local versus interleaved
 membership. They report moments separately from exact median/NMAD calculations, with complete result computation
 inside the measured operation. Larger-than-memory tests additionally check Dask worker memory and health.
@@ -361,11 +380,11 @@ For arrays already aligned to one another, use the array function directly:
 
 ```{code-cell} ipython3
 # Apply the same elevation grouping without geospatial objects
-gu.stats.grouped_stats(
-    values={"elevation": rast.data},
+gu.stats.stats(
+    {"elevation": rast.data},
+    ("mean", "min", "max"),
     by={"elevation": rast.data},
     bins={"elevation": elevation_edges},
-    statistics=("mean", "min", "max"),
 )
 ```
 
@@ -381,9 +400,10 @@ Use `strategy` to control how groups are combined across chunks:
 | `"sparse"` | Reduce and combine only group IDs present in each chunk | Many zones or sparsely populated group combinations |
 | `"groupwise"` | Gather complete groups from intersecting chunks, batching small groups that share chunks | Exact medians, NMAD, quantiles and custom functions |
 
-**`strategy="auto"` chooses `groupwise` for exact statistics**, including the default median and NMAD. For mergeable
-statistics such as count, mean, standard deviation or sum, it uses `dense` up to 4096 declared group combinations and
-`sparse` above that. These defaults favor fast dense reductions while limiting the size of intermediate summaries.
+**`strategy="auto"` chooses `groupwise` for exact statistics**, including median and NMAD in the default set. For
+mergeable statistics such as count, mean, standard deviation or sum, it uses `dense` up to 4096 declared group
+combinations and `sparse` above that. These defaults favor fast dense reductions while limiting the size of
+intermediate summaries.
 The `sparse` strategy uses ordinary NumPy arrays of observed groups; no sparse array dependency is required.
 
 Exact statistics require a complete group's values to fit in memory. Use `subsample` and `random_state` for a
@@ -393,7 +413,8 @@ see {ref}`sampling-reproducibility` for its `"topk"` and `"sequential"` options.
 (stats-variograms)=
 ## Variography
 
-{meth}`geoutils.Raster.variogram` or {meth}`geoutils.PointCloud.variogram`.
+Use {func}`geoutils.stats.variogram`, {meth}`geoutils.Raster.variogram`, or
+{meth}`geoutils.PointCloud.variogram`.
 
 Variography describes **how differences between values change with spatial separation**. An empirical variogram
 groups sampled pairs by distance and estimates their semivariance. A fitted model describes this spatial variability

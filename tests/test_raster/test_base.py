@@ -273,8 +273,9 @@ class TestClassVsAccessorConsistency:
         ("filter", {"method": "median", "size": 7}),
         ("sieve", {"size": 7}),
         ("fill_nodata", {"max_search_distance": 3}),
+        ("stats", {}),
+        ("stats", {"by": {"group": 1}, "bins": {"group": 2}, "statistics": "mean"}),
         ("get_stats", {}),
-        ("grouped_stats", {"by": {"group": 1}, "bins": {"group": 2}, "statistics": "mean"}),
         # 2.2. In-place methods
         ("load", {}),
     ]
@@ -343,12 +344,14 @@ class TestClassVsAccessorConsistency:
         elif method in ["raster_equal", "raster_allclose", "georeferenced_grid_equal", "intersection"]:
             args.update({"other": ds.copy(deep=False)})
         elif method == "cosample":
-            args.update({"other": ds.copy(deep=False)})
+            args.update({"other": raster})
         elif method == "copy" and "new_array" in args:
             args.update({"new_array": np.ones(ds.shape)})
 
         # Apply method for each class
         output_raster = getattr(raster, method)(**args)
+        if method == "cosample":
+            args.update({"other": ds.copy(deep=False)})
         output_ds = getattr(ds.rst, method)(**args)
 
         # Determine if operation was in-place or not
@@ -447,6 +450,7 @@ class TestClassVsAccessorConsistency:
     chunked_methods_and_args = (
         ("reproject", {"crs": CRS.from_epsg(4326)}),
         ("interp_points", {"points": "random", "as_array": True}),
+        ("cosample", {"other": "self", "subsample": 100, "strategy": "topk", "random_state": 42}),
         (
             "subsample",
             {"subsample": 100, "strategy": "topk"},
@@ -499,11 +503,16 @@ class TestClassVsAccessorConsistency:
             interp_y = raster.bounds.bottom + (rng.choice(raster.shape[1], ninterp) + rng.random(ninterp)) * res[1]
             kwargs.update({"points": (interp_x, interp_y)})
 
-        # Apply method for each
-        output_raster = getattr(raster, method)(**kwargs, mp_config=mp_config)
-        output_ds = getattr(ds.rst, method)(**kwargs)
-        output_raster2 = getattr(raster2, method)(**kwargs)
-        output_ds2 = getattr(ds2.rst, method)(**kwargs)
+        # Apply the same method through each backend, pairing cosample with its own input representation
+        outputs = []
+        for source, backend in ((raster, mp_config), (ds.rst, None), (raster2, None), (ds2.rst, None)):
+            options = kwargs.copy()
+            if method == "cosample":
+                options["other"] = source
+            if backend is not None:
+                options["mp_config"] = backend
+            outputs.append(getattr(source, method)(**options))
+        output_raster, output_ds, output_raster2, output_ds2 = outputs
 
         # For a raster-type output (reprojection, rasterize, create_mask, proximity, etc...)
         if isinstance(output_raster, Raster):

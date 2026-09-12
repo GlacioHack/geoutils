@@ -1,4 +1,4 @@
-"""Tests for measuring, fitting, saving, and converting variograms."""
+"""Tests for estimating, fitting, saving, and converting variograms."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ import xarray as xr
 from rasterio.transform import from_origin
 
 import geoutils as gu
+from geoutils._typing import NDArrayNum
 from geoutils.stats.variography import VariogramModel
 
 
@@ -116,6 +117,66 @@ class TestVariogramStorage:
         assert result.bin_edges[-1] == 10
         assert np.sum(result.counts) == 6
 
+    def test_from_pairs__bin_edges_missing_values_and_order(self) -> None:
+        """
+        Checks that from_pairs() handles exact edges and pairs containing nodata without changing within-bin order.
+        """
+
+        # Mix endpoint order, exact boundaries, empty bins, and distances outside the requested range
+        distances = np.array([4, 1, 2, 1.5, 6, 0.5, 7, np.nan, np.inf, 0, 3, 2.5], dtype=float)
+        differences = np.arange(1, len(distances) + 1, dtype=float)
+        differences[-2:] = np.nan
+        pairs = xr.Dataset(
+            {
+                "value": (("pair", "endpoint"), np.column_stack((np.zeros(len(distances)), differences))),
+                "distance": ("pair", distances),
+            }
+        )
+        edges = np.array([1, 2, 3, 4, 6], dtype=float)
+
+        # Use an order-sensitive estimator so sorting must preserve each bin's original pair order
+        def weighted_difference(values: NDArrayNum) -> float:
+            """Weight each difference by its position within the supplied bin."""
+            return float(np.dot(values, np.arange(1, len(values) + 1)))
+
+        result = gu.Variogram.from_pairs(pairs, estimator=weighted_difference, bins=edges)
+
+        # Check independently selected right-closed bins, with the first lower edge included
+        for index, (lower, upper) in enumerate(zip(edges[:-1], edges[1:])):
+            above_lower = distances >= lower if index == 0 else distances > lower
+            selected = above_lower & (distances <= upper) & np.isfinite(differences)
+            assert result.counts[index] == np.count_nonzero(selected)
+            if np.any(selected):
+                assert result.semivariance[index] == weighted_difference(differences[selected])
+                assert result.lags[index] == np.mean(distances[selected])
+            else:
+                assert np.isnan(result.semivariance[index])
+                assert np.isnan(result.lags[index])
+
+    def test_from_pairs__constant_distances_with_explicit_bins(self) -> None:
+        """Checks that explicit bins accept pairs sharing one distance and include empty bins."""
+
+        # Place every finite pair at one distance with an endpoint difference of two
+        pairs = xr.Dataset(
+            {"value": (("pair", "endpoint"), np.tile([1.0, 3.0], (4, 1))), "distance": ("pair", np.full(4, 2.0))}
+        )
+        result = gu.Variogram.from_pairs(pairs, estimator=np.mean, bins=[1, 2, 3])
+
+        # The first bin includes its upper boundary; the unoccupied bin remains NaN
+        np.testing.assert_array_equal(result.counts, [4, 0])
+        np.testing.assert_allclose(result.semivariance, [2, np.nan], equal_nan=True)
+        np.testing.assert_allclose(result.lags, [2, np.nan], equal_nan=True)
+
+    def test_from_pairs__distance_dimensions(self) -> None:
+        """Checks that from_pairs() rejects distances that do not provide one value per pair."""
+
+        # Give distances an extra dimension that would otherwise broadcast against endpoint differences
+        pairs = xr.Dataset(
+            {"value": (("pair", "endpoint"), np.zeros((3, 2))), "distance": (("pair", "extra"), np.ones((3, 1)))}
+        )
+        with pytest.raises(ValueError, match="Variable 'distance' in argument ``pairs`` must have dimensions"):
+            gu.Variogram.from_pairs(pairs)
+
 
 class TestVariogramEstimation:
     """Checks variogram estimation and fitting through raster and point cloud methods.
@@ -162,7 +223,7 @@ class TestVariogramEstimation:
         ]
 
         # Check the public result against the mean values and summed counts from separate samples
-        result = raster.variogram(n_pairs=500, bins=edges, n_runs=n_runs, random_state=42)
+        result = gu.stats.variogram(raster, n_pairs=500, bins=edges, n_runs=n_runs, random_state=42)
         empirical = np.stack([sample.semivariance for sample in samples])
         np.testing.assert_allclose(result.semivariance, np.nanmean(empirical, axis=0), equal_nan=True)
         np.testing.assert_array_equal(result.counts, np.sum([sample.counts for sample in samples], axis=0))
@@ -176,6 +237,21 @@ class TestVariogramEstimation:
             np.testing.assert_allclose(result.semivariance_error, expected, equal_nan=True)
             assert result.attrs["pair_count"] == int(result.counts.sum())
 
+    def test_variogram__repeated_explicit_bin_generator(self) -> None:
+        """Checks that repeated variogram samples reuse explicit boundaries supplied as a generator."""
+
+        # Build a raster and fixed bins that cover every sampled distance
+        array = np.arange(400, dtype=float).reshape(20, 20)
+        raster = gu.Raster.from_array(array, from_origin(0, 20, 1, 1), 32633)
+        edges = np.linspace(0, 30, 7)
+        options = {"n_pairs": 100, "n_runs": 2, "random_state": 7, "estimator": np.mean}
+
+        # Check that every run receives the same edges even when the input can be iterated only once
+        expected = raster.variogram(bins=edges, **options)
+        result = raster.variogram(bins=(edge for edge in edges), **options)
+        np.testing.assert_array_equal(result.counts, expected.counts)
+        np.testing.assert_allclose(result.semivariance, expected.semivariance, equal_nan=True)
+
     @pytest.mark.parametrize("n_runs", [0, -1, 1.5, True])
     def test_variogram_rejects_invalid_repetitions(self, n_runs: int | float) -> None:
         """Checks that invalid repetition counts are rejected before sampling."""
@@ -184,7 +260,7 @@ class TestVariogramEstimation:
         raster = gu.Raster.from_array(np.arange(16, dtype=float).reshape(4, 4), from_origin(0, 4, 1, 1), 32633)
 
         # Reject zero, negative, fractional, and boolean run counts
-        with pytest.raises(ValueError, match="n_runs must be a positive integer"):
+        with pytest.raises(ValueError, match="Argument ``n_runs`` must be a positive integer"):
             raster.variogram(n_runs=n_runs)
 
     def test_fit_accepts_short_names_and_skgstat_model_functions(self) -> None:

@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+from typing import Literal
 
+import numpy as np
+import pandas as pd
 import pytest
 
+from benchmarks.asv_suite import comparisons as benchmark_comparisons
 from benchmarks.asv_suite.comparisons import (
     BENCHMARK_CASE_BY_CLASS,
     BENCHMARK_CASES,
@@ -40,12 +45,23 @@ from benchmarks.gdal_comparison.commands import (
     _warp_memory_limit_mb,
     build_gdal_command,
 )
+from benchmarks.workflows.grouped_reference import (
+    compute_grouped_reference,
+    prepare_grouped_reference,
+)
 from benchmarks.workflows.registry import (
     OPERATION_METHODS,
     OPERATION_STRATEGIES,
     split_operation_case,
 )
 from benchmarks.workflows.runner import BenchmarkConfig
+from benchmarks.workflows.variography import (
+    prepare_pair_pointcloud,
+    prepare_pair_raster,
+    prepare_variogram_pairs,
+)
+from geoutils import Variogram
+from geoutils._misc import import_optional
 
 
 class TestComparisonReport:
@@ -66,8 +82,13 @@ class TestComparisonReport:
             if record.series_dimension != "method":
                 assert record.method == comparison.method
             if record.external_reference is not None:
-                assert record.series_label == GDAL_CLI_LABEL
-                assert record.execution_mode is None
+                if record.external_reference == "gdal_cli":
+                    assert record.series_label == GDAL_CLI_LABEL
+                    assert record.execution_mode is None
+                else:
+                    assert record.external_reference == "flox"
+                    assert record.execution_mode is not None
+                    assert record.series_label == f"Flox ({EXECUTION_MODE_LABELS[record.execution_mode]})"
                 assert record.calculation_engine is None
             else:
                 assert record.execution_mode is not None
@@ -126,7 +147,7 @@ class TestComparisonReport:
             cases = [
                 BENCHMARK_CASE_BY_CLASS[class_name]
                 for label, class_name in comparison.series
-                if label != GDAL_CLI_LABEL
+                if class_name in BENCHMARK_CASE_BY_CLASS
             ]
             assert {case.operation for case in cases} == {comparison.operation}
             if comparison.series_dimension != "method":
@@ -203,8 +224,9 @@ class TestComparisonReport:
 
         assert _select_complete_result((complete, incomplete)) is complete
 
-    def test_render_comparisons(self, tmp_path: Path) -> None:
-        """Checks that rendering a complete result writes navigation, numeric exports and every plot."""
+    @pytest.mark.parametrize("include_flox", [True, False])
+    def test_render_comparisons(self, tmp_path: Path, include_flox: bool) -> None:
+        """Checks that report navigation, exports and plots work with or without optional Flox measurements."""
 
         pytest.importorskip("matplotlib")
 
@@ -212,7 +234,13 @@ class TestComparisonReport:
         asv_directory = tmp_path / "asv"
         asv_directory.mkdir()
         (asv_directory / "index.html").write_text("Native ASV report", encoding="utf-8")
-        render_comparisons(_PreviewResult(), tmp_path)
+        result = _PreviewResult()
+        if not include_flox:
+            for class_name, case in EXTERNAL_REFERENCE_CASE_BY_CLASS.items():
+                if case.external_reference == "flox":
+                    for method in ("time_operation", "track_end_to_end_time_s", "track_peak_process_tree_mem_mb"):
+                        result.values[f"asv_suite.comparisons.{class_name}.{method}"] = [float("nan")] * 3
+        render_comparisons(result, tmp_path)
         assert (tmp_path / "index.html").is_file()
         root_page = (tmp_path / "index.html").read_text(encoding="utf-8")
         assert "comparisons/index.html" in root_page
@@ -346,8 +374,8 @@ class TestComparisonReport:
         # Doubling each unique baseline GeoUtils result should produce a twofold normalized improvement
         baseline_keys = set()
         for comparison in COMPARISONS:
-            for series_label, class_name in comparison.series:
-                if series_label == GDAL_CLI_LABEL:
+            for _series_label, class_name in comparison.series:
+                if class_name in EXTERNAL_REFERENCE_CASE_BY_CLASS:
                     continue
                 key = f"asv_suite.comparisons.{class_name}.track_end_to_end_time_s"
                 baseline_keys.add(key)
@@ -390,6 +418,144 @@ class TestComparisonReport:
         snapshot = json.loads((tmp_path / DOCUMENTATION_DATA).read_text(encoding="utf-8"))
         assert snapshot["metadata"]["commit"] == "preview-current"
         assert snapshot["metadata"]["machine"]["machine"] == "preview-machine"
+
+
+class TestGroupedReferenceChunked:
+    """Checks equivalent GeoUtils/Flox results and real multiprocessing worker reuse for prepared arrays."""
+
+    @pytest.mark.parametrize("execution_mode", ["eager", "dask"])
+    def test_grouped_reference__matching_statistics(self, execution_mode: Literal["eager", "dask"]) -> None:
+        """Checks that both benchmark implementations return the same masked counts and population moments."""
+
+        # Skip the optional Flox comparison when it is not installed
+        try:
+            import_optional("flox", extra_name="benchmark")
+        except ImportError as exc:
+            pytest.skip(str(exc))
+        inputs = prepare_grouped_reference(32, 4, "interleaved", execution_mode)
+        values, groups, mask, categories = prepare_grouped_reference(32, 4, "interleaved", "eager")
+
+        # Compute complete public GeoUtils and Flox tables from identical prepared inputs
+        geoutils_result = compute_grouped_reference(*inputs, implementation="geoutils")
+        flox_result = compute_grouped_reference(*inputs, implementation="flox")
+        expected = compute_grouped_reference(values, groups, mask, categories, implementation="geoutils")
+        pd.testing.assert_frame_equal(geoutils_result, expected, rtol=1e-12, atol=1e-12)
+        pd.testing.assert_frame_equal(geoutils_result, flox_result, rtol=1e-12, atol=1e-12)
+        if execution_mode == "dask":
+            import dask.array as da
+
+            assert isinstance(inputs[0], da.Array)
+            assert isinstance(inputs[1], da.Array)
+            assert isinstance(inputs[2], da.Array)
+
+        # Independently check every finite count, mean and ddof=0 standard deviation with NumPy
+        for value_index, name in enumerate(("first", "second")):
+            for group in categories:
+                members = values[value_index][(groups == group) & mask]
+                finite = members[np.isfinite(members)]
+                expected = [finite.size, finite.mean(), finite.std(ddof=0)]
+                np.testing.assert_allclose(geoutils_result.loc[group, name], expected, rtol=1e-12, atol=1e-12)
+
+    def test_grouped_reference__multiprocessing_reuses_worker(self) -> None:
+        """Checks that repeated grouped calculations reuse one real worker and match eager values exactly."""
+
+        # Use the registered benchmark setup so its fixed process count, tile size and pool lifetime are checked
+        case = next(
+            case
+            for case in BENCHMARK_CASES
+            if case.comparison_group == "grouped-flox-raster-size" and case.execution_mode == "multiprocessing"
+        )
+        benchmark = getattr(benchmark_comparisons, case.benchmark_class)()
+        # A 513-square input has nine 256-square tiles, so two calls exceed the pool's normal ten-task lifetime
+        try:
+            benchmark.setup(513)
+            assert benchmark.mp_cluster is not None
+            worker_pids = benchmark.mp_cluster.worker_pids()
+            assert len(worker_pids) == 1
+            assert worker_pids[0] != os.getpid()
+            assert benchmark.mp_config.chunks == (256, 256)
+
+            # Reduce the same prepared arrays twice using serialization and the initialized worker
+            expected = compute_grouped_reference(*benchmark.inputs, implementation="geoutils")
+            for _ in range(2):
+                result = compute_grouped_reference(
+                    *benchmark.inputs, implementation="geoutils", mp_config=benchmark.mp_config
+                )
+                pd.testing.assert_frame_equal(result, expected, rtol=1e-12, atol=1e-12)
+                assert benchmark.mp_cluster.worker_pids() == worker_pids
+        finally:
+            # Clean up the worker even when result or lifetime validation fails
+            benchmark.teardown(513)
+
+
+class TestVariographyWorkflows:
+    """Checks prepared variography fixtures against independent distance and semivariance calculations.
+
+    ASV covers execution and scaling of the benchmark classes; these tests check their inputs and full public outputs.
+    """
+
+    def test_variogram_pairs__independent_bin_statistics(self) -> None:
+        """Checks that prepared pair data gives the expected finite counts, mean lags and semivariances."""
+
+        # Use explicit edges and a simple mean-square formula so the fixture check needs no optional estimator package
+        pairs = prepare_variogram_pairs(1_000)
+        edges = np.geomspace(1, 1024, 9)
+        result = Variogram.from_pairs(
+            pairs, bins=edges, estimator=lambda differences: float(np.mean(differences**2) / 2)
+        )
+
+        # Calculate each distance interval independently from endpoint differences and include every prepared pair
+        distances = pairs["distance"].values
+        differences = np.diff(pairs["value"].values, axis=1).ravel()
+        for index, (lower, upper) in enumerate(zip(edges[:-1], edges[1:])):
+            selected = (distances > lower) & (distances <= upper)
+            assert result.counts[index] == np.count_nonzero(selected)
+            np.testing.assert_allclose(result.lags[index], distances[selected].mean())
+            np.testing.assert_allclose(result.semivariance[index], np.mean(differences[selected] ** 2) / 2)
+        assert result.counts.sum() == pairs.sizes["pair"]
+
+    def test_pair_pointcloud__original_values_and_distances(self) -> None:
+        """Checks that the irregular point fixture returns its smooth values at the sampled endpoint coordinates."""
+
+        # Use about one point per square map unit and request pairs well inside the source extent
+        points = prepare_pair_pointcloud(1_000)
+        pairs = points.pairsample(n_pairs=200, min_distance=1, max_distance=15, random_state=42)
+
+        # Calculate signal values and Euclidean distances directly from the reported endpoint coordinates
+        x, y = pairs["x"].values, pairs["y"].values
+        np.testing.assert_allclose(pairs["value"], np.sin(x / 31) + np.cos(y / 53))
+        expected_distances = np.hypot(np.diff(x, axis=1), np.diff(y, axis=1)).ravel()
+        np.testing.assert_allclose(pairs["distance"], expected_distances, rtol=1e-6)
+        assert pairs.sizes["pair"] == 200
+
+
+class TestPairRasterChunked:
+    """Checks prepared Dask raster pairs against the same eager pair sample."""
+
+    def test_pair_raster__finite_values_and_distances(self) -> None:
+        """Checks that Dask raster pairs match eager and exclude the deliberate nodata cells."""
+
+        # Draw the same public pair sample from eager and one-chunk Dask fixtures
+        import dask.array as da
+
+        expected = prepare_pair_raster(32, "eager").pairsample(
+            n_pairs=200, min_distance=1, max_distance=16, random_state=42
+        )
+        raster = prepare_pair_raster(32, "dask")
+        pairs = raster.pairsample(n_pairs=200, min_distance=1, max_distance=16, random_state=42)
+        assert isinstance(raster.data, da.Array) and not raster._obj._in_memory
+        assert not pairs.chunks
+        for name in pairs.variables:
+            assert np.array_equal(pairs[name], expected[name])
+
+        # Recover the analytic signal from endpoint positions and check the pattern used to introduce nodata values
+        rows, columns = pairs["row"].values, pairs["column"].values
+        expected_values = (np.sin(columns / 31) + np.cos(rows / 53)).astype(np.float32)
+        np.testing.assert_array_equal(pairs["value"], expected_values)
+        assert not np.any((rows * 32 + columns) % 17 == 0)
+        expected_distances = np.hypot(np.diff(rows, axis=1), np.diff(columns, axis=1)).ravel()
+        np.testing.assert_allclose(pairs["distance"], expected_distances)
+        assert pairs.sizes["pair"] == 200
 
 
 class TestGdalCommands:

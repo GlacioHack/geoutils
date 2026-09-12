@@ -33,9 +33,10 @@ from pyproj import CRS
 
 from geoutils._dispatch import is_dask_dataframe, is_dask_geodataframe
 from geoutils._misc import import_optional
-from geoutils.pointcloud.base import (
-    PointCloudBase,
+from geoutils.pointcloud.base import PointCloudBase
+from geoutils.pointcloud.dataframe import (
     _get_dataframe_attrs,
+    _import_dask_dataframe,
     _set_dataframe_attrs,
 )
 from geoutils.pointcloud.las import (
@@ -53,18 +54,6 @@ from geoutils.vector.pd_accessor import (
 )
 
 _DASK_ACCESSOR_REGISTERED = False
-
-
-def _import_dask_dataframe() -> Any:
-    """Import Dask DataFrame while suppressing optional dask-expr warnings from older environments."""
-
-    # Delay the optional import until lazy LAS partitions are requested
-    import_optional("dask")
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=FutureWarning, module="dask.dataframe")
-        import dask.dataframe as dd
-
-    return dd
 
 
 def _register_dask_pointcloud_accessor() -> None:

@@ -82,7 +82,7 @@ class TestEstimators:
         assert rmse_data == pytest.approx(3.0276503540974917)
 
     def test_sum_square(self) -> None:
-        """Test Sum Square functionality runs on any type of input"""
+        """Test sum square functionality runs on any type of input"""
 
         test_data = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
         # Test masked arrays with invalid data (should ignore NaNs/masked values)

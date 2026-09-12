@@ -45,6 +45,10 @@ from geoutils._misc import (
 from geoutils.interface.gridding import GriddingEngine, GriddingMethod
 from geoutils.profiler import ProfileMetrics, profile_call
 
+###################################
+# Configuration and measurements  #
+###################################
+
 
 # Keep input sizes, worker settings and measured results consistent across ASV, GDAL and large-data tests
 @dataclass
@@ -118,6 +122,11 @@ class BenchmarkResult(ProfiledResult):
         return self.worker_pids_before != self.worker_pids_after
 
 
+##############################
+# Size and output helpers    #
+##############################
+
+
 # Calculate memory limits and read one output pixel without loading a complete raster
 def logical_raster_size_mb(config: BenchmarkConfig) -> float:
     """Return the uncompressed float32 raster size in decimal megabytes."""
@@ -156,6 +165,11 @@ def read_raster_center(filename: str) -> float:
         row = dataset.height // 2
         col = dataset.width // 2
         return float(dataset.read(1, window=rio.windows.Window(col, row, 1, 1))[0, 0])
+
+
+##############################
+# Deterministic source files #
+##############################
 
 
 # Write deterministic test rasters, polygons and points without allocating the complete raster in memory
@@ -287,6 +301,11 @@ def _write_point_source(filename: str, points_per_axis: int = 5) -> None:
         crs=4326,
     )
     points.to_file(filename, driver="GPKG")
+
+
+############################################
+# Worker lifecycle and complete operations #
+############################################
 
 
 # Prepare the shared inputs, start the selected execution mode and force each operation to produce a complete output
@@ -698,16 +717,16 @@ class BenchmarkRunner:
         }
 
         # Measure the complete public calculation, including exact group gathering when requested
-        from geoutils.stats.grouped import GroupingStrategy, grouped_stats
+        from geoutils.stats import stats
 
         statistics = ["mean", "std", "min", "max"] if method == "moments" else ["median", "nmad"]
         config = self._multiproc_config("grouped_stats") if self.backend == "multiprocessing" else None
-        result = grouped_stats(
+        result = stats(
             values,
-            {"zone": groups},
+            by={"zone": groups},
             categories={"zone": range(regions**2)},
             statistics=statistics,
-            strategy=cast(GroupingStrategy, strategy or "auto"),
+            strategy=cast(Literal["auto", "dense", "sparse", "groupwise"], strategy or "auto"),
             mp_config=config,
         )
 
@@ -804,7 +823,7 @@ class BenchmarkRunner:
             import_optional("dask", extra_name="benchmark")
             import dask
 
-            statistics = raster.rst.get_stats(["mean", "std", "valid count"])
+            statistics = raster.rst.stats(["mean", "std", "valid count"])
             mean, _, _ = dask.compute(*statistics.values())
             return float(mean)
 

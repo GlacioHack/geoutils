@@ -4,7 +4,7 @@ import os.path
 import re
 import tempfile
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -16,7 +16,7 @@ from scipy.ndimage import binary_dilation
 
 import geoutils as gu
 from geoutils import examples, open_raster
-from geoutils._misc import silence_rasterio_message
+from geoutils._misc import import_optional, silence_rasterio_message
 from geoutils.interface._nodata import NodataPropagation
 from geoutils.interface.interpolation import (
     _get_dist_nodata_spread,
@@ -690,6 +690,48 @@ class TestInterpolate:
             assert np.allclose(vals, vals_near, equal_nan=False, rtol=10e-4)
             assert np.allclose(vals2, vals2_near, equal_nan=False, rtol=10e-4)
 
+    @pytest.mark.parametrize("method", ["interp_points", "reduce_points"])
+    @pytest.mark.parametrize("point_input_type", ["pointcloud", "accessor", "geodataframe", "latlon"])
+    @pytest.mark.parametrize("all_outside", [False, True])
+    def test_methods__point_output_coordinates(self, method: str, point_input_type: str, all_outside: bool) -> None:
+        """Checks that interpolation and window reduction return points in the raster CRS, including outside points."""
+
+        # Place the first point inside cell (1, 1) for both sampling methods and the second beyond the grid
+        values = np.arange(36, dtype=float).reshape(6, 6)
+        raster = gu.Raster.from_array(values, rio.transform.from_origin(500_000, 4_100_000, 10, 10), crs=32610)
+        expected_x = np.array([500_012.5, 501_042.5])
+        expected_y = np.array([4_099_987.5, 4_099_957.5])
+        expected_values = np.array([values[1, 1], np.nan])
+        if all_outside:
+            expected_x[0] += 1_000
+            expected_values[0] = np.nan
+
+        # Express the same query locations as spatial objects or longitude/latitude arrays
+        longitude, latitude = reproject_to_latlon((expected_x, expected_y), raster.crs)
+        pointcloud = gu.PointCloud.from_xyz(longitude, latitude, np.zeros(2), crs=4326)
+        point_inputs = {
+            "pointcloud": pointcloud,
+            "accessor": pointcloud.ds.pc,
+            "geodataframe": pointcloud.ds,
+            "latlon": (longitude, latitude),
+        }
+        point_input = point_inputs[point_input_type]
+
+        # Request point output through the public API; interpolation warns when every query is outside
+        sample = getattr(raster, method)
+        options = {"method": "nearest"} if method == "interp_points" else {}
+        if method == "interp_points" and all_outside:
+            with pytest.warns(UserWarning, match="All provided points were outside of raster bounds"):
+                result = sample(point_input, input_latlon=point_input_type == "latlon", **options)
+        else:
+            result = sample(point_input, input_latlon=point_input_type == "latlon", **options)
+
+        # Check coordinates and values in input order; longitude/latitude conversion rounds to centimeter accuracy
+        assert result.crs == raster.crs
+        np.testing.assert_allclose(result.geometry.x, expected_x, rtol=0, atol=1e-2)
+        np.testing.assert_allclose(result.geometry.y, expected_y, rtol=0, atol=1e-2)
+        np.testing.assert_allclose(result.data, expected_values, rtol=0, atol=0, equal_nan=True)
+
     def test_reduce_points(self) -> None:
         """
         Test reduce points.
@@ -827,6 +869,193 @@ class TestInterpolate:
 
 class TestInterpPointsChunked:
     """Compare point interpolation across eager, Dask and Multiprocessing backends."""
+
+    @pytest.mark.parametrize("backend", ["eager", "dask", "multiprocessing"])
+    @pytest.mark.parametrize("dtype", ["int16", "float64"])
+    @pytest.mark.parametrize(
+        "method,propagation,spread",
+        [
+            ("nearest", "gdal", None),
+            ("linear", "ignore", None),
+            ("linear", "gdal", 0),
+            ("linear", "propagate", 1),
+            ("cubic", "gdal", None),
+            ("cubic", "gdal", 0),
+        ],
+    )
+    def test_interp_points__validity_matches_explicit_source(
+        self,
+        backend: str,
+        dtype: str,
+        method: str,
+        propagation: NodataPropagation,
+        spread: int | None,
+    ) -> None:
+        """
+        Checks that validity interpolation matches an explicit one/NaN raster with each backend and nodata rule.
+        """
+
+        # 1/ Prepare two bands with nodata in different cells and a separate validity reference
+        # Integer masks and floating NaNs must both describe unavailable cells in the selected second band
+        data = np.arange(2 * 20 * 24).reshape(2, 20, 24).astype(dtype)
+        invalid = np.zeros(data.shape, dtype=bool)
+        invalid[0, 3, 4] = True
+        invalid[1, 7:9, 8:10] = True
+        if dtype == "float64":
+            data[1, 12, 14] = np.nan
+        raster = gu.Raster.from_array(np.ma.array(data, mask=invalid), Affine(1, 0, 0, 0, -1, 20), 32632, nodata=-9999)
+
+        # Construct the previous cosampling validity layer independently of the private interpolation option
+        finite = np.isfinite(np.ma.getdata(raster.data[1])) & ~np.ma.getmaskarray(raster.data[1])
+        validity = gu.Raster.from_array(
+            np.where(finite, 1, np.nan).astype(np.float32), raster.transform, raster.crs, nodata=np.nan
+        )
+        rows = np.array([-2, 0, 3, 7, 8, 10, 12, 16, 19, 23])
+        columns = np.array([1, 0, 4, 8, 9, 11, 14, 18, 23, 1])
+        x, y = raster.ij2xy(rows, columns)
+        points = (x + 0.2, y - 0.3)
+
+        # 2/ Evaluate both representations with the same interpolation and backend settings
+        # Use multiple tiles so the validity conversion must run inside the shared block kernel
+        options: dict[str, Any] = {
+            "points": points,
+            "method": method,
+            "nodata_propagation": propagation,
+            "dist_nodata_spread": spread,
+        }
+        raster_input: Any = raster
+        validity_input: Any = validity
+        if backend == "dask":
+            import_optional("dask")
+            raster_input = raster.to_xarray().chunk({"x": 12, "y": 10}).rst
+            validity_input = validity.to_xarray().chunk({"x": 12, "y": 10}).rst
+        elif backend == "multiprocessing":
+            options["mp_config"] = MultiprocConfig(chunks=(10, 12))
+        result = raster_input.interp_points(band=2, as_array=True, _validity_only=True, **options)
+        expected = validity_input.interp_points(as_array=True, **options)
+        if backend == "dask":
+            result, expected = import_optional("dask").compute(result, expected)
+
+        # 3/ Check the exact finite locations and values, including points near holes and outside bounds
+        assert result.dtype == np.float32
+        np.testing.assert_array_equal(result, expected)
+        assert np.any(np.isfinite(result))
+        assert np.any(np.isnan(result))
+
+    @pytest.mark.parametrize("validity_only", [False, True])
+    def test_interp_points__validity_does_not_load_multiprocessing_source(
+        self, validity_only: bool, tmp_path: Path
+    ) -> None:
+        """
+        Checks that real workers interpolate selected values or validity while the complete raster stays unloaded.
+        """
+
+        from geoutils.multiproc.cluster import MpCluster
+
+        # Store a raster whose nodata center is distinguishable from finite and out-of-bounds points
+        data = np.arange(240, dtype=np.float64).reshape(2, 10, 12)
+        data[0, 1, 1] = np.nan
+        data[1, 4, 5] = np.nan
+        raster = gu.Raster.from_array(data, Affine(1, 0, 0, 0, -1, 10), 32632, nodata=-9999)
+        filename = tmp_path / "validity-source.tif"
+        raster.to_file(filename)
+        unloaded = gu.Raster(filename, load_data=False)
+        points = raster.ij2xy(np.array([1, 4, 8, -2]), np.array([1, 5, 10, 1]))
+
+        # Let worker tiles read the file and build only their local one/NaN arrays
+        assert not unloaded.is_loaded
+        with MpCluster({"nb_workers": 2}) as cluster:
+            result = unloaded.interp_points(
+                points,
+                method="nearest",
+                band=2,
+                as_array=True,
+                _validity_only=validity_only,
+                mp_config=MultiprocConfig(chunks=(5, 6), cluster=cluster),
+            )
+
+        # Preserve the original storage and report validity at the sampled locations as floating values
+        assert not unloaded.is_loaded
+        assert unloaded.bands == (1, 2)
+        assert result.dtype == (np.float32 if validity_only else np.float64)
+        expected = [1, np.nan, 1, np.nan] if validity_only else [133, np.nan, 226, np.nan]
+        np.testing.assert_array_equal(result, expected)
+
+    @pytest.mark.parametrize("validity_only", [False, True])
+    @pytest.mark.parametrize("as_array", [False, True])
+    def test_interp_points__dask_points_defer_interpolation(
+        self, validity_only: bool, as_array: bool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        Checks that sizing a lazy point result does not interpolate values or discard duplicate labels and geometry.
+        """
+
+        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        import geoutils.interface.interpolation as interpolation
+        from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
+
+        # Synthetic Dask point tables bypass open_pointcloud(), which normally registers the optional accessor
+        _register_dask_pointcloud_accessor()
+
+        # Use duplicate labels and a nodata cell so row order and optional validity conversion are both visible
+        data = np.arange(30, dtype=np.float64).reshape(5, 6)
+        data[2, 3] = np.nan
+        raster = gu.Raster.from_array(data, Affine(1, 0, 0, 0, -1, 5), 32632, nodata=-9999)
+        x, y = raster.ij2xy(np.array([1, 2, 3]), np.array([1, 3, 4]))
+        points = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x, y), index=["a", "a", "b"], crs=raster.crs)
+        lazy_points = dgpd.from_geopandas(points, npartitions=2, sort=False)
+
+        # Reject kernel execution while constructing the graph; computing input partition lengths is allowed
+        def fail_interpolation(*args: Any, **kwargs: Any) -> None:
+            """Reject interpolation before the caller computes the lazy result."""
+
+            raise AssertionError("Interpolation ran while constructing the lazy output.")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(interpolation, "_interp_points_base", fail_interpolation)
+            output = raster.interp_points(
+                lazy_points, method="nearest", as_array=as_array, _validity_only=validity_only
+            )
+
+        # Compute only after restoring the kernel, then compare values and the complete point output when requested
+        computed = output.compute()
+        expected = [1, np.nan, 1] if validity_only else [7, np.nan, 22]
+        if as_array:
+            np.testing.assert_array_equal(computed, expected)
+        else:
+            np.testing.assert_array_equal(computed["z"], expected)
+            np.testing.assert_array_equal(computed.geometry.to_numpy(), points.geometry.to_numpy())
+            assert computed.crs == points.crs
+            np.testing.assert_array_equal(computed.index, points.index)
+            assert output.pc.data_column == "z"
+
+    def test_interp_points__boolean_outside_bounds(self) -> None:
+        """Checks that nearest interpolation of booleans returns NaNs outside the raster with every backend."""
+
+        import_optional("dask")
+
+        # Alternate true and false pixels and interleave interior points with points beyond the raster
+        rows, columns = np.indices((5, 6))
+        values = (rows + columns) % 2 == 0
+        raster = gu.Raster.from_array(values, Affine(1, 0, 0, 0, -1, 5), 32632)
+        x, y = raster.ij2xy(np.array([1, -2, 2, 7]), np.array([1, 1, 1, 1]))
+        expected = np.array([1, np.nan, 0, np.nan], dtype=np.float32)
+
+        # Convert through integers because Raster.to_xarray() uses GDAL, which cannot store booleans
+        lazy = raster.astype("uint8").to_xarray().astype(bool).chunk({"x": 3, "y": 2})
+
+        # Interpolate the same boolean raster with eager, Dask and multiprocessing inputs
+        options = {"points": (x, y), "method": "nearest", "as_array": True}
+        results = [
+            raster.interp_points(**options),
+            lazy.rst.interp_points(**options).compute(),
+            raster.interp_points(**options, mp_config=MultiprocConfig(chunks=(2, 3))),
+        ]
+
+        # Return exact boolean values and represent out-of-bounds samples as nodata values
+        for result in results:
+            assert result.dtype == np.float32
+            np.testing.assert_array_equal(result, expected)
 
     @pytest.mark.parametrize("area_or_point", ["Area", "Point"])
     @pytest.mark.parametrize("method", ["nearest", "linear"])

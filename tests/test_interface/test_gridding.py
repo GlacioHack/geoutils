@@ -777,7 +777,9 @@ class TestGridChunked:
         raster_dask: bool,
         tmp_path: Path,
     ) -> None:
-        """Grid every combination of eager and Dask point-cloud and raster reference inputs."""
+        """
+        Checks that grid() returns a lazy output when the point source or raster reference uses Dask.
+        """
 
         pytest.importorskip("dask_geopandas")
         import dask.array as da
@@ -785,9 +787,10 @@ class TestGridChunked:
         # Write both inputs so their Dask variants use the same values and georeferencing
         point_file = tmp_path / "points.gpkg"
         self.points.to_file(point_file)
+        # Match the requested grid coordinates to the source points so nearest neighbors have no ties
         reference = Raster.from_array(
             np.zeros((3, 3), dtype=np.uint8),
-            transform=rio.transform.from_origin(-0.5, 2.5, 1, 1),
+            transform=rio.transform.from_origin(0, 2, 1, 1),
             crs=self.points.crs,
         )
         raster_file = tmp_path / "reference.tif"
@@ -806,7 +809,7 @@ class TestGridChunked:
             dist_nodata_pixel=2,
         )
 
-        # The point-cloud backend controls whether the output itself is eager or Dask
+        # Either lazy input selects Dask output, while two eager inputs return an eager raster
         output = (
             points.pc.grid(ref=raster, resampling="nearest", dist_nodata_pixel=2)
             if point_dask
@@ -816,24 +819,27 @@ class TestGridChunked:
                 dist_nodata_pixel=2,
             )
         )
-        if point_dask:
+        if point_dask or raster_dask:
             assert isinstance(output, xr.DataArray)
             assert isinstance(output.data, da.Array)
             assert not output._in_memory
             computed_output = output.compute()
-            assert not points.pc.is_loaded
+            if point_dask:
+                assert not points.pc.is_loaded
         else:
             assert isinstance(output, Raster)
             assert output.is_loaded
             computed_output = output
 
-        # A Dask reference supplies only grid metadata and chunks, and must stay lazy
+        # A Dask reference supplies its spatial chunks without reading any of its raster values
         if raster_dask:
             assert isinstance(raster.data, da.Array)
             assert not raster._in_memory
-            if point_dask:
-                assert output.data.chunks == raster.data.chunks
+            assert output.data.chunks == raster.data.chunks
 
+        # Grid coordinates coincide with source points; raster rows reverse the points' increasing Y order
+        expected_values = self.points["z"].to_numpy().reshape(3, 3)[::-1]
+        np.testing.assert_array_equal(computed_output.data, expected_values)
         assert expected.raster_equal(computed_output, warn_failure_reason=True, strict_masked=False)
 
     @pytest.mark.parametrize("resampling", ["nearest", "idw", "mean"])
@@ -913,3 +919,25 @@ class TestGridChunked:
                 mp_config=MultiprocConfig(chunks=(2, 2), outfile=str(tmp_path / "grid-error.tif")),
             )
         assert not points.pc.is_loaded
+
+    def test_grid__error_dask_reference_with_multiprocessing(self, tmp_path: Path) -> None:
+        """
+        Checks that an eager point source with a Dask raster reference rejects multiprocessing before computing.
+        """
+
+        # Place source points at the requested grid coordinates and open the reference with spatial chunks
+        points = PointCloud(self.points, data_column="z")
+        reference_file = tmp_path / "reference.tif"
+        reference = Raster.from_array(
+            np.zeros((3, 3), dtype=np.uint8), rio.transform.from_origin(0, 2, 1, 1), self.points.crs
+        )
+        reference.to_file(reference_file)
+        lazy_reference = gu.open_raster(str(reference_file), chunks={"x": 2, "y": 2})
+
+        # Reject competing schedulers without loading the reference or creating a multiprocessing output
+        output_file = tmp_path / "grid-error.tif"
+        config = MultiprocConfig(chunks=(2, 2), outfile=str(output_file))
+        with pytest.raises(ValueError, match="Cannot use Multiprocessing and Dask simultaneously"):
+            points.grid(ref=lazy_reference, mp_config=config)
+        assert not lazy_reference._in_memory
+        assert not output_file.exists()

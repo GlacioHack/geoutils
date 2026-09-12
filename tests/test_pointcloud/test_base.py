@@ -131,14 +131,16 @@ class TestClassVsAccessorConsistency:
     methods_and_kwargs = [
         ("set_data_column", {"new_data_column": "b2"}),
         ("copy", {}),
+        ("reproject", {"crs": 4326}),
         ("to_xyz", {}),
         ("to_array", {}),
         ("to_tuples", {}),
         ("pointcloud_equal", {"other": "self"}),
         ("pointcloud_allclose", {"other": "self"}),
         ("georeferenced_coords_equal", {"pc": "self"}),
+        ("stats", {}),
+        ("stats", {"by": {"group": "b2"}, "bins": {"group": 2}, "statistics": "mean"}),
         ("get_stats", {}),
-        ("grouped_stats", {"by": {"group": "b2"}, "bins": {"group": 2}, "statistics": "mean"}),
         ("subsample", {"subsample": 2, "random_state": 42}),
         ("cosample", {"other": "self", "subsample": 2, "random_state": 42}),
         (
@@ -160,6 +162,14 @@ class TestClassVsAccessorConsistency:
         (
             "grid",
             {"grid_coords": (np.array([0.0, 1.0]), np.array([0.0, 1.0])), "resampling": "nearest"},
+        ),
+        (
+            "grid",
+            {
+                "grid_coords": (np.array([0.0, 1.0]), np.array([0.0, 1.0])),
+                "resampling": "nearest",
+                "data_column": "b2",
+            },
         ),
     ]
 
@@ -304,7 +314,7 @@ class TestClassVsAccessorConsistency:
     def test_shared_methods_and_arithmetic_ownership(self) -> None:
         """Check that shared operations live in the base while arithmetic remains exclusive to PointCloud."""
 
-        shared_methods = {"from_xyz", "pointcloud_equal", "pointcloud_allclose", "get_stats", "grid"}
+        shared_methods = {"from_xyz", "pointcloud_equal", "pointcloud_allclose", "stats", "get_stats", "grid"}
         assert shared_methods <= set(PointCloudBase.__dict__)
         assert shared_methods.isdisjoint(PointCloud.__dict__)
         assert "__add__" not in PointCloudBase.__dict__

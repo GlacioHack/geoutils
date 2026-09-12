@@ -29,6 +29,7 @@ from typing import (
     Iterable,
     Literal,
     TypeVar,
+    cast,
     overload,
 )
 
@@ -47,43 +48,30 @@ from geoutils.interface.gridding import (
     GriddingMethod,
     _grid_pointcloud_to_raster,
 )
+from geoutils.pointcloud.dataframe import (
+    _build_pointcloud_output,
+    _get_dataframe_attrs,
+    _set_dataframe_attrs,
+)
 from geoutils.pointcloud.testing import _georeferenced_coords_equal
 from geoutils.sampling.subsampling import _subsample_pointcloud
-from geoutils.stats.stats import _statistics
+from geoutils.stats.stats import stats as _stats
+from geoutils.stats.stats import variogram as _variogram
 from geoutils.vector.base import VectorBase
+from geoutils.vector.transformation import _get_reproject_crs
 
 if TYPE_CHECKING:
     import xarray as xr
 
+    from geoutils.interface.interpolation import InterpolationMethod
     from geoutils.multiproc import MultiprocConfig
-    from geoutils.pointcloud.pointcloud import PointCloud
+    from geoutils.pointcloud.pointcloud import PointCloudLike
     from geoutils.raster.base import RasterLike
     from geoutils.stats.variography import Variogram
+    from geoutils.vector.base import VectorLike
 
 
 PointCloudBaseType = TypeVar("PointCloudBaseType", bound="PointCloudBase")
-
-
-def _get_dataframe_attrs(ds: Any) -> dict[str, Any]:
-    """Get GeoUtils metadata from Pandas or Dask dataframes."""
-
-    # Dask does not carry Pandas ``attrs`` reliably through graph operations
-    if is_dask_dataframe(ds):
-        try:
-            return object.__getattribute__(ds, "_geoutils_attrs")
-        except AttributeError:
-            return {}
-    return getattr(ds, "attrs", {})
-
-
-def _set_dataframe_attrs(ds: Any, attrs: dict[str, Any]) -> None:
-    """Set GeoUtils metadata on Pandas or Dask dataframes."""
-
-    # Keep a private copy on Dask collections and use the public mapping for Pandas
-    if is_dask_dataframe(ds):
-        object.__setattr__(ds, "_geoutils_attrs", attrs.copy())
-    elif hasattr(ds, "attrs"):
-        ds.attrs.update(attrs)
 
 
 class PointCloudBase(VectorBase):
@@ -237,23 +225,14 @@ class PointCloudBase(VectorBase):
     def _cast_pointcloud_output(self, new_ds: Any) -> Any:
         """Cast a GeoDataFrame-like point cloud output to the proper public type."""
 
-        # Copy metadata before adapting the output so reprojection does not alter the source's cached CRS
+        # Copy source metadata before updating the result so its cached values remain independent
         attrs = _get_dataframe_attrs(self.ds).copy()
-        new_crs = getattr(new_ds, "crs", None)
-        if new_crs is not None and new_crs != attrs.get("crs"):
-            attrs["crs"] = new_crs
-            attrs["bounds"] = None
-        attrs["data_column"] = self.data_column
-        attrs["geometry_type"] = "Point"
-        _set_dataframe_attrs(new_ds, attrs)
-
-        # Accessors expose dataframe-like outputs while PointCloud wraps eager outputs
-        if self._is_pd or self._is_dask:
-            return new_ds
-
-        from geoutils.pointcloud.pointcloud import PointCloud
-
-        return PointCloud(new_ds, data_column=self.data_column)
+        return _build_pointcloud_output(
+            new_ds,
+            data_column=self.data_column,
+            as_dataframe=self._is_pd or self._is_dask,
+            attrs=attrs,
+        )
 
     def _override_gdf_output(self, other: Any) -> Any:
         """Keep point-preserving GeoDataFrame outputs as point clouds."""
@@ -281,29 +260,35 @@ class PointCloudBase(VectorBase):
                 if self.data_column is None:
                     raise ValueError("Dask-backed point clouds require an explicit data column.")
                 new_ds = new_ds.assign(**{self.data_column: new_array})
-            return self._cast_pointcloud_output(new_ds)
+        else:
+            new_ds = self.ds.copy()
+            if new_array is not None:
+                if not isinstance(new_array, np.ndarray):
+                    new_array = np.asarray(new_array)
+                new_array = new_array.squeeze()
+                if not (new_array.ndim == 1 and new_array.shape[0] == self.point_count):
+                    raise ValueError(
+                        "New data array must be 1-dimensional with the same number of points as the point "
+                        "cloud being copied."
+                    )
+                if self.data_column is not None:
+                    new_ds[self.data_column] = new_array
+                else:
+                    new_ds.geometry = gpd.points_from_xy(
+                        x=self.geometry.x.to_numpy(),
+                        y=self.geometry.y.to_numpy(),
+                        z=new_array,
+                        crs=self.crs,
+                    )
 
-        new_ds = self.ds.copy()
-        if new_array is not None:
-            if not isinstance(new_array, np.ndarray):
-                new_array = np.asarray(new_array)
-            new_array = new_array.squeeze()
-            if not (new_array.ndim == 1 and new_array.shape[0] == self.point_count):
-                raise ValueError(
-                    "New data array must be 1-dimensional with the same number of points as the point "
-                    "cloud being copied."
-                )
-            if self.data_column is not None:
-                new_ds[self.data_column] = new_array
-            else:
-                new_ds.geometry = gpd.points_from_xy(
-                    x=self.geometry.x.to_numpy(),
-                    y=self.geometry.y.to_numpy(),
-                    z=new_array,
-                    crs=self.crs,
-                )
-
-        return self._cast_pointcloud_output(new_ds)
+        output = self._cast_pointcloud_output(new_ds)
+        if self._is_dask:
+            # A lazy copy has the same point locations, so it can reuse the source's known count and bounds
+            source_attrs = _get_dataframe_attrs(self.ds)
+            output_attrs = _get_dataframe_attrs(output).copy()
+            output_attrs.update(point_count=source_attrs.get("point_count"), bounds=source_attrs.get("bounds"))
+            _set_dataframe_attrs(output, output_attrs)
+        return output
 
     @classmethod
     def from_xyz(
@@ -471,116 +456,92 @@ class PointCloudBase(VectorBase):
         ds = self.ds.compute() if self._is_dask else self.ds
         return PointCloud(ds, data_column=self.data_column)
 
-    @overload
-    def get_stats(
+    def stats(
         self,
-        stats_name: str | Callable[[NDArrayNum], np.floating[Any]],
-    ) -> np.floating[Any]: ...
-
-    @overload
-    def get_stats(
-        self,
-        stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
-    ) -> dict[str, np.floating[Any]]: ...
-
-    @profiler.profile("geoutils.pointcloud.base.get_stats", memprof=True)
-    def get_stats(
-        self,
-        stats_name: (
-            str | Callable[[NDArrayNum], np.floating[Any]] | list[str | Callable[[NDArrayNum], np.floating[Any]]] | None
-        ) = None,
-    ) -> np.floating[Any] | dict[str, np.floating[Any]] | None:
-        """
-        Retrieve statistics for the point-cloud values.
-
-        :param stats_name: Statistic name, custom callable, or list of either. None returns the main statistics and
-            ``all`` returns every available statistic.
-        :returns: One value for a single statistic, or a dictionary for multiple, default or all statistics.
-        """
-
-        # Statistics return small eager values, so reduce the lazy data column here
-        data = self.data.compute().values if self._is_dask else np.asarray(self.data)
-
-        if isinstance(stats_name, list) or stats_name is None or stats_name == "all":
-            return _statistics(data, stats_name)  # type: ignore
-        if isinstance(stats_name, str):
-            return _statistics(data, [stats_name])[stats_name]  # type: ignore
-        if callable(stats_name):
-            return stats_name(data)  # type: ignore
-        warnings.warn(f"Statistic name {stats_name} is a not recognized string", category=UserWarning)
-        return None
-
-    def grouped_stats(
-        self,
-        by: Mapping[str, Any],
+        statistics: str | Callable[[Any], Any] | Iterable[str | Callable[[Any], Any]] | None = None,
         *,
+        by: Mapping[str, Any] | None = None,
         values: str | Iterable[str] | Mapping[str, Any] | None = None,
         bins: Mapping[str, Any] | None = None,
         categories: Mapping[str, Iterable[Any]] | None = None,
-        statistics: str | Callable[[Any], Any] | Iterable[str | Callable[[Any], Any]] = ("median", "nmad"),
-        at: Literal["self"] | Any | None = None,
-        mask: Any | None = None,
+        at: Literal["self"] | RasterLike | PointCloudLike | None = None,
+        mask: RasterLike | VectorLike | ArrayLike | None = None,
         mask_mode: Literal["inside", "outside"] = "inside",
         subsample: int | float = 1,
+        subsample_per_group: bool = False,
         random_state: int | np.random.Generator | None = None,
         strategy: Literal["auto", "dense", "sparse", "groupwise"] = "auto",
+        backend: Literal["geoutils", "flox"] = "geoutils",
         subsampling_strategy: Literal["sequential", "topk"] = "sequential",
-        interpolation: str = "linear",
+        interpolation: InterpolationMethod = "linear",
         align: Literal["raise", "reproject"] = "raise",
         observed: bool = True,
         return_masks: bool = False,
         mp_config: MultiprocConfig | None = None,
-    ) -> pd.DataFrame | tuple[pd.DataFrame, Mapping[Any, Any]]:
-        """Calculate statistics for point values grouped on a common spatial support.
+    ) -> Any:
+        """Calculate summary statistics or statistics grouped by categories, bins, or vector zones.
 
-        Point groupers may be passed directly, selected from this point cloud with a column name, or paired with an
-        external selector as ``(object, selector)``. Raster groupers are interpolated at the ordered support points.
+        Omit ``by`` to summarize the active point values. Grouped inputs follow the same ``by``, ``categories``,
+        ``bins``, and vector-zone interface as Raster.stats().
 
-        Zonal statistics use vector features as bins: pass ``by={"zone": (zones, "id")}`` to group by a vector
-        attribute. Unique IDs give one group per feature; repeated IDs combine features. A vector without a
-        selected column instead defines boolean inside/outside groups for the union of its features.
-
-        Returned dataframe rows preserve interval and categorical metadata. Each value has a finite ``count`` and the
-        requested statistics in a two level column index. When ``return_masks`` is true, the second result maps each
-        row key to a boolean point cloud or GeoDataFrame on the complete support.
-
-        :param by: Ordered mapping of names to raster, point cloud, vector or aligned array groupers.
-        :param values: Columns or mapping of names to columns, external objects or ``(object, selector)`` pairs.
-            Defaults to the active point value column or geometry elevations.
-        :param bins: Continuous group definitions as bin counts, numeric edges or Pandas IntervalIndexes.
-        :param categories: Ordered categories for discrete groupers.
-        :param statistics: Statistic name, callable or iterable of either. Count is always included.
-        :param at: Point support, using this point cloud by default or ``"self"`` explicitly.
-        :param mask: boolean aligned mask, point mask, raster mask or vector defining eligible locations.
-        :param mask_mode: Whether a vector mask retains locations inside or outside its geometries.
-        :param subsample: Fraction when at most one, otherwise the maximum locations used for statistics.
-        :param random_state: Random generator or seed used to reproduce subsampling.
-        :param strategy: Dense or sparse summaries, complete group gathering (groupwise), or automatic selection.
-        :param subsampling_strategy: Topk or sequential sampling of eligible locations.
-        :param interpolation: Raster interpolation method used on point support.
-        :param align: Whether mismatched grids or coordinate systems raise or are reprojected.
-        :param observed: Whether to omit declared group combinations with no eligible locations.
-        :param return_masks: Whether to also return complete support masks for the dataframe groups.
-        :param mp_config: Multiprocessing configuration for preparation and grouped reductions.
-        :returns: Grouped dataframe, optionally followed by a mapping of support aligned masks.
+        :param statistics: Statistics to calculate (e.g. "mean", ["mean", "nmad"], or np.nanmedian). None returns
+            "min", "max", "mean", "median", "std", "nmad", "validcount", "totalcount" and "percentagevalidpoints".
+            "all" also includes "sum", "sumofsquares", "90thpercentile", "iqr", "le90" and "rmse", plus inlier counts
+            for masked global statistics. Grouped defaults replace "validcount" with "count"; every grouped result
+            includes "count".
+        :param by: Named variables to group by (e.g. {"elevation": elevation}); use {"glacier": (outlines, "id")}
+            for vector zones. Arrays must match the selected locations. Omit for global statistics.
+        :param values: Point columns to summarize (e.g. "height" or ["height", "intensity"]); defaults to the main
+            data column. Use a mapping for named inputs (e.g. {"elevation": (dem, 1)}).
+        :param bins: Continuous bins keyed by grouping name (e.g. {"elevation": 10}). Each definition is a count of
+            equal-width bins, increasing edges (e.g. [0, 2, 5]), or a Pandas IntervalIndex to choose open/closed sides.
+        :param categories: Ordered categories keyed by grouping name (e.g. {"landcover": [100, 110, 120]}).
+            Values outside these categories are excluded.
+        :param at: Grid or ordered point locations on which to calculate statistics (e.g. at=reference or at="self").
+            Defaults to this point cloud's locations.
+        :param mask: Locations to include (True in a boolean mask, e.g. mask=points.data > 1000, or vector features).
+            Global counts describe values before this mask; "all" adds counts for values kept by the mask.
+        :param mask_mode: Keep locations "inside" or "outside" vector features; ignored for boolean masks.
+        :param subsample: Fraction (e.g. 0.1 for 10%) or maximum count (e.g. 10000) of eligible locations to use.
+            A value of 1 keeps all locations. Counts describe the sampled locations.
+        :param subsample_per_group: Apply subsample within each combined group (True, stratified sampling) or once
+            across all groups (False). Without by, both use one global sample.
+        :param random_state: Seed to reproduce subsampling (e.g. 42), or an existing random generator.
+        :param strategy: Combine chunk statistics for all groups ("dense"), only groups present in each chunk
+            ("sparse"), or gather each complete group ("groupwise"). "auto" chooses from the statistics and group count;
+            exact quantiles and custom functions require "auto" or "groupwise" for chunked data.
+        :param backend: Use the GeoUtils reducer ("geoutils") or optional Flox reducer ("flox") for grouped statistics;
+            see stats() for the Flox restrictions.
+        :param subsampling_strategy: "topk" keeps the same sampled locations across chunk layouts for a fixed seed;
+            "sequential" draws random locations using traversal order and can depend on the chunks.
+        :param interpolation: Raster values at point locations use interp_points() with SciPy methods "nearest",
+            "linear", "slinear", "cubic", "quintic", "pchip" or "splinef2d".
+            Raster groupers listed in categories use "nearest".
+        :param align: "raise" rejects different grids or coordinate systems; "reproject" aligns them to the output
+            locations. Point inputs must still share the same ordered coordinates.
+        :param observed: Omit declared group combinations with no eligible locations (True), or include them (False).
+        :param return_masks: Also return masks keyed by group labels (e.g. table, masks = points.stats(...)).
+            Masks cover complete groups before subsampling. Requires by.
+        :param mp_config: Worker and tile settings for multiprocessing, e.g. MultiprocConfig(chunks=512).
+            Cannot be combined with Dask inputs.
+        :returns: A statistic, summary dictionary, grouped dataframe, or grouped dataframe and mask mapping.
         """
 
-        # Keep spatial normalization in the grouped statistics module shared with rasters
-        from geoutils.stats.grouped import _grouped_stats
-
-        return _grouped_stats(
+        return _stats(
             self,
-            by,
+            statistics,
+            by=by,
             values=values,
             bins=bins,
             categories=categories,
-            statistics=statistics,
             at=at,
             mask=mask,
             mask_mode=mask_mode,
             subsample=subsample,
+            subsample_per_group=subsample_per_group,
             random_state=random_state,
             strategy=strategy,
+            backend=backend,
             subsampling_strategy=subsampling_strategy,
             interpolation=interpolation,
             align=align,
@@ -589,6 +550,21 @@ class PointCloudBase(VectorBase):
             mp_config=mp_config,
         )
 
+    @profiler.profile("geoutils.pointcloud.base.get_stats", memprof=True)
+    def get_stats(
+        self,
+        stats_name: (
+            str
+            | Callable[[NDArrayNum], np.floating[Any]]
+            | Iterable[str | Callable[[NDArrayNum], np.floating[Any]]]
+            | None
+        ) = None,
+    ) -> Any:
+        """Call stats() with the legacy argument names; deprecated in favor of stats()."""
+
+        warnings.warn("get_stats() is deprecated; use stats() instead.", DeprecationWarning, stacklevel=2)
+        return _stats(self, statistics=stats_name)
+
     @overload
     def subsample(
         self,
@@ -596,6 +572,7 @@ class PointCloudBase(VectorBase):
         return_indices: Literal[False] = False,
         *,
         random_state: int | np.random.Generator | None = None,
+        mask: RasterLike | PointCloudLike | VectorLike | ArrayLike | None = None,
     ) -> NDArrayNum: ...
 
     @overload
@@ -605,6 +582,7 @@ class PointCloudBase(VectorBase):
         return_indices: Literal[True],
         *,
         random_state: int | np.random.Generator | None = None,
+        mask: RasterLike | PointCloudLike | VectorLike | ArrayLike | None = None,
     ) -> tuple[NDArrayNum, ...]: ...
 
     @overload
@@ -613,6 +591,8 @@ class PointCloudBase(VectorBase):
         subsample: float | int,
         return_indices: bool = False,
         random_state: int | np.random.Generator | None = None,
+        *,
+        mask: RasterLike | PointCloudLike | VectorLike | ArrayLike | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
     @profiler.profile("geoutils.pointcloud.base.subsample", memprof=True)
@@ -621,14 +601,22 @@ class PointCloudBase(VectorBase):
         subsample: float | int,
         return_indices: bool = False,
         random_state: int | np.random.Generator | None = None,
+        *,
+        mask: RasterLike | PointCloudLike | VectorLike | ArrayLike | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]:
         """
-        Randomly sample finite point-cloud values.
+        Randomly sample finite point cloud values allowed by mask, without replacement.
 
-        :param subsample: Fraction of values to sample when at most 1, otherwise the number of values.
-        :param return_indices: Whether to return sampled indexes instead of values.
+        :param subsample: Fraction of eligible finite values to sample when at most 1, otherwise the maximum number
+            of values. The mask is applied before calculating this size.
+        :param return_indices: Whether to return sampled row positions instead of values.
         :param random_state: Random generator or seed used to make sampling reproducible.
-        :returns: Sampled values, or sampled indexes when ``return_indices`` is True.
+        :param mask: Eligible points: True in a boolean array or spatial mask, or inside vector geometries.
+            Arrays must have one entry per point. Point masks must follow the same ordered coordinates;
+            raster masks use nearest interpolation. Point and raster masks must share this point cloud's CRS.
+            Missing mask entries are excluded (e.g. mask=points.data > 0).
+        :returns: One-dimensional NumPy values with the source dtype, or a one-element tuple of indices into the
+            original row order. These indices are positions, independent of any dataframe index labels.
         """
 
         return _subsample_pointcloud(
@@ -636,61 +624,75 @@ class PointCloudBase(VectorBase):
             subsample=subsample,
             return_indices=return_indices,
             random_state=random_state,
+            mask=mask,
         )
 
     def cosample(
         self,
-        other: Any,
+        other: RasterLike | PointCloudLike | ArrayLike,
         *,
         other_band: int = 1,
         auxiliary: Mapping[str, Any] | None = None,
-        auxiliary_bands: Mapping[str, int] | None = None,
         auxiliary_at: Literal["self", "other"] | Mapping[str, Literal["self", "other"]] | None = None,
-        at: Literal["self", "other"] | Any | None = None,
-        mask: Any | None = None,
+        at: Literal["self", "other"] | RasterLike | PointCloudLike | None = None,
+        mask: RasterLike | VectorLike | ArrayLike | None = None,
         mask_mode: Literal["inside", "outside"] = "inside",
         subsample: int | float = 1,
         random_state: int | np.random.Generator | None = None,
         strategy: Literal["sequential", "topk"] = "topk",
         raster_point_mode: Literal["grid_points", "resample_raster"] | None = None,
         grid_method: GriddingMethod = "linear",
-        resample_method: str = "linear",
+        resample_method: InterpolationMethod | Literal["reduce"] = "linear",
         grid_kwargs: Mapping[str, Any] | None = None,
         resample_kwargs: Mapping[str, Any] | None = None,
         align: Literal["raise", "reproject"] = "raise",
-    ) -> RasterLike | PointCloud | gpd.GeoDataFrame:
-        """Sample this point cloud and another dataset at common finite locations.
+        mp_config: MultiprocConfig | None = None,
+    ) -> RasterLike | PointCloudLike:
+        """
+        Sample this point cloud and another dataset at common finite locations.
 
         This point cloud provides the default spatial support. Use ``raster_point_mode="grid_points"`` to grid
         point values onto a raster input instead. An explicit ``at`` chooses the exact output locations and must
         agree with any explicit mode. Raw auxiliary arrays must identify their primary input's grid or point ordering.
 
-        :param other: Other primary point cloud, raster or array aligned to this point cloud.
-        :param other_band: Band selected from the other primary when it is a raster.
-        :param auxiliary: Named auxiliary rasters, point clouds or aligned arrays.
-        :param auxiliary_bands: Bands selected from auxiliary rasters, keyed by auxiliary name.
-        :param auxiliary_at: Native ``"self"`` or ``"other"`` support of raw auxiliaries, globally or by name.
-        :param at: Output support: "self", "other" or a raster or point cloud. Defaults to this point cloud unless
-            ``raster_point_mode="grid_points"`` selects a raster input. Point inputs on point support must share
-            the selected ordered coordinates.
-        :param mask: boolean aligned mask, raster mask or vector defining eligible locations.
-        :param mask_mode: Whether a vector mask retains locations inside or outside its geometries.
-        :param subsample: Fraction when at most one, otherwise the maximum number of locations.
-        :param random_state: Random generator or seed used to reproduce the sample.
-        :param strategy: Topk or sequential subsampling when the output uses a raster grid.
-        :param raster_point_mode: ``"grid_points"`` for raster output or ``"resample_raster"`` for point output.
-            If omitted, infer the direction from ``at`` or use this point cloud. With no explicit ``at``, a mode
-            requires one input of the requested spatial type.
-        :param grid_method: Method passed to :meth:`grid`, such as ``"linear"`` or ``"mean"``.
-        :param resample_method: Method passed to :meth:`geoutils.Raster.interp_points`.
-            ``"reduce"`` raises NotImplementedError pending revision of the :meth:`geoutils.Raster.reduce_points`
-            integration.
-        :param grid_kwargs: Additional gridding options, such as ``dist_nodata_pixel`` and ``min_points``.
-            Select target locations and method through ``at`` and ``grid_method``.
-        :param resample_kwargs: Additional interpolation options, such as ``nodata_propagation``.
-            Select target locations, band and method through the corresponding co-sampling arguments.
-        :param align: Whether mismatched raster grids or coordinate systems raise or are reprojected.
-        :returns: Raster or point cloud on the selected support; Xarray DataArray or GeoPandas GeoDataFrame for
+        Spatial inputs, explicit output support and raster or point masks must use one family: Raster/PointCloud
+        objects, or DataArray/GeoDataFrame objects. The latter may mix eager and Dask storage. Plain arrays and
+        vector outlines are accepted with either family.
+
+        :param other: Dataset to sample alongside this point cloud. A plain array follows this point cloud's order.
+        :param other_band: Band selected from other if it is a raster, counting from one.
+        :param auxiliary: Additional values by output name (e.g. {"slope": slope_raster}). Select a raster band with
+            {"slope": (slope_raster, 2)} or a point column with {"intensity": (points, "intensity")}. Spatial inputs
+            without a selector use the first raster band or active point values.
+        :param auxiliary_at: Input locations followed by plain auxiliary arrays: "self", "other", or a choice per name
+            (e.g. {"slope": "other"}). Spatial auxiliaries use their own coordinates.
+        :param at: Output locations: "self", "other", or a reference raster/point cloud. Defaults to this point cloud.
+            Point inputs must share the selected point order; "grid_points" selects a raster grid instead.
+        :param mask: Locations eligible for sampling, defined by a boolean array, spatial mask, or vector outlines.
+        :param mask_mode: Whether a vector mask keeps locations "inside" or "outside" its geometries.
+        :param subsample: Fraction of common finite locations (e.g. 0.1), or maximum count (e.g. 1000); 1 keeps all.
+        :param random_state: Seed or random generator for reproducible sampling (e.g. 42).
+        :param strategy: Raster sampling with "topk" or "sequential"; "topk" keeps the same seeded sample across chunk
+            sizes. Point output always uses "sequential".
+        :param raster_point_mode: Conversion direction: "grid_points" places points on a raster, "resample_raster"
+            reads rasters at points. Defaults to at's locations, or this point cloud's locations. Must agree with at.
+        :param grid_method: Point gridding by SciPy interpolation ("nearest", "linear", "cubic"), or circular "idw",
+            "mean", "minimum", "maximum", "range", "count", "stdev", "average_distance", "average_distance_pts".
+            The aliases "average", "min" and "max" select "mean", "minimum" and "maximum".
+        :param resample_method: Raster interpolation using the SciPy methods "nearest", "linear", "cubic", "quintic",
+            "slinear", "pchip" or "splinef2d". Window reduction ("reduce") is not implemented.
+        :param grid_kwargs: Options for PointCloud.grid(), e.g. {"dist_nodata_pixel": 2, "min_points": 3} sets a
+            two-pixel radius and minimum of three finite points for circular methods. Other options include
+            "distance_power" for IDW and "engine" ("scipy" or "numba").
+            Set locations and method with at and grid_method.
+        :param resample_kwargs: Options for Raster.interp_points(), e.g. {"nodata_propagation": "ignore"}. The nodata
+            policies are "gdal", "ignore" and "propagate"; "dist_nodata_spread" controls extra spreading in pixels.
+            Set locations, band and method with the corresponding cosample() arguments.
+        :param align: Handling of mismatched grids or coordinate systems: "raise" an error, or "reproject" to match at.
+            Point inputs must still share the same ordered coordinates when sampled at points.
+        :param mp_config: Worker and tile settings for multiprocessing. Raster output uses its outfile; cannot be
+            combined with Dask inputs.
+        :returns: Raster or point cloud on the selected support; Xarray DataArray or eager/lazy GeoDataFrame for
             accessor calls. Bands or columns contain "self", "other", then auxiliaries in mapping order.
             Raster outputs retain the target grid with a common mask; point outputs retain selected geometries
             and index labels, with "self" as the active data column.
@@ -704,7 +706,6 @@ class PointCloudBase(VectorBase):
             band=1,
             other_band=other_band,
             auxiliary=auxiliary,
-            auxiliary_bands=auxiliary_bands,
             auxiliary_at=auxiliary_at,
             at=at,
             mask=mask,
@@ -718,6 +719,7 @@ class PointCloudBase(VectorBase):
             grid_kwargs=grid_kwargs,
             resample_kwargs=resample_kwargs,
             align=align,
+            mp_config=mp_config,
         )
 
     def pairsample(
@@ -728,7 +730,7 @@ class PointCloudBase(VectorBase):
         min_distance: float | None = None,
         max_distance: float | None = None,
         random_state: int | np.random.Generator | None = None,
-        mask: Any | None = None,
+        mask: RasterLike | PointCloudLike | VectorLike | ArrayLike | None = None,
         strategy: Literal["kdtree", "hashgrid", "nn_logvector"] = "nn_logvector",
         n_bins: int = 24,
         anchors_per_round: int = 50_000,
@@ -747,25 +749,38 @@ class PointCloudBase(VectorBase):
         Exact ring strategies use a KD-tree or hash grid. ``"nn_logvector"`` proposes isotropic log-spaced vectors
         and accepts a nearby observed endpoint, which is generally faster for large point clouds.
 
-        :param n_pairs: Target number of finite pairs.
-        :param sampling: ``"loglag"`` for balanced lag coverage or ``"random_xy"`` for uniform endpoints.
-        :param min_distance: Smallest pair distance. Defaults to half the average point spacing.
-        :param max_distance: Largest pair distance. Defaults to the point cloud diagonal.
-        :param random_state: Random generator or seed used to reproduce the sample.
-        :param mask: boolean array or vector defining eligible points.
-        :param strategy: Irregular point strategy for logarithmic lags.
-        :param n_bins: Number of distance rings used by exact strategies.
-        :param anchors_per_round: Maximum anchor points tested in one exact search round.
-        :param attempts_per_anchor: Distance rings attempted for every exact search anchor.
-        :param max_rounds: Maximum exact search or random top-up rounds.
-        :param cell_size: Cell width used by the hash grid strategy.
-        :param nn_tolerance: Maximum endpoint snap distance as a fraction of each proposed distance.
-        :param nn_batch_size: Maximum nearest-neighbor proposals evaluated together.
-        :param nn_oversample: Proposal multiplier used to top up nearest-neighbor pairs.
-        :param nn_max_batches: Maximum nearest-neighbor top-up batches.
-        :param index_dtype: Integer dtype used by returned endpoint indexes.
-        :param distance_dtype: Floating dtype used by returned distances.
-        :returns: Dataset indexed by pair and its two endpoints.
+        Strategy controls apply to ``"loglag"``. ``"random_xy"`` uses ``max_rounds`` and ``nn_batch_size``.
+        Dask point tables are loaded because the search requires all coordinates.
+
+        :param n_pairs: Requested number of pairs with two finite values; fewer may be returned if sampling stops early.
+        :param sampling: ``"loglag"`` balances short and long distances on a log scale; ``"random_xy"`` draws
+            endpoints uniformly.
+        :param min_distance: Smallest distance in CRS units (e.g. meters). Defaults to half the spacing estimated
+            from the eligible point density.
+        :param max_distance: Largest distance in CRS units. Defaults to the bounding box diagonal of eligible points.
+        :param random_state: Seed for reproducible sampling (e.g. 42).
+        :param mask: Eligible points: True in a boolean array or spatial mask, or inside vector geometries.
+            Arrays must have one entry per point. Point masks must follow the same ordered coordinates;
+            raster masks use nearest interpolation. Point and raster masks must share this point cloud's CRS.
+            Missing mask entries are excluded.
+        :param strategy: GeoUtils log-lag strategy: ``"kdtree"`` uses SciPy to search distance rings, ``"hashgrid"``
+            searches rings using a spatial grid, and ``"nn_logvector"`` uses SciPy to match proposed endpoints
+            to nearby points.
+        :param n_bins: Log-spaced distance rings used by ``"kdtree"`` and ``"hashgrid"`` (e.g. 24).
+        :param anchors_per_round: First endpoints tested per round by ``"kdtree"`` and ``"hashgrid"``.
+        :param attempts_per_anchor: Distance rings tried per first endpoint by ``"kdtree"`` and ``"hashgrid"``.
+        :param max_rounds: Maximum rounds to fill the sample with ``"kdtree"``, ``"hashgrid"``, or ``"random_xy"``.
+        :param cell_size: Grid cell width in CRS units for ``"hashgrid"``. Defaults to one eighth of max_distance.
+        :param nn_tolerance: Allowed endpoint snap distance for ``"nn_logvector"``, as a fraction of the proposed
+            pair distance (e.g. 0.1 allows a 10% offset).
+        :param nn_batch_size: Maximum candidate pairs per batch with ``"nn_logvector"`` or ``"random_xy"``;
+            smaller batches use less temporary memory.
+        :param nn_oversample: Candidate count as a multiple of the remaining pairs with ``"nn_logvector"`` (e.g. 2).
+        :param nn_max_batches: Maximum batches to fill the sample with ``"nn_logvector"``.
+        :param index_dtype: Integer NumPy dtype for returned row indexes (e.g. ``"int64"`` for very large point clouds).
+        :param distance_dtype: Floating NumPy dtype for returned distances (e.g. ``"float64"`` for greater precision).
+        :returns: Xarray Dataset with pair and endpoint dimensions, containing original row indexes, values,
+            coordinates, and distances.
         """
 
         from geoutils.sampling.pairsampling import _sample_point_pairs
@@ -806,49 +821,133 @@ class PointCloudBase(VectorBase):
         model: str | Callable[..., Any] | list[str | Callable[..., Any]] | None = None,
         fit_kwargs: dict[str, Any] | None = None,
         random_state: int | np.random.Generator | None = None,
-        mask: Any | None = None,
+        mask: VectorLike | ArrayLike | None = None,
         **pair_sampling_kwargs: Any,
     ) -> Variogram:
         """Estimate a lightweight empirical variogram from point pairs.
 
-        :param n_pairs: Target number of finite pairs in each independent run.
-        :param sampling: Pair sampling scheme, either ``"loglag"`` or ``"random_xy"``.
-        :param estimator: SciKit-GStat estimator name or function applied in each lag class.
-        :param bins: Named or explicit lag boundaries.
-        :param n_lags: Number of classes used for named binning.
-        :param min_lag: Smallest sampled lag. Defaults to half the average point spacing.
-        :param max_lag: Largest sampled lag. Defaults to the point cloud diagonal.
-        :param n_runs: Advanced option to repeat sampling and estimate the standard error of the mean variogram.
-        :param model: Optional theoretical model or ordered list of summed models to fit.
-        :param fit_kwargs: Options passed to :meth:`geoutils.stats.Variogram.fit`.
-        :param random_state: Random generator or seed used to reproduce all runs.
-        :param mask: boolean array or vector defining eligible points.
-        :param pair_sampling_kwargs: Advanced options accepted by :meth:`pairsample`.
-        :returns: Empirical lag statistics and optional fitted model metadata.
+        :param n_pairs: Number of finite pairs targeted in each run (e.g. 100_000).
+        :param sampling: How to select pairs: ``"loglag"`` balances short and long distances, while ``"random_xy"``
+            selects endpoints independently.
+        :param estimator: Semivariance estimator from SciKit-GStat: ``"dowd"``, ``"matheron"``, ``"cressie"``,
+            ``"genton"``, ``"minmax"``, ``"entropy"`` or ``"percentile"``. A function can instead map absolute pair
+            differences to one value per distance bin.
+        :param bins: Distance bins: ``"log"`` for logarithmic spacing, ``"uniform"`` for equal widths, or explicit
+            edges (e.g. [1, 10, 100]).
+        :param n_lags: Number of distance bins when bins is ``"log"`` or ``"uniform"``.
+        :param min_lag: Minimum sampled distance in CRS units; defaults to half the spacing estimated from density.
+        :param max_lag: Maximum sampled distance in CRS units; defaults to the extent diagonal of eligible points.
+        :param n_runs: Independent samples to average; repeat sampling to estimate each distance bin's standard error.
+        :param model: SciKit-GStat model to fit: ``"spherical"``, ``"exponential"``, ``"gaussian"``, ``"cubic"``,
+            ``"stable"`` or ``"matern"``, or the corresponding model function. Sum a list of models ordered from short
+            to long range (e.g. ["spherical", "exponential"]). ``None`` keeps only the empirical variogram.
+        :param fit_kwargs: Options for Variogram.fit(): ``use_nugget``, ``bounds``, ``p0`` or ``maxfev``
+            (e.g. {"use_nugget": True}); optimization uses SciPy curve_fit().
+        :param random_state: Seed or NumPy generator for reproducible sampling across runs (e.g. 42).
+        :param mask: Points to keep: True values in a boolean mask or points inside vector geometries.
+        :param pair_sampling_kwargs: Extra pairsample() options (e.g. ``strategy`` or ``max_rounds``).
+        :returns: Variogram with distance bins, pair counts and semivariance, plus sampling errors and a fitted model
+            when requested.
         """
 
-        from geoutils.stats.variography import _estimate_variogram
-
-        return _estimate_variogram(
+        return _variogram(
             self,
+            n_pairs=n_pairs,
+            sampling=sampling,
             n_runs=n_runs,
             estimator=estimator,
             bins=bins,
             n_lags=n_lags,
             min_lag=min_lag,
             max_lag=max_lag,
-            models=model,
+            model=model,
             fit_kwargs=fit_kwargs,
             random_state=random_state,
-            pair_kwargs={
-                "n_pairs": n_pairs,
-                "sampling": sampling,
-                "min_distance": min_lag,
-                "max_distance": max_lag,
-                "mask": mask,
-                **pair_sampling_kwargs,
-            },
+            mask=mask,
+            **pair_sampling_kwargs,
         )
+
+    @overload
+    def reproject(
+        self: PointCloudBaseType,
+        ref: RasterLike | VectorLike | None = None,
+        crs: CRS | str | int | None = None,
+        *,
+        inplace: Literal[False] = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> PointCloudBaseType | gpd.GeoDataFrame: ...
+
+    @overload
+    def reproject(
+        self: PointCloudBaseType,
+        ref: RasterLike | VectorLike | None = None,
+        crs: CRS | str | int | None = None,
+        *,
+        inplace: Literal[True],
+        mp_config: MultiprocConfig | None = None,
+    ) -> None: ...
+
+    @overload
+    def reproject(
+        self: PointCloudBaseType,
+        ref: RasterLike | VectorLike | None = None,
+        crs: CRS | str | int | None = None,
+        *,
+        inplace: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> PointCloudBaseType | gpd.GeoDataFrame | None: ...
+
+    @profiler.profile("geoutils.pointcloud.base.reproject", memprof=True)
+    def reproject(
+        self: PointCloudBaseType,
+        ref: RasterLike | VectorLike | None = None,
+        crs: CRS | str | int | None = None,
+        inplace: bool = False,
+        *,
+        mp_config: MultiprocConfig | None = None,
+    ) -> PointCloudBaseType | gpd.GeoDataFrame | None:
+        """
+        Reproject point coordinates, preserving their order and value columns.
+
+        Without multiprocessing, eager inputs return eager results and Dask inputs remain lazy. Multiprocessing
+        reads and writes row partitions, keeping file-backed PointCloud inputs and results unloaded. LAS/LAZ
+        output rounds coordinates to its stored precision; GeoPackage preserves floating-point coordinates.
+        Reopened indices follow the file format. LAS attributes must fit their dimension types; GeoPackage
+        requires millisecond timestamps and nullable integers that remain exact when read as float64.
+
+        :param ref: Raster or vector whose CRS should be matched; mutually exclusive with ``crs``.
+        :param crs: Target coordinate reference system; mutually exclusive with ``ref``.
+        :param inplace: Update this object for eager execution. Unsupported with Dask or multiprocessing.
+        :param mp_config: Worker configuration with an integer number of points per chunk. The output format is
+            inferred from ``outfile`` or selected by ``driver`` (``GPKG``, ``LAS`` or ``LAZ``), defaulting to
+            GeoPackage. Cannot be combined with Dask input.
+        :returns: Reprojected PointCloud or GeoDataFrame matching the input interface, or None when in place.
+            Multiprocessing PointCloud results are unloaded; dataframe accessor results are eager.
+        """
+
+        # Keep the shared vector implementation for eager and lazy dataframe transformations
+        if mp_config is None:
+            return super().reproject(ref=ref, crs=crs, inplace=inplace)
+        if self._is_dask:
+            raise ValueError("Argument ``mp_config`` cannot be combined with a Dask point cloud.")
+        if inplace:
+            raise ValueError("Argument ``inplace`` is not supported with ``mp_config``; use the returned point cloud.")
+
+        # Resolve the target without reading point data, then let workers build the output file
+        from geoutils.pointcloud.transformation import _reproject_pointcloud
+
+        target_crs = _get_reproject_crs(ref=ref, crs=crs)
+        projected = _reproject_pointcloud(self, crs=target_crs, mp_config=mp_config)
+        if self._is_pd:
+            # Read every output attribute and use native LAS Z when the file represents heights as a column
+            projected.load(columns="all")
+            return _build_pointcloud_output(
+                projected.ds,
+                data_column=projected.data_column,
+                as_dataframe=True,
+                attrs=_get_dataframe_attrs(self.ds),
+            )
+        return cast(PointCloudBaseType, projected)
 
     @profiler.profile("geoutils.pointcloud.base.grid", memprof=True)
     def grid(
@@ -862,6 +961,7 @@ class PointCloudBase(VectorBase):
         dist_nodata_pixel: float = 1.0,
         nodata: int | float = -9999,
         *,
+        data_column: str | None = None,
         distance_power: float = 2.0,
         min_points: int = 1,
         engine: GriddingEngine = "scipy",
@@ -876,7 +976,7 @@ class PointCloudBase(VectorBase):
         Define the output grid with a reference raster, regular X/Y coordinates, or a combination of resolution or
         shape and optional bounds.
 
-        :param ref: Reference raster whose grid should be matched.
+        :param ref: Reference raster whose grid should be matched. A Dask reference also selects lazy output.
         :param grid_coords: Regular X and Y coordinates defining the output grid.
         :param res: Output resolution in X and Y, mutually exclusive with ``shape``.
         :param shape: Output shape as ``(height, width)``, mutually exclusive with ``res``.
@@ -885,6 +985,7 @@ class PointCloudBase(VectorBase):
             aliases for ``mean``, ``minimum`` and ``maximum``.
         :param dist_nodata_pixel: Maximum point distance or circular neighborhood radius in output pixels.
         :param nodata: Nodata value of the output raster.
+        :param data_column: Point value column to grid. None uses the active point values.
         :param distance_power: Distance exponent used for inverse-distance weighting.
         :param min_points: Minimum number of finite points required inside a circular neighborhood.
         :param engine: Calculation engine, either ``scipy`` or ``numba``.
@@ -906,6 +1007,7 @@ class PointCloudBase(VectorBase):
                 resampling=resampling,
                 dist_nodata_pixel=dist_nodata_pixel,
                 nodata=nodata,
+                data_column=data_column,
                 distance_power=distance_power,
                 min_points=min_points,
                 engine=engine,

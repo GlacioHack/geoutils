@@ -34,7 +34,6 @@ from typing import (
     Literal,
     Sequence,
     TypeVar,
-    Union,
 )
 
 import geopandas as gpd
@@ -49,13 +48,13 @@ from shapely.geometry.base import BaseGeometry
 from geoutils import profiler
 from geoutils._misc import copy_doc
 from geoutils.vector.base import VectorBase
+from geoutils.vector.base import VectorLike as VectorLike  # noqa: F401
 
 if TYPE_CHECKING:
     from geoutils.raster.base import RasterType
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 VectorType = TypeVar("VectorType", bound="Vector")
-VectorLike = Union["Vector", gpd.GeoDataFrame]
 
 
 class Vector(VectorBase):

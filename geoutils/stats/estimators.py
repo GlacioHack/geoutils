@@ -80,6 +80,9 @@ def sum_square(data: NDArrayNum) -> np.floating[Any]:
         another quantity.
     :return: sum square
     """
+    # Promote integer values before squaring so their original storage type cannot overflow
+    if np.issubdtype(data.dtype, np.integer):
+        data = data.astype(np.float64)
     if np.ma.isMaskedArray(data):
         return np.ma.sum(np.square(data))
     else:
@@ -94,6 +97,9 @@ def rmse(data: NDArrayNum) -> np.floating[Any]:
         another quantity.
     :return: rmse
     """
+    # Promote integer values before squaring so their original storage type cannot overflow
+    if np.issubdtype(data.dtype, np.integer):
+        data = data.astype(np.float64)
     if np.ma.isMaskedArray(data):
         return np.sqrt(np.ma.mean(np.square(data)))
     else:

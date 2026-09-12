@@ -17,6 +17,7 @@ from pyproj import CRS
 
 import geoutils as gu
 import geoutils.vector.pd_accessor as vector_pd_accessor
+from geoutils._misc import import_optional
 from geoutils.multiproc import MultiprocConfig
 
 
@@ -206,9 +207,10 @@ class TestPointCloudAccessor:
         ],
     )
     def test_geometric_methods__dask_geopandas(self, method: str, kwargs: dict[str, object]) -> None:
-        """Keep copied, cropped and translated point partitions lazy and equal to eager GeoPandas."""
+        """Checks that lazy copies have the same location metadata while cropping and translation recalculate it."""
 
-        dgpd = pytest.importorskip("dask_geopandas")
+        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        from dask.callbacks import Callback
 
         # Open one on-disk source lazily and build the expected result through the eager accessor
         temp_dir = tempfile.TemporaryDirectory()
@@ -216,15 +218,41 @@ class TestPointCloudAccessor:
         self.gdf.to_file(temp_file)
         ds = gu.open_pointcloud(temp_file, data_column="z", chunks=5)
         expected = getattr(self.gdf.pc, method)(**kwargs)
+        source_count, source_bounds = ds.pc.point_count, ds.pc.bounds
 
         # Each dataframe operation should add work without evaluating any point partition
-        output = getattr(ds.pc, method)(**kwargs)
+        tasks = []
+        with Callback(pretask=lambda *args: tasks.append(args[0])):
+            output = getattr(ds.pc, method)(**kwargs)
+            assert output.pc.crs == expected.crs
+            assert output.pc.data_column == "z"
+            if method == "copy":
+                # Changing only values does not move points, so copies can reuse counts and bounds
+                assert output.pc.bounds == source_bounds
+                assert output.pc.point_count == source_count
+                value_copy = ds.pc.copy(new_array=ds.pc.data * 2)
+                assert value_copy.pc.bounds == source_bounds
+                assert value_copy.pc.point_count == source_count
+            else:
+                assert output.pc.bounds is None
+        assert tasks == []
         assert isinstance(output, dgpd.GeoDataFrame)
         assert not ds.pc.is_loaded
         assert not output.pc.is_loaded
+
+        # Recount selected rows only on request; the original file's cached count and bounds are unchanged
+        assert output.pc.point_count == len(expected)
+        assert ds.pc.point_count == source_count
+        assert ds.pc.bounds == source_bounds
         assert_geodataframe_equal(output.compute(), expected)
         assert not ds.pc.is_loaded
         assert not output.pc.is_loaded
+
+        # Compute replacement values only on request and preserve every original point coordinate
+        if method == "copy":
+            expected_values = self.gdf.copy()
+            expected_values["z"] *= 2
+            assert_geodataframe_equal(value_copy.compute(), expected_values)
 
     def test_to_file__dask_geopandas(self) -> None:
         """Write a lazy point cloud to a regular GeoPandas-supported vector file."""

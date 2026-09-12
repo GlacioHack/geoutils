@@ -31,6 +31,7 @@ dependencies:
   - numba # For filters and point cloud gridding
   - dask # For out-of-memory operations
   - dask-geopandas # For out-of-memory vector/point operations
+  - flox # For grouped statistics
 
   # Test dependencies
   - gdal<3.13.3  # To test functionalities against GDAL

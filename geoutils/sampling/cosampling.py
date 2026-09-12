@@ -6,382 +6,639 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 
-"""Sample several geospatial datasets at the same locations."""
+"""
+Sample several geospatial datasets at the same locations.
+
+Note: This module is inspired from logic originally developed in xDEM for coregistration and uncertainty quantification.
+"""
 
 from __future__ import annotations
 
 import warnings
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING, Any, Literal
+from contextlib import ExitStack
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Literal, cast
 
-import geopandas as gpd
 import numpy as np
-import pandas as pd
 import xarray as xr
 
-from geoutils._dispatch import get_geo_attr, has_geo_attr, is_dask_array, is_dask_dataframe
+from geoutils._dispatch import (
+    _get_pointcloud_interface,
+    _get_raster_interface,
+    _is_raster,
+    get_geo_attr,
+    has_geo_attr,
+    is_dask_array,
+    is_dask_dataframe,
+)
 from geoutils._misc import import_optional
-from geoutils._typing import NDArrayBool, NDArrayNum
+from geoutils._typing import ArrayLike, NDArrayBool, NDArrayNum
 from geoutils.interface.gridding import GriddingMethod
 from geoutils.raster.array import _selected_raster_data
-from geoutils.sampling.subsampling import _dask_subsample, _subsample_numpy
-from geoutils.vector.base import _as_geodataframe
+from geoutils.sampling.subsampling import _sample_valid_indices
+from geoutils.sampling.support import (
+    _aligned_pointcloud,
+    _aligned_raster,
+    _as_array,
+    _mask_at_support,
+    _mask_on_raster,
+    _normalize_sampling_input,
+    _point_values_at_support,
+    _sampling_specification,
+    _sampling_support,
+)
 
 if TYPE_CHECKING:
+    from geoutils.interface.interpolation import InterpolationMethod
     from geoutils.multiproc import MultiprocConfig
-    from geoutils.pointcloud.pointcloud import PointCloud
+    from geoutils.pointcloud.base import PointCloudBase
+    from geoutils.pointcloud.pointcloud import PointCloudLike
+    from geoutils.raster.base import RasterBase, RasterLike
     from geoutils.raster.raster import Raster
+    from geoutils.vector.base import VectorLike
 
 
 #################################
-# 1/ SHARED SUPPORT AND VALUES
+# 1/ INPUT PREPARATION
 #################################
 
 
-def _raster_from_input(value: Any, owner: Any, name: str) -> Any:
-    """Return a raster input or attach an owner's metadata to a raw array."""
+@dataclass(frozen=True)
+class _CosampleInput:
+    """
+    Small dataclass to consistently store pointers to normalized values, selector, input support and kind.
 
-    # Reuse raster objects and accessors so their georeferencing stays authoritative
-    raster = value if hasattr(value, "ij2xy") else getattr(value, "rst", None)
-    if raster is not None:
-        return raster
+    These are created in the input preparation step done in _prepare_cosample_input(), right below!
+    """
 
-    # Require a raster owner before interpreting a raw array as gridded data
-    owner_raster = owner if hasattr(owner, "ij2xy") else getattr(owner, "rst", None)
-    if owner_raster is None:
-        raise ValueError(f"Two-dimensional value {name!r} must be tied to a raster input.")
-
-    # Unwrap Xarray and accept the common singleton band representation
-    array = value.data if isinstance(value, xr.DataArray) else value
-    array = array if hasattr(array, "ndim") else np.asarray(array)
-    if array.ndim == 3 and array.shape[0] == 1:
-        array = array[0]
-    if array.ndim != 2 or tuple(array.shape) != tuple(owner_raster.shape):
-        raise ValueError(f"Array {name!r} must match the shape of its native raster input.")
-
-    # Attach the owner's grid so later alignment follows the raster API
-    return owner_raster.from_array(
-        data=array if is_dask_array(array) else np.ma.masked_invalid(array),
-        transform=owner_raster.transform,
-        crs=owner_raster.crs,
-        nodata=owner_raster.nodata,
-        area_or_point=owner_raster.area_or_point,
-    )
+    value: RasterBase | PointCloudBase | ArrayLike
+    selector: int | str | None
+    input_support: RasterBase | PointCloudBase
+    kind: Literal["raster", "point"]
 
 
-def _aligned_raster(value: Any, owner: Any, support: Any, name: str, align: str) -> Any:
-    """Return a raster aligned to raster or point support."""
-
-    # Normalize raw arrays before comparing their owner's spatial reference
-    raster = _raster_from_input(value, owner, name)
-    if hasattr(support, "georeferenced_grid_equal"):
-        if support.georeferenced_grid_equal(raster):
-            return raster
-
-        # Reproject grid inputs only when the caller permits spatial alignment
-        if align == "reproject":
-            return raster.reproject(ref=support, silent=True)
-        raise ValueError(f"Raster value {name!r} does not share the selected support grid.")
-
-    # Match a point support CRS without imposing a raster grid
-    if raster.crs != support.crs:
-        if align != "reproject":
-            raise ValueError(f"Raster value {name!r} does not share the point support CRS.")
-        raster = raster.reproject(crs=support.crs, silent=True)
-
-    # Normalize reprojection outputs that expose the raster API through an accessor
-    normalized = raster if hasattr(raster, "ij2xy") else getattr(raster, "rst", None)
-    if normalized is None:
-        raise TypeError(f"Raster value {name!r} could not be normalized after reprojection.")
-    return normalized
-
-
-def _mask_on_raster(mask: Any | None, support: Any, mask_mode: str, align: str) -> Any:
-    """Evaluate a user mask on raster support."""
-
-    # Keep every cell eligible when no additional mask was requested
-    if mask is None:
-        return np.ones(support.shape, dtype=bool)
-
-    # Apply vector masks only after excluding raster objects and accessors
-    mask_raster = mask if hasattr(mask, "ij2xy") else getattr(mask, "rst", None)
-    if mask_raster is None and has_geo_attr(mask, "create_mask", accessors=("vct",)):
-        create_mask = get_geo_attr(mask, "create_mask", accessors=("vct",))
-        values = np.asarray(create_mask(ref=support, as_array=True), dtype=bool)
-        return values if mask_mode == "inside" else ~values
-
-    # Align raster masks while accepting raw boolean arrays on the support grid
-    if mask_raster is not None:
-        mask_raster = _aligned_raster(mask_raster, mask_raster, support, "mask", align)
-        values = _selected_raster_data(mask_raster, fill_value=False)
-    else:
-        values = mask if hasattr(mask, "ndim") else np.asarray(mask)
-        if np.ma.isMaskedArray(values):
-            values = np.ma.asarray(values).filled(False)
-
-    # Drop only a singleton band so one row or one column remains a spatial dimension
-    if values.ndim == 3 and values.shape[0] == 1:
-        values = values[0]
-
-    # Reject ambiguous numeric masks and arrays on a different grid shape
-    if tuple(values.shape) != tuple(support.shape) or not np.issubdtype(values.dtype, np.bool_):
-        raise ValueError("A raster support mask must be boolean and match the support grid.")
-    return values
-
-
-def _sampling_support(inputs: Iterable[Any], at: Any | None) -> Any:
-    """Choose the grid or point locations shared by all requested values."""
-
-    # Keep the data object from each `(object, band or column)` request
-    objects = [value[0] if isinstance(value, tuple) else value for value in inputs]
-    if at is None:
-        at = objects[0]
-        for value in objects:
-            pointcloud = value if hasattr(value, "georeferenced_coords_equal") else getattr(value, "pc", None)
-            if pointcloud is not None:
-                at = pointcloud
-                break
-
-    # Return the Raster or PointCloud interface used by both cosample() and grouped_stats()
-    raster = at if hasattr(at, "ij2xy") else getattr(at, "rst", None)
-    pointcloud = at if hasattr(at, "georeferenced_coords_equal") else getattr(at, "pc", None)
-    if raster is None and pointcloud is None:
-        raise TypeError("at must select raster or point cloud support.")
-    return raster if raster is not None else pointcloud
-
-
-def _sampling_specification(source: Any, specification: Any) -> tuple[Any, Any]:
-    """Split a value request into its data object and optional band or column."""
-
-    # Interpret ordinary band numbers and column names relative to the calling object
-    if specification is None or isinstance(specification, (str, int, np.integer)):
-        return source, specification
-
-    # Treat a pair as `(object, selection)` only when its first item carries spatial information
-    if isinstance(specification, tuple) and len(specification) == 2:
-        value = specification[0]
-        if (
-            hasattr(value, "ij2xy")
-            or hasattr(value, "georeferenced_coords_equal")
-            or getattr(value, "rst", None) is not None
-            or getattr(value, "pc", None) is not None
-            or has_geo_attr(value, "rasterize", accessors=("vct",))
-        ):
-            return specification
-    return specification, None
-
-
-def _vector_values_at_points(points: gpd.GeoDataFrame, features: gpd.GeoDataFrame, values: NDArrayNum) -> pd.Series:
-    """Assign vector feature values to points, with later features winning at overlaps."""
-
-    # Use row positions because point and feature labels may contain duplicates
-    left = gpd.GeoDataFrame(geometry=points.geometry.reset_index(drop=True), crs=points.crs)
-    right = gpd.GeoDataFrame({"value": values}, geometry=features.geometry.reset_index(drop=True), crs=features.crs)
-    if right.crs != left.crs:
-        right = right.to_crs(left.crs)
-    matches = gpd.sjoin(left, right, how="inner", predicate="intersects").sort_values("index_right")
-
-    # Keep unmatched points missing and preserve their original ordering
-    output = np.full(len(points), np.nan)
-    output[matches.index.to_numpy()] = matches["value"].to_numpy()
-    return pd.Series(output, index=points.index, name="value")
-
-
-def _sample_vector_values(
-    dataframe: gpd.GeoDataFrame, values: NDArrayNum, support: Any, support_dataframe: Any | None
-) -> Any:
-    """Place numeric feature values on the chosen grid or point locations."""
-
-    # Rasterize feature numbers first so zero always means that no feature covers the cell
-    if hasattr(support, "ij2xy"):
-        indexes = np.arange(1, len(values) + 1)
-        rasterize = get_geo_attr(dataframe, "rasterize", accessors=("vct",))
-        raster = rasterize(ref=support, in_value=indexes.tolist(), out_value=0, out_dtype=np.int32)
-        codes = _selected_raster_data(raster).astype(np.int64)
-        return np.take(np.concatenate(([np.nan], values)), codes)
-
-    # Apply the same GeoPandas join to every Dask dataframe part
-    if support_dataframe is None:
-        raise RuntimeError("Point support coordinates were not prepared.")
-    if is_dask_dataframe(support_dataframe):
-        sampled = support_dataframe.map_partitions(
-            _vector_values_at_points, dataframe, values, meta=pd.Series([], dtype=float, name="value")
-        )
-        return sampled.to_dask_array(lengths=True)
-    return _vector_values_at_points(support_dataframe, dataframe, values).to_numpy()
-
-
-def _values_at_support(
-    source: Any,
+def _prepare_cosample_input(
+    value: Any,
     selector: int | str | None,
-    *,
-    owner: Any,
-    support: Any,
-    support_dataframe: Any | None,
     name: str,
-    interpolation: str,
+    native: _CosampleInput | None = None,
+) -> _CosampleInput:
+    """
+    Prepare a single input: differentiate raster/pointclouds and arrays, validate their relative shape if they are an
+    array input, and check their input band exists if provided.
+
+    This function is used below in _prepare_cosample_all_inputs().
+    """
+
+    # Normalize Xarray inputs without spatial coordinates as arrays, and resolve spatial interfaces once
+    value = _normalize_sampling_input(value)
+    raster = _get_raster_interface(value)
+    pointcloud = _get_pointcloud_interface(value) if raster is None else None
+    kind: Literal["raster", "point"]
+    if raster is not None:
+        value = input_support = raster
+        kind = "raster"
+    elif pointcloud is not None:
+        value = input_support = pointcloud
+        kind = "point"
+    else:
+        # Require every array input to indicate the primary input support it follows
+        if native is None:
+            raise ValueError(f"Argument ``auxiliary_at`` must identify the native support of array auxiliary {name!r}.")
+        input_support, kind = native.input_support, native.kind
+        value = _as_array(value)
+
+        # Check the native shape without loading Dask arrays or spatial values
+        if kind == "raster":
+            if value.ndim == 3 and value.shape[0] == 1:
+                value = value[0]
+            if value.ndim != 2 or tuple(value.shape) != tuple(cast("RasterBase", input_support).shape):
+                raise ValueError(f"Array {name!r} must match the shape of its native raster input.")
+        elif value.ndim != 1:
+            raise ValueError(f"Raw point value {name!r} must contain one value per native point.")
+
+    # Validate raster bands from metadata before alignment, interpolation or worker dispatch
+    if kind == "raster":
+        if selector is None and name not in {"self", "other"}:
+            selector = 1
+        count = raster.count if raster is not None else 1
+        if not isinstance(selector, (int, np.integer)):
+            raise TypeError(f"Raster selector for {name!r} must be a band number.")
+        if not 1 <= selector <= count:
+            raise ValueError(f"Band for {name!r} must be between one and the raster band count.")
+        selector = int(selector)
+    elif pointcloud is not None:
+        # Primary point inputs use their active values; auxiliary tuples can select another column
+        selector = pointcloud.data_column if name in {"self", "other"} or selector is None else selector
+        if selector is not None and (not isinstance(selector, str) or selector not in pointcloud.columns):
+            raise ValueError(f"Point column {selector!r} selected for {name!r} does not exist.")
+    else:
+        selector = None
+
+    return _CosampleInput(value, selector, input_support, kind)
+
+
+def _prepare_cosample_inputs(
+    first: RasterLike | PointCloudLike,
+    second: RasterLike | PointCloudLike | ArrayLike,
+    band: int,
+    other_band: int,
+    auxiliary: Mapping[str, Any] | None,
+    auxiliary_at: Literal["self", "other"] | Mapping[str, Literal["self", "other"]] | None,
+) -> dict[str, _CosampleInput]:
+    """
+    Prepare all inputs (storing kind, values, selector and native support) to later choose output support.
+
+    See _cosample() for arguments.
+
+    Raster/point cloud inputs use their own coordinates as input support. An array ``second`` follows the first
+    input support, and array auxiliaries define their input support through ``auxiliary_at``.
+    """
+
+    # Copy auxiliary dictionaries to avoid modifying the user input, and check their content
+    auxiliary = {} if auxiliary is None else dict(auxiliary)
+    if any(not isinstance(name, str) or not name for name in auxiliary):
+        raise ValueError("Auxiliary names must be non-empty strings.")
+    if {"self", "other", "geometry"}.intersection(auxiliary):
+        raise ValueError("Auxiliary names cannot be 'self', 'other' or 'geometry'.")
+    if not isinstance(auxiliary_at, Mapping):
+        if auxiliary_at not in (None, "self", "other"):
+            raise ValueError("Values in argument ``auxiliary_at`` must be 'self' or 'other'.")
+        auxiliary_at = {} if auxiliary_at is None else dict.fromkeys(auxiliary, auxiliary_at)
+    else:
+        auxiliary_at = dict(auxiliary_at)
+    if not set(auxiliary_at).issubset(auxiliary):
+        raise ValueError("Argument ``auxiliary_at`` contains a name that is not present in ``auxiliary``.")
+    if any(location not in ("self", "other") for location in auxiliary_at.values()):
+        raise ValueError("Values in argument ``auxiliary_at`` must be 'self' or 'other'.")
+
+    # An array second input has to follow the first input's locations, including when explicitly selected as support
+    inputs = {"self": _prepare_cosample_input(first, band, "self")}
+    inputs["other"] = _prepare_cosample_input(second, other_band, "other", inputs["self"])
+
+    # We loop through every auxiliary input
+    for name, specification in auxiliary.items():
+        # For a raster or point cloud, the input support is simply its coordinates
+        # For arrays, we use the input specified for that auxiliary
+        if isinstance(specification, tuple):
+            value, selector = _sampling_specification(first, specification)
+        else:
+            value, selector = specification, None
+        input_support_name = auxiliary_at.get(name)
+        native = inputs[input_support_name] if input_support_name is not None else None
+        inputs[name] = _prepare_cosample_input(value, selector, name, native)
+
+    return inputs
+
+
+def _check_cosample_input_types(
+    inputs: Mapping[str, _CosampleInput],
+    support: RasterBase | PointCloudBase,
+    mask: RasterLike | VectorLike | ArrayLike | None,
+) -> None:
+    """
+    Require inputs to be of the same object or accessor "family" (GeoUtils, or Xarray/Pandas).
+
+    However, DataArrays and GeoDataFrames can mix eager and Dask. Plain arrays have to match their input locations,
+    and vector outlines only supply a mask, so both of them are accepted in every case.
+    """
+
+    # Include all input supports
+    values = [(name, input_data.input_support) for name, input_data in inputs.items()]
+    values.append(("at", support))
+
+    # On a grid, vector masks supply shapes rather than point values, including lazy geometry tables
+    if _is_raster(mask) or not _is_raster(support):
+        mask_interface = _get_raster_interface(mask)
+        if mask_interface is None:
+            mask_interface = _get_pointcloud_interface(mask)
+        if mask_interface is not None:
+            values.append(("mask", mask_interface))
+    first = inputs["self"].input_support
+    use_accessors = getattr(first, "_is_xr", False) or getattr(first, "_is_pd", False)
+
+    # Check the interface family (independently of whether its arrays or dataframe partitions are lazy)
+    for name, interface in values:
+        is_accessor = getattr(interface, "_is_xr", False) or getattr(interface, "_is_pd", False)
+        if is_accessor != use_accessors:
+            raise TypeError(
+                f"Cannot mix Raster/PointCloud objects with DataArray/GeoDataFrame inputs in cosample(): {name!r}. "
+                "Use one family for all geospatial inputs."
+            )
+
+
+def _choose_cosample_support(
+    inputs: Mapping[str, _CosampleInput],
+    at: Literal["self", "other"] | RasterLike | PointCloudLike | None,
+    raster_point_mode: Literal["grid_points", "resample_raster"] | None,
+) -> RasterBase | PointCloudBase:
+    """
+    Choose output locations based on the ``at`` input, and the raster-point mode.
+
+    An ``at`` argument has precedence, otherwise the raster-point mode identifies the support.
+    With neither option, _sampling_support() chooses the first point cloud, or the first raster's grid.
+
+    The arguments fulfill different roles:
+    - ``at`` can for instance decide which of 2 raster inputs is the reference, which raster_point_mode doesn't affect,
+    - ``raster_point_mode`` decides on the direction in case of a raster-point comparison (grid points to raster,
+      or resample raster at point coordinates), but can conflict with ``at`` if defined in the other direction.
+    """
+
+    # Choose explicit output locations before using the raster and point conversion direction
+    if isinstance(at, str):
+        if at not in {"self", "other"}:
+            raise ValueError("Argument ``at`` must be 'self', 'other' or a geospatial support object.")
+        at = inputs[at].input_support
+    if at is None and raster_point_mode is not None:
+        candidates = []
+        kind = "raster" if raster_point_mode == "grid_points" else "point"
+        for name in ("self", "other"):
+            input_data = inputs[name]
+            if input_data.kind == kind and input_data.value is input_data.input_support:
+                candidates.append(input_data.input_support)
+        if len(candidates) != 1:
+            raise ValueError("The conversion mode requires one unambiguous input support; select ``at`` explicitly.")
+        at = candidates[0]
+
+    # Main call to select common support
+    support = _sampling_support((inputs["self"].input_support, inputs["other"].input_support), at)
+
+    # Reject a conversion direction that conflicts with the chosen output locations
+    support_is_raster = _is_raster(support)
+    if (support_is_raster and raster_point_mode == "resample_raster") or (
+        not support_is_raster and raster_point_mode == "grid_points"
+    ):
+        raise ValueError(
+            "Argument ``raster_point_mode`` conflicts with the grid or point locations selected by ``at``."
+        )
+    return support
+
+
+########################################
+# 2/ COMMON ALIGNMENT AND VALIDITY
+########################################
+
+
+def _align_cosample_inputs_for_raster_support(
+    inputs: Mapping[str, _CosampleInput],
+    support: RasterBase,
+    grid_method: GriddingMethod,
+    grid_kwargs: Mapping[str, Any],
     align: Literal["raise", "reproject"],
     mp_config: MultiprocConfig | None,
-    preserve_lazy: bool = False,
-    strict_owner: bool = False,
-) -> Any:
-    """Read one requested value at every location chosen for the final result."""
+    temporary_files: ExitStack,
+) -> tuple[dict[str, Any], dict[str, tuple[RasterBase, int]]]:
+    """
+    Align every input with the output support, keeping Dask/MP/eager support.
 
-    # Find the raster or point cloud interface before handling plain arrays
-    source_raster = source if hasattr(source, "ij2xy") else getattr(source, "rst", None)
-    source_pointcloud = (
-        source
-        if hasattr(source, "georeferenced_coords_equal") and hasattr(source, "data_column")
-        else getattr(source, "pc", None)
+    Point inputs are gridded, and rasters reprojected to the support grid if necessary.
+    NumPy and Dask use the selected arrays, while multiprocessing uses raster objects and band indexes that
+    workers can read by tile.
+    """
+
+    from geoutils.pointcloud.dataframe import (
+        _assign_point_values,
+        _build_pointcloud_output,
+        _get_dataframe_attrs,
     )
-    support_is_raster = hasattr(support, "ij2xy")
 
-    # Place vector values now; the parent workflow decides later how to handle missing values
-    is_vector = source_raster is None and source_pointcloud is None and has_geo_attr(
-        source, "rasterize", accessors=("vct",)
-    )
-    if is_vector:
-        dataframe = _as_geodataframe(source)
-        if selector is None or selector not in dataframe.columns:
-            raise ValueError("Vector values require an explicit feature column.")
-        if not pd.api.types.is_numeric_dtype(dataframe[selector]):
-            raise TypeError("Selected vector values must be numeric.")
-        return _sample_vector_values(dataframe, np.asarray(dataframe[selector], dtype=float), support, support_dataframe)
+    # Store rasters and band numbers for multiprocessing, or store arrays for NumPy and Dask
+    aligned_rasters = {}
+    arrays = {}
+    aligned_points = {}
+    for name, input_data in inputs.items():
+        value = input_data.value
+        selected_band = cast(int, input_data.selector) if input_data.kind == "raster" else 1
+        input_support = input_data.input_support
 
-    # Use a plain grid directly when its shape and coordinates already match the output grid
-    raw_values = source.data if isinstance(source, xr.DataArray) else source
-    raw_ndim = raw_values.ndim if hasattr(raw_values, "ndim") else np.asarray(raw_values).ndim
-    owner_raster = owner if hasattr(owner, "ij2xy") else getattr(owner, "rst", None)
-    if source_raster is None and source_pointcloud is None and raw_ndim >= 2 and owner_raster is not None:
-        support_shape = tuple(support.shape) if support_is_raster else None
-        direct_values = raw_values.data if isinstance(raw_values, xr.DataArray) else raw_values
-        if raw_ndim == 3 and direct_values.shape[0] == 1:
-            direct_values = direct_values[0]
-        if (
-            support_shape is not None
-            and tuple(direct_values.shape) == support_shape
-            and owner_raster.georeferenced_grid_equal(support)
-        ):
-            if np.ma.isMaskedArray(direct_values):
-                direct_values = np.where(np.ma.getmaskarray(direct_values), np.nan, np.ma.getdata(direct_values))
-            return direct_values
+        # Give each gridded or reprojected input its own temporary file for multiprocessing
+        intermediate = temporary_files.enter_context(mp_config.temporary()) if mp_config is not None else None
 
-        # Attach any other plain grid to its owner so _aligned_raster() can reproject it
-        source_raster = _aligned_raster(source, owner, support, name, align)
+        # Reuse each point projected coordinates for its spatial values and plain arrays
+        if input_data.kind == "point":
+            owner = cast("PointCloudBase", input_support)
+            if id(owner) not in aligned_points:
+                point_config = temporary_files.enter_context(mp_config.temporary()) if mp_config is not None else None
+                aligned_points[id(owner)] = _aligned_pointcloud(owner, support, name, align, mp_config=point_config)
+            pointcloud = aligned_points[id(owner)]
+            if value is not owner:
+                # Replace masked values with NaN and attach arrays by position, including single points and Dask chunks
+                raw = value
+                if np.ma.isMaskedArray(raw):
+                    raw = np.where(np.ma.getmaskarray(raw), np.nan, np.ma.getdata(raw))
+                geometry = pointcloud.ds[[pointcloud.ds.geometry.name]]
+                if geometry.geometry.name != "geometry":
+                    geometry = geometry.rename_geometry("geometry")
+                dataframe = _assign_point_values(geometry, {name: raw})
 
-    if source_raster is not None:
-        if selector is not None and not isinstance(selector, (int, np.integer)):
-            raise TypeError(f"Raster selector for {name!r} must be a band number.")
-        band = 1 if selector is None else int(selector)
-        raster = _aligned_raster(source_raster, source_raster, support, name, align)
-        if support_is_raster:
-            return _selected_raster_data(raster, band)
+                # Select the array column while keeping the owner's coordinates and spatial metadata
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore", message="Overriding 3D points with with data column", category=UserWarning
+                    )
+                    copied = _build_pointcloud_output(
+                        dataframe,
+                        data_column=name,
+                        as_dataframe=pointcloud._is_pd,
+                        attrs=_get_dataframe_attrs(pointcloud.ds),
+                        preserve_locations=True,
+                    )
+                pointcloud = _get_pointcloud_interface(copied)
 
-        # Read raster values at the chosen point coordinates
-        if support_dataframe is None:
-            raise RuntimeError("Point support coordinates were not prepared.")
-        points = (
-            support_dataframe
-            if is_dask_dataframe(support_dataframe)
-            else (support_dataframe.geometry.x.to_numpy(), support_dataframe.geometry.y.to_numpy())
-        )
-        return raster.interp_points(
-            points=points,
-            method=interpolation,
-            band=band,
-            as_array=True,
-            mp_config=mp_config,
-        )
-
-    # Reject point values on a raster grid here because only cosample() provides a gridding method
-    if source_pointcloud is not None:
-        if support_is_raster:
-            raise ValueError(f"Point value {name!r} cannot be evaluated on raster support without gridding.")
-        if source_pointcloud.crs != support.crs:
-            if align != "reproject":
-                raise ValueError(f"Point value {name!r} does not share the support CRS.")
-            source_pointcloud = source_pointcloud.reproject(crs=support.crs)
-            source_pointcloud = (
-                source_pointcloud if hasattr(source_pointcloud, "georeferenced_coords_equal") else source_pointcloud.pc
+            # Select point columns without copying or loading the source, then calculate one raster band
+            value = pointcloud.grid(
+                ref=support,
+                resampling=grid_method,
+                data_column=cast("str | None", input_data.selector),
+                mp_config=intermediate,
+                **grid_kwargs,
             )
-        if source_pointcloud is not support and not support.georeferenced_coords_equal(source_pointcloud):
-            raise ValueError(f"Point value {name!r} does not share the ordered support coordinates.")
 
-        # Keep Dask dataframe parts lazy when grouped_stats() can calculate from them directly
-        dataframe = source_pointcloud.ds
-        if is_dask_dataframe(dataframe) and not preserve_lazy:
-            dataframe = dataframe.compute()
-        column = source_pointcloud.data_column if selector is None else selector
-        if column is not None and (not isinstance(column, str) or column not in dataframe.columns):
-            raise ValueError(f"Point column {column!r} selected for {name!r} does not exist.")
-        values = dataframe.geometry.z if column is None else dataframe[column]
-        return values.to_dask_array(lengths=True) if is_dask_dataframe(dataframe) else np.asarray(values)
+        # Align every input once, then keep its raster for workers or read its selected NumPy/Dask band
+        raster = _aligned_raster(value, input_support, support, name, align, mp_config=intermediate)
+        if mp_config is not None:
+            aligned_rasters[name] = (raster, selected_band)
+        else:
+            arrays[name] = _selected_raster_data(raster, selected_band)
 
-    # Accept a plain 1D array when its owner proves that it follows the chosen point order
-    if support_is_raster:
-        raise ValueError(f"Raw value {name!r} cannot be tied to the selected spatial support.")
-    if strict_owner:
-        owner_pointcloud = owner if hasattr(owner, "georeferenced_coords_equal") else getattr(owner, "pc", None)
-        if owner_pointcloud is None or not support.georeferenced_coords_equal(owner_pointcloud):
-            raise ValueError(f"One-dimensional value {name!r} must be tied to the selected point support.")
-    if np.ma.isMaskedArray(source):
-        source = np.where(np.ma.getmaskarray(source), np.nan, np.ma.getdata(source))
-    array = (
-        source.squeeze() if preserve_lazy and is_dask_array(source) else np.atleast_1d(np.asanyarray(source).squeeze())
-    )
-    if support_dataframe is None or array.ndim != 1 or len(array) != len(support_dataframe):
-        raise ValueError(f"Raw point value {name!r} must contain one value per support point.")
-    return array
+    return arrays, aligned_rasters
 
 
-##################
-# 2/ RASTER OUTPUT
-##################
+def _align_cosample_inputs_for_point_support(
+    inputs: Mapping[str, _CosampleInput],
+    support: PointCloudBase,
+    partition_lengths: tuple[int, ...] | None,
+    align: Literal["raise", "reproject"],
+    mp_config: MultiprocConfig | None,
+    temporary_files: ExitStack,
+) -> tuple[dict[str, Any], dict[str, tuple[RasterBase, int]]]:
+    """
+    Align every input with the output points and keep the representation needed for later sampling.
+
+    Point inputs are checked lazily at the output support (as inputs need to be aligned already), while rasters are
+    reprojected to the right CRS, and retained for later interpolation after the common validity mask is derived.
+    """
+
+    # Separate grid inputs from values already located at the output points
+    point_values = {}
+    grid_inputs = {}
+    aligned_points = {}
+    for name, input_data in inputs.items():
+        if input_data.kind == "raster":
+            grid_inputs[name] = input_data
+            continue
+
+        # Reject incompatible coordinates before any raster reprojection or interpolation starts
+        owner = cast("PointCloudBase", input_data.input_support)
+        if id(owner) not in aligned_points:
+            intermediate = temporary_files.enter_context(mp_config.temporary()) if mp_config is not None else None
+            aligned_points[id(owner)] = _aligned_pointcloud(owner, support, name, align, mp_config=intermediate)
+        value = aligned_points[id(owner)] if input_data.value is owner else input_data.value
+        point_values[name] = _point_values_at_support(
+            cast("PointCloudBase | ArrayLike", value),
+            input_data.selector,
+            support_dataframe=support.ds,
+            name=name,
+            point_partition_lengths=partition_lengths,
+        )
+
+    # Give each raster reprojection its own temporary file and keep selected bands for deferred interpolation
+    aligned_rasters = {}
+    for name, input_data in grid_inputs.items():
+        intermediate = temporary_files.enter_context(mp_config.temporary()) if mp_config is not None else None
+        raster = _aligned_raster(
+            input_data.value, input_data.input_support, support, name, align, mp_config=intermediate
+        )
+        aligned_rasters[name] = (raster, cast(int, input_data.selector))
+    return point_values, aligned_rasters
 
 
-def _sample_grid_indices(
-    valid: Any,
-    *,
+def _intersect_validity(validity_layers: Iterable[Any]) -> Any:
+    """Intersect boolean validity raster/pointcloud layers without computing lazy arrays."""
+
+    # Combine finite coverage and mask eligibility while preserving the input array backend
+    common_validity = None
+    for validity in validity_layers:
+        if validity is None:
+            continue
+        common_validity = validity if common_validity is None else common_validity & validity
+
+    # Every cosampling path supplies validity from at least one primary input
+    if common_validity is None:
+        raise RuntimeError("Cosampling requires at least one validity layer.")
+    return common_validity
+
+
+###############################
+# 3/ COSAMPLE ON RASTER SUPPORT
+###############################
+
+
+def _cosample_raster_eager(
+    arrays: Mapping[str, NDArrayNum],
+    common_validity: NDArrayBool,
     subsample: int | float,
     random_state: int | np.random.Generator | None,
     strategy: Literal["sequential", "topk"],
-) -> tuple[NDArrayNum, NDArrayNum]:
-    """Choose row and column numbers from the cells available in every input."""
+) -> NDArrayNum:
+    """Cosample valid locations eagerly (in-memory) into a multi-band array output."""
 
-    # Let the Dask sampler choose cells before loading their row and column numbers
-    if is_dask_array(valid):
-        indexes = _dask_subsample(
-            valid,
-            subsample=subsample,
-            return_indices=True,
-            random_state=random_state,
-            strategy=strategy,
+    # Use all valid cells when no smaller sample was requested
+    if subsample == 1:
+        selected = common_validity
+        if not np.any(common_validity):
+            raise ValueError("There is no finite data common to all cosampled values.")
+    else:
+        # Subsample pixel locations randomly for all output bands
+        rows, columns = _sample_valid_indices(
+            common_validity, subsample=subsample, random_state=random_state, strategy=strategy
         )
-        return tuple(np.asarray(index.compute(), dtype=np.int64) for index in indexes)  # type: ignore[return-value]
+        if rows.size == 0:
+            raise ValueError("There is no finite data common to all cosampled values.")
+        selected = np.zeros(common_validity.shape, dtype=bool)
+        selected[rows, columns] = True
 
-    # Turn available cells into finite values accepted by the shared NumPy sampler
-    sampling_values = np.where(np.asarray(valid, dtype=bool), 1.0, np.nan)
-    indexes = _subsample_numpy(
-        sampling_values,
-        subsample=subsample,
-        return_indices=True,
-        random_state=random_state,
-        strategy=strategy,
+    # Stack self, other and auxiliary arrays as output bands, setting unselected cells to NaN
+    return np.stack([np.where(selected, array, np.nan) for array in arrays.values()])
+
+
+def _cosample_raster_dask(
+    arrays: Mapping[str, Any],
+    common_validity: Any,
+    subsample: int | float,
+    random_state: int | np.random.Generator | None,
+    strategy: Literal["sequential", "topk"],
+) -> Any:
+    """
+    Cosample valid locations lazily across chunks into a multi-band Dask array output.
+
+    Same logic as eager, but written in Dask.
+    """
+
+    import_optional("dask")
+    import dask.array as da
+
+    # Use all valid cells when no smaller sample was requested
+    if subsample == 1:
+        selected = common_validity
+
+        # Check that at least one cell is valid without computing the complete Dask output
+        if not bool(common_validity.any().compute()):
+            raise ValueError("There is no finite data common to all cosampled values.")
+    else:
+        # Randomly choose one set of cell positions for every output band
+        rows, columns = _sample_valid_indices(
+            common_validity, subsample=subsample, random_state=random_state, strategy=strategy
+        )
+        if rows.size == 0:
+            raise ValueError("There is no finite data common to all cosampled values.")
+
+        # Give each cell a unique number using row * width + column
+        # Mark sampled cell numbers within each Dask chunk instead of loading the full mask into memory
+        grid_rows = da.arange(common_validity.shape[0], chunks=common_validity.chunks[0])[:, None]
+        grid_columns = da.arange(common_validity.shape[1], chunks=common_validity.chunks[1])[None, :]
+        selected = da.isin(
+            grid_rows * common_validity.shape[1] + grid_columns,
+            rows * common_validity.shape[1] + columns,
+        )
+
+    # Stack self, other and auxiliary arrays as output bands, setting unselected cells to NaN
+    return np.stack([np.where(selected, array, np.nan) for array in arrays.values()])
+
+
+def _wrapper_cosample_raster_block_mp(
+    tile: RasterBase,
+    inputs: Mapping[str, tuple[RasterBase, int]],
+    support: RasterBase,
+    mask: RasterLike | VectorLike | ArrayLike | None,
+    mask_mode: str,
+    indices: tuple[NDArrayNum, NDArrayNum] | None = None,
+    validity_only: bool = False,
+) -> Raster:
+    """
+    Wrapper for Multiprocessing cosample in input blocks, used in _cosample_raster_mp() with map_overlap().
+
+    Same logic as eager above, but for a chunk.
+    """
+
+    from geoutils.raster.raster import Raster
+
+    # Read the same geographic window from every input and store its requested band in arrays
+    tile = _get_raster_interface(tile)
+    arrays = {}
+    for name, (raster, band) in inputs.items():
+        window = tile if name == "self" else raster.crop(tile.bounds)
+        arrays[name] = _selected_raster_data(window, band)
+
+    # Find this tile's first row and column in the complete output grid
+    column, row = (~support.transform) * (tile.transform.c, tile.transform.f)
+    row, column = int(round(row)), int(round(column))
+
+    # Crop raster masks or slice array masks to this tile; vector masks are evaluated using coordinates
+    if mask is not None:
+        if _is_raster(mask):
+            mask = get_geo_attr(mask, "crop", accessors=("rst",))(tile.bounds)
+        elif not has_geo_attr(mask, "create_mask", accessors=("vct",)):
+            mask = _as_array(mask).reshape(support.shape)[row : row + tile.height, column : column + tile.width]
+
+    # Intersect the user mask and finite coverage from every input before selecting any cells
+    validity_layers = [_mask_at_support(mask, tile, mask_mode=mask_mode)]
+    validity_layers.extend(np.isfinite(array) for array in arrays.values())
+    common_validity = _intersect_validity(validity_layers)
+
+    # Find sampled cells within this tile's rows, then check that their columns also fall inside the tile
+    # The sample is sorted by row so each tile can look up its cells without scanning the full sample
+    if indices is not None:
+        lower, upper = np.searchsorted(indices[0], (row, row + tile.height))
+        rows, columns = indices[0][lower:upper] - row, indices[1][lower:upper] - column
+        inside = (columns >= 0) & (columns < tile.width)
+        selected = np.zeros(tile.shape, dtype=bool)
+        selected[rows[inside], columns[inside]] = True
+        common_validity &= selected
+
+    # Return a band of 1 for valid cells and NaN elsewhere when choosing the sample
+    # For the final output, return one band per input with excluded cells set to NaN
+    if validity_only:
+        data = np.where(common_validity, np.float32(1), np.float32(np.nan))
+    else:
+        data = np.stack([np.where(common_validity, array, np.nan) for array in arrays.values()])
+    return Raster.from_array(
+        data,
+        tile.transform,
+        tile.crs,
+        nodata=np.nan,
+        area_or_point=support.area_or_point,
+        tags={} if validity_only else {"long_name": tuple(inputs)},
     )
-    return tuple(np.asarray(index, dtype=np.int64) for index in indexes)  # type: ignore[return-value]
+
+
+def _wrapper_has_finite_raster_block(tile: RasterBase) -> bool:
+    """
+    Wrapper for Multiprocessing through map_blocks: check one validity tile for finite cells."""
+
+    return bool(np.any(np.isfinite(_selected_raster_data(tile))))
+
+
+def _cosample_raster_mp(
+    inputs: Mapping[str, tuple[RasterBase, int]],
+    support: RasterBase,
+    mask: RasterLike | VectorLike | ArrayLike | None,
+    mask_mode: str,
+    subsample: int | float,
+    random_state: int | np.random.Generator | None,
+    strategy: Literal["sequential", "topk"],
+    mp_config: MultiprocConfig,
+    temporary_files: ExitStack,
+) -> Raster:
+    """
+    Cosample valid values from a temporary "validity" file, then write their values by block.
+
+    Same logic as eager above, but chunked using Multiprocessing as backend.
+
+    _wrapper_cosample_raster_block_mp() applies the same mask in both passes.
+    We keep the temporary "validity" file alive until the values have been written, and sort
+    sampled rows so each worker can find the cells inside its block.
+    """
+
+    from geoutils.multiproc import map_blocks, map_overlap
+
+    # Write 1 where all inputs are finite and the mask allows the cell, and NaN elsewhere
+    # Select cells from this temporary file before writing the output values
+    intermediate = temporary_files.enter_context(mp_config.temporary())
+    reference = inputs["self"][0]
+    validity_raster = map_overlap(
+        _wrapper_cosample_raster_block_mp, reference, intermediate, inputs, support, mask, mask_mode, validity_only=True
+    )
+
+    # Check that valid cells exist, or randomly select a subset for all output bands
+    indices = None
+    if subsample == 1:
+        has_valid = any(map_blocks(_wrapper_has_finite_raster_block, validity_raster, intermediate))
+    else:
+        indices = validity_raster.subsample(
+            subsample, return_indices=True, random_state=random_state, strategy=strategy, mp_config=intermediate
+        )
+        has_valid = len(indices[0]) > 0
+
+        # Sort sampled cells by row so each tile can find its cells without scanning the full sample
+        order = np.argsort(indices[0], kind="stable")
+        indices = indices[0][order], indices[1][order]
+    if not has_valid:
+        raise ValueError("There is no finite data common to all cosampled values.")
+
+    # Read each tile again to write the selected values from all inputs to the final output file
+    return map_overlap(
+        _wrapper_cosample_raster_block_mp, reference, mp_config, inputs, support, mask, mask_mode, indices=indices
+    )
 
 
 def _cosample_on_raster(
-    first: Any,
-    second: Any,
+    first: RasterLike | PointCloudLike,
+    inputs: Mapping[str, _CosampleInput],
     *,
-    support: Any,
-    band: int,
-    other_band: int,
-    auxiliary: Mapping[str, Any],
-    auxiliary_bands: Mapping[str, int],
-    auxiliary_owners: Mapping[str, Any],
-    mask: Any | None,
+    support: RasterBase,
+    mask: RasterLike | VectorLike | ArrayLike | None,
     mask_mode: str,
     subsample: int | float,
     random_state: int | np.random.Generator | None,
@@ -389,85 +646,76 @@ def _cosample_on_raster(
     grid_method: GriddingMethod,
     grid_kwargs: Mapping[str, Any],
     align: Literal["raise", "reproject"],
-) -> Raster | xr.DataArray:
-    """Build a raster whose bands contain values sampled at the same grid cells."""
+    mp_config: MultiprocConfig | None,
+    temporary_files: ExitStack,
+) -> RasterLike:
+    """
+    Cosample all inputs at the same raster locations into a multi-band raster output.
 
-    # Put every requested value on the output grid before deciding which cells to keep
-    arrays = {}
-    for name, value in {"self": first, "other": second, **auxiliary}.items():
-        owner = first if name in {"self", "other"} else auxiliary_owners[name]
-        selected_band = band if name == "self" else other_band if name == "other" else auxiliary_bands.get(name, 1)
+    See _cosample() for most input arguments.
 
-        # Grid point observations, including plain arrays tied to a point cloud
-        pointcloud = value if hasattr(value, "georeferenced_coords_equal") else getattr(value, "pc", None)
-        owner_points = owner if hasattr(owner, "georeferenced_coords_equal") else getattr(owner, "pc", None)
-        if pointcloud is None and owner_points is not None and not hasattr(value, "ij2xy"):
-            raw = value.data if isinstance(value, xr.DataArray) else value
-            if np.ndim(raw) == 1:
-                if np.ma.isMaskedArray(raw):
-                    raw = np.where(np.ma.getmaskarray(raw), np.nan, np.ma.getdata(raw))
-                copied = owner_points.copy(new_array=raw)
-                pointcloud = copied if hasattr(copied, "georeferenced_coords_equal") else copied.pc
-        if pointcloud is not None:
-            if pointcloud.crs != support.crs:
-                if align != "reproject":
-                    raise ValueError(f"Point value {name!r} does not share the support CRS.")
-                projected = pointcloud.reproject(crs=support.crs)
-                pointcloud = projected if hasattr(projected, "georeferenced_coords_equal") else projected.pc
-            value = pointcloud.grid(ref=support, resampling=grid_method, **grid_kwargs)
-            selected_band = 1
+    This function does in order:
 
-        # Read the selected band after every value uses the output grid
-        arrays[name] = _values_at_support(
-            value,
-            selected_band,
-            owner=owner,
-            support=support,
-            support_dataframe=None,
-            name=name,
-            interpolation="linear",
-            align=align,
-            mp_config=None,
+    - _align_cosample_inputs_for_raster_support() places every input on the grid.
+    - _intersect_validity() then combines finite coverage with the optional mask into a common validity mask.
+    - Then an eager/Dask/MP _cosample_raster() function draws one common sample and constructs the multi-band output.
+
+    :param inputs: Named values with their selected band and original locations, prepared by _cosample().
+    :param support: Raster defining the output grid, resolved from ``at`` and ``raster_point_mode``.
+    :param temporary_files: Pass ExitStack to keep intermediate multiprocessing files alive until output is built.
+
+    :returns: Raster with one band per input and a shared mask outside the selected cells.
+    """
+
+    # 1/ Align every input with the output grid without loading lazy values
+    arrays, aligned_rasters = _align_cosample_inputs_for_raster_support(
+        inputs, support, grid_method, grid_kwargs, align, mp_config, temporary_files
+    )
+
+    # 2/ Compute the common validity mask, then select the same sample of grid cells for all aligned inputs
+
+    # 2a/ For Multiprocessing
+    if mp_config is not None:
+        # Align raster masks once before workers crop them, and validate array masks against the complete grid
+        if _is_raster(mask):
+            intermediate = temporary_files.enter_context(mp_config.temporary())
+            mask = _aligned_raster(mask, mask, support, "mask", align, mp_config=intermediate)
+        elif mask is not None and not has_geo_attr(mask, "create_mask", accessors=("vct",)):
+            mask = _mask_on_raster(mask, support, mask_mode, align)
+
+        result = _cosample_raster_mp(
+            aligned_rasters,
+            support,
+            mask,
+            mask_mode,
+            subsample,
+            random_state,
+            strategy,
+            mp_config,
+            temporary_files,
         )
 
-    # Keep only cells allowed by the user mask and available in every value
-    valid = _mask_on_raster(mask, support, mask_mode, align)
-    for array in arrays.values():
-        valid = valid & np.isfinite(array)
+        # Return the output file through the caller's raster interface
+        output = first._cast_raster_output(result)
+        if isinstance(output, xr.DataArray):
+            output.attrs["long_name"] = tuple(inputs)
+        return output
 
-    # Keep every available cell when the caller does not request a smaller sample
-    if subsample == 1:
-        selected = valid
-        has_valid = valid.any()
-        if not bool(has_valid.compute() if is_dask_array(has_valid) else has_valid):
-            raise ValueError("There is no finite data common to all cosampled values.")
+    # 2b/ For Dask or eager, intersect the user mask and finite coverage from every aligned value
+    validity_layers = [_mask_at_support(mask, support, mask_mode=mask_mode, align=align)]
+    validity_layers.extend(np.isfinite(array) for array in arrays.values())
+    common_validity = _intersect_validity(validity_layers)
+
+    # Subsample only the common valid cells, then stack their values into output bands
+    if is_dask_array(common_validity):
+        data = _cosample_raster_dask(arrays, common_validity, subsample, random_state, strategy)
     else:
-        # Draw cell locations once so every output band uses the same sample
-        rows, columns = _sample_grid_indices(valid, subsample=subsample, random_state=random_state, strategy=strategy)
-        if rows.size == 0:
-            raise ValueError("There is no finite data common to all cosampled values.")
-        if is_dask_array(valid):
-            import_optional("dask")
-            import dask.array as da
+        data = _cosample_raster_eager(arrays, common_validity, subsample, random_state, strategy)
 
-            grid_rows = da.arange(valid.shape[0], chunks=valid.chunks[0])[:, None]
-            grid_columns = da.arange(valid.shape[1], chunks=valid.chunks[1])[None, :]
-            selected = da.isin(grid_rows * valid.shape[1] + grid_columns, rows * valid.shape[1] + columns)
-        else:
-            selected = np.zeros(valid.shape, dtype=bool)
-            selected[rows, columns] = True
-
-    # Warn when an added value appears likely to remove more than half of the available cells
-    if auxiliary:
-        base_fraction = float(np.mean(np.isfinite(np.asarray(arrays["self"][:512, :512]))))
-        for name in auxiliary:
-            auxiliary_fraction = float(np.mean(np.isfinite(np.asarray(arrays[name][:512, :512]))))
-            if base_fraction > 0 and auxiliary_fraction < 0.5 * base_fraction:
-                warnings.warn(f"Auxiliary variable {name!r} has substantially fewer finite values than 'self'.")
-
-    # Build bands in the documented order and keep Dask data lazy
-    data = np.stack([np.where(selected, array, np.nan) for array in arrays.values()])
+    # 3/ Construct the raster output from the NumPy or Dask bands
     tags = {"long_name": tuple(arrays)}
+
+    # Return an Xarray for accessor calls without computing its Dask arrays
     if getattr(first, "_is_xr", False) or getattr(first, "_is_pd", False):
         from geoutils.raster.xr_accessor import RasterAccessor
 
@@ -475,7 +723,7 @@ def _cosample_on_raster(
             data, support.transform, support.crs, nodata=np.nan, area_or_point=support.area_or_point, tags=tags
         )
 
-    # Return a base Raster because the combined bands may no longer describe the caller's subclass
+    # Load the result into a Raster
     from geoutils.raster.raster import Raster
 
     data = data.compute() if is_dask_array(data) else data
@@ -484,355 +732,383 @@ def _cosample_on_raster(
     )
 
 
-#################
-# 3/ POINT OUTPUT
-#################
+##############################
+# 4/ COSAMPLE ON POINT SUPPORT
+##############################
 
 
 def _raster_valid_at_points(
-    raster: Any,
-    points: tuple[NDArrayNum, NDArrayNum],
-    resample_method: str,
+    raster: RasterBase,
+    points: PointCloudLike | tuple[NDArrayNum, NDArrayNum],
+    resample_method: InterpolationMethod,
     band: int,
     resample_kwargs: Mapping[str, Any],
-) -> NDArrayBool:
-    """Find which output points can receive a value from one raster band."""
+    mp_config: MultiprocConfig | None = None,
+    point_partition_lengths: tuple[int, ...] | None = None,
+) -> Any:
+    """
+    Find valid raster points by interpolating raster block's validity, respecting Dask/MP.
 
-    # Mark available source cells with one and missing cells with NaN
-    data = _selected_raster_data(raster, band)
-    validity = np.where(np.isfinite(data), 1.0, np.nan).astype(np.float32)
+    Arguments follow _cosample_on_points(), except for point_partition_lengths that follows _point_values_at_support().
+    """
 
-    # Build a one-band raster so only the requested source band controls point selection
-    validity_raster = raster.from_array(
-        data=validity,
-        transform=raster.transform,
-        crs=raster.crs,
-        nodata=np.nan,
-        area_or_point=raster.area_or_point,
-    )
-
-    # Get the Raster interface when from_array() returns an Xarray object
-    validity_accessor = validity_raster if hasattr(validity_raster, "ij2xy") else getattr(validity_raster, "rst", None)
-    if validity_accessor is None:
-        raise TypeError("Could not create a raster validity layer.")
-
-    # Check point coverage first so we read values only at points that can be kept
-    values = validity_accessor.interp_points(
+    # Interpolate a mask of 1 for finite raster cells and NaN for missing cells to find points with data
+    # Use no extra nodata spreading unless the caller requests it
+    values = raster.interp_points(
         points=points,
         method=resample_method,
-        as_array=True,
+        band=band,
+        as_array=not is_dask_dataframe(points),
+        mp_config=mp_config,
+        _validity_only=True,
         **{"dist_nodata_spread": 0, **resample_kwargs},
     )
-    return np.isfinite(np.asarray(values).squeeze())
+
+    # Convert the interpolated Dask column to an array, reusing point counts per chunk when available
+    if is_dask_dataframe(values):
+        values = get_geo_attr(values, "data", ("pc",)).to_dask_array(lengths=point_partition_lengths)
+    return np.isfinite(values)
 
 
 def _cosample_on_points(
-    first: Any,
-    second: Any,
+    first: RasterLike | PointCloudLike,
+    inputs: Mapping[str, _CosampleInput],
     *,
-    support: Any,
-    band: int,
-    other_band: int,
-    auxiliary: Mapping[str, Any],
-    auxiliary_bands: Mapping[str, int],
-    auxiliary_owners: Mapping[str, Any],
-    mask: Any | None,
+    support: PointCloudBase,
+    mask: RasterLike | VectorLike | ArrayLike | None,
     mask_mode: str,
     subsample: int | float,
     random_state: int | np.random.Generator | None,
-    resample_method: str,
+    resample_method: InterpolationMethod,
     resample_kwargs: Mapping[str, Any],
     align: Literal["raise", "reproject"],
-) -> PointCloud | gpd.GeoDataFrame:
-    """Build a point table whose columns contain values sampled at the same points."""
+    mp_config: MultiprocConfig | None,
+    temporary_files: ExitStack,
+) -> PointCloudLike:
+    """
+    Cosample all inputs at the same point locations into a multi-column point cloud output.
 
-    # Load the output point coordinates and keep their original row labels
+    See _cosample() for input arguments.
+
+    This function does in order:
+    - _align_cosample_inputs_for_point_support() checks point locations and separates their values from aligned rasters,
+    - _raster_valid_at_points() checks raster valid values before defining a common validity mask,
+    - Finally, raster values are interpolated at the selected points with interp_points().
+
+    :param support: Point cloud defining the ordered output coordinates, resolved from ``at`` and ``raster_point_mode``.
+    :param inputs: Named values, raster bands and original locations resolved by _prepare_cosample_inputs().
+    :param temporary_files: Pass ExitStack to keep intermediate multiprocessing files alive until output is built.
+
+    :returns: PointCloud with one column per input, retaining selected points in their original order.
+    """
+
+    from geoutils.pointcloud.dataframe import (
+        _assign_point_values,
+        _build_pointcloud_output,
+        _point_partition_lengths,
+        _select_point_rows,
+    )
+
+    # 1/ Read the output point coordinates and align each input for sampling
     dataframe = support.ds
-    dataframe = dataframe.compute() if is_dask_dataframe(dataframe) else dataframe
-    x, y = dataframe.geometry.x.to_numpy(), dataframe.geometry.y.to_numpy()
-    points = (x, y)
+    is_dask_points = is_dask_dataframe(dataframe)
 
-    # Separate point values from rasters because only raster values need interpolation
-    point_values: dict[str, NDArrayNum] = {}
-    rasters: dict[str, tuple[Any, int]] = {}
-    all_values = {"self": first, "other": second, **auxiliary}
-    for name, value in all_values.items():
-        value_raster = value if hasattr(value, "ij2xy") else getattr(value, "rst", None)
-        value_pointcloud = (
-            value
-            if hasattr(value, "georeferenced_coords_equal") and hasattr(value, "data_column")
-            else getattr(value, "pc", None)
+    # Count rows in each Dask chunk so values and masks can be matched to the same points
+    # Keep the Dask dataframe to not load all coordinates in memory
+    partition_lengths = _point_partition_lengths(dataframe) if is_dask_points else None
+
+    # Check every point input before aligning rasters, whose values will be read only at the selected points
+    point_values, aligned_rasters = _align_cosample_inputs_for_point_support(
+        inputs, support, partition_lengths, align, mp_config, temporary_files
+    )
+
+    # 2/ Compute the common validity mask, then select the same sample of point locations for all aligned inputs
+    validity_layers = [np.isfinite(values) for values in point_values.values()]
+
+    # Check where each raster has data and combine the result with the masks from the point values
+    if aligned_rasters:
+        points = dataframe if is_dask_points else (dataframe.geometry.x.to_numpy(), dataframe.geometry.y.to_numpy())
+    for raster, selected_band in aligned_rasters.values():
+        finite = _raster_valid_at_points(
+            raster, points, resample_method, selected_band, resample_kwargs, mp_config, partition_lengths
         )
+        validity_layers.append(finite)
 
-        # Use an owner only for plain arrays that do not carry coordinates
-        owner = value
-        if value_raster is None and value_pointcloud is None:
-            owner = first if name in {"self", "other"} else auxiliary_owners[name]
+    # Read the user mask at the output point coordinates and exclude points where it is False
+    intermediate = (
+        temporary_files.enter_context(mp_config.temporary()) if mp_config is not None and mask is not None else None
+    )
+    mask_values = _mask_at_support(
+        mask,
+        support,
+        support_dataframe=dataframe,
+        mask_mode=mask_mode,
+        align=align,
+        mp_config=intermediate,
+        point_partition_lengths=partition_lengths,
+    )
+    validity_layers.append(mask_values)
 
-        # Treat 2D arrays as grids and 1D arrays as values following the point order
-        array = value.data if isinstance(value, xr.DataArray) else value
-        ndim = array.ndim if hasattr(array, "ndim") else np.asarray(array).ndim
-        if value_raster is not None or (value_pointcloud is None and ndim == 2):
-            selected_band = band if name == "self" else other_band if name == "other" else auxiliary_bands.get(name, 1)
-            rasters[name] = (_aligned_raster(value, owner, support, name, align), selected_band)
-        else:
-            point_values[name] = _values_at_support(
-                value,
-                None,
-                owner=owner,
-                support=support,
-                support_dataframe=dataframe,
-                name=name,
-                interpolation=resample_method,
-                align=align,
-                mp_config=None,
-                strict_owner=True,
+    # Intersect all finite coverage and mask eligibility before drawing one common sample
+    common_validity = _intersect_validity(validity_layers)
+
+    # Keep all remaining points, or randomly choose a smaller sample as requested
+    selected_rows = common_validity
+    if subsample != 1:
+        (indices,) = _sample_valid_indices(
+            common_validity, subsample=subsample, random_state=random_state, strategy="sequential"
+        )
+        if indices.size == 0:
+            raise ValueError("There is no finite data common to all cosampled values.")
+
+        # Sort the selected row numbers so the output follows the original point order
+        selected_rows = np.sort(indices)
+    elif is_dask_points and not bool(common_validity.any().compute()):
+        raise ValueError("There is no finite data common to all cosampled values.")
+
+    # Create a table with only geometry and the requested point columns, then keep the selected rows
+    geometry = dataframe[[dataframe.geometry.name]]
+    if geometry.geometry.name != "geometry":
+        geometry = geometry.rename_geometry("geometry")
+    point_columns = _assign_point_values(geometry, point_values, partition_lengths=partition_lengths)
+    output = _select_point_rows(point_columns, selected_rows, partition_lengths=partition_lengths)
+    if not is_dask_dataframe(output) and output.empty:
+        raise ValueError("There is no finite data common to all cosampled values.")
+
+    # 3/ Interpolate each raster at the selected coordinates and add its values as a new column
+    if aligned_rasters:
+        selected_points = (
+            output if is_dask_dataframe(output) else (output.geometry.x.to_numpy(), output.geometry.y.to_numpy())
+        )
+        sampled = {}
+        for name, (raster, selected_band) in aligned_rasters.items():
+            values = raster.interp_points(
+                points=selected_points,
+                method=resample_method,
+                band=selected_band,
+                as_array=not is_dask_dataframe(output),
+                mp_config=mp_config,
+                **resample_kwargs,
             )
 
-    # Keep points where every point value is available and every raster can be read
-    valid = np.ones(len(dataframe), dtype=bool)
-    for values in point_values.values():
-        valid &= np.isfinite(values)
-    for raster, selected_band in rasters.values():
-        valid &= _raster_valid_at_points(raster, points, resample_method, selected_band, resample_kwargs)
+            # Extract the interpolated column as a Dask Series so it keeps the same chunks as the selected points
+            sampled[name] = get_geo_attr(values, "data", ("pc",)) if is_dask_dataframe(values) else values
 
-    # Read vector and raster masks at the chosen point locations
-    if mask is not None:
-        mask_raster = mask if hasattr(mask, "ij2xy") else getattr(mask, "rst", None)
+        # Final interpolation may exclude more points near nodata; remove rows with missing or infinite values
+        output = _assign_point_values(output, sampled)
+        output = output.replace([np.inf, -np.inf], np.nan).dropna(subset=list(inputs))
 
-        # Use the mask's own geometry, grid, or point order
-        if mask_raster is None and has_geo_attr(mask, "create_mask", accessors=("vct",)):
-            create_mask = get_geo_attr(mask, "create_mask", accessors=("vct",))
-            mask_values = np.asarray(create_mask(ref=support, as_array=True), dtype=bool).squeeze()
-            valid &= mask_values if mask_mode == "inside" else ~mask_values
-        elif mask_raster is not None:
-            mask_raster = _aligned_raster(mask, mask, support, "mask", align)
-            mask_values = mask_raster.interp_points(points=points, method="nearest", as_array=True)
-            valid &= np.isfinite(mask_values).squeeze() & (np.asarray(mask_values).squeeze() != 0)
-        else:
-            # Require a plain mask to contain one boolean value per output point
-            mask_values = np.atleast_1d(np.asanyarray(mask).squeeze())
-            if np.ma.isMaskedArray(mask_values):
-                mask_values = mask_values.filled(False)
-            if mask_values.ndim != 1 or len(mask_values) != len(valid) or mask_values.dtype != bool:
-                raise ValueError("A point support mask must be boolean with one value per point.")
-            valid &= mask_values
+    # Order all columns as self, other, auxiliaries, then geometry
+    output = output[[*inputs, "geometry"]]
 
-    # Stop before sampling when no point has every requested value
-    if not np.any(valid):
-        raise ValueError("There is no finite data common to all cosampled values.")
-
-    # Choose point rows before reading the more expensive raster values
-    (indices,) = _subsample_numpy(
-        np.where(valid, 1.0, np.nan),
-        subsample=subsample,
-        return_indices=True,
-        random_state=random_state,
-    )
-    indices = np.sort(np.asarray(indices, dtype=np.int64))
-    selected_points = (x[indices], y[indices])
-
-    # Select point columns directly and read raster values only at the chosen points
-    sampled = {name: values[indices] for name, values in point_values.items()}
-    for name, (raster, selected_band) in rasters.items():
-        sampled[name] = np.atleast_1d(
-            np.asarray(
-                raster.interp_points(
-                    points=selected_points,
-                    method=resample_method,
-                    band=selected_band,
-                    as_array=True,
-                    **resample_kwargs,
-                )
-            ).squeeze()
-        )
-
-    # Remove points where interpolation still returned NaN from any sampled column
-    final_valid = np.ones(len(indices), dtype=bool)
-    for values in sampled.values():
-        final_valid &= np.isfinite(values)
-    indices = indices[final_valid]
-    sampled = {name: values[final_valid] for name, values in sampled.items()}
-
-    # Keep the chosen geometries, duplicate row labels, and any Z coordinates
-    if len(indices) == 0:
-        raise ValueError("There is no finite data common to all cosampled values.")
-    columns = {name: sampled[name] for name in all_values}
-    geometry = dataframe.geometry.iloc[indices].rename("geometry")
-    output = gpd.GeoDataFrame(columns, index=dataframe.index[indices], geometry=geometry, crs=support.crs)
-    output.attrs["data_column"] = "self"
-
-    # Return a GeoDataFrame for an accessor call and a PointCloud for an object call
-    if getattr(first, "_is_xr", False) or getattr(first, "_is_pd", False):
-        return output
-    from geoutils.pointcloud.pointcloud import PointCloud
-
-    # Keep both primary values as columns even when the point geometry already has a Z coordinate
+    # Build the point output with self as its active column and metadata for the selected rows
+    # Accessor calls keep Dask data chunked; PointCloud calls load the result into memory
+    as_dataframe = getattr(first, "_is_xr", False) or getattr(first, "_is_pd", False)
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore", message="Overriding 3D points with with data column 'self'", category=UserWarning
         )
-        return PointCloud(output, data_column="self")
+        result = _build_pointcloud_output(output, data_column="self", as_dataframe=as_dataframe)
+
+    # Check for empty results only when loaded, so Dask does not run the final interpolation yet
+    if not is_dask_dataframe(result) and get_geo_attr(result, "point_count", ("pc",)) == 0:
+        raise ValueError("There is no finite data common to all cosampled values.")
+    return result
 
 
-##########################
-# 4/ PUBLIC METHOD ROUTING
-##########################
+###########################
+# 5/ MAIN COSAMPLE FUNCTION
+###########################
 
 
 def _cosample(
-    first: Any,
-    second: Any,
+    first: RasterLike | PointCloudLike,
+    second: RasterLike | PointCloudLike | ArrayLike,
     *,
     band: int,
     other_band: int,
     auxiliary: Mapping[str, Any] | None,
-    auxiliary_bands: Mapping[str, int] | None,
     auxiliary_at: Literal["self", "other"] | Mapping[str, Literal["self", "other"]] | None,
-    at: Literal["self", "other"] | Any | None,
-    mask: Any | None,
+    at: Literal["self", "other"] | RasterLike | PointCloudLike | None,
+    mask: RasterLike | VectorLike | ArrayLike | None,
     mask_mode: Literal["inside", "outside"],
     subsample: int | float,
     random_state: int | np.random.Generator | None,
     strategy: Literal["sequential", "topk"],
     raster_point_mode: Literal["grid_points", "resample_raster"] | None,
     grid_method: GriddingMethod,
-    resample_method: str,
+    resample_method: InterpolationMethod | Literal["reduce"],
     grid_kwargs: Mapping[str, Any] | None,
     resample_kwargs: Mapping[str, Any] | None,
     align: Literal["raise", "reproject"],
-) -> Raster | PointCloud | xr.DataArray | gpd.GeoDataFrame:
-    """Check public cosample() inputs and run the raster or point workflow.
+    mp_config: MultiprocConfig | None = None,
+) -> RasterLike | PointCloudLike:
+    """
+    Cosample two datasets at the same locations, potentially with same-shape auxiliary data tied to them.
 
-    _sampling_support() chooses the shared output locations. _cosample_on_raster() or _cosample_on_points() then
-    aligns every requested value, applies one common selection, and builds the matching spatial result.
+    Two primary inputs can be rasters or point clouds, and auxiliary outputs can also be arrays but need to match the
+    shape of one of the two main inputs.
+    The output is a multi-band raster or multi-column point cloud containing all data sampled at valid values of the
+    same locations.
+
+    This function reuses eager, Dask and multiprocessing execution from other geospatial operations (grid,
+    interp_points). Additional steps include placing values on common support, determine validity (non-NaN/inf),
+    then drawing one shared sample.
+    Specifically:
+    - Dask retains array chunks or point partitions in a graph.
+    - Multiprocessing uses temporary raster files and map_overlap() to write the final bands without holding chunks
+    in-memory at once.
+
+    This main function has the following steps:
+
+    - First, _prepare_cosample_inputs() resolves each input's values, band and original locations.
+    - Then _choose_cosample_support() identifies the shared output locations and _check_cosample_input_types()
+      enforces consistent object types (GeoUtils or Xarray/Pandas).
+    - Finally, _cosample_on_raster() or _cosample_on_points() aligns the inputs, computes a common validity mask, then
+      selects inputs at the same location (with optional subsampling), and finally builds the output.
+
+    :param first: First raster or point cloud, whose selected values become the "self" output.
+    :param second: Second raster or point cloud to sample alongside the first. An array has to match the first input
+        grid shape or point count.
+    :param band: Band selected from the first raster, counting from one. Point clouds use their main data column.
+    :param other_band: Band selected from the second input if it is a raster, counting from one.
+    :param auxiliary: Additional values by output name (e.g. {"slope": slope_raster}). Select a raster band or
+        point column with a pair, e.g. {"slope": (slope_raster, 2)} or {"intensity": (points, "intensity")}.
+        Spatial inputs default to the first raster band or active point values.
+    :param auxiliary_at: Input locations followed by plain auxiliary arrays: "self", "other", or a choice per name
+        (e.g. {"slope": "other"}). Spatial auxiliaries use their own coordinates.
+    :param at: Output locations: "self", "other", or a reference raster/point cloud. Defaults to the first point
+        cloud, or first raster's grid when neither input is a point cloud.
+    :param mask: Locations eligible for sampling, defined by a boolean array, spatial mask, or vector outlines.
+    :param mask_mode: Whether a vector mask keeps locations "inside" or "outside" its geometries.
+    :param subsample: Fraction of common finite locations (e.g. 0.1), or maximum count (e.g. 1000); 1 keeps all.
+    :param random_state: Seed or random generator for reproducible sampling (e.g. 42).
+    :param strategy: Raster sampling with "topk" or "sequential"; "topk" keeps the same seeded sample across chunk
+        sizes. Point output always uses "sequential".
+    :param raster_point_mode: Conversion direction: "grid_points" places points on a raster, "resample_raster" reads
+        rasters at points. Defaults to at's locations, or point locations when available. Must agree with at.
+    :param grid_method: Point gridding by SciPy interpolation ("nearest", "linear", "cubic"), or circular "idw",
+        "mean", "minimum", "maximum", "range", "count", "stdev", "average_distance", "average_distance_pts".
+        The aliases "average", "min" and "max" select "mean", "minimum" and "maximum".
+    :param resample_method: Raster interpolation using the SciPy methods "nearest", "linear", "cubic", "quintic",
+        "slinear", "pchip" or "splinef2d". Window reduction ("reduce") is not implemented.
+    :param grid_kwargs: Options for PointCloud.grid(), e.g. {"dist_nodata_pixel": 2, "min_points": 3} sets a two-pixel
+        radius and minimum of three finite points for circular methods. Other options include "distance_power" for
+        IDW and "engine" ("scipy" or "numba"). Set output locations and method with at and grid_method.
+    :param resample_kwargs: Options for Raster.interp_points(), e.g. {"nodata_propagation": "ignore"}. The nodata
+        policies are "gdal", "ignore" and "propagate"; "dist_nodata_spread" controls extra spreading in pixels.
+        Set locations, band and method with the corresponding cosample() arguments.
+    :param align: Handling of mismatched grids or coordinate systems: "raise" an error, or "reproject" to match at.
+        Point inputs must still share the same ordered coordinates when sampled at points.
+    :param mp_config: Worker and tile settings for multiprocessing. Raster output uses its outfile; cannot be
+        combined with Dask inputs.
+
+    :returns: Raster bands or point cloud columns named 'self', 'other' and the auxiliaries.
+        All values share the same finite locations; raster cells outside the sample remain masked.
     """
 
-    # Check options before inspecting or loading any input data
+    # 1/ Check input arguments and raise appropriate errors
+    # Basic type/value checks
     if second is None:
-        raise TypeError("cosample requires an 'other' primary dataset.")
+        raise TypeError("Argument ``other`` is required for cosample().")
     if mask_mode not in {"inside", "outside"}:
-        raise ValueError("mask_mode must be 'inside' or 'outside'.")
+        raise ValueError("Argument ``mask_mode`` must be 'inside' or 'outside'.")
     if strategy not in {"sequential", "topk"}:
-        raise ValueError("strategy must be 'sequential' or 'topk'.")
+        raise ValueError("Argument ``strategy`` must be 'sequential' or 'topk'.")
     if align not in {"raise", "reproject"}:
-        raise ValueError("align must be 'raise' or 'reproject'.")
+        raise ValueError("Argument ``align`` must be 'raise' or 'reproject'.")
     if not isinstance(subsample, (int, float)) or subsample <= 0:
-        raise ValueError("subsample must be a positive number.")
+        raise ValueError("Argument ``subsample`` must be a positive number.")
     if raster_point_mode not in {None, "grid_points", "resample_raster"}:
-        raise ValueError("raster_point_mode must be 'grid_points', 'resample_raster' or None.")
+        raise ValueError("Argument ``raster_point_mode`` must be 'grid_points', 'resample_raster' or None.")
 
-    # Keep output locations and method choices in the named public arguments
+    # Copy extra options, and reject arguments that should be passed to cosample() directly and not as kwargs
+    # (This check is required because interp_points() contains similarly-named inputs as cosample(), such as
+    # "mp_config" or "band", etc)
     grid_kwargs = {} if grid_kwargs is None else dict(grid_kwargs)
     resample_kwargs = {} if resample_kwargs is None else dict(resample_kwargs)
-    if {"ref", "grid_coords", "res", "shape", "bounds", "resampling"}.intersection(grid_kwargs):
-        raise ValueError("Use at and grid_method to choose gridding locations and method, outside grid_kwargs.")
-    if {"points", "method", "band", "as_array", "input_latlon", "return_interpolator"}.intersection(resample_kwargs):
-        raise ValueError("Use at, band and resample_method outside resample_kwargs; point coordinates follow at.")
-
-    # Copy added value settings so this function cannot change the caller's dictionaries
-    auxiliary = {} if auxiliary is None else dict(auxiliary)
-    auxiliary_bands = {} if auxiliary_bands is None else dict(auxiliary_bands)
-    if any(not isinstance(name, str) or not name for name in auxiliary):
-        raise ValueError("Auxiliary names must be non-empty strings.")
-    if {"self", "other", "geometry"}.intersection(auxiliary):
-        raise ValueError("Auxiliary names cannot be 'self', 'other' or 'geometry'.")
-    if not set(auxiliary_bands).issubset(auxiliary):
-        raise ValueError("auxiliary_bands contains a name that is not present in auxiliary.")
-
-    # Record which primary input supplies coordinates for each plain added array
-    auxiliary_owners: dict[str, Any] = {}
-    for name, value in auxiliary.items():
-        value_raster = value if hasattr(value, "ij2xy") else getattr(value, "rst", None)
-        value_pointcloud = (
-            value
-            if hasattr(value, "georeferenced_coords_equal") and hasattr(value, "data_column")
-            else getattr(value, "pc", None)
+    if {"ref", "grid_coords", "res", "shape", "bounds", "resampling", "data_column", "mp_config"}.intersection(
+        grid_kwargs
+    ):
+        raise ValueError(
+            "Use ``at``, ``grid_method``, point column selectors and ``mp_config`` outside ``grid_kwargs`` "
+            "to choose the grid, method, point column and backend."
         )
-        if value_raster is not None or value_pointcloud is not None:
-            auxiliary_owners[name] = value
-            continue
+    if {
+        "points",
+        "method",
+        "band",
+        "as_array",
+        "input_latlon",
+        "return_interpolator",
+        "mp_config",
+        "_validity_only",
+    }.intersection(resample_kwargs):
+        raise ValueError(
+            "Use ``at``, ``band``, ``resample_method`` and ``mp_config`` outside ``resample_kwargs``; "
+            "validity is managed internally."
+        )
 
-        # Require every plain array to name the primary input whose locations it follows
-        owner_name = auxiliary_at.get(name) if isinstance(auxiliary_at, Mapping) else auxiliary_at
-        if owner_name is None:
-            raise ValueError(f"auxiliary_at must identify the native support of array auxiliary {name!r}.")
-        if owner_name not in {"self", "other"}:
-            raise ValueError("auxiliary_at values must be 'self' or 'other'.")
-        auxiliary_owners[name] = first if owner_name == "self" else second
-
-    # Choose explicit output locations before using the raster and point conversion direction
-    if isinstance(at, str):
-        if at not in {"self", "other"}:
-            raise ValueError("at must be 'self', 'other' or a geospatial support object.")
-        at = first if at == "self" else second
-    if at is None and raster_point_mode is not None:
-        candidates = []
-        for value in (first, second):
-            attribute = "ij2xy" if raster_point_mode == "grid_points" else "georeferenced_coords_equal"
-            accessor = "rst" if raster_point_mode == "grid_points" else "pc"
-            candidate = value if hasattr(value, attribute) else getattr(value, accessor, None)
-            if candidate is not None:
-                candidates.append(candidate)
-        if len(candidates) != 1:
-            raise ValueError("The conversion mode requires one unambiguous input support; select at explicitly.")
-        at = candidates[0]
-    support = _sampling_support((first, second), at)
+    # 2/ Resolve input locations and define the shared output support
+    inputs = _prepare_cosample_inputs(first, second, band, other_band, auxiliary, auxiliary_at)
+    mask = _normalize_sampling_input(mask)
+    support = _choose_cosample_support(inputs, at, raster_point_mode)
+    _check_cosample_input_types(inputs, support, mask)
 
     # Find the raster or point cloud interface that defines the output locations
-    raster_support = support if hasattr(support, "ij2xy") else getattr(support, "rst", None)
-    point_support = (
-        support
-        if hasattr(support, "georeferenced_coords_equal") and hasattr(support, "data_column")
-        else getattr(support, "pc", None)
-    )
-    # Reject a conversion direction that conflicts with the chosen output locations
-    if (raster_support is not None and raster_point_mode == "resample_raster") or (
-        point_support is not None and raster_point_mode == "grid_points"
-    ):
-        raise ValueError("raster_point_mode conflicts with the grid or point locations selected by at.")
-    if point_support is not None and resample_method == "reduce":
+    support_is_raster = _is_raster(support)
+    if not support_is_raster and resample_method == "reduce":
         raise NotImplementedError(
             "Window reduction in cosample awaits revision of Raster.reduce_points(); "
             "use reduce_points separately in the meantime."
         )
-    if raster_support is not None:
-        # Build output bands on the selected raster grid and give them the same mask
-        return _cosample_on_raster(
-            first,
-            second,
-            support=raster_support,
-            band=band,
-            other_band=other_band,
-            auxiliary=auxiliary,
-            auxiliary_bands=auxiliary_bands,
-            auxiliary_owners=auxiliary_owners,
-            mask=mask,
-            mask_mode=mask_mode,
-            subsample=subsample,
-            random_state=random_state,
-            strategy=strategy,
-            grid_method=grid_method,
-            grid_kwargs=grid_kwargs,
-            align=align,
-        )
-    if point_support is not None:
-        # Build output columns on the selected point coordinates and keep their order
+
+    # 3/ Select execution backend and, for Multiprocessing, keep temporary files alive until the output is complete
+
+    # If any input is Dask but mp_config was passed, raise an error
+    if mp_config is not None:
+        input_values = [input_data.value for input_data in inputs.values()]
+        for value in [*input_values, support, mask]:
+            # Inspect raw collections and spatial metadata without reading file-backed DataArray values
+            lazy = is_dask_array(value) or is_dask_dataframe(value)
+            if has_geo_attr(value, "_chunks", accessors=("rst",)):
+                lazy |= get_geo_attr(value, "_chunks", accessors=("rst",)) is not None
+            if has_geo_attr(value, "_is_dask", accessors=("pc", "vct")):
+                lazy |= get_geo_attr(value, "_is_dask", accessors=("pc", "vct"))
+            if lazy:
+                raise ValueError("Cannot use Multiprocessing and Dask simultaneously in cosample().")
+
+    # Keep temporary files alive until end of execution with ExitStack()
+    with ExitStack() as temporary_files:
+        # Dispatch only the kwargs relevant to the support operation (grid() or interp_points())
+        if support_is_raster:
+            return _cosample_on_raster(
+                first,
+                inputs,
+                support=cast("RasterBase", support),
+                mask=mask,
+                mask_mode=mask_mode,
+                subsample=subsample,
+                random_state=random_state,
+                strategy=strategy,
+                grid_method=grid_method,
+                grid_kwargs=grid_kwargs,
+                align=align,
+                mp_config=mp_config,
+                temporary_files=temporary_files,
+            )
+
         return _cosample_on_points(
             first,
-            second,
-            support=point_support,
-            band=band,
-            other_band=other_band,
-            auxiliary=auxiliary,
-            auxiliary_bands=auxiliary_bands,
-            auxiliary_owners=auxiliary_owners,
+            inputs,
+            support=cast("PointCloudBase", support),
             mask=mask,
             mask_mode=mask_mode,
             subsample=subsample,
             random_state=random_state,
-            resample_method=resample_method,
+            resample_method=cast("InterpolationMethod", resample_method),
             resample_kwargs=resample_kwargs,
             align=align,
+            mp_config=mp_config,
+            temporary_files=temporary_files,
         )
-    raise TypeError("at must select a raster or point cloud support.")
