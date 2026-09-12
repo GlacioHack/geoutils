@@ -3,6 +3,7 @@ from __future__ import annotations
 import os.path
 import re
 import tempfile
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Literal
 
@@ -16,7 +17,7 @@ from scipy.ndimage import binary_dilation
 
 import geoutils as gu
 from geoutils import examples, open_raster
-from geoutils._misc import import_optional, silence_rasterio_message
+from geoutils._misc import silence_rasterio_message
 from geoutils.interface._nodata import NodataPropagation
 from geoutils.interface.interpolation import (
     _get_dist_nodata_spread,
@@ -867,6 +868,7 @@ class TestInterpolate:
         assert np.array_equal(lrl2, lrl3, equal_nan=True)
 
 
+@pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestInterpPointsChunked:
     """Compare point interpolation across eager, Dask and Multiprocessing backends."""
 
@@ -926,7 +928,6 @@ class TestInterpPointsChunked:
         raster_input: Any = raster
         validity_input: Any = validity
         if backend == "dask":
-            import_optional("dask")
             raster_input = raster.to_xarray().chunk({"x": 12, "y": 10}).rst
             validity_input = validity.to_xarray().chunk({"x": 12, "y": 10}).rst
         elif backend == "multiprocessing":
@@ -934,7 +935,9 @@ class TestInterpPointsChunked:
         result = raster_input.interp_points(band=2, as_array=True, _validity_only=True, **options)
         expected = validity_input.interp_points(as_array=True, **options)
         if backend == "dask":
-            result, expected = import_optional("dask").compute(result, expected)
+            import dask
+
+            result, expected = dask.compute(result, expected)
 
         # 3/ Check the exact finite locations and values, including points near holes and outside bounds
         assert result.dtype == np.float32
@@ -990,7 +993,8 @@ class TestInterpPointsChunked:
         Checks that sizing a lazy point result does not interpolate values or discard duplicate labels and geometry.
         """
 
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        import dask_geopandas as dgpd
+
         import geoutils.interface.interpolation as interpolation
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
@@ -1032,8 +1036,6 @@ class TestInterpPointsChunked:
     def test_interp_points__boolean_outside_bounds(self) -> None:
         """Checks that nearest interpolation of booleans returns NaNs outside the raster with every backend."""
 
-        import_optional("dask")
-
         # Alternate true and false pixels and interleave interior points with points beyond the raster
         rows, columns = np.indices((5, 6))
         values = (rows + columns) % 2 == 0
@@ -1065,7 +1067,7 @@ class TestInterpPointsChunked:
     ) -> None:
         """Checks that fractional projected coordinates give exact interpolation values regardless of raster tiling."""
 
-        da = pytest.importorskip("dask.array")
+        import dask.array as da
 
         # Large coordinates and fractional pixels expose rounding from recalculating a tile's local transform
         rows, cols = np.indices((35, 43))
@@ -1091,8 +1093,6 @@ class TestInterpPointsChunked:
     @pytest.mark.parametrize("method", ["nearest", "linear"])
     def test_interp_points__outer_half_pixels(self, method: Literal["nearest", "linear"]) -> None:
         """Checks that every backend keeps points on the raster's outer half pixels."""
-
-        pytest.importorskip("dask.array")
 
         # Locate points on all outer half pixels and just beyond the raster
         raster = gu.Raster.from_array(np.arange(30.0).reshape(5, 6), Affine(1, 0, 0, 0, -1, 5), 32632)
@@ -1145,7 +1145,6 @@ class TestInterpPointsChunked:
          - Points outside of bounds are handled in the wrapper (_interp_points) by returning NaNs.
         """
 
-        pytest.importorskip("dask")
         import dask.array as da
 
         # Get filepath of on-disk (for laziness) test file
@@ -1260,8 +1259,6 @@ class TestInterpPointsChunked:
     ) -> None:
         """Keep each nodata policy identical across eager, Dask and Multiprocessing interpolation."""
 
-        pytest.importorskip("dask")
-
         # Store one invalid central cell so every backend reads the same source metadata
         source = np.arange(81, dtype=np.float32).reshape(9, 9)
         source[4, 4] = np.nan
@@ -1316,7 +1313,6 @@ class TestInterpPointsChunked:
     ) -> None:
         """Interpolate every combination of eager and Dask raster and point-cloud inputs."""
 
-        pytest.importorskip("dask_geopandas")
         import dask.array as da
 
         # Create exact cell-center queries so both interpolation methods have one unambiguous result
@@ -1373,8 +1369,6 @@ class TestInterpPointsChunked:
     def test_interp_points__dask_pointcloud_multiprocessing_error(self, tmp_path: Path) -> None:
         """Reject Multiprocessing when Dask already partitions the point-cloud input."""
 
-        pytest.importorskip("dask_geopandas")
-
         # Store one point source and reopen it lazily through the public helper
         raster = gu.Raster.from_array(
             np.arange(9, dtype=np.float32).reshape(3, 3),
@@ -1404,9 +1398,9 @@ class TestInterpPointsChunked:
     def test_interp_points__dask_pointcloud_input(self, lazy_test_files_tiny: list[str]) -> None:
         """Test interpolation to Dask-GeoPandas point-cloud inputs."""
 
-        # Load the optional lazy dataframe and array types used in assertions
-        dgpd = pytest.importorskip("dask_geopandas")
+        # Load the lazy dataframe and array types used in assertions
         import dask.array as da
+        import dask_geopandas as dgpd
 
         # Compare a loaded Raster with a chunked accessor over the same source
         path_raster = lazy_test_files_tiny[0]
@@ -1448,8 +1442,7 @@ class TestInterpPointsChunked:
     def test_interp_points_las__dask_pointcloud_input(self) -> None:
         """Test interpolation to Dask point-cloud inputs opened from LAS."""
 
-        # This path needs both lazy GeoDataFrames and the LAS reader
-        pytest.importorskip("dask_geopandas")
+        # The class marker covers lazy GeoDataFrames; this case also needs the optional LAS reader
         pytest.importorskip("laspy")
         import dask.array as da
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,6 @@ from affine import Affine
 from shapely.geometry import box
 
 import geoutils as gu
-from geoutils._misc import import_optional
 from geoutils.multiproc import MultiprocConfig
 
 
@@ -432,6 +432,7 @@ class TestGroupedStats:
         pd.testing.assert_frame_equal(result, expected)
 
 
+@pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestGroupedStatsChunked:
     """
     Tests grouped statistics from stats(by=) with Dask and Multiproc inputs.
@@ -447,7 +448,8 @@ class TestGroupedStatsChunked:
         """Checks that fully masked chunks return an empty table and mask mapping."""
 
         # Mask every location while requesting both boolean groups in the result
-        da = pytest.importorskip("dask.array")
+        import dask.array as da
+
         values = da.ones((5, 6), chunks=2)
         table, masks = gu.stats.stats(
             values,
@@ -487,7 +489,8 @@ class TestGroupedStatsChunked:
         )
         config = MultiprocConfig(chunks=4) if backend == "multiproc" else None
         if backend == "dask":
-            da = pytest.importorskip("dask.array")
+            import dask.array as da
+
             values = da.from_array(values, chunks=4)
         result = gu.stats.stats(
             values,
@@ -509,7 +512,8 @@ class TestGroupedStatsChunked:
         """Checks that the Dask backend matches eager calculation and creates group masks only when requested."""
 
         # Calculate an eager reference from three numeric intervals
-        da = pytest.importorskip("dask.array")
+        import dask.array as da
+
         values = np.arange(12, dtype=float).reshape(3, 4)
         grouper = np.arange(12, dtype=float).reshape(3, 4)
         expected = gu.stats.stats(values, by={"x": grouper}, bins={"x": [0, 4, 8, 12]}, statistics="mean")
@@ -544,7 +548,6 @@ class TestGroupedStatsChunked:
         )
         config = MultiprocConfig(chunks=3) if backend == "multiproc" else None
         if backend == "dask":
-            import_optional("dask")
             import dask.array as da
             import dask.dataframe as dd
 
@@ -575,7 +578,6 @@ class TestGroupedStatsChunked:
         )
         config = MultiprocConfig(chunks=2) if backend == "multiproc" else None
         if backend == "dask":
-            import_optional("dask")
             import dask.dataframe as dd
 
             groups = dd.from_pandas(groups, npartitions=2)
@@ -611,7 +613,6 @@ class TestGroupedStatsChunked:
         )
         config = MultiprocConfig(chunks=2) if backend == "multiproc" else None
         if backend == "dask":
-            import_optional("dask")
             import dask.array as da
 
             groups = da.from_array(groups, chunks=2)
@@ -651,7 +652,6 @@ class TestGroupedStatsChunked:
         )
         config = MultiprocConfig(chunks=2) if backend == "multiproc" else None
         if backend == "dask":
-            import_optional("dask")
             import dask.array as da
 
             groups = da.from_array(groups, chunks=2)
@@ -692,7 +692,8 @@ class TestGroupedStatsChunked:
         if source_type == "dataframe":
             points = points.ds.pc
         elif source_type == "dask":
-            dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+            import dask_geopandas as dgpd
+
             from geoutils.pointcloud.pd_accessor import (
                 _register_dask_pointcloud_accessor,
             )
@@ -714,7 +715,6 @@ class TestGroupedStatsChunked:
         """Checks that known Dask categories return their specified order and absent groups like Pandas categories."""
 
         # Declare an unused category so discovering only observed labels would lose part of the requested groups
-        import_optional("dask")
         import dask.dataframe as dd
 
         values = np.array([1.0, 3.0, 5.0, 7.0])
@@ -761,7 +761,6 @@ class TestGroupedStatsChunked:
         )
 
         # Write a point file to disk with height and zone columns, then reopen it as Dask partitions
-        pytest.importorskip("dask_geopandas")
         filename = tmp_path / "points.gpkg"
         points.ds.to_file(filename)
         points = gu.open_pointcloud(str(filename), chunks=2, data_column="height").pc
@@ -785,7 +784,8 @@ class TestGroupedStatsChunked:
         assert table[("points", "count")].tolist() == [1, 2]
         mask = masks["west"]
         mask_values = mask.pc.data
-        dd = pytest.importorskip("dask.dataframe")
+        import dask.dataframe as dd
+
         assert isinstance(mask_values, dd.Series)
         assert not mask.pc.is_loaded
         mask_values = mask_values.compute()
@@ -856,7 +856,8 @@ class TestGroupedStatsChunked:
         )
 
         # Divide the projected points into Dask partitions without changing duplicate labels or row order
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        import dask_geopandas as dgpd
+
         from geoutils.pointcloud.pd_accessor import (
             _register_dask_pointcloud_accessor,
         )
@@ -926,7 +927,6 @@ class TestGroupedStatsChunked:
         # Cross group boundaries with uneven chunks, including differently chunked Dask grouping variables
         config = None
         if backend == "dask":
-            import_optional("dask")
             import dask.array as da
 
             values = {name: da.from_array(array, chunks=(2, 3)) for name, array in values.items()}
@@ -987,7 +987,6 @@ class TestGroupedStatsChunked:
         expected_table, expected_masks = source.stats("sum", by={"zone": (zones, "label")}, return_masks=True)
         config = MultiprocConfig(chunks=(1, 2)) if backend == "multiproc" else None
         if backend == "dask":
-            import_optional("dask")
             import dask.array as da
 
             source = source.to_xarray().chunk({"y": 1, "x": 2}).rst
@@ -1088,7 +1087,8 @@ class TestGroupedStatsChunked:
             if source_type in {"xarray", "dask"}:
                 xarray_source = source.to_xarray()
                 if source_type == "dask":
-                    da = pytest.importorskip("dask.array")
+                    import dask.array as da
+
                     xarray_source = xarray_source.chunk({"band": 1, "y": 3, "x": 2})
                 source = xarray_source.rst
         else:
@@ -1161,7 +1161,8 @@ class TestGroupedStatsChunked:
         elif source_type == "dataframe":
             points = dataframe.pc
         else:
-            dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+            import dask_geopandas as dgpd
+
             from geoutils.pointcloud.pd_accessor import (
                 _register_dask_pointcloud_accessor,
             )
@@ -1192,7 +1193,8 @@ class TestGroupedStatsChunked:
 
         # Create two interleaved groupers and give the selected values a different Dask chunk layout
         pytest.importorskip("flox")
-        da = pytest.importorskip("dask.array")
+        import dask.array as da
+
         values = np.arange(48, dtype=float).reshape(6, 8)
         values[0, 0] = np.nan
         rows, columns = np.indices(values.shape)
@@ -1233,6 +1235,18 @@ class TestGroupedStatsChunked:
 
 class TestGroupedStatsErrors:
     """Test module for errors and warnings raised by grouped statistics."""
+
+    @pytest.mark.skipif(find_spec("flox") is not None, reason="Only runs if flox is missing.")
+    def test_stats__error_missing_flox(self) -> None:
+        """Checks that stats() reports a missing Flox installation when the Flox backend is requested."""
+
+        # Use valid grouped values so the optional backend is the only missing part of the call
+        values = np.arange(6, dtype=float)
+        groups = np.arange(6) % 2
+
+        # Ask for the Flox backend and check that GeoUtils names the package that must be installed
+        with pytest.raises(ImportError, match="Optional dependency 'flox' required.*"):
+            gu.stats.stats(values, "mean", by={"zone": groups}, categories={"zone": [0, 1]}, backend="flox")
 
     @pytest.mark.parametrize(
         "by,bins,categories,message",

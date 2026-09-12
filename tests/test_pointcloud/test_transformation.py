@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib.util import find_spec
 from pathlib import Path
 
 import geopandas as gpd
@@ -12,11 +13,11 @@ from geopandas.testing import assert_geodataframe_equal
 from pyproj import CRS
 
 import geoutils as gu
-from geoutils._misc import import_optional
 from geoutils.multiproc import MultiprocConfig
 from geoutils.multiproc.cluster import MpCluster
 
 
+@pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestReprojectChunked:
     """
     Test module for reproject() for point clouds.
@@ -48,7 +49,7 @@ class TestReprojectChunked:
         File-backed inputs keep their original loaded/unloaded state, and the new file output stays unloaded.
         """
 
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        import dask_geopandas as dgpd
 
         # 1/ Prepare eager, accessor, Dask and multiprocessing inputs from the same 11 points
         # Chunks of 4 or 6 both leave a shorter final chunk, which helps catch dropped/duplicated rows at the joins
@@ -108,9 +109,9 @@ class TestReprojectChunked:
     ) -> None:
         """Checks that LAS/LAZ keep elevations and attributes when intensity is the active value column."""
 
-        laspy = import_optional("laspy")
+        laspy = pytest.importorskip("laspy")
         if output_suffix == ".laz":
-            import_optional("lazrs")
+            pytest.importorskip("lazrs")
 
         # Create both kinds of input used here: GeoPackage keeps height in geometry, while LAS keeps it in Z
         filename = tmp_path / ("source" + source_suffix)
@@ -236,7 +237,7 @@ class TestReprojectChunked:
     ) -> None:
         """Checks that LAS accessor output keeps all attributes and makes intensity or LAS Z active."""
 
-        laspy = import_optional("laspy")
+        laspy = pytest.importorskip("laspy")
 
         # Select intensity, or select geometry height with None; the other point attributes should still be written
         source = self.points.copy()
@@ -321,7 +322,7 @@ class TestReprojectErrors:
     def test_reproject__error_dask_with_multiprocessing(self, tmp_path: Path) -> None:
         """Checks that Dask + multiprocessing is rejected before any Dask partition runs."""
 
-        import_optional("dask_geopandas", package_name="dask-geopandas")
+        pytest.importorskip("dask_geopandas")
         from dask.callbacks import Callback
 
         # Open the file as a Dask dataframe split into several row partitions
@@ -373,7 +374,7 @@ class TestReprojectErrors:
     def test_reproject__error_las_without_elevations(self, tmp_path: Path) -> None:
         """Checks that LAS output rejects 2D points even when they have an active intensity column."""
 
-        import_optional("laspy")
+        pytest.importorskip("laspy")
 
         # Remove Z from the geometry but leave intensity present; intensity must not be used as height by accident
         frame = gpd.GeoDataFrame(
@@ -409,7 +410,7 @@ class TestReprojectErrors:
             column, suffix = "observed_at", ".gpkg"
             frame[column] = pd.date_range("2024-01-01T00:00:00.123456789", periods=3, freq="s")
         else:
-            import_optional("laspy")
+            pytest.importorskip("laspy")
             column, suffix = "intensity", ".las"
             if attribute_kind == "fractional_intensity":
                 frame[column] = np.array([0.5, 1.5, 2.5])

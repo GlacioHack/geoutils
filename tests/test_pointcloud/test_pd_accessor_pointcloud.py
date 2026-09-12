@@ -17,7 +17,6 @@ from pyproj import CRS
 
 import geoutils as gu
 import geoutils.vector.pd_accessor as vector_pd_accessor
-from geoutils._misc import import_optional
 from geoutils.multiproc import MultiprocConfig
 
 
@@ -209,7 +208,7 @@ class TestPointCloudAccessor:
     def test_geometric_methods__dask_geopandas(self, method: str, kwargs: dict[str, object]) -> None:
         """Checks that lazy copies have the same location metadata while cropping and translation recalculate it."""
 
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        dgpd = pytest.importorskip("dask_geopandas")
         from dask.callbacks import Callback
 
         # Open one on-disk source lazily and build the expected result through the eager accessor

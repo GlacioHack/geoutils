@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib.util import find_spec
 from typing import Any
 
 import geopandas as gpd
@@ -12,7 +13,6 @@ from rasterio.transform import from_origin
 from shapely.geometry import box
 
 import geoutils as gu
-from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
 from geoutils.sampling.pairsampling import _RegularPairSampler
 
@@ -200,7 +200,7 @@ class TestPointPairSampling:
         elif mask_form == "xarray":
             mask = xr.DataArray(mask.reshape(12, 12), dims=("row", "column"))
         elif mask_form == "dask":
-            mask = import_optional("dask.array").array.from_array(mask, chunks=17)
+            mask = pytest.importorskip("dask.array").from_array(mask, chunks=17)
 
         # Draw independent endpoints with smaller output number types
         pairs = points.pairsample(
@@ -282,6 +282,7 @@ class TestPointPairSampling:
         assert np.array_equal(np.sort(pairs["index"], axis=1), np.tile([0, 1], (10, 1)))
 
 
+@pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestPairSampleChunked:
     """Checks pairsample() loading behavior and exact results with chunked inputs."""
 
@@ -290,7 +291,8 @@ class TestPairSampleChunked:
         """Checks that local pairs stay in the same actual chunk when interior chunk sizes vary."""
 
         # Use irregular row and column boundaries that differ from a repeated first-chunk grid
-        da = import_optional("dask.array").array
+        import dask.array as da
+
         chunks = ((4, 9, 7), (5, 3, 12))
         eager = np.arange(400, dtype=float).reshape(20, 20)
         array = da.from_array(eager, chunks=chunks)
@@ -318,8 +320,9 @@ class TestPairSampleChunked:
         """Checks that a Dask chunk is read once for both endpoints of a pair."""
 
         # Count reads of one source chunk so separate endpoint computations would be visible
-        dask = import_optional("dask")
-        da = import_optional("dask.array").array
+        import dask
+        import dask.array as da
+
         reads, candidate_counts = [], []
 
         @dask.delayed
@@ -358,7 +361,8 @@ class TestPairSampleChunked:
         """Checks that raster pair sampling reads selected Dask pixels without loading the source."""
 
         # Create one lazy raster chunk so sampling order also has an exact eager reference
-        da = pytest.importorskip("dask.array")
+        import dask.array as da
+
         array = np.arange(600, dtype=float).reshape(24, 25)
         raster = gu.RasterAccessor.from_array(
             da.from_array(array, chunks=array.shape), from_origin(0, 24, 2, 2), 32633, nodata=None
@@ -379,7 +383,8 @@ class TestPairSampleChunked:
         """Checks that nearby Dask pairs stay in one chunk and use the requested number types."""
 
         # Create a lazy raster whose row and column chunks have different sizes
-        da = pytest.importorskip("dask.array")
+        import dask.array as da
+
         array = np.arange(576, dtype=float).reshape(24, 24)
         raster = gu.RasterAccessor.from_array(
             da.from_array(array, chunks=(6, 8)), from_origin(0, 24, 1, 1), 32633, nodata=None
@@ -410,8 +415,9 @@ class TestPairSampleChunked:
         """Checks that spatial masking reads each Dask source partition once during eager pair sampling."""
 
         # Count reads from three source partitions so a second coordinate load would be visible
-        dask = import_optional("dask")
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        import dask
+        import dask_geopandas as dgpd
+
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
         _register_dask_pointcloud_accessor()

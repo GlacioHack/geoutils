@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import warnings
+from importlib.util import find_spec
 from typing import Literal
 from unittest.mock import patch
 
 import numpy as np
 import pytest
 
-from geoutils._misc import import_optional
 from geoutils.multiproc import MultiprocConfig
 from geoutils.sampling.stratified import _stratified_subsample_indices
 from geoutils.sampling.subsampling import _splitmix64
@@ -90,6 +90,7 @@ class TestStratifiedSubsample:
         assert actual_rng.integers(100000) == reference_rng.integers(100000)
 
 
+@pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
 class TestStratifiedSubsampleChunked:
     """Checks stratified subsampling against eager results for Dask arrays and Multiproc chunks."""
 
@@ -111,7 +112,6 @@ class TestStratifiedSubsampleChunked:
         """
 
         # Create repeating group IDs, exclude every seventh location, and add one group containing a single location
-        import_optional("dask")
         import dask.array as da
 
         groups = (np.arange(120) % 4).reshape(shape)
@@ -154,10 +154,9 @@ class TestStratifiedSubsampleChunked:
         """Checks that Multiproc workers combine several task batches and match the positions selected with Dask."""
 
         # Use more than eight tiles so Multiproc processes several task batches and combines their samples
-        from geoutils.multiproc.cluster import MpCluster
-
-        import_optional("dask")
         import dask.array as da
+
+        from geoutils.multiproc.cluster import MpCluster
 
         groups = (np.arange(360) % 7).reshape(18, 20)
         groups[::3, ::4] = -1
@@ -179,7 +178,6 @@ class TestStratifiedSubsampleChunked:
         """Checks that ID -1 and sample sizes rounded to zero return no positions for eager and Dask inputs."""
 
         # Create one input with no valid group ID and another with one valid location in its final Dask block
-        import_optional("dask")
         import dask.array as da
 
         all_excluded = np.full((4, 6), -1)

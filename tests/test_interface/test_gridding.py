@@ -672,6 +672,7 @@ class TestPointCloud:
         assert np.allclose(actual, expected, equal_nan=True)
 
 
+@pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestGridChunked:
     """Compare gridding outputs and loading across eager, Dask and Multiprocessing backends."""
 
@@ -711,7 +712,6 @@ class TestGridChunked:
         The Dask and Multiprocessing inputs must remain unloaded after their results are read.
         """
 
-        pytest.importorskip("dask_geopandas")
         import dask.array as da
 
         # Store one point source for both backends that read partitions from disk
@@ -781,7 +781,6 @@ class TestGridChunked:
         Checks that grid() returns a lazy output when the point source or raster reference uses Dask.
         """
 
-        pytest.importorskip("dask_geopandas")
         import dask.array as da
 
         # Write both inputs so their Dask variants use the same values and georeferencing
@@ -847,7 +846,6 @@ class TestGridChunked:
         """Ensure the Numba calculation engine is identical across eager, Dask and Multiprocessing backends."""
 
         pytest.importorskip("numba")
-        pytest.importorskip("dask_geopandas")
 
         # Store one point source so both chunked backends can select local points
         point_file = tmp_path / "points.gpkg"
@@ -875,8 +873,6 @@ class TestGridChunked:
 
     def test_grid__nodata_propagation_chunked_backends(self, tmp_path: Path) -> None:
         """Ensure nodata propagation is identical across eager, Dask and Multiprocessing gridding."""
-
-        pytest.importorskip("dask_geopandas")
 
         # Add one invalid center to exercise support across output chunk boundaries
         points = self.points.copy()
@@ -906,8 +902,6 @@ class TestGridChunked:
 
     def test_grid__dask_multiprocessing_error(self, tmp_path: Path) -> None:
         """Reject two schedulers for one gridding operation before evaluating point partitions."""
-
-        pytest.importorskip("dask_geopandas")
 
         # A Dask point source already owns task scheduling and cannot use Multiprocessing
         point_file = tmp_path / "points.gpkg"

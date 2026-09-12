@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import warnings
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Literal
 from unittest.mock import patch
@@ -16,7 +17,6 @@ from shapely.geometry import box
 
 import geoutils as gu
 from geoutils import open_raster
-from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
 from geoutils.raster.array import get_mask_from_array
@@ -195,6 +195,7 @@ class TestRasterSubsample:
         np.testing.assert_array_equal(raster.data.mask, original.mask)
 
 
+@pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestSubsampleChunked:
     """Checks subsample() across eager, Dask and Multiproc inputs.
 
@@ -219,7 +220,6 @@ class TestSubsampleChunked:
     ) -> None:
         """Checks that all storage paths follow the same sampling, loading, and repeatability rules."""
 
-        pytest.importorskip("dask")
         import dask.array as da
 
         warnings.filterwarnings("ignore", category=UserWarning, message="Argument ``subsample`` with value*")
@@ -413,7 +413,6 @@ class TestSubsampleChunked:
         """Checks that lazy point sampling gathers the requested values in the same seeded order as NumPy."""
 
         # Give several points the same labels so returned indexes must refer to row positions
-        import_optional("dask_geopandas")
         import dask_geopandas as dgpd
 
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
@@ -476,7 +475,8 @@ class TestSubsampleChunked:
         expected_indices = points.subsample(subsample, return_indices=True, mask=mask, random_state=42)
         source = points
         if lazy:
-            dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+            import dask_geopandas as dgpd
+
             from geoutils.pointcloud.pd_accessor import (
                 _register_dask_pointcloud_accessor,
             )
@@ -504,7 +504,6 @@ class TestSubsampleChunked:
         """Checks that boolean False locations are excluded and topk preserves positions across array chunks."""
 
         # Make both accepted and excluded positions occur in every chunk
-        import_optional("dask")
         import dask.array as da
 
         valid = (np.arange(30) % 4 != 0).reshape(shape)
@@ -550,7 +549,6 @@ class TestSubsampleChunked:
             path = tmp_path / "empty_sample.tif"
             raster.to_file(path)
             if backend == "dask":
-                import_optional("dask")
                 source = open_raster(str(path), chunks={"x": 3, "y": 2}).rst
             else:
                 source = gu.Raster(path)
@@ -567,7 +565,8 @@ class TestSubsampleChunked:
         assert np.array_equal(sampled, expected_sample)
         assert np.array_equal(indices, expected_indices)
         if backend == "dask":
-            da = pytest.importorskip("dask.array")
+            import dask.array as da
+
             assert isinstance(source.data, da.Array) and not source._obj._in_memory
         if backend == "multiprocessing":
             assert not source.is_loaded
@@ -613,7 +612,6 @@ class TestSubsampleChunked:
     ) -> None:
         """Checks that masks and finite data jointly define fractional samples across eager, Dask and worker tiles."""
 
-        import_optional("dask")
         import dask.array as da
 
         from geoutils.multiproc.cluster import MpCluster

@@ -12,7 +12,6 @@ from shapely import LineString, MultiLineString, MultiPolygon, Polygon
 
 import geoutils as gu
 from geoutils import examples
-from geoutils._misc import import_optional
 from geoutils.exceptions import InvalidGridError
 from geoutils.interface import rasterization
 from geoutils.multiproc import MultiprocConfig
@@ -67,7 +66,7 @@ class TestRasterVectorInterface:
     ) -> None:
         """Checks that vector rasterization returns one spatial layer from every multi-band reference type."""
 
-        import_optional("dask")
+        pytest.importorskip("dask")
         import dask.array as da
 
         # Create equivalent native, Xarray and chunked Xarray references with two bands

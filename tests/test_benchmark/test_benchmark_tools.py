@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Literal
 
@@ -44,7 +45,6 @@ from benchmarks.workflows.variography import (
     prepare_variogram_pairs,
 )
 from geoutils import Variogram
-from geoutils._misc import import_optional
 
 
 class TestComparisonReport:
@@ -123,6 +123,7 @@ class TestComparisonReport:
         assert (tmp_path / DOCUMENTATION_DATA).is_file()
 
 
+@pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
 class TestGroupedReferenceChunked:
     """Test module for running grouped benchmark workflows with each execution path."""
 
@@ -135,12 +136,9 @@ class TestGroupedReferenceChunked:
     ) -> None:
         """Checks that GeoUtils and Flox return a complete table from eager and Dask inputs."""
 
-        # Flox is an optional benchmark reference, so skip only its two cases when it is unavailable
+        # Flox is an optional benchmark reference, so leave its two cases out of the base test environment
         if implementation == "flox":
-            try:
-                import_optional("flox", extra_name="benchmark")
-            except ImportError as exc:
-                pytest.skip(str(exc))
+            pytest.importorskip("flox")
 
         # Prepare four groups from small arrays, then run the same entry point used by the benchmark classes
         inputs = prepare_grouped_reference(16, 2, "interleaved", execution_mode)
@@ -204,6 +202,7 @@ class TestVariographyWorkflows:
         assert np.isfinite(pairs["distance"]).all()
 
 
+@pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
 class TestPairRasterChunked:
     """Test module for running raster pair sampling with Dask input."""
 

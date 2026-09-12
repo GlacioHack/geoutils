@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +14,6 @@ from rasterio.transform import from_origin
 from shapely.geometry import box
 
 import geoutils as gu
-from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
 from geoutils.sampling.support import (
@@ -259,6 +259,7 @@ class TestSupport:
         assert np.array_equal(result, [True, True, False, False, True])
 
 
+@pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
 class TestSupportChunked:
     """
     Test module checking that the support helpers respect Dask/MP chunked execution and that their values exactly
@@ -268,7 +269,6 @@ class TestSupportChunked:
     def test_values_at_support__backends(self, tmp_path: Path) -> None:
         """Checks that Dask and Multiproc raster alignment exactly matches eager without loading the inputs."""
 
-        import_optional("dask")
         import dask.array as da
 
         # Create a two-band raster with one nodata pixel, and shift the selected support by one column
@@ -333,7 +333,6 @@ class TestSupportChunked:
     def test_mask_at_support__backends(self, tmp_path: Path) -> None:
         """Checks that Dask and Multiproc vector masks exactly match eager without loading the support grids."""
 
-        import_optional("dask")
         import dask.array as da
 
         # Create a raster support and a polygon that covers its first three columns

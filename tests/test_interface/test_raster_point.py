@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from importlib.util import find_spec
 
 import numpy as np
 import pytest
@@ -10,7 +11,6 @@ import rasterio as rio
 
 import geoutils as gu
 from geoutils import examples
-from geoutils._misc import import_optional
 
 
 class TestRasterPointInterface:
@@ -239,6 +239,7 @@ class TestRasterPointInterface:
             gu.Raster.from_pointcloud_regular(pc1)
 
 
+@pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
 class TestToPointcloudChunked:
     """
     Test module for comparing to_pointcloud() outputs from eager and Dask rasters.
@@ -252,7 +253,6 @@ class TestToPointcloudChunked:
     def test_to_pointcloud__eager_samples_keep_lazy_source(self, subsample: int, as_array: bool) -> None:
         """Checks that point sampling returns exact eager values without loading or replacing the Dask source."""
 
-        import_optional("dask")
         import dask.array as da
 
         # Include a missing pixel and uneven chunks to check the mask and deterministic sample order

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,6 @@ from rasterio.transform import from_origin
 from shapely.geometry import box
 
 import geoutils as gu
-from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
 
@@ -603,6 +603,7 @@ class TestPointCosampleSupport:
         assert_geodataframe_equal(points.ds, original)
 
 
+@pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestCosampleChunked:
     """Test module for cosample() with Dask and Multiproc backends: loading behavior and exact equality with eager."""
 
@@ -610,10 +611,9 @@ class TestCosampleChunked:
     def test_cosample__dask_point_auxiliaries_on_raster(self, auxiliary_type: str) -> None:
         """Checks that lazy point gridding assigns array or column auxiliaries to the correct raster pixels."""
 
-        import_optional("dask")
         import dask.array as da
+        import dask_geopandas as dgpd
 
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
         # Give every pixel one point and a distinct auxiliary value, using duplicate labels to expose index alignment
@@ -663,8 +663,6 @@ class TestCosampleChunked:
         """Checks that Dask point gridding returns the same seeded sample as eager gridding for each chunk size."""
 
         # Place one point at each grid pixel so the nearest-neighbor gridding is exact
-        pytest.importorskip("dask.array")
-        pytest.importorskip("dask_geopandas")
         values = np.arange(65 * 97, dtype=float).reshape(65, 97)
         raster = _raster(values)
         points = raster.to_pointcloud()
@@ -854,7 +852,8 @@ class TestCosampleChunked:
         # Cosample eager or Dask rasters with the user mask supplied as an array or raster
         source = first
         if lazy:
-            da = pytest.importorskip("dask.array")
+            import dask.array as da
+
             source = gu.RasterAccessor.from_array(
                 da.from_array(data.astype(float).filled(np.nan), chunks=(2, 3)), first.transform, first.crs
             ).rst
@@ -880,7 +879,8 @@ class TestCosampleChunked:
         """Checks that Dask output stays lazy and topk does not depend on chunk sizes."""
 
         # Create the two Dask rasters with different chunk layouts
-        da = pytest.importorskip("dask.array")
+        import dask.array as da
+
         array = np.arange(63, dtype=float).reshape(7, 9)
         transform = from_origin(0, 7, 1, 1)
         first = gu.RasterAccessor.from_array(da.from_array(array, chunks=(2, 4)), transform, 32633)
@@ -915,7 +915,6 @@ class TestCosampleChunked:
         Checks that Multiproc does not load raster inputs and matches eager and Dask results for each mask.
         """
 
-        import_optional("dask")
         from geoutils.multiproc.cluster import MpCluster
 
         # 1/ Create selected bands, auxiliary values, and masks with nodata at different locations
@@ -1032,7 +1031,8 @@ class TestCosampleChunked:
         source: Any = points
         other: Any = raster.to_xarray()
         if lazy:
-            dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+            import dask_geopandas as dgpd
+
             from geoutils.pointcloud.pd_accessor import (
                 _register_dask_pointcloud_accessor,
             )
@@ -1110,10 +1110,9 @@ class TestCosampleChunked:
     def test_cosample__dask_point_partitions(self, subsample: int | float, mask_type: str) -> None:
         """Checks that values, labels and 3D geometry match eager across Dask point partitions."""
 
-        import_optional("dask")
         import dask.array as da
+        import dask_geopandas as dgpd
 
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
         # 1/ Prepare point columns and independent geometry elevations on known raster pixels
@@ -1188,8 +1187,8 @@ class TestCosampleChunked:
     ) -> None:
         """Checks that Dask reads raster validity first and waits to interpolate the selected values."""
 
-        import_optional("dask")
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        import dask_geopandas as dgpd
+
         import geoutils.interface.interpolation as interpolation
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
@@ -1243,8 +1242,8 @@ class TestCosampleChunked:
     def test_cosample__mixed_eager_and_dask_inputs(self, lazy_input: str, caller: str) -> None:
         """Checks that eager and Dask raster and point inputs can be used together."""
 
-        import_optional("dask")
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        import dask_geopandas as dgpd
+
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
         # Place observations on known raster pixels so interpolation and point values have exact references
@@ -1272,7 +1271,8 @@ class TestCosampleChunked:
 
         # Check input and output loading before comparing every row with eager
         if lazy_input == "raster":
-            da = pytest.importorskip("dask.array")
+            import dask.array as da
+
             assert isinstance(raster_input.data, da.Array)
         else:
             assert not point_input.pc.is_loaded and not result.pc.is_loaded
@@ -1472,7 +1472,7 @@ class TestCosampleErrors:
         """Checks that Dask inputs cannot be combined with Multiproc output."""
 
         # Pass a Dask input in each input position while the other arguments are eager
-        import_optional("dask")
+        pytest.importorskip("dask")
         raster = _raster(np.arange(30, dtype=float).reshape(5, 6))
         eager = raster.to_xarray()
         lazy = eager.chunk({"y": 2, "x": 3})

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import warnings
 from functools import partial
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, cast
 
@@ -13,7 +14,6 @@ import pytest
 from affine import Affine
 
 import geoutils as gu
-from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
 from geoutils.multiproc.readers import _ValueReader
@@ -245,6 +245,7 @@ class TestReduction:
         }
 
 
+@pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
 class TestReductionChunked:
     """
     Tests reductions split across Dask chunks or Multiproc tiles.
@@ -278,7 +279,8 @@ class TestReductionChunked:
         # Store the same values in Dask chunks or ask Multiproc to read NumPy tiles
         config = None
         if backend == "dask":
-            da = pytest.importorskip("dask.array")
+            import dask.array as da
+
             values = [da.from_array(first, chunks=(2, 4)), da.from_array(second, chunks=(3, 2))]
             group_ids = da.from_array(group_ids, chunks=(3, 3))
         else:
@@ -407,7 +409,8 @@ class TestReductionChunked:
         expected, _ = _reduce_values([values], statistics, group_ids=group_ids, total_groups=4, strategy="groupwise")
         config = MultiprocConfig(chunks=6) if backend == "multiproc" else None
         if backend == "dask":
-            da = pytest.importorskip("dask.array")
+            import dask.array as da
+
             values = da.from_array(values, chunks=6)
             group_ids = da.from_array(group_ids, chunks=5)
 
@@ -440,7 +443,8 @@ class TestReductionChunked:
         expected, _ = _reduce_values([source], statistics)
         config = MultiprocConfig(chunks=(1, 2)) if backend == "multiproc" else None
         if backend == "dask":
-            da = pytest.importorskip("dask.array")
+            import dask.array as da
+
             source = da.from_array(source, chunks=(1, 2))
 
         # Reduce separate blocks without squaring in the original integer data type
@@ -466,7 +470,8 @@ class TestReductionChunked:
         expected, _ = _reduce_values([source], statistics, group_ids=group_ids, total_groups=4, strategy=strategy)
         config = MultiprocConfig(chunks=2) if backend == "multiproc" else None
         if backend == "dask":
-            da = pytest.importorskip("dask.array")
+            import dask.array as da
+
             source = da.from_array(source, chunks=2)
             group_ids = da.from_array(group_ids, chunks=3)
 
@@ -502,7 +507,8 @@ class TestReductionChunked:
             expected, _ = _reduce_values([source], statistics)
         config = MultiprocConfig(chunks=2) if backend == "multiproc" else None
         if backend == "dask":
-            da = pytest.importorskip("dask.array")
+            import dask.array as da
+
             source = da.from_array(source, chunks=2)
 
         # Keep undefined sums and a zero valid count after reducing separate chunks
@@ -520,7 +526,8 @@ class TestReductionChunked:
         """Checks that merging Dask chunks preserves small variation around a large base value."""
 
         # Values near 1e8 expose unstable variance formulas that subtract two large squared totals
-        da = pytest.importorskip("dask.array")
+        import dask.array as da
+
         values = 1e8 + np.random.default_rng(42).normal(scale=0.1, size=3000)
         group_ids = np.arange(values.size) % 3
         statistics = _normalize_statistics("std")
@@ -542,8 +549,9 @@ class TestReductionChunked:
         """Checks that groupwise Dask reduction reads only blocks containing a requested group."""
 
         # Record value blocks read after group locations are known and reject the excluded final block
-        dask = pytest.importorskip("dask")
-        da = pytest.importorskip("dask.array")
+        import dask
+        import dask.array as da
+
         reads = []
 
         def read_values(block: int) -> NDArrayNum:
@@ -570,7 +578,6 @@ class TestReductionChunked:
         """Checks that the optional native Dask reductions are lazy and match the shared GeoUtils reducer."""
 
         # Include nodata values across uneven chunks and request every numerical estimator
-        import_optional("dask")
         import dask
         import dask.array as da
 
@@ -651,7 +658,8 @@ class TestReductionChunked:
         """Checks mergeable statistics across local, interleaved, uneven and oversized Dask chunks."""
 
         # Create exact quarter-step values with separate nodata patterns
-        da = pytest.importorskip("dask.array")
+        import dask.array as da
+
         rows, columns = np.indices(shape)
         positions = rows * shape[1] + columns
         first = 20 + (positions % 97) * 0.25
@@ -685,7 +693,8 @@ class TestReductionChunked:
         """Checks that automatic sparse reduction keeps widely separated group IDs distinct."""
 
         # Use three group IDs from a space just above the automatic dense threshold
-        da = pytest.importorskip("dask.array")
+        import dask.array as da
+
         total_groups = 4097
         labels = np.array([0, total_groups // 2, total_groups - 1])
         values = np.arange(30, dtype=float)

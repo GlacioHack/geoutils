@@ -14,7 +14,6 @@ from pyproj import CRS
 from rasterio.transform import from_origin
 
 import geoutils as gu
-from geoutils._misc import import_optional
 from geoutils.multiproc import ClusterGenerator, MultiprocConfig
 from geoutils.multiproc.readers import (
     _read_values,
@@ -141,7 +140,7 @@ class TestValueReaderChunked:
     def test_value_reader__las_rows(self, column: str, tmp_path: Path) -> None:
         """Checks that LAS row slices return exact elevations and integer attributes while the source is not loaded."""
 
-        laspy = import_optional("laspy")
+        laspy = pytest.importorskip("laspy")
 
         # Write a LAS file to disk with scaled Z elevations and separate integer intensity values
         header = laspy.LasHeader(point_format=6, version="1.4")

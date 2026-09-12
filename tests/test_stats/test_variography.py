@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from importlib.util import find_spec
 from pathlib import Path
 
 import numpy as np
@@ -76,6 +77,8 @@ class TestVariogramStorage:
     def test_from_pairs_discards_pair_data(self) -> None:
         """Checks that from_pairs() keeps per-distance results and releases individual pairs."""
 
+        pytest.importorskip("skgstat")
+
         # Create twenty pairs with a constant endpoint difference of two
         values = np.column_stack((np.arange(20, dtype=float), np.arange(20, dtype=float) + 2))
         pairs = xr.Dataset(
@@ -94,6 +97,8 @@ class TestVariogramStorage:
 
     def test_from_pairs_uses_sampled_distance_limits_for_stable_bins(self) -> None:
         """Checks that from_pairs() uses requested distance limits as repeatable bin edges."""
+
+        pytest.importorskip("skgstat")
 
         # Store requested limits that extend beyond the distances drawn in this pair sample
         pairs = xr.Dataset(
@@ -173,6 +178,8 @@ class TestVariogramEstimation:
     def test_object_variogram_aggregates_runs_and_fits_summed_model(self) -> None:
         """Checks that Raster.variogram() combines repeated samples and fits a summed model."""
 
+        pytest.importorskip("skgstat")
+
         # Create a smooth raster with variation in both grid directions
         y, x = np.mgrid[:35, :35]
         raster = gu.Raster.from_array(
@@ -197,6 +204,8 @@ class TestVariogramEstimation:
     @pytest.mark.parametrize("n_runs", [1, 3])
     def test_variogram_repetitions_match_independent_samples(self, n_runs: int) -> None:
         """Checks that repeated pair samples combine their values, counts, and sampling errors."""
+
+        pytest.importorskip("skgstat")
 
         # Reproduce each pair sample separately with fixed distance bin edges
         y, x = np.mgrid[:20, :20]
@@ -260,6 +269,8 @@ class TestVariogramEstimation:
     def test_pointcloud_variogram_and_advanced_pairs_share_api(self) -> None:
         """Checks that PointCloud exposes both pair samples and their reduced variogram values."""
 
+        pytest.importorskip("skgstat")
+
         # Create point values that vary smoothly in both coordinate directions
         y, x = np.mgrid[:18, :18]
         pointcloud = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), (np.sin(x / 3) + np.cos(y / 5)).ravel(), crs=32633)
@@ -283,6 +294,8 @@ class TestVariogramConversion:
     def test_model_evaluation_and_gpytorch_parameters(self) -> None:
         """Checks that a Gaussian model gives the expected zero-distance values and GPyTorch length scale."""
 
+        pytest.importorskip("skgstat")
+
         # Create a Gaussian model with no measured values on the first two coordinate columns
         result = gu.Variogram.from_model("gaussian", effective_range=12, partial_sill=3, nugget=0.2, active_dims=(0, 1))
         parameters = result.gpytorch_parameters()
@@ -296,6 +309,8 @@ class TestVariogramConversion:
 
     def test_product_model_multiplies_covariances(self) -> None:
         """Checks that a product model multiplies component covariances and keeps one nugget."""
+
+        pytest.importorskip("skgstat")
 
         # Combine spatial and temporal models that use different coordinate columns
         spatial = gu.Variogram.from_model("gaussian", effective_range=10, partial_sill=2, active_dims=(0, 1))
@@ -313,6 +328,8 @@ class TestVariogramConversion:
 
     def test_skgstat_estimation_can_discard_or_keep_backend(self) -> None:
         """Checks that direct SciKit-GStat estimation keeps its source object only when requested."""
+
+        pytest.importorskip("skgstat")
 
         # Estimate the same coordinate values with and without keeping the SciKit-GStat object
         coordinates = np.linspace(0, 10, 40)[:, np.newaxis]
@@ -355,6 +372,8 @@ class TestVariogramConversion:
     def test_gstools_conversion_keeps_sum_and_common_active_dims(self) -> None:
         """Checks that summed GSTools models share coordinate columns and one parent nugget."""
 
+        pytest.importorskip("gstools")
+
         # Sum two models that use the same two coordinate columns
         first = gu.Variogram.from_model("gaussian", 8, 2, active_dims=(0, 1))
         second = gu.Variogram.from_model("exponential", 20, 3, active_dims=(0, 1))
@@ -368,6 +387,40 @@ class TestVariogramConversion:
 
 class TestVariogramErrors:
     """Test module for validation errors raised by variogram storage, estimation, and conversion."""
+
+    @pytest.mark.skipif(find_spec("skgstat") is not None, reason="Only runs if scikit-gstat is missing.")
+    def test_estimate__error_missing_scikit_gstat(self) -> None:
+        """Checks that estimate() reports a missing SciKit-GStat installation."""
+
+        # Give estimate() enough valid observations so it can proceed directly to the optional backend
+        coordinates = np.arange(4, dtype=float)[:, np.newaxis]
+        values = np.arange(4, dtype=float)
+
+        # Check that GeoUtils names the installable package (its Python import is called skgstat)
+        with pytest.raises(ImportError, match="Optional dependency 'scikit-gstat' required.*"):
+            gu.Variogram.estimate(coordinates, values)
+
+    @pytest.mark.skipif(find_spec("gstools") is not None, reason="Only runs if gstools is missing.")
+    def test_to_gstools__error_missing_dependency(self) -> None:
+        """Checks that to_gstools() reports a missing GSTools installation."""
+
+        # Build a complete fitted model without importing any conversion backend
+        variogram = gu.Variogram.from_model("gaussian", effective_range=10, partial_sill=2)
+
+        # Check the error raised when the requested output package is unavailable
+        with pytest.raises(ImportError, match="Optional dependency 'gstools' required.*"):
+            variogram.to_gstools()
+
+    @pytest.mark.skipif(find_spec("gpytorch") is not None, reason="Only runs if gpytorch is missing.")
+    def test_to_gpytorch__error_missing_dependency(self) -> None:
+        """Checks that to_gpytorch() reports a missing GPyTorch installation."""
+
+        # Build a complete fitted model without importing any conversion backend
+        variogram = gu.Variogram.from_model("gaussian", effective_range=10, partial_sill=2)
+
+        # Check the error raised when the requested output package is unavailable
+        with pytest.raises(ImportError, match="Optional dependency 'gpytorch' required.*"):
+            variogram.to_gpytorch()
 
     def test_variogram__error_read_only_arrays(self) -> None:
         """Checks that callers cannot modify arrays stored by a Variogram."""
@@ -408,6 +461,8 @@ class TestVariogramErrors:
 
     def test_gstools_conversion__error_component_specific_dimensions(self) -> None:
         """Checks that GSTools conversion rejects components that use different coordinate columns."""
+
+        pytest.importorskip("gstools")
 
         # Combine spatial and temporal models that select different columns
         spatial = gu.Variogram.from_model("gaussian", 8, 2, active_dims=(0, 1))

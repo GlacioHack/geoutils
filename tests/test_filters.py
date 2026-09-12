@@ -516,6 +516,7 @@ def test_filter_against_center_value(method: str, np_filter: Callable[[NDArrayNu
     assert np.isclose(np_filter(arr), arr_filtered[1, 1], atol=1e-8)
 
 
+@pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
 class TestFilterChunked:
 
     @pytest.mark.parametrize("path_index", [0, 2])
@@ -537,7 +538,6 @@ class TestFilterChunked:
           floating summation orderso we use allclose.
         """
 
-        pytest.importorskip("dask")
         import dask.array as da
 
         # Get raster path

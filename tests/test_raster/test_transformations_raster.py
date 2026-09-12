@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import warnings
+from importlib.util import find_spec
 from typing import Any, Literal
 
 import matplotlib.pyplot as plt
@@ -825,11 +826,9 @@ class TestMaskGeotransformations:
         assert np.all(res.data.data)
 
 
+@pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
 class TestReprojectChunked:
     """Compare Dask and multiprocessing reprojection with the eager raster implementation."""
-
-    pytest.importorskip("dask")
-    import dask.array as da
 
     @pytest.mark.parametrize("load_source", [False, True])
     def test_reproject__multiprocessing_logical_mask(self, tmp_path: Any, load_source: bool) -> None:

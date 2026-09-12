@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,6 @@ from rasterio.transform import from_origin
 from shapely.geometry import box
 
 import geoutils as gu
-from geoutils._misc import import_optional
 from geoutils.multiproc import ClusterGenerator, MultiprocConfig
 
 
@@ -43,7 +43,7 @@ def stats_file(request: pytest.FixtureRequest, tmp_path: Path) -> tuple[Any, Any
     filename = tmp_path / f"statistics.{request.param}"
     if request.param == "las":
         # Write a LAS file to disk with values in attributes separate from the point coordinates
-        laspy = import_optional("laspy")
+        laspy = pytest.importorskip("laspy")
         header = laspy.LasHeader(point_format=6, version="1.4")
         header.add_crs(CRS.from_epsg(32633))
         for name, dtype in (("first", "float64"), ("second", "float64"), ("group", "int32")):
@@ -222,7 +222,7 @@ class TestSelection:
         if container == "dataframe":
             source, keep, groups = (array.to_frame() for array in (source, keep, groups))
         elif container == "dask_series":
-            import_optional("dask")
+            pytest.importorskip("dask")
             import dask.array as da
             import dask.dataframe as dd
 
@@ -262,6 +262,7 @@ class TestSelection:
         np.testing.assert_allclose(grouped["value"], [[1, 1, 2], [2, 5, 2]])
 
 
+@pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestSelectionChunked:
     """
     Checks stats() input selection with Dask and Multiproc inputs.
@@ -274,7 +275,6 @@ class TestSelectionChunked:
         """Checks that a masked Dask raster gives computed values and the same counts as eager data."""
 
         # Use mismatched data and mask chunks so masking also checks automatic chunk alignment
-        import_optional("dask")
         import dask.array as da
         import xarray as xr
 
@@ -302,7 +302,6 @@ class TestSelectionChunked:
         import geopandas as gpd
         from shapely.geometry import box
 
-        import_optional("dask_geopandas", package_name="dask-geopandas")
         points = gu.PointCloud.from_xyz(
             np.array([0.5, 1.5, 2.0, 2.5]), np.ones(4), np.array([10.0, 20.0, 30.0, 40.0]), crs=32633
         )
@@ -326,7 +325,6 @@ class TestSelectionChunked:
         """Checks that one stats() call returns computed summaries for mixed eager and Dask values."""
 
         # Select the same locations from eager and Dask values with distinct scales
-        import_optional("dask")
         import dask.array as da
 
         eager = np.array([1.0, np.nan, 3.0, 4.0, 5.0, 6.0])
@@ -653,7 +651,7 @@ class TestSelectionErrors:
             gu.stats.stats(values, "mean", mask=pd.DataFrame(np.ones(values.shape, dtype=int)), **options)
 
         # Check that a Dask Series is rejected before the Multiproc backend starts any workers
-        import_optional("dask")
+        pytest.importorskip("dask")
         import dask.dataframe as dd
 
         lazy_values = dd.from_pandas(pd.Series(np.arange(6, dtype=float)), npartitions=2)

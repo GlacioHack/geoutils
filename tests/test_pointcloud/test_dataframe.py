@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib.util import find_spec
 from typing import Any
 
 import geopandas as gpd
@@ -12,7 +13,6 @@ from numpy.typing import NDArray
 from rasterio.coords import BoundingBox
 
 from geoutils._dispatch import is_dask_dataframe
-from geoutils._misc import import_optional
 from geoutils.pointcloud.dataframe import (
     _assign_point_values,
     _build_pointcloud_output,
@@ -163,6 +163,7 @@ class TestPointDataframe:
         assert_geodataframe_equal(result, expected)
 
 
+@pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestPointDataframeChunked:
     """
     Test module for lazy metadata, output construction, partition alignment, assignment and row selection.
@@ -173,7 +174,7 @@ class TestPointDataframeChunked:
     def test_dataframe_attrs__dask_private_copy(self) -> None:
         """Checks that Dask metadata is copied and can be read without running any tasks."""
 
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        import dask_geopandas as dgpd
         from dask.callbacks import Callback
 
         # Make a lazy point table and check that it starts with no GeoUtils metadata
@@ -196,7 +197,7 @@ class TestPointDataframeChunked:
     def test_build_pointcloud_output__dask_metadata(self, preserve_locations: bool) -> None:
         """Checks that lazy output metadata changes without reading any Dask partitions."""
 
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        import dask_geopandas as dgpd
         from dask.callbacks import Callback
 
         # Start with a known point count and bounds for the input coordinates
@@ -235,7 +236,7 @@ class TestPointDataframeChunked:
     def test_build_pointcloud_output__dask_to_pointcloud(self) -> None:
         """Checks that asking for a PointCloud computes Dask rows and returns the same eager data."""
 
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        import dask_geopandas as dgpd
 
         # Split the rows into three partitions so making an eager PointCloud has work to compute
         frame = _make_point_frame()
@@ -255,11 +256,9 @@ class TestPointDataframeChunked:
     def test_point_rows__reuse_partition_layout(self, partitions: int, native_series: bool) -> None:
         """Checks that Dask assignment and row selection stay lazy with repeated labels and known row counts."""
 
-        import_optional("dask")
         import dask.array as da
+        import dask_geopandas as dgpd
         from dask.callbacks import Callback
-
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
 
         # Repeat index labels and use uneven partitions (matching by label would put values on the wrong rows)
         positions = np.arange(40)
@@ -296,7 +295,6 @@ class TestPointDataframeChunked:
     def test_assign_point_values__dask_values_to_eager_rows(self) -> None:
         """Checks that Dask values are computed before they are added to an eager dataframe."""
 
-        import_optional("dask")
         import dask.array as da
 
         # Put the values in Dask chunks of 4 + 2
@@ -314,10 +312,8 @@ class TestPointDataframeChunked:
     def test_assign_point_values__empty_dask_dataframe(self) -> None:
         """Checks that an empty Dask point table accepts an empty value array and keeps its dtype."""
 
-        import_optional("dask")
         import dask.array as da
-
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        import dask_geopandas as dgpd
 
         # Make a zero-row point table that still has geometry/CRS, plus an empty int16 value array
         frame = _make_point_frame(0)
@@ -337,10 +333,9 @@ class TestPointDataframeChunked:
     def test_assign_point_values__unknown_array_length(self) -> None:
         """Checks that a Dask array with an unknown length is split to match the point partitions."""
 
-        dask = import_optional("dask")
+        import dask
         import dask.array as da
-
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        import dask_geopandas as dgpd
 
         # Put the values behind a delayed task, so Dask reports the array length as unknown
         frame = _make_point_frame()
@@ -360,7 +355,7 @@ class TestPointDataframeChunked:
     def test_select_point_rows__integer_partition_boundaries(self) -> None:
         """Checks that sorted row numbers cross Dask partitions and keep a row requested twice."""
 
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        import dask_geopandas as dgpd
         from dask.callbacks import Callback
 
         # Pick rows from all three two-row partitions, and ask for position 2 twice
@@ -408,7 +403,7 @@ class TestPointDataframeErrors:
     ) -> None:
         """Checks that lazy row selection rejects 2D, unsorted and out-of-range row numbers."""
 
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        dgpd = pytest.importorskip("dask_geopandas")
 
         # Try a 2D array, decreasing row numbers, -1 or 6 on a dataframe with rows 0..5
         lazy = dgpd.from_geopandas(_make_point_frame(), npartitions=3, sort=False)
@@ -422,10 +417,10 @@ class TestPointDataframeErrors:
     def test_point_array_partitions__error_invalid_partition_lengths(self, lengths: tuple[int, ...]) -> None:
         """Checks that array alignment rejects a missing partition count and a negative row count."""
 
-        import_optional("dask")
+        pytest.importorskip("dask")
         import dask.array as da
 
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        dgpd = pytest.importorskip("dask_geopandas")
 
         # Pair six valid values with either one count for three partitions or the counts (2, -1, 5)
         lazy = dgpd.from_geopandas(_make_point_frame(), npartitions=3, sort=False)
@@ -439,7 +434,7 @@ class TestPointDataframeErrors:
     def test_point_array_partitions__error_invalid_value_shape(self, values: NDArray[Any]) -> None:
         """Checks that array alignment rejects five values for six rows and a two-dimensional array."""
 
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        dgpd = pytest.importorskip("dask_geopandas")
 
         # Try either five values for six points or a 6 x 2 array with two values per point
         lazy = dgpd.from_geopandas(_make_point_frame(), npartitions=3, sort=False)
@@ -452,7 +447,7 @@ class TestPointDataframeErrors:
     def test_assign_point_values__error_invalid_dask_series(self, kind: str) -> None:
         """Checks that Dask values must be a Series with the same three partitions as the points."""
 
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        dgpd = pytest.importorskip("dask_geopandas")
 
         # Pass either a 2D dataframe or a Series split into two partitions instead of three
         lazy = dgpd.from_geopandas(_make_point_frame(), npartitions=3, sort=False)
@@ -469,7 +464,7 @@ class TestPointDataframeErrors:
     def test_select_point_rows__error_invalid_dask_mask(self) -> None:
         """Checks that a Dask boolean mask must have the same partitions as the point dataframe."""
 
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        dgpd = pytest.importorskip("dask_geopandas")
 
         # Split the mask into two partitions while the point dataframe still has three
         lazy = dgpd.from_geopandas(_make_point_frame(), npartitions=3, sort=False)
