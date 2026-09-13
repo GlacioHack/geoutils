@@ -361,9 +361,18 @@ def _sample_vector_values(
 
     # Rasterize feature row numbers starting at one, reserving zero for cells outside all features
     if _is_raster(support):
+        from geoutils.vector.vector import Vector
+
         indexes = np.arange(1, len(values) + 1)
-        rasterize = get_geo_attr(dataframe, "rasterize", accessors=("vct",))
-        raster = rasterize(ref=support, in_value=indexes.tolist(), out_value=0, out_dtype=np.int32, mp_config=mp_config)
+
+        # Use a plain Vector so loading a multiprocessing result closes its file before the output path is reused
+        raster = Vector(dataframe).rasterize(
+            ref=support,
+            in_value=indexes.tolist(),
+            out_value=0,
+            out_dtype=np.int32,
+            mp_config=mp_config,
+        )
 
         # Replace feature numbers with their values, and replace zero with NaN
         codes = _selected_raster_data(raster).astype(np.int64)
