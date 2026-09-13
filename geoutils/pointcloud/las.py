@@ -720,15 +720,40 @@ def _write_laspy_dask_dataframe(
 
 def _write_laspy_temp_chunk(
     filename: str | pathlib.Path,
-    pc: gpd.GeoDataFrame | pd.DataFrame,
+    pc: gpd.GeoDataFrame | pd.DataFrame | str | pathlib.Path,
     data_column: str | None,
     header: Any,
+    check_attributes: bool = False,
 ) -> str:
-    """Write one worker-owned dataframe partition to a temporary LAS file."""
+    """Write one dataframe or saved dataframe partition to a temporary LAS file."""
+
+    # Load saved partitions inside the worker so the parent process only sends their small filenames
+    saved_partition = pd.read_pickle(pc) if isinstance(pc, (str, pathlib.Path)) else pc
+    dataframe = _as_geodataframe(saved_partition)
+
+    # Check conversions that must preserve every attribute before saving the encoded LAS records
+    if check_attributes:
+        try:
+            encoded = _dataframe_to_lasdata(dataframe, data_column=data_column, header=header)
+        except OverflowError as error:
+            raise ValueError(
+                "LAS output cannot preserve point attributes with the selected dimension types."
+            ) from error
+
+        columns = [column for column in dataframe.columns if column not in (dataframe.geometry.name, data_column)]
+        for column in columns:
+            expected_values = dataframe[column].to_numpy()
+            encoded_values = np.asarray(encoded[column])
+            equal_values = expected_values.astype(object) == encoded_values.astype(object)
+            equal_values |= pd.isna(expected_values) & pd.isna(encoded_values)
+            if not np.all(equal_values):
+                raise ValueError(f"LAS output cannot preserve the values in column {column!r} with its dimension type.")
+        encoded.write(filename)
+        return os.fspath(filename)
 
     _write_laspy_dataframe(
         filename=filename,
-        pc=pc,
+        pc=dataframe,
         data_column=data_column,
         header=header,
         chunks=None,
@@ -758,23 +783,26 @@ def _stitch_laspy_files(
 
 def _write_laspy_multiproc_partitions(
     filename: str | pathlib.Path,
-    pc: gpd.GeoDataFrame | pd.DataFrame,
+    partitions: Iterable[gpd.GeoDataFrame | pd.DataFrame | str | pathlib.Path],
     data_column: str | None,
     header: Any,
     chunks: int,
     cluster: Any,
+    check_attributes: bool = False,
 ) -> None:
-    """Write eager row partitions in workers, then stitch them in source order."""
+    """Write dataframe partitions in workers, then stitch them in their supplied order."""
 
     if chunks <= 0:
         raise ValueError("Argument 'chunks' must be a strictly positive integer.")
 
     # Workers write independent files because concurrent writes to one LAS stream are unsafe
     with tempfile.TemporaryDirectory() as tmp_dir:
-        tmp_paths = [pathlib.Path(tmp_dir) / f"chunk_{index}.las" for index, _ in enumerate(range(0, len(pc), chunks))]
         futures = []
-        for tmp_path, part in zip(tmp_paths, _iter_dataframe_chunks(pc=pc, chunk_size=chunks)):
-            futures.append(cluster.submit(_write_laspy_temp_chunk, tmp_path, part, data_column, header))
+        for index, part in enumerate(partitions):
+            tmp_path = pathlib.Path(tmp_dir) / f"chunk_{index}.las"
+            futures.append(
+                cluster.submit(_write_laspy_temp_chunk, tmp_path, part, data_column, header, check_attributes)
+            )
 
         # Gather paths in input order before streaming all temporary files together
         written_paths = cluster.gather(futures)
@@ -916,7 +944,7 @@ def _write_laspy(
     if mp_config is not None:
         _write_laspy_multiproc_partitions(
             filename=filename,
-            pc=pc,
+            partitions=_iter_dataframe_chunks(pc=pc, chunk_size=_point_partition_size(mp_config)),
             data_column=data_column,
             header=header,
             chunks=_point_partition_size(mp_config),

@@ -16,25 +16,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Exact conversions between rasters and point clouds, without gridding or interpolation."""
+"""Exact conversions between rasters and regular point clouds, without gridding or interpolation."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Iterable, Literal
+import operator
+import pathlib
+import tempfile
+from typing import TYPE_CHECKING, Any, Iterable, Literal
 
 import affine
 import geopandas as gpd
 import numpy as np
 import rasterio as rio
+from numpy.typing import NDArray
 from rasterio.crs import CRS
 
-from geoutils._dispatch import get_geo_attr, has_geo_attr
+from geoutils._dispatch import get_geo_attr, has_geo_attr, is_dask_array
+from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
 from geoutils.raster.array import get_mask_from_array
 from geoutils.raster.referencing import _default_nodata, _xy2ij
 
 if TYPE_CHECKING:
-    from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
+    from geoutils.multiproc import MultiprocConfig
+    from geoutils.pointcloud.pointcloud import PointCloudLike
     from geoutils.raster.base import RasterType
 
 
@@ -129,6 +135,205 @@ def _regular_pointcloud_to_raster(
 #########################
 
 
+def _raster_to_pointcloud_partition(
+    source_raster: RasterType,
+    flat_indices: slice | NDArray[np.int64],
+    bands: list[int],
+    column_names: list[str],
+    skip_nodata: bool,
+    row_offset: float,
+    column_offset: float,
+    chunks: int | tuple[int, int],
+    filename: pathlib.Path,
+) -> pathlib.Path:
+    """Read selected raster cells into one ordered point partition and stage it for the common file writer."""
+
+    # Expand compact full-conversion ranges while preserving the supplied order of sampled cell indexes
+    total_pixels = int(np.prod(source_raster.shape))
+    if isinstance(flat_indices, slice):
+        start, stop, step = flat_indices.indices(total_pixels)
+        selected_indices = np.arange(start, stop, step, dtype=np.int64)
+    else:
+        selected_indices = np.asarray(flat_indices, dtype=np.int64)
+    rows, columns = np.unravel_index(selected_indices, source_raster.shape)
+
+    # Group requested cells by raster tile so each worker reads bounded windows instead of individual samples
+    chunk_rows, chunk_columns = (chunks, chunks) if isinstance(chunks, int) else chunks
+    tile_columns = (source_raster.shape[1] + chunk_columns - 1) // chunk_columns
+    tile_ids = (rows // chunk_rows) * tile_columns + columns // chunk_columns
+    dtype = np.dtype(bool if source_raster.is_mask else source_raster.dtype)
+    band_values = np.ma.masked_all((len(bands), len(selected_indices)), dtype=dtype)
+    native_bands = [source_raster.bands[band - 1] for band in bands]
+
+    assert source_raster.name is not None
+    with rio.open(source_raster.name) as dataset:
+        for tile_id in np.unique(tile_ids):
+            selected = np.flatnonzero(tile_ids == tile_id)
+            tile_row, tile_column = divmod(int(tile_id), tile_columns)
+            row_start = tile_row * chunk_rows
+            column_start = tile_column * chunk_columns
+            row_stop = min(row_start + chunk_rows, source_raster.shape[0])
+            column_stop = min(column_start + chunk_columns, source_raster.shape[1])
+
+            # Read every requested band once for this tile and restore values to their output positions
+            block = dataset.read(
+                native_bands,
+                window=((row_start, row_stop), (column_start, column_stop)),
+                masked=True,
+            )
+            local_rows = rows[selected] - row_start
+            local_columns = columns[selected] - column_start
+            selected_values = block[:, local_rows, local_columns]
+            band_values.data[:, selected] = np.ma.getdata(selected_values)
+            band_values.mask[:, selected] = np.ma.getmaskarray(selected_values)
+
+    # Use main-band validity for every output column, matching eager and Dask selection behavior
+    if skip_nodata:
+        keep = ~get_mask_from_array(band_values[0]).reshape(-1)
+        selected_indices = selected_indices[keep]
+        band_values = band_values[:, keep].data
+    else:
+        band_values = np.ma.filled(band_values.astype("float32"), np.nan)
+        if source_raster.nodata is not None:
+            band_values[band_values == source_raster.nodata] = np.nan
+
+    # Convert row/column positions with the full affine transform and requested pixel offset
+    rows, columns = np.unravel_index(selected_indices, source_raster.shape)
+    transform = source_raster.transform
+    x_coords = transform.c + transform.a * (columns + column_offset) + transform.b * (rows + row_offset)
+    y_coords = transform.f + transform.d * (columns + column_offset) + transform.e * (rows + row_offset)
+    dataframe = gpd.GeoDataFrame(
+        {name: band_values[index] for index, name in enumerate(column_names)},
+        geometry=gpd.points_from_xy(x_coords, y_coords),
+        crs=source_raster.crs,
+    )
+    dataframe.to_pickle(filename)
+    return filename
+
+
+def _multiproc_raster_to_pointcloud(
+    source_raster: RasterType,
+    bands: list[int],
+    column_names: list[str],
+    data_column_name: str,
+    subsample: float | int,
+    skip_nodata: bool,
+    random_state: int | np.random.Generator | None,
+    row_offset: float,
+    column_offset: float,
+    mp_config: MultiprocConfig,
+) -> Any:
+    """
+    Convert raster cells in bounded workers and return an unloaded point cloud at the configured output path.
+
+    _raster_to_pointcloud_partition() reads raster windows and saves each group of output points as a GeoDataFrame.
+    _write_pointcloud_partitions() writes those saved groups to the requested file one at a time, so the parent process
+    never holds all point values at once.
+    """
+
+    from geoutils.multiproc.cluster import _map_bounded
+    from geoutils.pointcloud.writing import (
+        _resolve_pointcloud_output,
+        _write_pointcloud_partitions,
+    )
+
+    # Raster conversion currently preserves its two-dimensional geometry and named band columns through GeoPackage
+    output_filename, driver = _resolve_pointcloud_output(
+        mp_config.outfile,
+        mp_config.driver,
+        supported_drivers=("GPKG",),
+        operation_name="raster to point cloud conversion",
+    )
+    output_filename.parent.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory(prefix=".geoutils-raster-points-", dir=output_filename.parent) as directory:
+        temporary_directory = pathlib.Path(directory)
+
+        # Give workers an unloaded file even when the caller supplied an in-memory raster or Xarray accessor
+        worker_source = source_raster
+        if source_raster.is_loaded or source_raster._is_xr or source_raster.name is None:
+            from geoutils.raster import Raster
+
+            source_filename = temporary_directory / "source.tif"
+            source_raster.to_file(source_filename)
+            worker_source = Raster(source_filename, load_data=False)
+
+        total_pixels = int(np.prod(worker_source.shape))
+        chunk_shape = (mp_config.chunks, mp_config.chunks) if isinstance(mp_config.chunks, int) else mp_config.chunks
+        output_partition_size = int(np.prod(chunk_shape))
+
+        # Keep the full path compact; sampled paths preserve their deterministic selection order across partitions
+        if subsample == 1:
+            selected_parts: list[slice | NDArray[np.int64]] = [
+                slice(start, min(start + output_partition_size, total_pixels))
+                for start in range(0, total_pixels, output_partition_size)
+            ]
+        elif not skip_nodata:
+            from geoutils.sampling.subsampling import (
+                _get_subsample_size_from_user_input,
+            )
+
+            sample_size = _get_subsample_size_from_user_input(subsample, total_pixels)
+            flat_indices = np.random.default_rng(random_state).choice(total_pixels, sample_size, replace=False)
+            selected_parts = [
+                flat_indices[start : start + output_partition_size]
+                for start in range(0, len(flat_indices), output_partition_size)
+            ]
+        else:
+            from geoutils.sampling.subsampling import _subsample
+
+            stable_random_state = random_state
+            if stable_random_state is None:
+                stable_random_state = int(np.random.default_rng().integers(0, np.iinfo(np.uint32).max, dtype=np.uint32))
+            row_indices, column_indices = _subsample(
+                source_raster=worker_source,
+                subsample=subsample,
+                band=bands[0],
+                return_indices=True,
+                random_state=stable_random_state,
+                strategy="topk",
+                mp_config=mp_config,
+            )
+            flat_indices = np.asarray(row_indices, dtype=np.int64) * worker_source.shape[1] + np.asarray(
+                column_indices, dtype=np.int64
+            )
+            selected_parts = [
+                flat_indices[start : start + output_partition_size]
+                for start in range(0, len(flat_indices), output_partition_size)
+            ]
+
+        # Preserve a valid empty output schema when no eligible cells were selected
+        if not selected_parts:
+            selected_parts = [np.empty(0, dtype=np.int64)]
+        arguments = (
+            (
+                worker_source,
+                selected,
+                bands,
+                column_names,
+                skip_nodata,
+                row_offset,
+                column_offset,
+                mp_config.chunks,
+                temporary_directory / f"partition_{index}.pkl",
+            )
+            for index, selected in enumerate(selected_parts)
+        )
+        partition_filenames = [
+            filename for _, filename in _map_bounded(mp_config.cluster, _raster_to_pointcloud_partition, arguments)
+        ]
+
+        # Assemble one ordered file and return its metadata-only PointCloud wrapper
+        return _write_pointcloud_partitions(
+            output_filename,
+            partition_filenames,
+            driver=driver,
+            data_column=data_column_name,
+            geometry_type="Point",
+            mp_config=mp_config,
+        )
+
+
 def _raster_to_pointcloud(
     source_raster: RasterType,
     data_column_name: str = "b1",
@@ -140,12 +345,13 @@ def _raster_to_pointcloud(
     as_array: bool = False,
     random_state: int | np.random.Generator | None = None,
     force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-) -> NDArrayNum | PointCloud:
+    mp_config: MultiprocConfig | None = None,
+) -> Any:
     """
     Convert a raster to a point cloud. See Raster.to_pointcloud() for details.
     """
 
-    # Input checks
+    # 1/ Input checks
 
     # Main data column checks
     if not isinstance(data_column_name, str):
@@ -197,99 +403,260 @@ def _raster_to_pointcloud(
         all_bands = [data_band]
         all_column_names = [data_column_name]
 
-    # Point sampling returns a compact eager result, so compute a separate copy of a Dask source
-    # Loading the caller's DataArray here would replace its lazy graph with an in-memory array
-    if source_raster._chunks is not None:
-        source_raster = source_raster.copy(deep=False).rst
-        source_raster.load()
+    # One operation cannot be scheduled by Dask and multiprocessing at the same time
+    dask_backend = source_raster._chunks is not None
+    if dask_backend and mp_config is not None:
+        raise ValueError(
+            "Cannot use Multiprocessing and Dask simultaneously. To use Dask, remove ``mp_config`` from "
+            "to_pointcloud(). To use Multiprocessing, open the raster without ``chunks``."
+        )
 
-    # If subsample is the entire array, load it to optimize speed
-    if subsample == 1 and not source_raster.is_loaded:
-        source_raster.load()
+    # Validate the coordinate convention before launching lazy or multiprocessing work
+    offsets = {"center": (0.5, 0.5), "ul": (0.0, 0.0), "ur": (0.0, 1.0), "ll": (1.0, 0.0), "lr": (1.0, 1.0)}
+    try:
+        row_offset, column_offset = offsets[force_pixel_offset]
+    except KeyError as exception:
+        raise ValueError(f"Unknown pixel offset {force_pixel_offset!r}.") from exception
 
-    # Band indexes in the array are band number minus one
-    all_indexes = [b - 1 for b in all_bands]
+    # Multiprocessing point output is assembled on disk and returned without loading its values in the parent
+    if mp_config is not None and not as_array:
+        return _multiproc_raster_to_pointcloud(
+            source_raster=source_raster,
+            bands=all_bands,
+            column_names=all_column_names,
+            data_column_name=data_column_name,
+            subsample=subsample,
+            skip_nodata=skip_nodata,
+            random_state=random_state,
+            row_offset=row_offset,
+            column_offset=column_offset,
+            mp_config=mp_config,
+        )
 
-    # We do 2D subsampling on the data band only, regardless of valid masks on other bands
-    if skip_nodata:
-        if source_raster.is_loaded or source_raster._is_xr:
-            if source_raster.count == 1:
-                self_mask = get_mask_from_array(
-                    source_raster.data
-                )  # This is to avoid the case where the mask is just "False"
+    # Preserve eager full-conversion loading, while file-backed chunked conversions use window reads
+    sampling_config = mp_config
+    if not dask_backend and not source_raster.is_loaded and sampling_config is None:
+        if subsample == 1:
+            source_raster.load()
+        else:
+            from geoutils.multiproc import MultiprocConfig
+
+            sampling_config = MultiprocConfig(chunks=512)
+
+    data = source_raster.data if source_raster.is_loaded or source_raster._is_xr else None
+    total_pixels = int(np.prod(source_raster.shape))
+
+    # Flatten complete rasters directly, reading file-backed inputs in whole tiles without random sampling
+    if subsample == 1:
+        if data is not None:
+            band_values = [data.reshape(-1) if data.ndim == 2 else data[band - 1].reshape(-1) for band in all_bands]
+            main_values = data.reshape(-1) if data.ndim == 2 else data[data_band - 1].reshape(-1)
+        else:
+            from geoutils.multiproc import MultiprocConfig
+            from geoutils.multiproc.chunked import iter_chunk_slices
+            from geoutils.multiproc.cluster import _map_bounded
+            from geoutils.multiproc.readers import _read_values, _ValueReader
+
+            read_config = sampling_config if sampling_config is not None else MultiprocConfig(chunks=512)
+            tile_slices = list(iter_chunk_slices(source_raster.shape, read_config.chunks))
+            band_values = []
+            for band in all_bands:
+                reader = _ValueReader(source_raster, band)
+                arguments = [(reader.block(slices),) for slices in tile_slices]
+                pieces = [piece for _, piece in _map_bounded(read_config.cluster, _read_values, arguments)]
+
+                # Place rectangular tiles on the raster grid before taking a row-major flattened view
+                raster_values = np.ma.masked_all(source_raster.shape, dtype=reader.dtype)
+                for slices, piece in zip(tile_slices, pieces):
+                    raster_values.data[slices] = np.ma.getdata(piece)
+                    raster_values.mask[slices] = np.ma.getmaskarray(piece)
+                band_values.append(raster_values.reshape(-1))
+            main_values = band_values[0]
+
+        if data is not None and is_dask_array(data):
+            import dask.array as da
+
+            dask = import_optional("dask")
+            flat_indices: Any = da.arange(total_pixels, chunks=main_values.chunks)
+
+            # Find the output size of each lazy block before constructing arrays with a ragged validity filter
+            if skip_nodata:
+                valid = da.isfinite(main_values)
+                if source_raster.nodata is not None:
+                    valid &= main_values != source_raster.nodata
+                valid_blocks = valid.to_delayed().ravel()
+                valid_counts = dask.compute(*[dask.delayed(np.count_nonzero)(block) for block in valid_blocks])
+
+                # Apply each validity block to the flat indices and bands while keeping their values lazy
+                if sum(valid_counts) != total_pixels:
+                    selected_values = []
+                    for values in [flat_indices, *band_values]:
+                        value_blocks = values.rechunk(valid.chunks).to_delayed().ravel()
+                        selected_blocks = [
+                            da.from_delayed(
+                                dask.delayed(operator.getitem)(value_block, valid_block),
+                                shape=(int(count),),
+                                dtype=values.dtype,
+                            )
+                            for value_block, valid_block, count in zip(value_blocks, valid_blocks, valid_counts)
+                        ]
+                        selected_values.append(da.concatenate(selected_blocks))
+                    flat_indices, *band_values = selected_values
+
+            pixel_data = da.stack(band_values, axis=0)
+        else:
+            # Keep the common all-finite case as reshaped views, filtering only when the main band has missing cells
+            flat_indices = np.arange(total_pixels, dtype=np.int64)
+            if skip_nodata:
+                invalid = get_mask_from_array(main_values).reshape(-1)
+                if np.any(invalid):
+                    flat_indices = np.flatnonzero(~invalid)
+                    band_values = [values[flat_indices] for values in band_values]
+            if len(band_values) == 1:
+                pixel_data = band_values[0].reshape(1, -1)
+            elif any(np.ma.isMaskedArray(values) for values in band_values):
+                pixel_data = np.ma.stack(band_values, axis=0)
             else:
-                self_mask = get_mask_from_array(
-                    source_raster.data[data_band - 1, :, :]
-                )  # This is to avoid the case where the mask is just "False"
-            valid_mask = ~self_mask
+                pixel_data = np.stack(band_values, axis=0)
 
-        # Load only mask of valid data from disk if array not loaded
-        else:
-            valid_mask = ~source_raster._load_only_mask(bands=data_band)
-    # If we are not skipping nodata values, valid mask is everywhere
+        rows = flat_indices // source_raster.shape[1]
+        columns = flat_indices % source_raster.shape[1]
+
     else:
-        if source_raster.count == 1:
-            valid_mask = np.ones(source_raster.data.shape, dtype=bool)
+        from geoutils.sampling.subsampling import (
+            _get_subsample_size_from_user_input,
+            _subsample,
+        )
+
+        # Select missing cells when requested, otherwise use stable keys for identical results from every backend
+        if not skip_nodata:
+            sample_size = _get_subsample_size_from_user_input(subsample, total_pixels)
+            flat_indices = np.random.default_rng(random_state).choice(total_pixels, sample_size, replace=False)
+            rows, columns = np.unravel_index(flat_indices, source_raster.shape)
         else:
-            valid_mask = np.ones(source_raster.data[0, :].shape, dtype=bool)
+            stable_random_state = random_state
+            if stable_random_state is None:
+                stable_random_state = int(np.random.default_rng().integers(0, np.iinfo(np.uint32).max, dtype=np.uint32))
+            indices = _subsample(
+                source_raster=source_raster,
+                subsample=subsample,
+                band=data_band,
+                return_indices=True,
+                random_state=stable_random_state,
+                strategy="topk",
+                mp_config=sampling_config,
+            )
+            if any(is_dask_array(index) for index in indices):
+                indices = import_optional("dask").compute(*indices)
+            rows, columns = (np.asarray(index, dtype=np.int64) for index in indices)
 
-    # Get subsample on valid mask
-    from geoutils.sampling.subsampling import _subsample_numpy
+        # Gather the selected values lazily, from memory, or through file windows
+        if data is not None and is_dask_array(data):
+            import dask.array as da
 
-    # Build a low memory boolean masked array with invalid values masked to pass to subsampling
-    ma_valid = np.ma.masked_array(data=np.ones(np.shape(valid_mask), dtype=bool), mask=~valid_mask)
-    # Take a subsample within the valid values
-    indices = _subsample_numpy(array=ma_valid, subsample=subsample, random_state=random_state, return_indices=True)
-
-    # If the Raster is loaded, pick from the data while ignoring the mask
-    if source_raster.is_loaded or source_raster._is_xr:
-        if source_raster.count == 1:
-            pixel_data = source_raster.data[indices[0], indices[1]]
+            dask_data: Any = data
+            band_values = [
+                dask_data.vindex[rows, columns] if dask_data.ndim == 2 else dask_data[band - 1].vindex[rows, columns]
+                for band in all_bands
+            ]
+            pixel_data = da.stack(band_values, axis=0)
+        elif data is not None:
+            band_values = [
+                data[rows, columns] if data.ndim == 2 else data[band - 1, rows, columns] for band in all_bands
+            ]
+            pixel_data = (
+                np.ma.stack(band_values, axis=0)
+                if any(np.ma.isMaskedArray(values) for values in band_values)
+                else np.stack(band_values, axis=0)
+            )
         else:
-            pixel_data = source_raster.data[all_indexes, :][:, indices[0], indices[1]]
+            from geoutils.multiproc import MultiprocConfig
+            from geoutils.multiproc.readers import _read_selected_values, _ValueReader
 
-    # Otherwise use rasterio.sample to load only requested pixels
-    else:
-        # Extract the coordinates at subsampled pixels with valid data
-        # To extract data, we always use "upper left" which rasterio interprets as the exact raster coordinates
-        # Further below we redefine output coordinates based on point interpretation
-        x_coords, y_coords = (np.array(a) for a in source_raster.ij2xy(indices[0], indices[1], force_offset="ul"))
+            read_config = sampling_config if sampling_config is not None else MultiprocConfig(chunks=512)
+            flat_indices = rows * source_raster.shape[1] + columns
+            band_values = [
+                _read_selected_values(_ValueReader(source_raster, band), flat_indices, read_config)
+                for band in all_bands
+            ]
+            pixel_data = (
+                np.ma.stack(band_values, axis=0)
+                if any(np.ma.isMaskedArray(values) for values in band_values)
+                else np.stack(band_values, axis=0)
+            )
 
-        with rio.open(source_raster.name) as raster:
-            # Rasterio uses indexes (starts at 1)
-            pixel_data = np.array(list(raster.sample(zip(x_coords, y_coords), indexes=all_bands))).T
+    # Remove mask metadata after valid cells are selected; kept nodata cells are converted to NaN below
+    if is_dask_array(pixel_data) and skip_nodata:
+        import dask.array as da
 
-    # At this point there should not be any nodata anymore, so we can transform everything to normal array
-    if np.ma.isMaskedArray(pixel_data):
+        pixel_data = da.ma.getdata(pixel_data)
+    elif np.ma.isMaskedArray(pixel_data):
         pixel_data = pixel_data.data
 
     # If nodata values were not skipped, convert them to NaNs and change data type
-    if skip_nodata is False:
+    if not skip_nodata:
         pixel_data = pixel_data.astype("float32")
-        pixel_data[pixel_data == source_raster.nodata] = np.nan
+        if is_dask_array(pixel_data):
+            import dask.array as da
 
-    # Now we force the coordinates we define for the point cloud, according to pixel interpretation
-    x_coords_2, y_coords_2 = (
-        np.array(a) for a in source_raster.ij2xy(indices[0], indices[1], force_offset=force_pixel_offset)
+            pixel_data = da.ma.filled(pixel_data, np.nan)
+            if source_raster.nodata is not None:
+                pixel_data = da.where(pixel_data == source_raster.nodata, np.nan, pixel_data)
+        elif source_raster.nodata is not None:
+            pixel_data[pixel_data == source_raster.nodata] = np.nan
+
+    # Calculate coordinates with the complete affine transform, including rotation and the requested pixel offset
+    transform = source_raster.transform
+    x_coords = transform.c + transform.a * (columns + column_offset) + transform.b * (rows + row_offset)
+    y_coords = transform.f + transform.d * (columns + column_offset) + transform.e * (rows + row_offset)
+
+    # Preserve Dask execution in both array and point dataframe outputs
+    if is_dask_array(pixel_data):
+        import dask.array as da
+
+        if not is_dask_array(x_coords):
+            x_coords = da.from_array(np.asarray(x_coords), chunks=pixel_data.chunks[1])
+            y_coords = da.from_array(np.asarray(y_coords), chunks=pixel_data.chunks[1])
+        if as_array:
+            return da.stack((x_coords, y_coords, *[pixel_data[index] for index in range(len(all_bands))]), axis=1)
+
+        from geoutils.pointcloud.dataframe import (
+            _build_pointcloud_output,
+            _import_dask_dataframe,
+        )
+        from geoutils.vector.pd_accessor import _import_dask_geopandas
+
+        # Build matching Dask series so dataframe values keep their raster dtype and continuous point index
+        point_chunks = pixel_data.chunks[1]
+        x_coords = x_coords.rechunk(point_chunks)
+        y_coords = y_coords.rechunk(point_chunks)
+        dask_dataframe = _import_dask_dataframe()
+        dask_geopandas = _import_dask_geopandas()
+        dataframe = dask_dataframe.from_dask_array(pixel_data.T, columns=all_column_names)
+        coordinate_frame = dask_dataframe.concat(
+            [
+                dask_dataframe.from_dask_array(x_coords, columns="x"),
+                dask_dataframe.from_dask_array(y_coords, columns="y"),
+            ],
+            axis=1,
+        )
+        geometry = dask_geopandas.points_from_xy(coordinate_frame, x="x", y="y", crs=source_raster.crs)
+        dataframe = dataframe.assign(geometry=geometry)
+        dataframe = dask_geopandas.from_dask_dataframe(dataframe, geometry="geometry")
+
+        # Finalize point metadata; the shared builder also adds ``.pc`` and ``.vct`` to this Dask frame
+        return _build_pointcloud_output(dataframe, data_column=data_column_name, as_dataframe=True)
+
+    # Build the established eager array or PointCloud result
+    if as_array:
+        return np.vstack((np.asarray(x_coords), np.asarray(y_coords), pixel_data)).T
+
+    from geoutils.pointcloud import PointCloud
+
+    dataframe = gpd.GeoDataFrame(
+        pixel_data.T,
+        columns=all_column_names,
+        geometry=gpd.points_from_xy(np.asarray(x_coords), np.asarray(y_coords)),
+        crs=source_raster.crs,
     )
-
-    if not as_array:
-        from geoutils.pointcloud import (
-            PointCloud,  # Runtime import to avoid circularity issues
-        )
-
-        pc = PointCloud(
-            gpd.GeoDataFrame(
-                pixel_data.T,
-                columns=all_column_names,
-                geometry=gpd.points_from_xy(x_coords_2, y_coords_2),
-                crs=source_raster.crs,
-            ),
-            data_column=data_column_name,
-        )
-        return pc
-    else:
-        # Merge the coordinates and pixel data an array of N x K
-        # This has the downside of converting all the data to the same data type
-        points_arr = np.vstack((x_coords_2.reshape(1, -1), y_coords_2.reshape(1, -1), pixel_data)).T
-        return points_arr
+    return PointCloud(dataframe, data_column=data_column_name)

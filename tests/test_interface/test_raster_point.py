@@ -1,19 +1,28 @@
-"""Tests for raster-point interfacing."""
+"""Tests for conversion between rasters and regular point clouds."""
 
 from __future__ import annotations
 
 import re
 from importlib.util import find_spec
+from pathlib import Path
 
 import numpy as np
 import pytest
 import rasterio as rio
 
 import geoutils as gu
-from geoutils import examples
+from geoutils import examples, open_raster
+from geoutils._dispatch import is_dask_dataframe
+from geoutils.multiproc import MultiprocConfig
+from geoutils.multiproc.cluster import MpCluster
 
 
-class TestRasterPointInterface:
+class TestRasterPoint:
+    """
+    Test module for the exact conversions point-raster in to_pointcloud() and from_pointcloud_regular().
+
+    Support for Dask/Multiproc is tested in TestRasterPointChunked further below.
+    """
 
     # Paths to example data
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
@@ -239,37 +248,129 @@ class TestRasterPointInterface:
             gu.Raster.from_pointcloud_regular(pc1)
 
 
-@pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
-class TestToPointcloudChunked:
+@pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
+class TestRasterPointChunked:
     """
-    Test module for comparing to_pointcloud() outputs from eager and Dask rasters.
+    Test module for to_pointcloud() across eager, Dask and Multiprocessing backends.
 
-    These tests cover the currently eager point outputs and keep the source Dask array. Expand them to cover lazy
-    outputs when to_pointcloud() returns lazy point data.
+    We check that Dask outputs stay lazy until explicitly computed, and Multiprocessing input/outputs stay unloaded,
+    both returning the exact same result.
     """
 
     @pytest.mark.parametrize("subsample", [1, 11])
+    @pytest.mark.parametrize("skip_nodata", [True, False])
     @pytest.mark.parametrize("as_array", [False, True])
-    def test_to_pointcloud__eager_samples_keep_lazy_source(self, subsample: int, as_array: bool) -> None:
-        """Checks that point sampling returns exact eager values without loading or replacing the Dask source."""
+    def test_to_pointcloud__chunked_backends_equal(
+        self, subsample: int, skip_nodata: bool, as_array: bool, tmp_path: Path
+    ) -> None:
+        """Checks that eager, Dask and Multiprocessing conversions return exactly the same values."""
 
         import dask.array as da
 
-        # Include a missing pixel and uneven chunks to check the mask and deterministic sample order
-        values = np.arange(63, dtype=np.float32).reshape((7, 9))
-        values[2, 3] = np.nan
+        # Write a raster file with three bands, one nodata value pixel and a dimension size that will
+        # make the final chunk a different size (not a multiple of the chunksize)
+        main_values = np.arange(63, dtype=np.float32).reshape((7, 9))
+        main_values[2, 3] = np.nan
+        values = np.stack((main_values, main_values + 100, main_values + 200))
         transform = rio.transform.from_origin(500000, 8600000, 20, 20)
-        eager = gu.Raster.from_array(values, transform, 32633, nodata=-9999)
-        source = gu.RasterAccessor.from_array(da.from_array(values, chunks=(3, 4)), transform, 32633, nodata=-9999)
-        source_array = source.data
-        options = {"subsample": subsample, "as_array": as_array, "random_state": 42}
+        source_file = tmp_path / "point-source.tif"
+        gu.Raster.from_array(values, transform, 32633, nodata=-9999).to_file(source_file)
 
-        # Sample eager point values while keeping the input array available for lazy operations
+        # Open the same file as a loaded NumPy raster, a lazy Dask array and an unloaded Raster for multiprocessing
+        eager = gu.Raster(source_file)
+        eager.load()
+        dask_source = open_raster(str(source_file), chunks={"band": 1, "x": 4, "y": 3})
+        multiprocessing_source = gu.Raster(source_file)
+        dask_source_array = dask_source.data
+        options = {
+            "subsample": subsample,
+            "skip_nodata": skip_nodata,
+            "as_array": as_array,
+            "random_state": 42,
+            "auxiliary_data_bands": [2, 3],
+            "force_pixel_offset": "center",
+        }
+
+        # Run to_pointcloud() with every backend, matching MP chunks with Dask
         expected = eager.to_pointcloud(**options)
-        actual = source.rst.to_pointcloud(**options)
+        dask_output = dask_source.rst.to_pointcloud(**options)
+        point_output = tmp_path / f"points-{subsample}-{skip_nodata}.gpkg"
+        with MpCluster({"nb_workers": 2}) as cluster:
+            multiprocessing_output = multiprocessing_source.to_pointcloud(
+                **options,
+                mp_config=MultiprocConfig(chunks=(3, 4), outfile=str(point_output), cluster=cluster),
+            )
+
+        # Dask keeps both source and output lazy until the result is explicitly computed
+        assert dask_source.data is dask_source_array
+        assert not dask_source._in_memory
         if as_array:
-            np.testing.assert_array_equal(expected, actual)
+            assert isinstance(dask_output, da.Array)
+            dask_computed = dask_output.compute()
+            assert isinstance(dask_output, da.Array)
         else:
-            assert expected.pointcloud_equal(actual)
+            assert is_dask_dataframe(dask_output)
+            assert not dask_output.pc.is_loaded
+            assert dask_output.pc.data_column == "b1"
+            dask_computed = dask_output.compute()
+            assert not dask_output.pc.is_loaded
+        assert dask_source.data is dask_source_array
+        assert not dask_source._in_memory
+
+        # Multiprocessing keeps the source unloaded; array output is eager, while point output stays on disk
+        assert not multiprocessing_source.is_loaded
+        if as_array:
+            assert isinstance(multiprocessing_output, np.ndarray)
+            assert not point_output.exists()
+            np.testing.assert_array_equal(expected, dask_computed)
+            np.testing.assert_array_equal(expected, multiprocessing_output)
+        else:
+            assert not multiprocessing_output.is_loaded
+            assert multiprocessing_output.name == str(point_output)
+            assert point_output.exists()
+            assert expected.vector_equal(dask_computed)
+            assert expected.pointcloud_equal(multiprocessing_output)
+            assert multiprocessing_output.is_loaded
+            assert not multiprocessing_source.is_loaded
+
+    def test_to_pointcloud__multiprocessing_empty_output_stays_unloaded(self, tmp_path: Path) -> None:
+        """Checks that an all-nodata raster produces an empty file-backed PointCloud without loading its source."""
+
+        # Write an all-nodata raster split into several uneven tiles
+        source_file = tmp_path / "empty-source.tif"
+        output_file = tmp_path / "empty-points.gpkg"
+        values = np.ma.masked_all((5, 7), dtype=np.int16)
+        values.data.fill(-9999)
+        gu.Raster.from_array(values, rio.transform.from_origin(0, 5, 1, 1), 32633, nodata=-9999).to_file(source_file)
+        source = gu.Raster(source_file)
+
+        # Let each worker stage an empty point partition and assemble their common GeoPackage schema
+        with MpCluster({"nb_workers": 2}) as cluster:
+            result = source.to_pointcloud(
+                mp_config=MultiprocConfig(chunks=(3, 4), outfile=str(output_file), cluster=cluster)
+            )
+
+        # Read the point count from file metadata, then load the empty table explicitly
+        assert not source.is_loaded
+        assert not result.is_loaded
+        assert result.point_count == 0
+        assert not result.is_loaded
+        assert list(result.ds.columns) == ["b1", "geometry"]
+        assert result.is_loaded
+
+    def test_to_pointcloud__error_dask_with_multiproc(self) -> None:
+        """Checks that trying to use Multiproc with a Dask raises an error, without loading the file."""
+
+        import dask.array as da
+
+        # Build a lazy Dask raster that will trigger Dask execution
+        values = da.arange(20, chunks=7).reshape((4, 5))
+        transform = rio.transform.from_origin(0, 4, 1, 1)
+        source = gu.RasterAccessor.from_array(values, transform, 4326)
+        source_array = source.data
+
+        # Verify error is raised when passing mp_config, without loading or affecting the Dask object
+        with pytest.raises(ValueError, match="Cannot use Multiprocessing and Dask simultaneously"):
+            source.rst.to_pointcloud(as_array=True, mp_config=MultiprocConfig(chunks=(2, 3)))
         assert source.data is source_array
         assert not source._in_memory

@@ -1936,7 +1936,8 @@ class RasterBase(ABC):
         as_array: Literal[False] = False,
         random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> NDArrayNum: ...
+        mp_config: MultiprocConfig | None = None,
+    ) -> PointCloud: ...
 
     @overload
     def to_pointcloud(
@@ -1951,7 +1952,8 @@ class RasterBase(ABC):
         as_array: Literal[True],
         random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> PointCloud: ...
+        mp_config: MultiprocConfig | None = None,
+    ) -> NDArrayNum: ...
 
     @overload
     def to_pointcloud(
@@ -1966,6 +1968,7 @@ class RasterBase(ABC):
         as_array: bool = False,
         random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        mp_config: MultiprocConfig | None = None,
     ) -> NDArrayNum | PointCloud: ...
 
     def to_pointcloud(
@@ -1979,7 +1982,8 @@ class RasterBase(ABC):
         as_array: bool = False,
         random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> NDArrayNum | PointCloud:
+        mp_config: MultiprocConfig | None = None,
+    ) -> Any:
         """
         Convert raster to point cloud.
 
@@ -1999,12 +2003,27 @@ class RasterBase(ABC):
         If 'subsample' is smaller than 1 (for fractions), or smaller than the pixel count, a random subsample
         of (valid) points is returned.
 
-        If the raster is not loaded, sampling will be done from disk using rasterio.sample after loading only the masks
-        of the dataset.
+        An optimized conversion is used when ``subsample=1``, using all inputs. It considers every raster cell and
+        simply reshapes the main data band and every requested auxiliary band into one-dimensional values. When
+        ``skip_nodata=True``, cells with missing values in the main data band are removed at the same positions from
+        every band. A missing value in an auxiliary band alone does not remove the point.
+
+        Every other ``subsample`` value uses subsampling, whether it ultimately selects some or all valid
+        cells, as it needs to run isfinite() to know which values are valid. The cell positions are
+        selected once, using the main data band to exclude missing values when ``skip_nodata=True``.
+        Values at those same row and column positions are then collected from the main and
+        auxiliary bands, which keeps every output column aligned with the point coordinates.
+
+        For a Dask-backed raster, the selection may compute the counts or indexes needed to determine the output
+        layout, while the selected band values and returned Dask array or point dataframe remain lazy. Passing a
+        MultiprocConfig reads raster windows without loading the source. Point output is written in ordered partitions
+        to ``mp_config.outfile`` and returned as an unloaded, file-backed PointCloud. Array output remains an eager
+        NumPy array and does not use ``outfile``.
 
         Formats:
             * `as_array` == False: A vector with dataframe columns ["b1", "b2", ..., "geometry"],
-            * `as_array` == True: A numpy ndarray of shape (N, 2 + count) with the columns [x, y, b1, b2..].
+            * `as_array` == True: An array of shape (N, 2 + count) with the columns [x, y, b1, b2..]. Dask input
+              returns a lazy Dask array; other inputs return a NumPy array.
 
         :param data_column_name: Name to use for point cloud data column, defaults to "bX" where X is the data band
             number.
@@ -2020,6 +2039,8 @@ class RasterBase(ABC):
         :param random_state: Random state or seed number.
         :param force_pixel_offset: Force offset to derive point coordinate with. Raster coordinates normally only
             associate to upper-left corner "ul" ("Area" definition) or center ("Point" definition).
+        :param mp_config: Worker, tile and output settings for multiprocessing. Point output uses a GeoPackage at
+            ``outfile``; array output does not write a file. Cannot be combined with a Dask source.
 
         :raises ValueError: If the sample count or fraction is poorly formatted.
 
@@ -2037,6 +2058,7 @@ class RasterBase(ABC):
             as_array=as_array,
             random_state=random_state,
             force_pixel_offset=force_pixel_offset,
+            mp_config=mp_config,
         )
         if as_array:
             return output

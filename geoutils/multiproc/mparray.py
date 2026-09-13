@@ -99,8 +99,8 @@ class MultiprocConfig:
         :param chunks: The size of the chunks for splitting raster data. Pass an integer for square chunks, or a
             ``(rows, cols)`` tuple for rectangular chunks. Point cloud operations use an integer number of points.
         :param outfile: The file path where the output will be written.
-        :param driver: Output format. None uses GeoTIFF for rasters; point reprojection infers LAS/LAZ or GeoPackage
-            from the output filename, defaulting to GeoPackage when no extension is given.
+        :param driver: Output format. None uses GeoTIFF for raster results. Point cloud file results infer LAS/LAZ or
+            GeoPackage from the output filename where supported, defaulting to GeoPackage when no extension is given.
         :param cluster: A cluster object for distributed computing, or None for sequential processing.
         """
         self.chunks = _validate_chunk_size(chunks)
