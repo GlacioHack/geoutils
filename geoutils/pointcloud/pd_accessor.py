@@ -35,6 +35,7 @@ from geoutils._dispatch import is_dask_dataframe, is_dask_geodataframe
 from geoutils._misc import import_optional
 from geoutils.pointcloud.base import PointCloudBase
 from geoutils.pointcloud.dataframe import (
+    _build_pointcloud_output,
     _get_dataframe_attrs,
     _import_dask_dataframe,
     _set_dataframe_attrs,
@@ -49,7 +50,6 @@ from geoutils.pointcloud.las import (
 from geoutils.vector.pd_accessor import (
     VectorAccessor,
     _import_dask_geopandas,
-    _register_dask_vector_accessor,
     _replace_geodataframe,
 )
 
@@ -57,15 +57,21 @@ _DASK_ACCESSOR_REGISTERED = False
 
 
 def _register_dask_pointcloud_accessor() -> None:
-    """Register the ``pc`` accessor on Dask DataFrames lazily."""
+    """
+    Add the ``.pc`` property to Dask DataFrames when lazy point cloud support is first needed.
+
+    Pandas and Dask keep separate lists of dataframe accessors. The Pandas decorator on PointCloudAccessor therefore
+    makes ``.pc`` available only on Pandas and GeoPandas objects. This function adds the same accessor to Dask objects
+    without importing the optional Dask DataFrame package during ordinary GeoUtils imports.
+    """
 
     global _DASK_ACCESSOR_REGISTERED
 
-    # Dask warns if the same accessor is registered more than once
+    # Register once because the accessor is added to the shared Dask DataFrame class for the rest of the process
     if _DASK_ACCESSOR_REGISTERED:
         return
 
-    # Register only after Dask is available so normal imports remain lightweight
+    # Import Dask only when a lazy point cloud is requested, then attach PointCloudAccessor as its ``.pc`` property
     # https://docs.dask.org/en/stable/dataframe-extend.html#accessors
     import_optional("dask")
     with warnings.catch_warnings():
@@ -179,11 +185,16 @@ def open_pointcloud(
 
         # Dask-GeoPandas creates file partitions without loading all features
         dgpd = _import_dask_geopandas()
-        _register_dask_vector_accessor()
-        _register_dask_pointcloud_accessor()
         dgdf = dgpd.read_file(filename, chunksize=chunks)
         _set_pointcloud_attrs_from_file(dgdf, filename=filename, data_column=data_column)
-        return dgdf
+        # Use the common output builder to add point metadata and the Dask ``.pc`` and ``.vct`` properties
+        return _build_pointcloud_output(
+            dgdf,
+            data_column=data_column,
+            as_dataframe=True,
+            attrs=_get_dataframe_attrs(dgdf),
+            preserve_locations=True,
+        )
 
     # Native LAS Z values are the default point-cloud data
     if data_column is None:
@@ -212,8 +223,6 @@ def open_pointcloud(
     # Load optional Dask components only for partitioned LAS output
     dd = _import_dask_dataframe()
     dgpd = _import_dask_geopandas()
-    _register_dask_vector_accessor()
-    _register_dask_pointcloud_accessor()
     dask = import_optional("dask")
     delayed = dask.delayed
 
@@ -249,7 +258,14 @@ def open_pointcloud(
             "geometry_type": "Point",
         },
     )
-    return ddf
+    # Use the common output builder to add point metadata and the Dask ``.pc`` and ``.vct`` properties
+    return _build_pointcloud_output(
+        ddf,
+        data_column=data_column,
+        as_dataframe=True,
+        attrs=_get_dataframe_attrs(ddf),
+        preserve_locations=True,
+    )
 
 
 @pd.api.extensions.register_dataframe_accessor("pc")
