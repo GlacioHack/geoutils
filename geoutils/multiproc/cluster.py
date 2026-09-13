@@ -20,10 +20,9 @@
 """This module defines the cluster configurations."""
 
 import multiprocessing
-import sys
 from collections.abc import Iterable, Iterator
 from multiprocessing.pool import Pool
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Literal, Optional
 
 
 def _map_bounded(
@@ -150,10 +149,22 @@ class BasicCluster(AbstractCluster):
 
 
 class MpCluster(AbstractCluster):
-    def __init__(self, conf: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(
+        self,
+        conf: Optional[Dict[str, Any]] = None,
+        *,
+        start_method: Literal["fork", "forkserver", "spawn"] | None = None,
+    ) -> None:
         """
-        Initializes a multiprocessing cluster.
-        :param conf: Configuration dictionary, which may contain the number of workers.
+        Initialize a multiprocessing cluster with a safe platform start method.
+
+        By default, workers start through ``forkserver`` when the platform provides it (this avoids copying the
+        process active threads and library state into replacement workers).
+        Platforms without ``forkserver``, including Windows, use ``spawn`` instead.
+
+        :param conf: Configuration dictionary, which may contain ``nb_workers`` and ``max_tasks_per_child``.
+        :param start_method: Optional multiprocessing start method. Use this only when a workload requires a method
+            other than the safe platform default.
         """
         super().__init__()
         nb_workers = 1
@@ -161,9 +172,17 @@ class MpCluster(AbstractCluster):
         if conf is not None:
             nb_workers = conf.get("nb_workers", 1)
             max_tasks_per_child = conf.get("max_tasks_per_child", 10)
-        # Using the 'forkserver' context for more controlled process handling
-        # Windows requires spawn, preserve existing fork behavior elsewhere
-        ctx_in_main = multiprocessing.get_context("spawn" if sys.platform == "win32" else "fork")
+
+        # Prefer "forkserver" (so that "recycled" workers do not inherit threads, locks; for example opened GDAL files)
+        available_methods = multiprocessing.get_all_start_methods()
+        if start_method is None:
+            start_method = "forkserver" if "forkserver" in available_methods else "spawn"
+        elif start_method not in available_methods:
+            methods = ", ".join(available_methods)
+            raise ValueError(f"Start method {start_method!r} is not available on this platform. Available: {methods}.")
+        self.start_method = start_method
+        ctx_in_main = multiprocessing.get_context(start_method)
+
         # Recycling stays configurable so memory tests can distinguish it from a crash
         self.pool = ctx_in_main.Pool(processes=nb_workers, maxtasksperchild=max_tasks_per_child)
 
