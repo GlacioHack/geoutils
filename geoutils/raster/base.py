@@ -2365,11 +2365,13 @@ class RasterBase(ABC):
         max_local_distance: float | None = None,
         index_dtype: DTypeLike = np.int32,
         distance_dtype: DTypeLike = np.float64,
+        mp_config: MultiprocConfig | None = None,
     ) -> xr.Dataset:
         """Sample finite raster cell pairs for statistics by distance.
 
         Logarithmic lag sampling draws isotropic distances across short and long ranges. Anchor strategies reuse
-        raster cells and can confine part of the sample to source chunks, which limits reads from Dask-backed rasters.
+        raster cells and can confine part of the sample to source chunks, which limits reads from Dask-backed or
+        file-backed rasters.
 
         Strategy, duplicate, oversampling, anchor, and local distance controls apply to ``"loglag"``.
         Both sampling schemes use ``batch_pairs`` and ``max_rounds``.
@@ -2400,6 +2402,8 @@ class RasterBase(ABC):
         :param max_local_distance: Largest proposed local distance in CRS units. Defaults to the largest chunk diagonal.
         :param index_dtype: Integer NumPy dtype for returned cell indexes (e.g. ``"int64"`` for very large rasters).
         :param distance_dtype: Floating NumPy dtype for returned distances (e.g. ``"float32"`` to reduce memory).
+        :param mp_config: Worker and tile settings for multiprocessing reads from an unloaded raster. Cannot be
+            combined with Dask inputs. The returned Xarray Dataset is eager.
         :returns: Xarray Dataset with pair and endpoint dimensions, containing cell indexes, values, coordinates,
             and distances.
         """
@@ -2428,6 +2432,7 @@ class RasterBase(ABC):
             max_local_distance=max_local_distance,
             index_dtype=index_dtype,
             distance_dtype=distance_dtype,
+            mp_config=mp_config,
         )
 
     def variogram(
