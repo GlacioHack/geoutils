@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from importlib.util import find_spec
+from pathlib import Path
 from typing import Any
 
 import geopandas as gpd
@@ -14,6 +15,7 @@ from shapely.geometry import box
 
 import geoutils as gu
 from geoutils._typing import NDArrayNum
+from geoutils.multiproc import ClusterGenerator, MultiprocConfig
 from geoutils.sampling.pairsampling import _RegularPairSampler
 
 
@@ -30,7 +32,7 @@ class TestRasterPairSampling:
     """
     Checks pairsample() on raster grids.
 
-    Dask behavior is covered in TestPairSampleChunked further below.
+    Dask and multiprocessing behavior is covered in TestPairSampleChunked further below.
 
     This module is checking that:
     - All sampling "strategies" return the correct shape of outputs.
@@ -284,7 +286,12 @@ class TestPointPairSampling:
 
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestPairSampleChunked:
-    """Checks pairsample() loading behavior and exact results with chunked inputs."""
+    """
+    Test module for pair sampling through Dask chunks and multiprocessing file partitions.
+
+    Dask cases check that inputs remain lazy and source chunks are reused. Multiprocessing cases compare worker reads
+    with eager results and check that file-backed inputs remain unloaded. Every returned pair dataset is eager.
+    """
 
     @pytest.mark.parametrize("strategy", ["independent", "anchors", "chunk_anchors", "anchor_batched"])
     def test_pairsample__raster_uneven_local_chunks(self, strategy: str) -> None:
@@ -357,64 +364,11 @@ class TestPairSampleChunked:
         assert len(reads) == dask_candidate_count + 2
         assert np.array_equal(pairs.value, np.asarray(pairs["index"], dtype=float))
 
-    def test_pairsample__raster_dask_source_is_lazy(self) -> None:
-        """Checks that raster pair sampling reads selected Dask pixels without loading the source."""
-
-        # Create one lazy raster chunk so sampling order also has an exact eager reference
-        import dask.array as da
-
-        array = np.arange(600, dtype=float).reshape(24, 25)
-        raster = gu.RasterAccessor.from_array(
-            da.from_array(array, chunks=array.shape), from_origin(0, 24, 2, 2), 32633, nodata=None
-        )
-
-        # Draw pairs through the Xarray accessor without loading the complete array
-        pairs = raster.rst.pairsample(n_pairs=250, hybrid_local_fraction=0, random_state=42)
-        expected = gu.Raster.from_array(array, from_origin(0, 24, 2, 2), 32633).pairsample(
-            n_pairs=250, hybrid_local_fraction=0, random_state=42
-        )
-        assert pairs.sizes["pair"] == 250
-        assert isinstance(raster.data, da.Array)
-        assert not raster._in_memory
-        assert not pairs.chunks
-        xr.testing.assert_equal(pairs, expected)
-
-    def test_pairsample__raster_dask_local_chunks_and_dtypes(self) -> None:
-        """Checks that nearby Dask pairs stay in one chunk and use the requested number types."""
-
-        # Create a lazy raster whose row and column chunks have different sizes
-        import dask.array as da
-
-        array = np.arange(576, dtype=float).reshape(24, 24)
-        raster = gu.RasterAccessor.from_array(
-            da.from_array(array, chunks=(6, 8)), from_origin(0, 24, 1, 1), 32633, nodata=None
-        )
-        # Request only nearby pairs and smaller output number types
-        pairs = raster.rst.pairsample(
-            n_pairs=200,
-            min_distance=1,
-            max_distance=6,
-            hybrid_local_fraction=1,
-            random_state=7,
-            index_dtype=np.int16,
-            distance_dtype=np.float32,
-        )
-
-        # Check that both endpoints share a chunk and that output types match the request
-        assert isinstance(raster.data, da.Array) and not raster._in_memory
-        assert not pairs.chunks
-        first_chunk = np.column_stack((pairs.row[:, 0] // 6, pairs.column[:, 0] // 8))
-        second_chunk = np.column_stack((pairs.row[:, 1] // 6, pairs.column[:, 1] // 8))
-        assert np.array_equal(first_chunk, second_chunk)
-        assert np.array_equal(pairs.value, array[pairs.row, pairs.column])
-        assert pairs["index"].dtype == np.int16
-        assert pairs["distance"].dtype == np.float32
-
     @pytest.mark.parametrize("mask_form", ["vector", "raster", "pointcloud"])
-    def test_pairsample__point_masks_reuse_loaded_coordinates(self, mask_form: str) -> None:
-        """Checks that spatial masking reads each Dask source partition once during eager pair sampling."""
+    def test_pairsample__point_chunked_matches_eager_with_spatial_masks(self, mask_form: str, tmp_path: Path) -> None:
+        """Checks that Dask and multiprocessing point reads match eager sampling with each spatial mask."""
 
-        # Count reads from three source partitions so a second coordinate load would be visible
+        # Create one point table for the eager, Dask, and file-backed multiprocessing sources
         import dask
         import dask_geopandas as dgpd
 
@@ -422,7 +376,13 @@ class TestPairSampleChunked:
 
         _register_dask_pointcloud_accessor()
         y, x = np.mgrid[:12, :12]
-        dataframe = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), (x + y).ravel(), crs=32633).ds
+        values = (x + y).astype(float).ravel()
+        values[5] = np.nan
+        points = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), values, crs=32633, data_column="height")
+        dataframe = points.ds
+        filename = tmp_path / "points.gpkg"
+        points.to_file(filename)
+        file_points = gu.PointCloud(filename, data_column="height")
         reads = []
 
         def read_partition(partition: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -434,25 +394,165 @@ class TestPairSampleChunked:
             read_partition, meta=dataframe.iloc[:0]
         )
 
-        # Define the same left-half mask, matching integer raster coordinates to the point grid
+        # Define the same left-half mask for both backends, writing the point mask for worker row reads
         mask: Any
+        file_mask: Any
         if mask_form == "raster":
             mask = gu.Raster.from_array((x < 6)[::-1], from_origin(0, 11, 1, 1), dataframe.crs)
+            file_mask = mask
         elif mask_form == "pointcloud":
-            mask = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), (x < 6).ravel(), crs=dataframe.crs)
+            mask = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), (x < 6).ravel(), crs=dataframe.crs, data_column="keep")
+            mask_filename = tmp_path / "point-mask.gpkg"
+            mask.to_file(mask_filename)
+            file_mask = gu.PointCloud(mask_filename, data_column="keep")
         else:
             mask = gpd.GeoDataFrame(geometry=[box(-0.5, -0.5, 5.5, 11.5)], crs=dataframe.crs)
+            file_mask = mask
+        options = {"n_pairs": 100, "sampling": "random_xy", "random_state": 9}
 
-        # Evaluate pairs immediately, reusing the point table that was loaded for the pair search
+        # Evaluate the Dask partitions once and read matching file row partitions in two workers
         with dask.config.set(scheduler="synchronous"):
-            pairs = lazy_points.pc.pairsample(n_pairs=100, sampling="random_xy", mask=mask, random_state=9)
-        expected = dataframe.pc.pairsample(n_pairs=100, sampling="random_xy", mask=mask, random_state=9)
+            dask_pairs = lazy_points.pc.pairsample(mask=mask, **options)
+        with ClusterGenerator("multi", nb_workers=2) as cluster:
+            config = MultiprocConfig(chunks=37, cluster=cluster)
+            mp_pairs = file_points.pairsample(mask=file_mask, mp_config=config, **options)
+        expected = dataframe.pc.pairsample(mask=mask, **options)
 
+        # Require identical results while both chunked sources keep their original loading state
         assert len(reads) == 3
-        assert not lazy_points.pc.is_loaded and not pairs.chunks
-        xr.testing.assert_equal(pairs, expected)
-        assert pairs.sizes["pair"] == 100
-        assert np.all(pairs.x < 6)
+        assert not lazy_points.pc.is_loaded and not dask_pairs.chunks
+        assert not file_points.is_loaded and not mp_pairs.chunks
+        xr.testing.assert_equal(dask_pairs, expected)
+        xr.testing.assert_equal(mp_pairs, expected)
+        assert dask_pairs.sizes["pair"] == 100
+        assert np.all(dask_pairs.x < 6)
+        if mask_form == "pointcloud":
+            assert not file_mask.is_loaded
+
+    @pytest.mark.parametrize(
+        "sampling,strategy",
+        [
+            ("loglag", "independent"),
+            ("loglag", "anchors"),
+            ("loglag", "chunk_anchors"),
+            ("loglag", "anchor_batched"),
+            ("random_xy", "chunk_anchors"),
+        ],
+    )
+    def test_pairsample__raster_chunked_matches_eager(self, sampling: str, strategy: str, tmp_path: Path) -> None:
+        """Checks that matching Dask and multiprocessing chunks return the same raster pairs as eager sampling."""
+
+        # Create one full-size Dask chunk and matching file tile with the same finite values and nodata region
+        import dask.array as da
+
+        values = np.arange(900, dtype=float).reshape(30, 30)
+        values[2:5, 4:8] = np.nan
+        transform = from_origin(0, 30, 2, 3)
+        dask_raster = gu.RasterAccessor.from_array(
+            da.from_array(values, chunks=values.shape), transform, 32633, nodata=np.nan
+        )
+        filename = tmp_path / "pairs.tif"
+        gu.Raster.from_array(values, transform, 32633, nodata=np.nan).to_file(filename)
+        file_raster = gu.Raster(filename)
+        eager = gu.Raster(filename, load_data=True)
+        options = {
+            "n_pairs": 120,
+            "sampling": sampling,
+            "strategy": strategy,
+            "min_distance": 2,
+            "max_distance": 40,
+            "random_state": 42,
+            "anchors_per_round": 100,
+            "distances_per_anchor": 3,
+            "angles_per_distance": 3,
+        }
+
+        # Use identical chunk boundaries and one seed so all three backends must select the same pairs
+        dask_result = dask_raster.rst.pairsample(**options)
+        with ClusterGenerator("multi", nb_workers=2) as cluster:
+            config = MultiprocConfig(chunks=file_raster.shape, cluster=cluster)
+            mp_result = file_raster.pairsample(mp_config=config, **options)
+        expected = eager.pairsample(**options)
+
+        # Compare the labelled results and confirm that neither chunked input became loaded
+        xr.testing.assert_equal(dask_result, expected)
+        xr.testing.assert_equal(mp_result, expected)
+        assert dask_result.sizes["pair"] == 120
+        assert not dask_raster._in_memory
+        assert not file_raster.is_loaded
+
+    def test_pairsample__raster_chunked_local_tiles_and_file_mask(self, tmp_path: Path) -> None:
+        """Checks that Dask chunks and MP tiles produce the same local raster pairs through a file mask."""
+
+        # Create matching Dask and file-backed rasters with a mask that keeps the left half
+        import dask.array as da
+
+        values = np.arange(576, dtype=float).reshape(24, 24)
+        keep = np.zeros(values.shape, dtype=bool)
+        keep[:, :12] = True
+        transform = from_origin(0, 24, 1, 1)
+        dask_source = gu.RasterAccessor.from_array(da.from_array(values, chunks=(7, 9)), transform, 32633)
+        dask_mask = gu.RasterAccessor.from_array(da.from_array(keep, chunks=(7, 9)), transform, 32633)
+        source_filename = tmp_path / "local-values.tif"
+        mask_filename = tmp_path / "local-mask.tif"
+        gu.Raster.from_array(values, transform, 32633).to_file(source_filename)
+        gu.Raster.from_array(keep, transform, 32633).to_file(mask_filename)
+        file_source = gu.Raster(source_filename)
+        file_mask = gu.Raster(mask_filename, is_mask=True)
+        options = {
+            "n_pairs": 150,
+            "min_distance": 1,
+            "max_distance": 5,
+            "hybrid_local_fraction": 1,
+            "random_state": 7,
+            "index_dtype": np.int16,
+            "distance_dtype": np.float32,
+        }
+
+        # Draw only local pairs through identical seven by nine chunks, including shorter final chunks
+        dask_pairs = dask_source.rst.pairsample(mask=dask_mask, **options)
+        with ClusterGenerator("multi", nb_workers=2) as cluster:
+            config = MultiprocConfig(chunks=(7, 9), cluster=cluster)
+            mp_pairs = file_source.pairsample(mask=file_mask, mp_config=config, **options)
+
+        # Require identical pairs and verify locality from the independently calculated chunk boundaries
+        xr.testing.assert_equal(dask_pairs, mp_pairs)
+        row_edges = np.array([0, 7, 14, 21, 24])
+        column_edges = np.array([0, 9, 18, 24])
+        rows = np.searchsorted(row_edges, dask_pairs.row, side="right")
+        columns = np.searchsorted(column_edges, dask_pairs.column, side="right")
+        assert np.array_equal(rows[:, 0], rows[:, 1])
+        assert np.array_equal(columns[:, 0], columns[:, 1])
+        assert np.all(keep[dask_pairs.row, dask_pairs.column])
+        assert np.array_equal(dask_pairs.value, values[dask_pairs.row, dask_pairs.column])
+        assert dask_pairs["index"].dtype == np.int16
+        assert dask_pairs["distance"].dtype == np.float32
+        assert not dask_source._in_memory and not dask_mask._in_memory
+        assert not file_source.is_loaded and not file_mask.is_loaded
+
+    def test_pairsample__error_multiproc_with_dask(self) -> None:
+        """Checks that pairsample rejects simultaneous Dask and multiprocessing schedulers before reading values."""
+
+        # Create a lazy raster and retain its original Dask array for the loading-state check
+        dask_array = pytest.importorskip("dask.array")
+        values = dask_array.from_array(np.arange(100, dtype=float).reshape(10, 10), chunks=(4, 6))
+        source = gu.RasterAccessor.from_array(values, from_origin(0, 10, 1, 1), 32633)
+
+        # Reject the second scheduler without computing or replacing the lazy source array
+        with pytest.raises(ValueError, match="Cannot use Multiprocessing and Dask simultaneously"):
+            source.rst.pairsample(n_pairs=20, mp_config=MultiprocConfig(chunks=4))
+        assert source.data is values
+        assert not source._in_memory
+
+    def test_pairsample__error_point_multiproc_rectangular_chunks(self) -> None:
+        """Checks that point pair multiprocessing requires one integer row partition size."""
+
+        # Create an eager point table so chunk validation does not depend on a particular file reader
+        points = gu.PointCloud.from_xyz([0, 1, 2], [0, 0, 0], [3, 4, 5], crs=32633)
+
+        # Reject the two-dimensional tile shape used for rasters because point rows have one dimension
+        with pytest.raises(ValueError, match="Point-cloud multiprocessing requires an integer chunk size"):
+            points.pairsample(n_pairs=1, mp_config=MultiprocConfig(chunks=(2, 2)))
 
 
 class TestPairSampleErrors:

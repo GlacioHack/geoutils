@@ -741,6 +741,7 @@ class PointCloudBase(VectorBase):
         nn_max_batches: int = 200,
         index_dtype: DTypeLike = np.int32,
         distance_dtype: DTypeLike = np.float32,
+        mp_config: MultiprocConfig | None = None,
     ) -> xr.Dataset:
         """Sample finite point pairs for statistics by distance.
 
@@ -748,7 +749,7 @@ class PointCloudBase(VectorBase):
         and accepts a nearby observed endpoint, which is generally faster for large point clouds.
 
         Strategy controls apply to ``"loglag"``. ``"random_xy"`` uses ``max_rounds`` and ``nn_batch_size``.
-        Dask point tables are loaded because the search requires all coordinates.
+        Dask and Multiprocessing point tables are collected because the search requires all coordinates.
 
         :param n_pairs: Requested number of pairs with two finite values; fewer may be returned if sampling stops early.
         :param sampling: ``"loglag"`` balances short and long distances on a log scale; ``"random_xy"`` draws
@@ -777,6 +778,8 @@ class PointCloudBase(VectorBase):
         :param nn_max_batches: Maximum batches to fill the sample with ``"nn_logvector"``.
         :param index_dtype: Integer NumPy dtype for returned row indexes (e.g. ``"int64"`` for very large point clouds).
         :param distance_dtype: Floating NumPy dtype for returned distances (e.g. ``"float64"`` for greater precision).
+        :param mp_config: Worker and row partition settings for reading an unloaded point cloud. Cannot be combined
+            with Dask inputs. The global point search and returned Xarray Dataset are eager.
         :returns: Xarray Dataset with pair and endpoint dimensions, containing original row indexes, values,
             coordinates, and distances.
         """
@@ -803,6 +806,7 @@ class PointCloudBase(VectorBase):
             nn_max_batches=nn_max_batches,
             index_dtype=index_dtype,
             distance_dtype=distance_dtype,
+            mp_config=mp_config,
         )
 
     def variogram(
