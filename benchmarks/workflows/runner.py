@@ -446,6 +446,10 @@ class BenchmarkRunner:
             with rio.Env(GDAL_CACHEMAX=self.config.gdal_cachemax_mb):
                 # Default recycling bounds allocator and native-library caches in long jobs
                 self.mp_cluster = MpCluster(conf={"nb_workers": self.config.n_workers})
+
+                # Forkserver and spawn workers import modules independently, so finish their warm-up before profiling
+                warmup = self.mp_cluster.submit(_prepare_benchmark_process, self.config.gdal_cachemax_mb)
+                self.mp_cluster.compute(warmup)
         finally:
             # Restore the caller environment after all workers have inherited it
             if previous_cachemax is None:

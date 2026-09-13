@@ -61,6 +61,33 @@ class TestClusterGenerator:
         results = cluster.gather(futures)
         assert results == [0, 2, 4, 6]
 
+    def test_mp_cluster__default_start_method(self) -> None:
+        """Checks that MpCluster uses "forkserver" when available, otherwise falls back to spawn."""
+
+        # Select the platform default
+        available_methods = multiprocessing.get_all_start_methods()
+        expected_method = "forkserver" if "forkserver" in available_methods else "spawn"
+
+        # Start one worker and check that the selected context can execute an ordinary task
+        with MpCluster({"nb_workers": 1}) as cluster:
+            assert cluster.start_method == expected_method
+            assert cluster.compute(cluster.submit(sample_function, 2, 3)) == 5
+
+    def test_mp_cluster__explicit_start_method(self) -> None:
+        """Checks that MpCluster accepts an available start method selected by the user."""
+
+        # Spawn is available on every supported platform and provides a clean worker process
+        with MpCluster({"nb_workers": 1}, start_method="spawn") as cluster:
+            assert cluster.start_method == "spawn"
+            assert cluster.compute(cluster.submit(sample_function, 2, 3)) == 5
+
+    def test_mp_cluster__error_unavailable_start_method(self) -> None:
+        """Checks that MpCluster rejects a start method unavailable on the current platform."""
+
+        # Reject the value before creating a worker pool and list the methods the runtime supports
+        with pytest.raises(ValueError, match="is not available on this platform"):
+            MpCluster({"nb_workers": 1}, start_method="unavailable")  # type: ignore[arg-type]
+
     def test_mp_cluster_completion_order(self) -> None:
         """Checks that iter_completed() yields a later submitted task when it finishes first."""
 
