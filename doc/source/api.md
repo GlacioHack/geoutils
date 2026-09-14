@@ -134,7 +134,10 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
     ~raster.base.RasterBase.plot
 ```
 
+(api-raster-statistics)=
 ### Statistics
+
+See {ref}`stats` for estimators, grouping by intervals or categories, and variograms.
 
 ```{eval-rst}
 .. autosummary::
@@ -142,6 +145,22 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
     :template: raster_method.rst
 
     ~raster.base.RasterBase.stats
+    ~raster.base.RasterBase.variogram
+```
+
+(api-raster-sampling)=
+### Sampling
+
+See {ref}`sampling` for selecting valid observations, common locations and spatial pairs.
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+    :template: raster_method.rst
+
+    ~raster.base.RasterBase.subsample
+    ~raster.base.RasterBase.cosample
+    ~raster.base.RasterBase.pairsample
 ```
 
 ### Data manipulation
@@ -157,7 +176,6 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
     ~raster.base.RasterBase.set_nodata
     ~raster.base.RasterBase.get_nanarray
     ~raster.base.RasterBase.get_mask
-    ~raster.base.RasterBase.subsample
 ```
 
 ### Loading, writing and converting
@@ -584,14 +602,31 @@ documentation](https://shapely.readthedocs.io/en/stable/properties.html).
     PointCloud.grid
 ```
 
+(api-point-statistics)=
 ### Statistics
+
+See {ref}`stats` for the same statistical workflows on point cloud values.
 
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
 
     PointCloud.stats
+    PointCloud.variogram
+```
+
+(api-point-sampling)=
+### Sampling
+
+See {ref}`sampling` for sampling values and locations from point clouds.
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
     PointCloud.subsample
+    PointCloud.cosample
+    PointCloud.pairsample
 ```
 
 ### Testing methods
@@ -603,6 +638,99 @@ documentation](https://shapely.readthedocs.io/en/stable/properties.html).
     PointCloud.pointcloud_equal
     PointCloud.georeferenced_coords_equal
 ```
+
+(api-statistics)=
+## Statistics
+
+The {ref}`Statistics feature page<stats>` introduces these functions and result objects. The corresponding spatial
+methods are listed under {ref}`api-raster-statistics` and {ref}`api-point-statistics`.
+
+### Array estimators
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    stats.nmad
+    stats.linear_error
+    stats.rmse
+    stats.sum_square
+```
+
+### Grouped statistics and plotting
+
+**Zonal statistics are grouped statistics with bins defined by vector features.** Use
+`raster.stats(by={"zone": (zones, "id")})`, or the same point cloud method, to calculate statistics by
+feature ID. See {ref}`stats-zonal` for examples. The array function below handles already aligned values and groupers.
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    stats.stats
+    stats.plot_grouped_stats
+```
+
+### Variograms and covariance models
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    stats.variogram
+    Variogram
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    Variogram.estimate
+    Variogram.from_pairs
+    Variogram.from_model
+    Variogram.fit
+    Variogram.plot
+    Variogram.variogram
+    Variogram.covariance
+    Variogram.correlation
+    Variogram.combine
+```
+
+### Export and backend conversion
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    Variogram.to_dataframe
+    Variogram.to_xarray
+    Variogram.to_dict
+    Variogram.from_dict
+    Variogram.from_skgstat
+    Variogram.without_backend
+    Variogram.to_gstools
+    Variogram.to_gpytorch
+```
+
+(api-sampling)=
+## Sampling
+
+The {ref}`Sampling feature page<sampling>` describes selection from one dataset, matching locations between datasets,
+and spatial pairs. Their object methods are listed under {ref}`api-raster-sampling` and {ref}`api-point-sampling`.
+
+### Common-location samples
+
+{meth}`~geoutils.Raster.cosample` and {meth}`~geoutils.PointCloud.cosample` return a raster or point cloud on the
+support selected by `at`. Accessor calls return an {class}`xarray.DataArray` or {class}`geopandas.GeoDataFrame`.
+Bands or columns contain `"self"`, `"other"`, then named auxiliaries in mapping order. Raster band names are stored
+in `tags["long_name"]` (Xarray `attrs["long_name"]`); point outputs retain the support's selected index labels and
+use `"self"` as their active data column. See {ref}`sampling-cosample` for examples.
+
+### Pair samples
+
+{meth}`~geoutils.Raster.pairsample` and {meth}`~geoutils.PointCloud.pairsample` return an {class}`xarray.Dataset`
+with dimensions `pair` and `endpoint`, containing values, source indexes, coordinates and distances. See
+{ref}`sampling-pairs` for its use and the available distance sampling schemes.
 
 ## Multiprocessing configuration
 
