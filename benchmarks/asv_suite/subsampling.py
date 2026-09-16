@@ -98,11 +98,11 @@ class DaskCutoffComparison:
 
     param_names = ["implementation", "subsample_size"]
     params = [
-        ["geoutils_cutoff", "dask_argtopk"],
+        ["geoutils_cutoff", "dask_topk"],
         asv_parameter_values([262_145, 524_288, 1_048_576], pr_check_value=262_145),
     ]
 
-    def setup(self, implementation: Literal["geoutils_cutoff", "dask_argtopk"], subsample_size: int) -> None:
+    def setup(self, implementation: Literal["geoutils_cutoff", "dask_topk"], subsample_size: int) -> None:
         """Prepare equivalent lazy keys and raster chunks for both selection methods."""
 
         import_optional("dask", extra_name="benchmark")
@@ -129,7 +129,7 @@ class DaskCutoffComparison:
         self.blocks = self.values.to_delayed().ravel().tolist()
         self.largest_chunk = max(int(rows * columns) for rows in row_chunks for columns in column_chunks)
 
-    def _run(self, implementation: Literal["geoutils_cutoff", "dask_argtopk"], subsample_size: int) -> None:
+    def _run(self, implementation: Literal["geoutils_cutoff", "dask_topk"], subsample_size: int) -> None:
         """Find the exact selection boundary with GeoUtils or Dask's native reduction."""
 
         import dask
@@ -158,15 +158,15 @@ class DaskCutoffComparison:
             key_input = np.uint64(42) ^ cell_numbers.astype(np.uint64)
             keys = key_input.map_blocks(_splitmix64, dtype=np.uint64)
             eligible_keys = da.where(valid, keys, np.iinfo(np.uint64).max)
-            da.argtopk(eligible_keys, -subsample_size, split_every=8).compute()
+            da.topk(eligible_keys, -subsample_size, split_every=8).compute()
 
-    def time_cutoff(self, implementation: Literal["geoutils_cutoff", "dask_argtopk"], subsample_size: int) -> None:
+    def time_cutoff(self, implementation: Literal["geoutils_cutoff", "dask_topk"], subsample_size: int) -> None:
         """Measure exact selection above the largest raster chunk."""
 
         self._run(implementation, subsample_size)
 
     def track_peak_client_mem_mb(
-        self, implementation: Literal["geoutils_cutoff", "dask_argtopk"], subsample_size: int
+        self, implementation: Literal["geoutils_cutoff", "dask_topk"], subsample_size: int
     ) -> float:
         """Measure peak client memory while finding the exact selection boundary."""
 

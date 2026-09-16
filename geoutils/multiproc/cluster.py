@@ -180,7 +180,8 @@ class MpCluster(AbstractCluster):
         if conf is not None:
             nb_workers = conf.get("nb_workers", 1)
             max_tasks_per_child = conf.get("max_tasks_per_child", 10)
-        # Use spawn on Windows and preserve existing fork behavior elsewhere
+        # Using the 'forkserver' context for more controlled process handling
+        # Windows requires spawn, preserve existing fork behavior elsewhere
         ctx_in_main = multiprocessing.get_context("spawn" if sys.platform == "win32" else "fork")
         # Recycling stays configurable so memory tests can distinguish it from a crash
         self.pool = ctx_in_main.Pool(processes=nb_workers, maxtasksperchild=max_tasks_per_child)

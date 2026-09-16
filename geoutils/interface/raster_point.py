@@ -485,22 +485,22 @@ def _raster_chunk_topk_keys(
     Used only when the requested subsample is larger than one chunk.
     """
 
-    # Build local positions for every cell or only those allowed by the main raster band
+    # Build full raster indexes directly from the chunk row and column offsets
     row_start, row_stop, column_start, column_stop = (int(value) for value in tile_idx)
     tile_width = column_stop - column_start
+    row_offsets = np.arange(row_start, row_stop, dtype=np.int64) * np.int64(raster_width) + column_start
+    global_indices = (row_offsets[:, None] + np.arange(tile_width, dtype=np.int64)).reshape(-1)
+
+    # Keep only cells allowed by the main raster band
     if skip_nodata:
         if array is None:
-            raise RuntimeError("Raster values are required when missing cells are excluded.")
+            raise RuntimeError("Raster values are required when skip_nodata=True.")
         from geoutils.sampling.subsampling import _valid_subsample_mask
 
         valid = _valid_subsample_mask(array, skip_nodata=True)
-        flat_positions = np.flatnonzero(valid.ravel())
-    else:
-        flat_positions = np.arange((row_stop - row_start) * tile_width, dtype=np.int64)
+        global_indices = global_indices[valid.reshape(-1)]
 
-    # Convert local positions to full-raster indexes before calculating their repeatable random keys
-    local_rows, local_columns = np.divmod(flat_positions, tile_width)
-    global_indices = (local_rows + row_start) * np.int64(raster_width) + local_columns + column_start
+    # Calculate repeatable random keys from full raster indexes
     from geoutils.sampling.subsampling import _splitmix64
 
     return np.asarray(_splitmix64(np.uint64(seed) ^ global_indices.astype(np.uint64)), dtype=np.uint64)
@@ -536,12 +536,68 @@ def _topk_prefix_keys(keys: NDArray[np.uint64], prefix: int, prefix_bits: int) -
     return keys[prefix_matches]
 
 
+def _topk_histogram_candidates(
+    keys: NDArray[np.uint64], digit_bits: int, candidate_prefixes: tuple[int, int]
+) -> tuple[NDArray[np.int64], NDArray[np.uint64]]:
+    """Count the first key ranges and keep keys from an interval likely to contain the cutoff."""
+
+    histogram = _topk_key_histogram(keys, 0, 0, digit_bits)
+    prefix_start, prefix_stop = candidate_prefixes
+    prefixes = keys >> np.uint64(64 - digit_bits)
+    candidate_mask = (prefixes >= prefix_start) & (prefixes < prefix_stop)
+    return histogram, keys[candidate_mask]
+
+
+def _merge_topk_histogram_candidates(
+    parts: list[tuple[NDArray[np.int64], NDArray[np.uint64] | None]], candidate_limit: int
+) -> tuple[NDArray[np.int64], NDArray[np.uint64] | None]:
+    """Add histograms while keeping no more than one raster chunk of possible cutoff keys."""
+
+    histogram = np.sum([part[0] for part in parts], axis=0, dtype=np.int64)
+    candidate_parts = [part[1] for part in parts]
+    if any(part is None for part in candidate_parts):
+        return histogram, None
+
+    candidates = cast(list[NDArray[np.uint64]], candidate_parts)
+    if sum(len(part) for part in candidates) > candidate_limit:
+        return histogram, None
+    return histogram, np.concatenate(candidates)
+
+
+def _topk_candidate_prefixes(
+    subsample: float | int, total_cells: int, largest_chunk: int, digit_bits: int
+) -> tuple[int, int]:
+    """Choose a bounded key interval likely to contain the requested sample cutoff."""
+
+    prefix_count = 1 << digit_bits
+
+    # Cache ranges expected to hold three quarters of one chunk, leaving room for uneven key counts
+    cached_prefix_count = max(1, min(prefix_count, largest_chunk * prefix_count * 3 // (total_cells * 4)))
+    if 0 < subsample <= 1:
+        # Center fractional samples on their expected key quantile
+        predicted_prefix = min(prefix_count - 1, int(subsample * prefix_count))
+        lower_prefixes = cached_prefix_count // 2
+    else:
+        # Reserve most prefixes above the all-valid estimate because missing cells can move the cutoff upward
+        requested_size = max(1, min(int(subsample), total_cells))
+        predicted_prefix = (requested_size - 1) * prefix_count // total_cells
+        lower_prefixes = max(1, cached_prefix_count // 8)
+
+    prefix_start = max(0, predicted_prefix - lower_prefixes)
+    prefix_stop = min(prefix_count, prefix_start + cached_prefix_count)
+    return max(0, prefix_stop - cached_prefix_count), prefix_stop
+
+
 def _iterative_topk_cutoff(
     subsample: float | int,
     random_state: int | np.random.Generator | None,
     largest_chunk: int,
+    total_cells: int,
     number_chunks: int,
-    histogram_for_prefix: Callable[[int, int, int, int], NDArray[np.int64]],
+    histogram_for_prefix: Callable[
+        [int, int, int, int, tuple[int, int] | None],
+        tuple[NDArray[np.int64], NDArray[np.uint64] | None],
+    ],
     keys_for_prefix: Callable[[int, int, int, int], NDArray[np.uint64]],
 ) -> tuple[int, int, np.uint64 | None]:
     """
@@ -585,9 +641,17 @@ def _iterative_topk_cutoff(
     prefix_bits = 0
     rank = -1
     sample_size = 0
+    candidate_cache: tuple[int, int, int, NDArray[np.uint64]] | None = None
     while prefix_bits < 64:
         current_digit_bits = min(digit_bits, 64 - prefix_bits)
-        histogram = histogram_for_prefix(seed, prefix, prefix_bits, current_digit_bits)
+        candidate_prefixes = None
+        if prefix_bits == 0:
+            candidate_prefixes = _topk_candidate_prefixes(subsample, total_cells, largest_chunk, current_digit_bits)
+        histogram, candidate_keys = histogram_for_prefix(
+            seed, prefix, prefix_bits, current_digit_bits, candidate_prefixes
+        )
+        if candidate_prefixes is not None and candidate_keys is not None:
+            candidate_cache = (*candidate_prefixes, current_digit_bits, candidate_keys)
 
         # Use the first set of counts to calculate the requested number of points
         if prefix_bits == 0:
@@ -609,7 +673,15 @@ def _iterative_topk_cutoff(
         if group_size <= largest_chunk:
             if prefix_bits == 64:
                 return sample_size, seed, np.uint64(prefix)
-            group_keys = keys_for_prefix(seed, prefix, prefix_bits, group_size)
+            group_keys = None
+            if candidate_cache is not None:
+                cached_prefix_start, cached_prefix_stop, cached_prefix_bits, cached_keys = candidate_cache
+                if cached_prefix_bits == prefix_bits and cached_prefix_start <= prefix < cached_prefix_stop:
+                    cached_group_keys = _topk_prefix_keys(cached_keys, prefix, prefix_bits)
+                    if len(cached_group_keys) == group_size:
+                        group_keys = cached_group_keys
+            if group_keys is None:
+                group_keys = keys_for_prefix(seed, prefix, prefix_bits, group_size)
             if len(group_keys) != group_size:
                 raise RuntimeError("The number of random keys changed while finding the subsample cutoff.")
             group_keys.partition(rank)
@@ -686,6 +758,21 @@ def _wrapper_raster_topk_histogram_dask(
     return _topk_key_histogram(keys, prefix, prefix_bits, digit_bits)
 
 
+def _wrapper_raster_topk_histogram_candidates_dask(
+    array: Any | None,
+    tile_idx: NDArrayNum,
+    raster_width: int,
+    seed: int,
+    digit_bits: int,
+    candidate_prefixes: tuple[int, int],
+    skip_nodata: bool,
+) -> tuple[NDArray[np.int64], NDArray[np.uint64]]:
+    """Count first-pass key ranges and return possible cutoff keys from one Dask chunk."""
+
+    keys = _raster_chunk_topk_keys(array, tile_idx, raster_width, seed, skip_nodata)
+    return _topk_histogram_candidates(keys, digit_bits, candidate_prefixes)
+
+
 def _wrapper_raster_topk_prefix_keys_dask(
     array: Any | None,
     tile_idx: NDArrayNum,
@@ -725,8 +812,38 @@ def _dask_raster_topk_cutoff(
     dask = import_optional("dask")
     delayed = dask.delayed
 
-    def histogram_for_prefix(seed: int, prefix: int, prefix_bits: int, digit_bits: int) -> NDArray[np.int64]:
+    def histogram_for_prefix(
+        seed: int,
+        prefix: int,
+        prefix_bits: int,
+        digit_bits: int,
+        candidate_prefixes: tuple[int, int] | None,
+    ) -> tuple[NDArray[np.int64], NDArray[np.uint64] | None]:
         """Count keys for the requested subsample in every Dask chunk and add the results."""
+
+        # Keep a bounded interval around the expected cutoff during the first raster pass
+        if candidate_prefixes is not None:
+            histogram_candidates = [
+                delayed(_wrapper_raster_topk_histogram_candidates_dask)(
+                    block if skip_nodata else None,
+                    tile,
+                    raster_shape[1],
+                    seed,
+                    digit_bits,
+                    candidate_prefixes,
+                    skip_nodata,
+                )
+                for block, tile in zip(main_blocks, tiles)
+            ]
+            while len(histogram_candidates) > 1:
+                histogram_candidates = [
+                    delayed(_merge_topk_histogram_candidates)(histogram_candidates[start : start + 2], largest_chunk)
+                    for start in range(0, len(histogram_candidates), 2)
+                ]
+            return cast(
+                tuple[NDArray[np.int64], NDArray[np.uint64] | None],
+                dask.compute(histogram_candidates[0])[0],
+            )
 
         histograms = [
             delayed(_wrapper_raster_topk_histogram_dask)(
@@ -745,7 +862,7 @@ def _dask_raster_topk_cutoff(
             histograms = [
                 delayed(_sum_topk_histograms)(histograms[start : start + 8]) for start in range(0, len(histograms), 8)
             ]
-        return cast(NDArray[np.int64], dask.compute(histograms[0])[0])
+        return cast(NDArray[np.int64], dask.compute(histograms[0])[0]), None
 
     def keys_for_prefix(seed: int, prefix: int, prefix_bits: int, group_size: int) -> NDArray[np.uint64]:
         """Collect keys in the last range chosen for the requested subsample from every Dask chunk."""
@@ -774,6 +891,7 @@ def _dask_raster_topk_cutoff(
         subsample,
         random_state,
         largest_chunk,
+        int(np.prod(raster_shape)),
         len(tiles),
         histogram_for_prefix,
         keys_for_prefix,
@@ -1018,6 +1136,21 @@ def _wrapper_raster_topk_histogram_mp(
     return _topk_key_histogram(keys, prefix, prefix_bits, digit_bits)
 
 
+def _wrapper_raster_topk_histogram_candidates_mp(
+    source_raster: RasterType,
+    tile_idx: NDArrayNum,
+    seed: int,
+    digit_bits: int,
+    candidate_prefixes: tuple[int, int],
+    band: int,
+    skip_nodata: bool,
+) -> tuple[NDArray[np.int64], NDArray[np.uint64]]:
+    """Count first-pass key ranges and return possible cutoff keys from one multiprocessing tile."""
+
+    keys = _raster_tile_topk_keys(source_raster, tile_idx, seed, band, skip_nodata)
+    return _topk_histogram_candidates(keys, digit_bits, candidate_prefixes)
+
+
 def _wrapper_raster_topk_prefix_keys_mp(
     source_raster: RasterType,
     tile_idx: NDArrayNum,
@@ -1052,10 +1185,43 @@ def _multiproc_raster_topk_cutoff(
 
     from geoutils.multiproc.cluster import _map_bounded
 
-    def histogram_for_prefix(seed: int, prefix: int, prefix_bits: int, digit_bits: int) -> NDArray[np.int64]:
+    def histogram_for_prefix(
+        seed: int,
+        prefix: int,
+        prefix_bits: int,
+        digit_bits: int,
+        candidate_prefixes: tuple[int, int] | None,
+    ) -> tuple[NDArray[np.int64], NDArray[np.uint64] | None]:
         """Count keys for the requested subsample in every multiprocessing tile and add the results."""
 
-        arguments = (
+        # Collect the bounded first-pass cutoff candidates selected by the shared algorithm
+        if candidate_prefixes is not None:
+            candidate_arguments = (
+                (
+                    source_raster,
+                    tile,
+                    seed,
+                    digit_bits,
+                    candidate_prefixes,
+                    band,
+                    skip_nodata,
+                )
+                for tile in tiles
+            )
+            histogram_candidates = [
+                result
+                for _, result in _map_bounded(
+                    mp_config.cluster, _wrapper_raster_topk_histogram_candidates_mp, candidate_arguments
+                )
+            ]
+            while len(histogram_candidates) > 1:
+                histogram_candidates = [
+                    _merge_topk_histogram_candidates(histogram_candidates[start : start + 2], largest_chunk)
+                    for start in range(0, len(histogram_candidates), 2)
+                ]
+            return histogram_candidates[0]
+
+        histogram_arguments = (
             (
                 source_raster,
                 tile,
@@ -1069,9 +1235,11 @@ def _multiproc_raster_topk_cutoff(
             for tile in tiles
         )
         histogram = np.zeros(1 << digit_bits, dtype=np.int64)
-        for _, tile_histogram in _map_bounded(mp_config.cluster, _wrapper_raster_topk_histogram_mp, arguments):
+        for _, tile_histogram in _map_bounded(
+            mp_config.cluster, _wrapper_raster_topk_histogram_mp, histogram_arguments
+        ):
             histogram += tile_histogram
-        return histogram
+        return histogram, None
 
     def keys_for_prefix(seed: int, prefix: int, prefix_bits: int, group_size: int) -> NDArray[np.uint64]:
         """Collect keys in the last range chosen for the requested subsample from every multiprocessing tile."""
@@ -1089,6 +1257,7 @@ def _multiproc_raster_topk_cutoff(
         subsample,
         random_state,
         largest_chunk,
+        int(np.prod(source_raster.shape)),
         len(tiles),
         histogram_for_prefix,
         keys_for_prefix,

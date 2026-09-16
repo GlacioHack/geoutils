@@ -522,6 +522,43 @@ class TestRasterPointChunked:
         computed_order = np.lexsort((computed[:, 0], computed[:, 1]))
         np.testing.assert_array_equal(expected[expected_order], computed[computed_order])
 
+    @pytest.mark.parametrize("backend", ["dask", "multiprocessing"])
+    def test_to_pointcloud__chunked_cutoff_cache_fallback(self, backend: str, tmp_path: Path) -> None:
+        """Checks that a cutoff outside the bounded key cache returns the exact sample with either chunked backend."""
+
+        from geoutils.sampling.subsampling import _splitmix64
+
+        # Keep only cells from the upper half of the random key range so the initial cutoff estimate misses them
+        cell_indices = np.arange(64 * 64, dtype=np.int32)
+        keys = np.asarray(_splitmix64(np.uint64(42) ^ cell_indices.astype(np.uint64)), dtype=np.uint64)
+        valid = keys >> np.uint64(56) >= 128
+        values = np.ma.masked_array(cell_indices.reshape((64, 64)), mask=~valid.reshape((64, 64)), fill_value=-9999)
+        source_file = tmp_path / "cutoff-fallback-source.tif"
+        output_file = tmp_path / "multiprocessing-cutoff-fallback.gpkg"
+        raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 64, 1, 1), 32633, nodata=-9999)
+        raster.to_file(source_file)
+
+        # Select more cells than one 8 x 8 chunk through the eager and requested chunked paths
+        expected_values = raster.to_pointcloud(subsample=65, random_state=42, as_array=True)[:, 2]
+        if backend == "dask":
+            source = open_raster(str(source_file), chunks={"x": 8, "y": 8})
+            computed_values = source.rst.to_pointcloud(subsample=65, random_state=42, as_array=True).compute()[:, 2]
+        else:
+            source = gu.Raster(source_file)
+            computed = source.to_pointcloud(
+                subsample=65,
+                random_state=42,
+                mp_config=MultiprocConfig(chunks=(8, 8), outfile=str(output_file)),
+            )
+            computed_values = computed.ds["b1"].to_numpy()
+
+        # Match every selected cell by its unique raster value and leave the source unloaded
+        np.testing.assert_array_equal(np.sort(computed_values), np.sort(expected_values))
+        if backend == "dask":
+            assert not source._in_memory
+        else:
+            assert not source.is_loaded
+
     @pytest.mark.parametrize("as_array", [False, True])
     def test_to_pointcloud__dask_large_empty_sample(self, as_array: bool, tmp_path: Path) -> None:
         """Checks that a large Dask sample with no valid cells returns an empty lazy result."""
