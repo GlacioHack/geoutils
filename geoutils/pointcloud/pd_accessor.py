@@ -407,7 +407,6 @@ class PointCloudAccessor(PointCloudBase, VectorAccessor):
         :param kwargs: Additional attributes to set on the LasPy header.
         """
 
-        # The common writer streams Dask partitions or eager chunks as appropriate
         _write_laspy(
             filename=filename,
             pc=self.ds,

@@ -35,7 +35,7 @@ def _map_bounded(
     """
     Run a function for many inputs without submitting all the work at once.
 
-    Submit up to ``max_pending`` calls, wait for their results, and then start the next batch. This limits how many
+    Keep up to ``max_pending`` calls active and replace each completed call with the next input. This limits how many
     jobs and input values the cluster must keep at one time. Return results in the same order as the inputs, together
     with the position of each input.
 
@@ -51,20 +51,39 @@ def _map_bounded(
     if max_pending <= 0:
         raise ValueError("Argument ``max_pending`` must be a positive integer.")
 
-    # Submit one small batch at a time
+    # Fill the first bounded group without consuming the remaining input arguments
+    indexed_arguments = enumerate(arguments)
     pending: list[tuple[int, Any]] = []
-    for index, args in enumerate(arguments):
+    for _ in range(max_pending):
+        try:
+            index, args = next(indexed_arguments)
+        except StopIteration:
+            break
         pending.append((index, cluster.submit(function, *args)))
-        if len(pending) == max_pending:
-            # Wait for the batch and return its results in input order
-            results = cluster.gather([future for _, future in pending])
-            yield from ((task_index, result) for (task_index, _), result in zip(pending, results))
-            pending = []
 
-    # Finish the last, smaller batch
-    if pending:
-        results = cluster.gather([future for _, future in pending])
-        yield from ((task_index, result) for (task_index, _), result in zip(pending, results))
+    # Replace completed calls immediately while keeping returned results in input order
+    completed: dict[int, Any] = {}
+    next_result = 0
+    while pending:
+        futures = [future for _, future in pending]
+        completed_position, result = next(iter(cluster.iter_completed(futures)))
+        task_index, _ = pending.pop(completed_position)
+        completed[task_index] = result
+
+        ready = []
+        while next_result in completed:
+            ready.append((next_result, completed.pop(next_result)))
+            next_result += 1
+
+        # Count completed results against the limit until an earlier input allows them to be returned
+        while len(pending) + len(completed) < max_pending:
+            try:
+                index, args = next(indexed_arguments)
+            except StopIteration:
+                break
+            pending.append((index, cluster.submit(function, *args)))
+
+        yield from ready
 
 
 class ClusterGenerator:
@@ -161,8 +180,7 @@ class MpCluster(AbstractCluster):
         if conf is not None:
             nb_workers = conf.get("nb_workers", 1)
             max_tasks_per_child = conf.get("max_tasks_per_child", 10)
-        # Using the 'forkserver' context for more controlled process handling
-        # Windows requires spawn, preserve existing fork behavior elsewhere
+        # Use spawn on Windows and preserve existing fork behavior elsewhere
         ctx_in_main = multiprocessing.get_context("spawn" if sys.platform == "win32" else "fork")
         # Recycling stays configurable so memory tests can distinguish it from a crash
         self.pool = ctx_in_main.Pool(processes=nb_workers, maxtasksperchild=max_tasks_per_child)

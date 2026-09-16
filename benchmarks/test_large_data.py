@@ -181,7 +181,7 @@ class TestLargeData:
         if backend == "dask":
             pytest.importorskip("dask")
             pytest.importorskip("distributed")
-            if operation == "grid":
+            if operation in ("grid", "to_pointcloud"):
                 pytest.importorskip("dask_geopandas")
 
         # The uncompressed input must exceed the configured limit before claiming a large data test
@@ -199,6 +199,12 @@ class TestLargeData:
             assert os.path.exists(result.output_file)
             # Remove each checked output before the next large operation starts
             os.remove(result.output_file)
+
+        # The client must not build a temporary array as large as the complete raster
+        client_trace = result.metrics.client_mem_mb
+        assert client_trace
+        baseline_client_mb = client_trace[0][1]
+        assert result.metrics.peak_client_mem_mb - baseline_client_mb < logical_mb
 
         if backend == "dask":
             # Dask must complete without hiding a failure through nanny replacement
@@ -234,7 +240,12 @@ class TestLargeData:
     def test_operation_stays_out_of_core(self, case_name: str, large_data_config: BenchmarkConfig) -> None:
         """Complete one larger-than-memory operation without loading its full raster."""
 
-        self._check_case(case_name=case_name, large_data_config=large_data_config)
+        # Request more point rows than one raster chunk so point conversion checks its bounded cutoff path
+        config = large_data_config
+        if split_operation_case(case_name)[1] == "to_pointcloud":
+            config = replace(large_data_config, subsample_size=int(np.prod(large_data_config.chunks)) + 1)
+
+        self._check_case(case_name=case_name, large_data_config=config)
 
     @pytest.mark.parametrize("case_name", ["dask-grid", "multiprocessing-grid"])
     @pytest.mark.parametrize("resampling", ["idw", "mean"])

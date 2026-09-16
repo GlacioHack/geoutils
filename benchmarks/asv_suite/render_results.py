@@ -96,6 +96,10 @@ SCALING_SECTION_DETAILS = {
         "Scaling with the number of sampled values",
         "The returned sample size varies while the source raster remains fixed.",
     ),
+    "Number of output points": (
+        "Scaling with the number of output points",
+        "The point cloud size varies while the source raster remains fixed.",
+    ),
     "Number of groups per axis": (
         "Scaling with the number of groups",
         "The number of rectangular groups varies while raster and chunk dimensions remain fixed.",
@@ -111,6 +115,7 @@ OPERATION_LABELS: dict[OperationName, str] = {
     "statistics": "Statistics",
     "grouped_stats": "Grouped statistics",
     "subsample": "Subsampling",
+    "to_pointcloud": "Point cloud conversion",
     "interp_points": "Point interpolation",
     "polygonize": "Polygonization",
     "write": "Writing",
@@ -136,6 +141,7 @@ OPERATION_GROUPS: dict[OperationName, str] = {
     "filter": "Raster ⟶ Raster",
     "reproject": "Raster ⟶ Raster",
     "subsample": "Raster ⟶ Point",
+    "to_pointcloud": "Raster ⟶ Point",
     "interp_points": "Raster ⟶ Point",
     "polygonize": "Raster ⟶ Vector",
     "grid": "Point ⟶ Raster",

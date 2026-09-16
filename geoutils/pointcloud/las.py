@@ -541,18 +541,20 @@ def _as_geodataframe(pc: gpd.GeoDataFrame | pd.DataFrame, crs: CRS | None = None
     )
 
 
-def _iter_dataframe_chunks(pc: gpd.GeoDataFrame | pd.DataFrame, chunk_size: int | None) -> Iterator[gpd.GeoDataFrame]:
-    """Split an eager dataframe into the row partitions consumed by the common writer."""
+def _iter_dataframe_partitions(
+    pc: gpd.GeoDataFrame | pd.DataFrame, partition_size: int | None
+) -> Iterator[gpd.GeoDataFrame]:
+    """Split an eager dataframe into row partitions for the common writer."""
 
-    if chunk_size is None:
+    if partition_size is None:
         yield _as_geodataframe(pc)
         return
 
-    if chunk_size <= 0:
+    if partition_size <= 0:
         raise ValueError("Argument 'chunks' must be a strictly positive integer.")
 
-    for start in range(0, len(pc), chunk_size):
-        yield _as_geodataframe(pc.iloc[start : start + chunk_size])
+    for start in range(0, len(pc), partition_size):
+        yield _as_geodataframe(pc.iloc[start : start + partition_size])
 
 
 def _non_geometry_columns(pc: gpd.GeoDataFrame | pd.DataFrame) -> list[str]:
@@ -620,11 +622,11 @@ def _dataframe_to_lasdata(pc: gpd.GeoDataFrame | pd.DataFrame, data_column: str 
 
     laspy = import_optional("laspy")
 
-    # Reset point counts and bounds because they are recalculated for this chunk
+    # Reset point counts and bounds because they are recalculated for this partition
     pc = _as_geodataframe(pc)
-    chunk_header = header.copy()
-    chunk_header.partial_reset()
-    las = laspy.LasData(chunk_header)
+    partition_header = header.copy()
+    partition_header.partial_reset()
+    las = laspy.LasData(partition_header)
 
     # Map dataframe geometry and the selected value column to native LAS coordinates
     las.x = pc.geometry.x.values
@@ -677,11 +679,11 @@ def _write_laspy_dataframe(
     header: Any,
     chunks: int | None = None,
 ) -> None:
-    """Feed an eager dataframe, optionally split by rows, to the common writer."""
+    """Feed an eager dataframe, optionally split into row partitions, to the common writer."""
 
     _write_laspy_partitions(
         filename=filename,
-        partitions=_iter_dataframe_chunks(pc=pc, chunk_size=chunks),
+        partitions=_iter_dataframe_partitions(pc=pc, partition_size=chunks),
         data_column=data_column,
         header=header,
     )
@@ -718,14 +720,19 @@ def _write_laspy_dask_dataframe(
 ##################################
 
 
-def _write_laspy_temp_chunk(
+def _write_laspy_temp_partition(
     filename: str | pathlib.Path,
     pc: gpd.GeoDataFrame | pd.DataFrame | str | pathlib.Path,
     data_column: str | None,
     header: Any,
     check_attributes: bool = False,
 ) -> str:
-    """Write one dataframe or saved dataframe partition to a temporary LAS file."""
+    """
+    Write one dataframe or saved dataframe partition to a temporary LAS file.
+
+    When exact attribute preservation is required, _dataframe_to_lasdata() encodes the partition first so integer
+    overflow and scaled dimension rounding can be detected before the temporary file is accepted.
+    """
 
     # Load saved partitions inside the worker so the parent process only sends their small filenames
     saved_partition = pd.read_pickle(pc) if isinstance(pc, (str, pathlib.Path)) else pc
@@ -744,6 +751,8 @@ def _write_laspy_temp_chunk(
         for column in columns:
             expected_values = dataframe[column].to_numpy()
             encoded_values = np.asarray(encoded[column])
+
+            # Compare Python scalars so mixed numeric types do not hide integer rounding during NumPy promotion
             equal_values = expected_values.astype(object) == encoded_values.astype(object)
             equal_values |= pd.isna(expected_values) & pd.isna(encoded_values)
             if not np.all(equal_values):
@@ -763,11 +772,11 @@ def _write_laspy_temp_chunk(
 
 def _stitch_laspy_files(
     filename: str | pathlib.Path,
-    chunk_filenames: Iterable[str | pathlib.Path],
+    partition_filenames: Iterable[str | pathlib.Path],
     header: Any,
     chunk_size: int,
 ) -> None:
-    """Stream worker-owned temporary files into the final LAS/LAZ output."""
+    """Stream partition files into the final LAS/LAZ output."""
 
     laspy = import_optional("laspy")
 
@@ -775,8 +784,8 @@ def _stitch_laspy_files(
     write_header = header.copy()
     write_header.partial_reset()
     with laspy.open(filename, mode="w", header=write_header) as writer:
-        for chunk_filename in chunk_filenames:
-            with laspy.open(chunk_filename) as reader:
+        for partition_filename in partition_filenames:
+            with laspy.open(partition_filename) as reader:
                 for points in reader.chunk_iterator(chunk_size):
                     writer.write_points(points)
 
@@ -786,31 +795,37 @@ def _write_laspy_multiproc_partitions(
     partitions: Iterable[gpd.GeoDataFrame | pd.DataFrame | str | pathlib.Path],
     data_column: str | None,
     header: Any,
-    chunks: int,
+    chunk_size: int,
     cluster: Any,
     check_attributes: bool = False,
 ) -> None:
-    """Write dataframe partitions in workers, then stitch them in their supplied order."""
+    """
+    Write dataframe partitions in workers, then stitch them in their supplied order.
 
-    if chunks <= 0:
+    _write_laspy_temp_partition() gives each worker an independent LAS file because a shared LAS stream cannot be
+    written concurrently. _stitch_laspy_files() then copies those encoded records into the destination without
+    reordering rows.
+    """
+
+    if chunk_size <= 0:
         raise ValueError("Argument 'chunks' must be a strictly positive integer.")
 
     # Workers write independent files because concurrent writes to one LAS stream are unsafe
     with tempfile.TemporaryDirectory() as tmp_dir:
         futures = []
         for index, part in enumerate(partitions):
-            tmp_path = pathlib.Path(tmp_dir) / f"chunk_{index}.las"
+            partition_path = pathlib.Path(tmp_dir) / f"partition_{index}.las"
             futures.append(
-                cluster.submit(_write_laspy_temp_chunk, tmp_path, part, data_column, header, check_attributes)
+                cluster.submit(_write_laspy_temp_partition, partition_path, part, data_column, header, check_attributes)
             )
 
         # Gather paths in input order before streaming all temporary files together
         written_paths = cluster.gather(futures)
         _stitch_laspy_files(
             filename=filename,
-            chunk_filenames=written_paths,
+            partition_filenames=written_paths,
             header=header,
-            chunk_size=chunks,
+            chunk_size=chunk_size,
         )
 
 
@@ -911,7 +926,7 @@ def _write_laspy(
     """
     Dispatch LAS/LAZ writing to the eager, Dask or multiprocessing partition path.
 
-    Eager dataframes are optionally split into sequential row chunks. Dask
+    Eager dataframes are optionally split into sequential row partitions. Dask
     dataframes are computed one existing partition at a time. Multiprocessing
     writes independent temporary files in workers and stitches them afterward.
     """
@@ -944,10 +959,10 @@ def _write_laspy(
     if mp_config is not None:
         _write_laspy_multiproc_partitions(
             filename=filename,
-            partitions=_iter_dataframe_chunks(pc=pc, chunk_size=_point_partition_size(mp_config)),
+            partitions=_iter_dataframe_partitions(pc=pc, partition_size=_point_partition_size(mp_config)),
             data_column=data_column,
             header=header,
-            chunks=_point_partition_size(mp_config),
+            chunk_size=_point_partition_size(mp_config),
             cluster=mp_config.cluster,
         )
         return

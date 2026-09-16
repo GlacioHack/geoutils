@@ -36,6 +36,7 @@ from benchmarks.workflows.registry import (
     OperationStrategyName,
     resolve_operation_parameters,
 )
+from geoutils._dispatch import is_dask_array, is_dask_dataframe
 from geoutils._misc import (
     _get_process_mem_mb,
     _prepare_benchmark_process,
@@ -564,9 +565,10 @@ class BenchmarkRunner:
 
         from geoutils.multiproc import MultiprocConfig
 
+        suffix = ".gpkg" if operation == "to_pointcloud" else ".tif"
         return MultiprocConfig(
             chunks=self.config.chunks,
-            outfile=self._output_path(operation),
+            outfile=self._output_path(operation, suffix=suffix),
             cluster=self.mp_cluster,
         )
 
@@ -849,9 +851,45 @@ class BenchmarkRunner:
                     mp_config=mp_config,
                 )
             )
-            if hasattr(sample, "compute"):
+            if self.backend == "dask":
+                if not is_dask_array(sample) or raster._in_memory:
+                    raise AssertionError("Dask subsample() input and output must remain lazy before computation.")
                 sample = sample.compute()
+                if raster._in_memory:
+                    raise AssertionError("Computing a Dask sample must not load its source raster.")
+            elif raster.is_loaded:
+                raise AssertionError("Multiprocessing subsample() must not load its source raster.")
             return float(np.asarray(sample).mean())
+
+        if operation == "to_pointcloud":
+            # Build a fixed-size point result while the source remains larger than worker memory
+            options = {"subsample": self.config.subsample_size, "random_state": 42}
+            if self.backend == "dask":
+                points = raster.rst.to_pointcloud(**options)
+                if not is_dask_dataframe(points) or points.pc.is_loaded:
+                    raise AssertionError("Dask to_pointcloud() output must remain lazy before computation.")
+                dataframe = points.compute()
+                if points.pc.is_loaded:
+                    raise AssertionError("Computing a Dask result must not load its original point cloud wrapper.")
+                if raster._in_memory:
+                    raise AssertionError("Computing a Dask point cloud must not load its source raster.")
+            else:
+                points = raster.to_pointcloud(**options, mp_config=self._multiproc_config(operation))
+                if points.is_loaded:
+                    raise AssertionError("Multiprocessing to_pointcloud() output must remain unloaded.")
+                self._last_output_file = str(points.name)
+                import pyogrio
+
+                dataframe = pyogrio.read_dataframe(self._last_output_file, columns=["b1"])
+                if points.is_loaded:
+                    raise AssertionError("Reading the output file must not load its PointCloud wrapper.")
+                if raster.is_loaded:
+                    raise AssertionError("Multiprocessing point conversion must not load its source raster.")
+
+            # Check the requested count and constant source values without retaining the complete raster
+            if len(dataframe) != self.config.subsample_size:
+                raise AssertionError("Point conversion returned an unexpected number of rows.")
+            return float(dataframe["b1"].mean())
 
         if operation == "interp_points":
             # Interpolate only requested positions while source chunks stay file-backed

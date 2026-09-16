@@ -21,7 +21,9 @@ from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
 from geoutils.raster.array import get_mask_from_array
 from geoutils.sampling.subsampling import (
+    _recover_splitmix64_indices,
     _sample_valid_indices,
+    _splitmix64,
     _subsample_numpy,
 )
 
@@ -194,10 +196,45 @@ class TestRasterSubsample:
         np.testing.assert_array_equal(raster.data.data, original.data)
         np.testing.assert_array_equal(raster.data.mask, original.mask)
 
+    def test_subsample__keep_nodata(self) -> None:
+        """Checks that skip_nodata=False includes nodata cells and a user mask restricts the grid properly."""
+
+        # Create a synthetic raster with two finite cells and keep only the first five columns as a mask
+        values = np.ma.array(np.arange(24, dtype=np.int16).reshape(4, 6), mask=True)
+        values.mask[0, 0] = False
+        values.mask[3, 4] = False
+        raster = gu.Raster.from_array(values, from_origin(0, 4, 1, 1), crs=32633, nodata=-9999)
+        allowed = np.indices(raster.shape)[1] < 5
+
+        # Subsample with/without nodata skipping
+        all_indices = raster.subsample(1, return_indices=True, skip_nodata=False, mask=allowed)
+        finite_indices = raster.subsample(1, return_indices=True, mask=allowed)
+
+        # Check the flattened output
+        expected_flat = np.flatnonzero(allowed)
+        np.testing.assert_array_equal(np.ravel_multi_index(all_indices, raster.shape), expected_flat)
+        np.testing.assert_array_equal(np.ravel_multi_index(finite_indices, raster.shape), np.array([0, 22]))
+
+    def test_splitmix64__recover_indices(self) -> None:
+        """
+        Checks that random keys can recover their global cell indexes (used for performance, to avoid carrying
+        values along the keys).
+        """
+
+        # Create indexes spanning the signed range used by NumPy array positions
+        seed = 42
+        expected = np.array([0, 1, 2, 2**31, 2**48 + 17, 2**62 - 1], dtype=np.int64)
+        keys = np.asarray(_splitmix64(np.uint64(seed) ^ expected.astype(np.uint64)), dtype=np.uint64)
+
+        # Reverse the keys and compare to original indexes
+        recovered = _recover_splitmix64_indices(keys, seed)
+        assert np.shares_memory(keys, recovered)
+        np.testing.assert_array_equal(recovered, expected)
+
 
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestSubsampleChunked:
-    """Checks subsample() across eager, Dask and Multiproc inputs.
+    """Test module for subsample() across eager, Dask and multiprocessing inputs.
 
     We check that backends return the requested sample size and exactly the same values (for "topk" strategy).
     We also check behaviour with selected bands, mask input and chunk size.
@@ -205,6 +242,53 @@ class TestSubsampleChunked:
 
     # Strategies supported by _subsample()
     subsample_strategies = ("sequential", "topk")
+
+    def test_subsample__topk_matches_dask_argtopk(self, tmp_path: Path) -> None:
+        """Checks that Dask and multiprocessing top-k match Dask argtopk for identical cell keys."""
+
+        import dask.array as da
+
+        # Create uneven chunks with nodata cells in every part of the flattened raster
+        values = np.arange(99, dtype=np.float32).reshape((9, 11))
+        values.ravel()[::13] = np.nan
+        lazy_values = da.from_array(values, chunks=(4, 5))
+        source = gu.RasterAccessor.from_array(lazy_values, from_origin(0, 9, 1, 1), 32633)
+        source_file = tmp_path / "topk-reference.tif"
+        gu.Raster.from_array(values, from_origin(0, 9, 1, 1), 32633, nodata=-99999).to_file(source_file)
+        unloaded = gu.Raster(source_file)
+        seed = 42
+        sample_size = 17
+
+        # Select cells through both GeoUtils chunked paths while keeping the Dask indexes lazy
+        rows, columns = source.rst.subsample(
+            sample_size,
+            return_indices=True,
+            random_state=seed,
+            strategy="topk",
+        )
+        worker_rows, worker_columns = unloaded.subsample(
+            sample_size,
+            return_indices=True,
+            random_state=seed,
+            strategy="topk",
+            mp_config=MultiprocConfig(chunks=(4, 5)),
+        )
+        assert isinstance(rows, da.Array) and isinstance(columns, da.Array)
+
+        # Give every eligible flat cell the same deterministic key used by GeoUtils, then use Dask's reduction
+        valid = da.isfinite(lazy_values.reshape(-1))
+        cell_numbers = da.arange(values.size, chunks=valid.chunks, dtype=np.int64)
+        key_input = np.uint64(seed) ^ cell_numbers.astype(np.uint64)
+        keys = key_input.map_blocks(_splitmix64, dtype=np.uint64)
+        eligible_keys = da.where(valid, keys, np.iinfo(np.uint64).max)
+        expected = da.argtopk(eligible_keys, -sample_size, split_every=2).compute()
+
+        # Compare complete cell numbers and confirm that neither source was loaded
+        actual = (rows * values.shape[1] + columns).compute()
+        worker_actual = worker_rows * values.shape[1] + worker_columns
+        np.testing.assert_array_equal(actual, expected)
+        np.testing.assert_array_equal(worker_actual, expected)
+        assert not source._in_memory and not unloaded.is_loaded
 
     @pytest.mark.parametrize("path_index", [0, 2])
     @pytest.mark.parametrize("strategy", subsample_strategies)
@@ -405,6 +489,55 @@ class TestSubsampleChunked:
             )
             vals_raster_np = _as_numpy(vals_raster)
             assert np.array_equal(np.asarray(vals_from_indices), np.asarray(vals_raster_np))
+
+    @pytest.mark.parametrize("subsample", [1, 10])
+    def test_subsample__keep_nodata_backends(self, subsample: int, tmp_path: Path) -> None:
+        """Checks that subsamples nodata cells are processed in the same order across every backend."""
+
+        import dask.array as da
+
+        # 1/ Write a mostly nodata raster with small chunksize (that could trigger row-order mistakes if nodata cells
+        # were managed inconsistently)
+        values = np.ma.array(np.arange(24, dtype=np.int16).reshape(4, 6), mask=True)
+        values.mask[0, 0] = False
+        values.mask[3, 4] = False
+        raster = gu.Raster.from_array(values, from_origin(0, 4, 1, 1), crs=32633, nodata=-9999)
+        path = tmp_path / "keep_nodata_sample.tif"
+        raster.to_file(path)
+
+        # 2/ Keep the first five columns with the mask
+        allowed = np.indices(raster.shape)[1] < 5
+        options = {
+            "subsample": subsample,
+            "return_indices": True,
+            "random_state": 42,
+            "strategy": "topk",
+            "skip_nodata": False,
+            "mask": allowed,
+        }
+        expected = raster.subsample(**options)
+        lazy = open_raster(str(path), chunks={"x": 4, "y": 3})
+        unloaded = gu.Raster(path)
+
+        # 3/ Select cells lazily through 3 x 4 chunk without loading source
+        lazy_result = lazy.rst.subsample(**options)
+        worker_result = unloaded.subsample(
+            **options,
+            mp_config=MultiprocConfig(chunks=(3, 4)),
+        )
+        assert all(isinstance(index, da.Array) for index in lazy_result)
+        assert not lazy._in_memory and not unloaded.is_loaded
+        lazy_result = tuple(index.compute() for index in lazy_result)
+
+        # 4/ Check the exact eager order and confirm that nodata cells are treated similarly
+        np.testing.assert_array_equal(lazy_result, expected)
+        np.testing.assert_array_equal(worker_result, expected)
+        assert len(expected[0]) == (allowed.sum() if subsample == 1 else subsample)
+        assert np.all(allowed[expected])
+        assert np.any(values.mask[expected])
+        if subsample == 1:
+            expected_flat = np.flatnonzero(allowed)
+            np.testing.assert_array_equal(np.ravel_multi_index(expected, raster.shape), expected_flat)
 
     @pytest.mark.parametrize("subsample", [1, 5, 0.25, 0.001])
     @pytest.mark.parametrize("return_indices", [False, True])

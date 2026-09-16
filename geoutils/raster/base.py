@@ -1928,8 +1928,8 @@ class RasterBase(ABC):
         self,
         data_column_name: str = "b1",
         data_band: int = 1,
-        auxiliary_data_bands: list[int] | None = None,
-        auxiliary_column_names: list[str] | None = None,
+        auxiliary_data_bands: Iterable[int] | None = None,
+        auxiliary_column_names: Iterable[str] | None = None,
         subsample: float | int = 1,
         skip_nodata: bool = True,
         *,
@@ -1944,8 +1944,8 @@ class RasterBase(ABC):
         self,
         data_column_name: str = "b1",
         data_band: int = 1,
-        auxiliary_data_bands: list[int] | None = None,
-        auxiliary_column_names: list[str] | None = None,
+        auxiliary_data_bands: Iterable[int] | None = None,
+        auxiliary_column_names: Iterable[str] | None = None,
         subsample: float | int = 1,
         skip_nodata: bool = True,
         *,
@@ -1960,8 +1960,8 @@ class RasterBase(ABC):
         self,
         data_column_name: str = "b1",
         data_band: int = 1,
-        auxiliary_data_bands: list[int] | None = None,
-        auxiliary_column_names: list[str] | None = None,
+        auxiliary_data_bands: Iterable[int] | None = None,
+        auxiliary_column_names: Iterable[str] | None = None,
         subsample: float | int = 1,
         skip_nodata: bool = True,
         *,
@@ -1975,8 +1975,8 @@ class RasterBase(ABC):
         self,
         data_column_name: str = "b1",
         data_band: int = 1,
-        auxiliary_data_bands: list[int] | None = None,
-        auxiliary_column_names: list[str] | None = None,
+        auxiliary_data_bands: Iterable[int] | None = None,
+        auxiliary_column_names: Iterable[str] | None = None,
         subsample: float | int = 1,
         skip_nodata: bool = True,
         as_array: bool = False,
@@ -2003,22 +2003,19 @@ class RasterBase(ABC):
         If 'subsample' is smaller than 1 (for fractions), or smaller than the pixel count, a random subsample
         of (valid) points is returned.
 
-        An optimized conversion is used when ``subsample=1``, using all inputs. It considers every raster cell and
-        simply reshapes the main data band and every requested auxiliary band into one-dimensional values. When
-        ``skip_nodata=True``, cells with missing values in the main data band are removed at the same positions from
-        every band. A missing value in an auxiliary band alone does not remove the point.
+        Cell selection follows subsample(): the main data band determines which cells are eligible, including whether
+        nodata values are removed by ``skip_nodata``. The selected row and column positions are applied to every
+        requested band so their values and point coordinates stay aligned. A nodata value in an auxiliary band alone
+        does not remove the point.
 
-        Every other ``subsample`` value uses subsampling, whether it ultimately selects some or all valid
-        cells, as it needs to run isfinite() to know which values are valid. The cell positions are
-        selected once, using the main data band to exclude missing values when ``skip_nodata=True``.
-        Values at those same row and column positions are then collected from the main and
-        auxiliary bands, which keeps every output column aligned with the point coordinates.
+        Use subsample() when only one band's values or raster indexes are needed, with minimal output construction. Use
+        to_pointcloud() to extract one or more bands with their X/Y coordinates and return an array or point cloud.
 
         For a Dask-backed raster, the selection may compute the counts or indexes needed to determine the output
         layout, while the selected band values and returned Dask array or point dataframe remain lazy. Passing a
-        MultiprocConfig reads raster windows without loading the source. Point output is written in ordered partitions
-        to ``mp_config.outfile`` and returned as an unloaded, file-backed PointCloud. Array output remains an eager
-        NumPy array and does not use ``outfile``.
+        MultiprocConfig reads raster tiles without loading the source. Point output is written directly in ordered
+        partitions to ``mp_config.outfile`` and returned as an unloaded, file-backed PointCloud. Array output remains
+        an eager NumPy array and does not use ``outfile``.
 
         Formats:
             * `as_array` == False: A vector with dataframe columns ["b1", "b2", ..., "geometry"],
@@ -2033,7 +2030,7 @@ class RasterBase(ABC):
             columns, defaults to none.
         :param auxiliary_column_names: (Only for multi-band rasters) Names to use for auxiliary data bands, only if
             auxiliary data bands is not none, defaults to "b1", "b2", etc.
-        :param subsample: Subsample size. If > 1, parsed as a count, otherwise a fraction.
+        :param subsample: Subsample size, following the same count and fraction rules as subsample().
         :param skip_nodata: Whether to skip nodata values.
         :param as_array: Return an array instead of a vector.
         :param random_state: Random state or seed number.
@@ -2194,6 +2191,7 @@ class RasterBase(ABC):
         random_state: int | np.random.Generator | None = None,
         strategy: Literal["sequential", "topk"] = "sequential",
         mp_config: MultiprocConfig | None = None,
+        skip_nodata: bool = True,
         mask: RasterLike | VectorLike | ArrayLike | None = None,
     ) -> NDArrayNum: ...
 
@@ -2207,6 +2205,7 @@ class RasterBase(ABC):
         random_state: int | np.random.Generator | None = None,
         strategy: Literal["sequential", "topk"] = "sequential",
         mp_config: MultiprocConfig | None = None,
+        skip_nodata: bool = True,
         mask: RasterLike | VectorLike | ArrayLike | None = None,
     ) -> tuple[NDArrayNum, ...]: ...
 
@@ -2220,6 +2219,7 @@ class RasterBase(ABC):
         strategy: Literal["sequential", "topk"] = "sequential",
         mp_config: MultiprocConfig | None = None,
         *,
+        skip_nodata: bool = True,
         mask: RasterLike | VectorLike | ArrayLike | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
@@ -2233,12 +2233,16 @@ class RasterBase(ABC):
         strategy: Literal["sequential", "topk"] = "sequential",
         mp_config: MultiprocConfig | None = None,
         *,
+        skip_nodata: bool = True,
         mask: RasterLike | VectorLike | ArrayLike | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]:
         """
         Randomly sample valid raster values allowed by mask, without replacement.
 
-        :param subsample: Subsample size. If <= 1, a fraction of eligible finite pixels to extract.
+        This method reads one band and returns only its values or row and column indexes. Use to_pointcloud() to extract
+        one or more bands with their X/Y coordinates and return an array or point cloud.
+
+        :param subsample: Subsample size. If <= 1, a fraction of eligible pixels to extract.
             If > 1, the maximum number of pixels. The mask is applied before calculating this size.
         :param band: Band to subsample. Use return_indices=True and indexing to subsample the same points over
             several bands.
@@ -2247,6 +2251,7 @@ class RasterBase(ABC):
         :param strategy: "sequential" draws using the traversal order and can depend on chunk layout; "topk" keeps
             the same seeded sample across chunk layouts.
         :param mp_config: Worker and tile settings for multiprocessing. Cannot be combined with a Dask source.
+        :param skip_nodata: Whether to exclude nodata values, and False cells in a boolean raster.
         :param mask: Eligible cells: True in a boolean array or aligned mask raster, or inside vector geometries.
             Arrays must match the raster shape; mask rasters must share its grid and CRS. Missing mask entries are
             excluded (e.g. mask=raster.data > 0).
@@ -2263,6 +2268,7 @@ class RasterBase(ABC):
             random_state=random_state,
             strategy=strategy,
             mp_config=mp_config,
+            skip_nodata=skip_nodata,
             mask=mask,
         )
 
@@ -2389,14 +2395,35 @@ class RasterBase(ABC):
         distance_dtype: DTypeLike = np.float64,
         mp_config: MultiprocConfig | None = None,
     ) -> xr.Dataset:
-        """Sample finite raster cell pairs for statistics by distance.
+        """Sample cell pairs in the raster.
 
-        Logarithmic lag sampling draws isotropic distances across short and long ranges. Anchor strategies reuse
-        raster cells and can confine part of the sample to source chunks, which limits reads from Dask-backed or
-        file-backed rasters.
+        This function provides different strategies for sampling short and long pairwise distances in large rasters.
+        It supports chunked Dask and Multiprocessing out-of-memory reads, with explicit pair subsampling to also limit
+        the returned data held in memory.
 
-        Strategy, duplicate, oversampling, anchor, and local distance controls apply to ``"loglag"``.
-        Both sampling schemes use ``batch_pairs`` and ``max_rounds``.
+        Sampling methods
+        ----------------
+
+        With the default ``sampling="loglag"``, distances are drawn across a logarithmic scale and directions are
+        drawn uniformly around the first cell, so that short and long distances are both represented. The resulting
+        offsets are rounded to the raster grid. The ``"independent"`` strategy draws a new first cell for every pair,
+        while ``"anchors"`` reuses a limited set of first cells. The default ``"chunk_anchors"`` also draws those
+        first cells from a limited number of source chunks to reduce reads. The ``"anchor_batched"`` strategy draws
+        several distances and directions together for each first cell.
+
+        With ``sampling="random_xy"``, both cells are drawn independently and pairs outside the requested distance
+        range are discarded. Pairs near ``min_distance`` or ``max_distance`` are usually rare, even though these
+        distance extremes are often important for spatial analysis. Log-lag strategy options do not apply;
+        ``batch_pairs`` and ``max_rounds`` control how candidates are collected.
+
+        Memory and chunked inputs
+        -------------------------
+
+        ``n_pairs`` limits the returned data held in memory, while ``batch_pairs`` limits temporary candidate arrays.
+        For Dask and Multiprocessing inputs, finite cells are counted separately by chunk or tile. Pair geometry is
+        generated from the raster grid, then only chunks or tiles containing candidate endpoints are read. The
+        complete raster band is not collected in memory and the Raster stays unloaded. Pair selection and the
+        returned Xarray Dataset are eager for both backends.
 
         :param band: Band to sample, counting from one.
         :param n_pairs: Requested number of pairs with two finite values; fewer may be returned if sampling stops early.

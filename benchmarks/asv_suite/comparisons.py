@@ -282,6 +282,17 @@ _POLYGONIZATION_STRATEGIES = _strategy_cases(
 )
 _RASTERIZATION_MODES = _execution_cases("rasterization-raster-size", "rasterize", None, "rasterio")
 _SUBSAMPLE_STRATEGIES = _strategy_cases("subsample-size", "subsample", None, None, execution_mode="dask")
+_SUBSAMPLE_TOPK_MODES = _execution_cases(
+    "subsample-topk-size",
+    "subsample",
+    None,
+    None,
+    strategy="topk",
+    execution_modes=("dask", "multiprocessing"),
+)
+_TO_POINTCLOUD_MODES = _execution_cases(
+    "to-pointcloud-size", "to_pointcloud", None, None, execution_modes=("dask", "multiprocessing")
+)
 
 # Isolate input size, chunk size, membership layout and group count for shared grouped-statistic kernels
 _GROUPED_MODES = _execution_cases(
@@ -413,6 +424,8 @@ BENCHMARK_CASES = _merge_cases(
     _POLYGONIZATION_STRATEGIES,
     _RASTERIZATION_MODES,
     _SUBSAMPLE_STRATEGIES,
+    _SUBSAMPLE_TOPK_MODES,
+    _TO_POINTCLOUD_MODES,
     *tuple(_GRID_MODE_CASES.values()),
     _GRID_METHOD_CASES,
     *tuple(_GRID_ENGINE_CASES.values()),
@@ -734,6 +747,39 @@ COMPARISONS: tuple[Comparison, ...] = (
         logarithmic_x=True,
         documentation=False,
     ),
+    Comparison(
+        slug="subsampling-topk-size",
+        title="Top-k subsampling by execution mode",
+        description=(
+            "Selects the same values with random seed 42 from a 2048 × 2048 WGS84 raster using the mirrored "
+            "Dask and multiprocessing implementations."
+        ),
+        parameter_label="Number of sampled values",
+        series=_comparison_series(_SUBSAMPLE_TOPK_MODES, "execution_mode"),
+        operation="subsample",
+        method=None,
+        workload_template=("2,048 × 2,048 source raster; {parameter} sampled values; 512 × 512 chunks"),
+        strategy="topk",
+        series_dimension="execution_mode",
+        logarithmic_x=True,
+        documentation=False,
+    ),
+    Comparison(
+        slug="to-pointcloud-size",
+        title="Raster to point cloud by selected cell count",
+        description=(
+            "Selects cells with random seed 42, calculates their coordinates and values, and completes the "
+            "Dask dataframe or multiprocessing GeoPackage output."
+        ),
+        parameter_label="Number of output points",
+        series=_comparison_series(_TO_POINTCLOUD_MODES, "execution_mode"),
+        operation="to_pointcloud",
+        method=None,
+        workload_template=("2,048 × 2,048 source raster; {parameter} output points; 512 × 512 chunks"),
+        series_dimension="execution_mode",
+        logarithmic_x=True,
+        documentation=False,
+    ),
     *tuple(
         Comparison(
             slug="gridding-raster-size" if method == "nearest" else f"{method}-gridding-raster-size",
@@ -1009,6 +1055,18 @@ class _SubsampleSize(_ComparisonBenchmark):
         return BenchmarkConfig(shape=(2048, 2048), chunks=(512, 512), subsample_size=parameter)
 
 
+class _PointcloudSampleSize(_ComparisonBenchmark):
+    """Keep raster and chunks fixed while varying the number of output points."""
+
+    param_names = ["subsample_size"]
+    params = [asv_parameter_values([256, 16384, 524288], pr_check_value=256)]
+
+    def make_config(self, parameter: int) -> BenchmarkConfig:
+        """Select enough points to cover both compact and tile-sized selection paths."""
+
+        return BenchmarkConfig(shape=(2048, 2048), chunks=(512, 512), subsample_size=parameter)
+
+
 class _GriddingRasterSize(_ComparisonBenchmark):
     """Keep one gridding method and point count fixed while varying raster size."""
 
@@ -1219,6 +1277,8 @@ _SCENARIO_BASES: dict[str, type[_ComparisonBenchmark]] = {
     "polygonization-raster-size": _PolygonizationRasterSize,
     "rasterization-raster-size": _RasterizationRasterSize,
     "subsample-size": _SubsampleSize,
+    "subsample-topk-size": _SubsampleSize,
+    "to-pointcloud-size": _PointcloudSampleSize,
     "gridding-raster-size": _GriddingRasterSize,
     "gridding-point-count": _NearestGriddingPointCount,
     "worker-integration": _NumbaWorkerIntegration,

@@ -41,6 +41,7 @@ from geoutils.pointcloud.las import (
 from geoutils.pointcloud.writing import (
     _check_gpkg_attributes,
     _resolve_pointcloud_output,
+    _stage_pointcloud_partition,
     _write_pointcloud_partitions,
 )
 
@@ -64,7 +65,7 @@ def _reproject_pointcloud_partition(
     filename: pathlib.Path,
     las_output: bool,
 ) -> tuple[pathlib.Path, NDArrayNum | None]:
-    """Read and reproject one row partition, staging its exact dataframe and LAS coordinate bounds."""
+    """Read and reproject one row partition, saving its dataframe and returning its LAS coordinate bounds."""
 
     # Read independent row ranges so unloaded sources stay outside the parent process
     if isinstance(source, pathlib.Path):
@@ -96,9 +97,8 @@ def _reproject_pointcloud_partition(
             raise ValueError("LAS output requires finite X, Y and Z coordinates.")
         bounds = np.stack((coordinates.min(axis=0), coordinates.max(axis=0)))
 
-    # Preserve all dataframe dtypes until the final format is selected; only paths return to the parent
-    projected.to_pickle(filename)
-    return filename, bounds
+    # Preserve all dataframe dtypes until the final format is selected
+    return _stage_pointcloud_partition(projected, filename), bounds
 
 
 ############################################
@@ -174,10 +174,9 @@ def _reproject_pointcloud(source: PointCloudBase, crs: CRS, mp_config: Multiproc
     Reproject independent row partitions and return an unopened point cloud at the configured output path.
 
     _reproject_pointcloud_partition() reads source slices or receives eager rows, applies GeoPandas to_crs(), and
-    stages exact projected dataframes. _reproject_las_header() chooses common scales and offsets when needed, then
-    _write_pointcloud_partitions() appends or encodes every format in source order. Only paths and coordinate bounds
-    are gathered in the parent. Output row order and attribute columns follow the source; reopened indices follow the
-    destination format.
+    saves exact projected dataframes to temporary files.
+    _reproject_las_header() chooses common scales and offsets, then _write_pointcloud_partitions() appends or
+     encodes every format in source order.
     """
 
     # Validate configuration before inspecting point records or creating output files

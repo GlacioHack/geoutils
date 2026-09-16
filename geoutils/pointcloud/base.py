@@ -743,13 +743,36 @@ class PointCloudBase(VectorBase):
         distance_dtype: DTypeLike = np.float32,
         mp_config: MultiprocConfig | None = None,
     ) -> xr.Dataset:
-        """Sample finite point pairs for statistics by distance.
+        """Sample point pairs in the point cloud.
 
-        Exact ring strategies use a KD-tree or hash grid. ``"nn_logvector"`` proposes isotropic log-spaced vectors
-        and accepts a nearby observed endpoint, which is generally faster for large point clouds.
+        This function provides different strategies for sampling short and long pairwise distances in large point
+        clouds. It supports chunked Dask and Multiprocessing out-of-memory reads, with explicit pair subsampling to
+        also limit the returned data held in memory.
 
-        Strategy controls apply to ``"loglag"``. ``"random_xy"`` uses ``max_rounds`` and ``nn_batch_size``.
-        Dask and Multiprocessing point tables are collected because the search requires all coordinates.
+        Sampling methods
+        ----------------
+
+        With the default ``sampling="loglag"``, distance targets are drawn across a logarithmic scale so that short
+        and long distances are both represented. The ``"kdtree"`` and ``"hashgrid"`` strategies select a distance
+        range, find observed points at those distances from a sampled first point, and choose one as the second point.
+        They use a SciPy spatial tree and a regular spatial index, respectively. The ``"nn_logvector"`` strategy
+        instead projects an endpoint at a sampled distance and direction, then accepts the nearest observed point when
+        it lies within the ``nn_tolerance`` fraction of that target distance. This is generally faster for large point
+        clouds, but may return fewer pairs when no point is close to a target.
+
+        With ``sampling="random_xy"``, both endpoints are drawn independently and pairs outside the requested distance
+        range are discarded. Pairs near ``min_distance`` or ``max_distance`` are usually rare, even though these
+        distance extremes are often important for spatial analysis. Log-lag strategy options do not apply;
+        ``max_rounds`` and ``nn_batch_size`` control how candidates are collected.
+
+        Memory and chunked inputs
+        -------------------------
+
+        ``n_pairs`` limits the returned data held in memory. Dask partitions and multiprocessing row partitions are
+        processed separately, and their eligible coordinates, values, and original row indexes are staged in
+        temporary disk-backed arrays. The complete point table is not collected in memory and the PointCloud stays
+        unloaded. Log-lag sampling still builds a KD-tree or hash-grid index whose memory grows with the number of
+        eligible points. Pair selection and the returned Xarray Dataset are eager for both backends.
 
         :param n_pairs: Requested number of pairs with two finite values; fewer may be returned if sampling stops early.
         :param sampling: ``"loglag"`` balances short and long distances on a log scale; ``"random_xy"`` draws
@@ -778,8 +801,9 @@ class PointCloudBase(VectorBase):
         :param nn_max_batches: Maximum batches to fill the sample with ``"nn_logvector"``.
         :param index_dtype: Integer NumPy dtype for returned row indexes (e.g. ``"int64"`` for very large point clouds).
         :param distance_dtype: Floating NumPy dtype for returned distances (e.g. ``"float64"`` for greater precision).
-        :param mp_config: Worker and row partition settings for reading an unloaded point cloud. Cannot be combined
-            with Dask inputs. The global point search and returned Xarray Dataset are eager.
+        :param mp_config: Worker and row partition settings for reading an unloaded point cloud into temporary
+            disk-backed arrays. Cannot be combined with Dask inputs. Pair selection and the returned Xarray Dataset
+            are eager.
         :returns: Xarray Dataset with pair and endpoint dimensions, containing original row indexes, values,
             coordinates, and distances.
         """

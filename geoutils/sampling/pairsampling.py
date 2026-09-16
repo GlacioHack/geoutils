@@ -6,16 +6,16 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 
-"""
-Sample pairs of raster cells or point cloud rows.
-
-Note: This module is inspired from code originally developed in xDEM and SciKit-GStat for uncertainty quantification.
-"""
+"""Sample pairs of raster cells or point cloud rows."""
 
 from __future__ import annotations
 
 import warnings
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field, replace
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, Any, Literal
 
 import geopandas as gpd
@@ -43,6 +43,7 @@ from geoutils.multiproc.readers import (
     _reader_from_vector,
     _ValueReader,
 )
+from geoutils.pointcloud.writing import _stage_pointcloud_partition
 from geoutils.raster.array import _selected_raster_data, get_mask_from_array
 from geoutils.sampling.support import (
     _as_geodataframe,
@@ -80,7 +81,7 @@ class _RasterPairSource:
     Read raster pair values through NumPy, Dask, or multiprocessing without changing pair generation.
 
     The regular pair sampler uses shape and chunk_edges to generate endpoints. count_finite() and read_pairs()
-    isolate the backend-specific value access needed to reject missing endpoints.
+    isolate the backend-specific value access needed to reject endpoints with nodata values.
     """
 
     values: Any
@@ -164,7 +165,7 @@ class _RasterPairSource:
 
 
 def _uses_dask(value: Any) -> bool:
-    """Check raw arrays and spatial interfaces for Dask-backed values without loading them."""
+    """Return whether an array or spatial interface contains Dask-backed values without loading them."""
 
     if value is None:
         return False
@@ -177,29 +178,313 @@ def _uses_dask(value: Any) -> bool:
     return pointcloud is not None and pointcloud._is_dask
 
 
-def _read_point_pair_rows(reader: _ValueReader, rows: slice) -> gpd.GeoDataFrame:
-    """Read one point row partition with the geometry and selected pair value."""
+def _stage_point_pair_reader_partition(reader: _ValueReader, rows: slice, filename: Path) -> Path:
+    """Read and save one point row partition in a worker for bounded processing in the parent."""
 
-    return reader.read_points(rows)
+    return _stage_pointcloud_partition(reader.read_points(rows), filename)
 
 
-def _read_point_pair_dataframe(reader: _ValueReader, mp_config: MultiprocConfig) -> gpd.GeoDataFrame:
-    """Read ordered point rows in worker partitions without loading the source PointCloud object."""
+def _stage_point_pair_dask_partition(partition: Any, filename: Path) -> tuple[Path, int]:
+    """Compute and save one delayed point partition while keeping the remaining partitions lazy."""
 
-    from geoutils.pointcloud.las import _point_partition_size
+    dataframe = partition.compute()
+    return _stage_pointcloud_partition(dataframe, filename), len(dataframe)
 
-    # Use the point cloud convention of one integer row count per partition
-    chunks = _point_partition_size(mp_config)
-    arguments = (
-        (reader, slice(start, min(start + chunks, reader.shape[0]))) for start in range(0, reader.shape[0], chunks)
-    )
-    parts = [part for _, part in _map_bounded(mp_config.cluster, _read_point_pair_rows, arguments)]
+
+@dataclass(frozen=True)
+class _PointPairData:
+    """Store finite point rows used by pair sampling and their original table positions."""
+
+    coordinates: NDArrayNum
+    values: NDArrayNum
+    original_indexes: NDArrayNum
+    source_size: int
+
+
+@dataclass(frozen=True)
+class _PointPairMaskData:
+    """Store a Dask point mask in row-ordered temporary arrays for checks on each source partition."""
+
+    coordinates: NDArrayNum
+    values: NDArrayNum
+    crs: Any
+    source_size: int
+
+
+def _close_memory_map(array: np.memmap[Any, Any]) -> None:
+    """Close a temporary NumPy memory map before its containing directory is removed."""
+
+    memory_map = getattr(array, "_mmap", None)
+    if memory_map is not None:
+        memory_map.close()
+
+
+def _point_pair_mask_part(
+    mask: Any,
+    pointcloud: PointCloudBase,
+    dataframe: gpd.GeoDataFrame,
+    rows: slice,
+    mp_config: MultiprocConfig | None,
+) -> NDArrayNum:
+    """Evaluate a pair mask on one contiguous part of an irregular point cloud."""
+
+    # Compare a disk-backed Dask point mask with the same source rows without collecting either point table
+    if isinstance(mask, _PointPairMaskData):
+        if mask.crs != pointcloud.crs:
+            raise ValueError("Point value 'mask' does not share the support CRS.")
+        mask_coordinates = mask.coordinates[rows]
+        coordinates = np.column_stack((dataframe.geometry.x.to_numpy(), dataframe.geometry.y.to_numpy()))
+        if len(mask_coordinates) != len(dataframe) or not np.array_equal(coordinates, mask_coordinates):
+            raise ValueError("Point value 'mask' does not share the ordered support coordinates.")
+        return _normalize_mask_array(mask.values[rows], (len(dataframe),))
+
+    # Read ordered point masks over the same row range and check their coordinates locally
+    normalized_mask = _normalize_sampling_input(mask)
+    mask_pointcloud = _get_pointcloud_interface(normalized_mask)
+    if mask_pointcloud is not None:
+        if mask_pointcloud.crs != pointcloud.crs:
+            raise ValueError("Point value 'mask' does not share the support CRS.")
+
+        mask_reader = _reader_from_source(mask_pointcloud, None, pointcloud, mp_config)
+        if mask_reader is None and not mask_pointcloud.is_loaded and not mask_pointcloud._is_dask:
+            mask_reader = _ValueReader(mask_pointcloud)
+        if mask_reader is not None:
+            mask_dataframe = mask_reader.read_points(rows)
+        else:
+            mask_dataframe = mask_pointcloud.ds.iloc[rows]
+
+        from geoutils.pointcloud.testing import _point_coords_equal_eager
+
+        if not _point_coords_equal_eager(dataframe, mask_dataframe):
+            raise ValueError("Point value 'mask' does not share the ordered support coordinates.")
+        column = mask_pointcloud.data_column
+        values = np.asarray(mask_dataframe.geometry.z if column is None else mask_dataframe[column])
+        if not np.issubdtype(values.dtype, np.bool_):
+            raise ValueError("A point support mask must contain boolean values.")
+        return _normalize_mask_array(values, (len(dataframe),))
+
+    # Slice plain masks by original row, and place raster or vector masks only on this point partition
+    if not _is_raster(normalized_mask) and not _is_vector(normalized_mask):
+        if is_dask_array(normalized_mask):
+            selected_mask = normalized_mask.reshape(-1)[rows].compute()
+        else:
+            selected_mask = np.asanyarray(normalized_mask).reshape(-1)[rows]
+        return _normalize_mask_array(selected_mask, (len(dataframe),))
+    partition = _get_pointcloud_interface(dataframe)
+    assert partition is not None
+    spatial_mask = _mask_at_support(normalized_mask, partition, support_dataframe=dataframe)
+    return np.asarray(spatial_mask)
+
+
+def _stage_dask_point_pair_mask(
+    mask: PointCloudBase,
+    directory: Path,
+    storage: ExitStack,
+) -> _PointPairMaskData:
+    """
+    Compute a Dask point mask one partition at a time into temporary row-ordered memory maps.
+
+    _stage_point_pair_dask_partition() saves each partition separately. Its coordinates and boolean values are then
+    copied into common arrays so _point_pair_mask_part() can compare the matching source rows without loading the
+    complete mask table.
+    """
+
+    # Save every lazy partition using the same temporary-file exchange as the point source
+    parts: list[tuple[Path, int]] = []
+    for part_index, delayed_partition in enumerate(mask.ds.to_delayed()):
+        parts.append(_stage_point_pair_dask_partition(delayed_partition, directory / f"mask-source-{part_index}.pkl"))
+    source_size = sum(count for _, count in parts)
     if not parts:
-        return reader.read_points(slice(0, 0))
+        return _PointPairMaskData(np.empty((0, 2)), np.empty(0, dtype=bool), mask.crs, 0)
 
-    # Keep source row order and the geometry metadata supplied by each file reader
-    dataframe = pd.concat(parts, ignore_index=True)
-    return gpd.GeoDataFrame(dataframe, geometry=parts[0].geometry.name, crs=parts[0].crs)
+    # Inspect the first partition before allocating arrays with the mask's actual boolean dtype
+    first = pd.read_pickle(parts[0][0])
+    column = mask.data_column
+    first_values = np.asarray(first.geometry.z if column is None else first[column])
+    if not np.issubdtype(first_values.dtype, np.bool_):
+        raise ValueError("A point support mask must contain boolean values.")
+    coordinates = np.memmap(directory / "mask-coordinates.dat", mode="w+", dtype=np.float64, shape=(source_size, 2))
+    values = np.memmap(directory / "mask-values.dat", mode="w+", dtype=first_values.dtype, shape=source_size)
+    for array in (coordinates, values):
+        storage.callback(_close_memory_map, array)
+
+    # Copy each partition in source order and release its dataframe before reading the next one
+    start = 0
+    for filename, count in parts:
+        dataframe = pd.read_pickle(filename)
+        part_values = np.asarray(dataframe.geometry.z if column is None else dataframe[column])
+        if not np.issubdtype(part_values.dtype, np.bool_):
+            raise ValueError("A point support mask must contain boolean values.")
+        stop = start + count
+        coordinates[start:stop, 0] = dataframe.geometry.x.to_numpy()
+        coordinates[start:stop, 1] = dataframe.geometry.y.to_numpy()
+        values[start:stop] = part_values
+        start = stop
+    coordinates.flush()
+    values.flush()
+    return _PointPairMaskData(coordinates, values, mask.crs, source_size)
+
+
+def _write_point_pair_part(
+    directory: Path,
+    part_index: int,
+    dataframe: gpd.GeoDataFrame,
+    rows: slice,
+    pointcloud: PointCloudBase,
+    mask: Any | None,
+    mp_config: MultiprocConfig | None,
+) -> tuple[Path, int]:
+    """Filter one point partition and save its pair inputs without retaining the dataframe in memory."""
+
+    # Extract the selected values and planar coordinates from this bounded partition
+    column = pointcloud.data_column
+    values = np.asarray(dataframe.geometry.z if column is None else dataframe[column])
+    coordinates = np.column_stack((dataframe.geometry.x.to_numpy(), dataframe.geometry.y.to_numpy()))
+    valid = np.isfinite(values) & np.all(np.isfinite(coordinates), axis=1)
+
+    # Apply the matching part of a user mask before writing only eligible rows to temporary storage
+    if mask is not None:
+        valid &= _point_pair_mask_part(mask, pointcloud, dataframe, rows, mp_config)
+    local_indexes = np.flatnonzero(valid)
+    original_indexes = local_indexes.astype(np.int64, copy=False) + rows.start
+    filename = directory / f"part-{part_index}.npz"
+    np.savez(
+        filename,
+        coordinates=coordinates[local_indexes].astype(np.float64, copy=False),
+        values=values[local_indexes],
+        original_indexes=original_indexes,
+    )
+    return filename, len(local_indexes)
+
+
+def _point_pair_partitions(
+    pointcloud: PointCloudBase,
+    reader: _ValueReader | None,
+    mp_config: MultiprocConfig | None,
+    directory: Path,
+) -> Iterator[tuple[int, slice, Path]]:
+    """Save Dask or multiprocessing point partitions and yield their paths in source-row order."""
+
+    # Read unloaded files concurrently in bounded worker batches
+    if reader is not None:
+        assert mp_config is not None
+        from geoutils.pointcloud.las import _point_partition_size
+
+        chunks = _point_partition_size(mp_config)
+        slices = [slice(start, min(start + chunks, reader.shape[0])) for start in range(0, reader.shape[0], chunks)]
+        arguments = ((reader, rows, directory / f"source-{part_index}.pkl") for part_index, rows in enumerate(slices))
+        for part_index, filename in _map_bounded(mp_config.cluster, _stage_point_pair_reader_partition, arguments):
+            yield part_index, slices[part_index], filename
+        return
+
+    # Compute one Dask partition at a time so the complete point table is never collected
+    dataframe = pointcloud.ds
+    if is_dask_dataframe(dataframe):
+        start = 0
+        for part_index, delayed_partition in enumerate(dataframe.to_delayed()):
+            filename, count = _stage_point_pair_dask_partition(
+                delayed_partition, directory / f"source-{part_index}.pkl"
+            )
+            rows = slice(start, start + count)
+            yield part_index, rows, filename
+            start = rows.stop
+        return
+
+    filename = directory / "source-0.pkl"
+    yield 0, slice(0, len(dataframe)), _stage_pointcloud_partition(dataframe, filename)
+
+
+@contextmanager
+def _prepare_point_pair_data(
+    pointcloud: PointCloudBase,
+    mask: Any | None,
+    mp_config: MultiprocConfig | None,
+) -> Iterator[_PointPairData]:
+    """
+    Prepare finite pair inputs while saving chunked point tables in temporary disk-backed arrays.
+
+    Eager GeoDataFrames stay in memory. For chunked inputs, _point_pair_partitions() saves source rows and
+    _write_point_pair_part() filters them before the eligible coordinates, values, and original indexes are copied
+    into row-ordered memory maps. The maps remain available until pair sampling and output construction finish without
+    changing the source PointCloud object's loaded state.
+    """
+
+    # Keep the direct in-memory path for ordinary point tables
+    reader = _reader_from_source(pointcloud, None, pointcloud, mp_config)
+    if reader is None and not is_dask_dataframe(pointcloud.ds):
+        dataframe = pointcloud.ds
+        values = np.asarray(
+            dataframe[pointcloud.data_column] if pointcloud.data_column is not None else dataframe.geometry.z
+        )
+        coordinates = np.column_stack((dataframe.geometry.x.to_numpy(), dataframe.geometry.y.to_numpy()))
+        valid = np.isfinite(values) & np.all(np.isfinite(coordinates), axis=1)
+        if mask is not None:
+            mask_array = _point_pair_mask(mask, pointcloud, dataframe, mp_config)
+            if is_dask_array(mask_array):
+                mask_array = mask_array.compute()
+            valid &= mask_array
+        yield _PointPairData(coordinates[valid], values[valid], np.flatnonzero(valid), len(values))
+        return
+
+    # Filter each chunked partition and save it immediately so only bounded point rows reside in memory
+    with ExitStack() as storage:
+        directory = Path(storage.enter_context(TemporaryDirectory(prefix="geoutils-pairsample-")))
+        prepared_mask = mask
+        if mask is not None:
+            normalized_mask = _normalize_sampling_input(mask)
+            mask_pointcloud = _get_pointcloud_interface(normalized_mask)
+            if mask_pointcloud is not None and mask_pointcloud._is_dask:
+                prepared_mask = _stage_dask_point_pair_mask(mask_pointcloud, directory, storage)
+
+        parts: list[tuple[Path, int]] = []
+        source_size = 0
+        for part_index, rows, filename in _point_pair_partitions(pointcloud, reader, mp_config, directory):
+            if rows.start != source_size:
+                raise RuntimeError("Point partitions must cover consecutive source rows.")
+            dataframe = pd.read_pickle(filename)
+            parts.append(
+                _write_point_pair_part(directory, part_index, dataframe, rows, pointcloud, prepared_mask, mp_config)
+            )
+            source_size = rows.stop
+
+        # Validate global mask length after unknown Dask partition sizes have been observed once
+        if isinstance(prepared_mask, _PointPairMaskData) and prepared_mask.source_size != source_size:
+            raise ValueError("Point value 'mask' does not share the ordered support coordinates.")
+        if prepared_mask is not None and not isinstance(prepared_mask, _PointPairMaskData):
+            normalized_mask = _normalize_sampling_input(prepared_mask)
+            if (
+                _get_pointcloud_interface(normalized_mask) is None
+                and not _is_raster(normalized_mask)
+                and not _is_vector(normalized_mask)
+                and int(np.prod(np.shape(normalized_mask))) != source_size
+            ):
+                raise ValueError("Argument ``mask`` must be boolean and contain one value per input location.")
+
+        # Allocate compact disk-backed arrays after partition counts reveal the finite point total
+        valid_count = sum(count for _, count in parts)
+        if valid_count < 2:
+            raise ValueError("At least two finite points are required to sample pairs.")
+        coordinates = np.memmap(directory / "coordinates.dat", mode="w+", dtype=np.float64, shape=(valid_count, 2))
+        with np.load(parts[0][0]) as first_part:
+            value_dtype = first_part["values"].dtype
+        values = np.memmap(directory / "values.dat", mode="w+", dtype=value_dtype, shape=valid_count)
+        original_indexes = np.memmap(directory / "indexes.dat", mode="w+", dtype=np.int64, shape=valid_count)
+        for array in (coordinates, values, original_indexes):
+            storage.callback(_close_memory_map, array)
+
+        # Join the small temporary partitions in original row order without creating an in-memory concatenation
+        start = 0
+        for filename, count in parts:
+            with np.load(filename) as part:
+                stop = start + count
+                coordinates[start:stop] = part["coordinates"]
+                values[start:stop] = part["values"]
+                original_indexes[start:stop] = part["original_indexes"]
+                start = stop
+        coordinates.flush()
+        values.flush()
+        original_indexes.flush()
+        yield _PointPairData(coordinates, values, original_indexes, source_size)
 
 
 def _read_raster_pair_values(
@@ -1276,7 +1561,12 @@ def _prepare_raster_pair_source(
     mask: RasterLike | VectorLike | ArrayLike | None,
     mp_config: MultiprocConfig | None,
 ) -> _RasterPairSource:
-    """Prepare raster values and their optional mask for eager, Dask, or multiprocessing pair reads."""
+    """
+    Prepare raster values and their optional mask for eager, Dask, or multiprocessing pair reads.
+
+    Unloaded rasters use _reader_from_source() so workers can read bounded windows. Other inputs keep their NumPy or
+    Dask arrays, and every path returns a _RasterPairSource with the chunk boundaries used for local pair generation.
+    """
 
     # Reject competing task schedulers before reading either the source or its mask
     if mp_config is not None and (_uses_dask(raster) or _uses_dask(mask)):
@@ -1319,24 +1609,6 @@ def _prepare_raster_pair_source(
     return _RasterPairSource(array, mp_config)
 
 
-def _prepare_point_pair_dataframe(pointcloud: PointCloudBase, mp_config: MultiprocConfig | None) -> gpd.GeoDataFrame:
-    """Read point coordinates and values, using worker row partitions for an unloaded file source."""
-
-    # Apply the point cloud convention of one integer row count per multiprocessing partition
-    if mp_config is not None:
-        from geoutils.pointcloud.las import _point_partition_size
-
-        _point_partition_size(mp_config)
-
-    # A point pair search needs all coordinates, but worker reads need not load the source object itself
-    reader = _reader_from_source(pointcloud, None, pointcloud, mp_config)
-    if reader is not None:
-        assert mp_config is not None
-        return _read_point_pair_dataframe(reader, mp_config)
-    dataframe = pointcloud.ds
-    return dataframe.compute() if is_dask_dataframe(dataframe) else dataframe
-
-
 def _point_pair_mask(
     mask: RasterLike | PointCloudLike | VectorLike | ArrayLike,
     pointcloud: PointCloudBase,
@@ -1358,7 +1630,9 @@ def _point_pair_mask(
         else:
             mask_reader = _reader_from_source(mask_pointcloud, None, mask_pointcloud, mp_config)
             mask_dataframe = (
-                _read_point_pair_dataframe(mask_reader, mp_config) if mask_reader is not None else mask_pointcloud.ds
+                mask_reader.read_points(slice(0, mask_reader.shape[0]))
+                if mask_reader is not None
+                else mask_pointcloud.ds
             )
 
         # Require the same coordinate system and ordered X/Y locations as ordinary point masks
@@ -1570,7 +1844,7 @@ def _sample_point_pairs(
     directly. Then _pair_dataset() produces the Xarray labelled layout containing the pairs.
 
     Strategy controls apply to ``"loglag"``. ``"random_xy"`` uses ``max_rounds`` and ``nn_batch_size``.
-    Dask and multiprocessing point tables are collected because the search requires all coordinates.
+    Dask and multiprocessing point partitions are saved in temporary disk-backed arrays before pair selection.
 
     :param pointcloud: Point cloud to sample, using its main data column or geometry heights.
     :param n_pairs: Requested number of pairs with two finite values; fewer may be returned if sampling stops early.
@@ -1599,7 +1873,8 @@ def _sample_point_pairs(
     :param nn_max_batches: Maximum batches to fill the sample with ``"nn_logvector"``.
     :param index_dtype: Integer NumPy dtype for returned row indexes (e.g. ``"int64"`` for very large point clouds).
     :param distance_dtype: Floating NumPy dtype for returned distances (e.g. ``"float64"`` for greater precision).
-    :param mp_config: Worker and row partition settings for reading an unloaded point cloud before the global search.
+    :param mp_config: Worker and row partition settings for reading an unloaded point cloud into temporary
+        disk-backed arrays before pair selection.
     :returns: Xarray Dataset with pair and endpoint dimensions, containing original row indexes, values,
         coordinates, and distances.
     """
@@ -1607,26 +1882,70 @@ def _sample_point_pairs(
     # Reject competing schedulers before reading point rows or a spatial mask
     if mp_config is not None and (_uses_dask(pointcloud) or _uses_dask(mask)):
         raise ValueError("Cannot use Multiprocessing and Dask simultaneously in pairsample().")
+    if mp_config is not None:
+        from geoutils.pointcloud.las import _point_partition_size
 
-    # Read the point table because every pair search needs all coordinates
-    dataframe = _prepare_point_pair_dataframe(pointcloud, mp_config)
-    values = np.asarray(
-        dataframe[pointcloud.data_column] if pointcloud.data_column is not None else dataframe.geometry.z
-    )
-    coordinates = np.column_stack((dataframe.geometry.x.to_numpy(), dataframe.geometry.y.to_numpy()))
+        _point_partition_size(mp_config)
 
-    # Keep rows with available coordinates and values, then apply the optional mask
-    valid = np.isfinite(values) & np.all(np.isfinite(coordinates), axis=1)
-    if mask is not None:
-        # Reuse the loaded table for spatial masks and ordered-coordinate checks against point masks
-        mask_array = _point_pair_mask(mask, pointcloud, dataframe, mp_config)
-        if mask_array is not None and is_dask_array(mask_array):
-            mask_array = mask_array.compute()
-        valid &= mask_array
+    # Keep temporary disk-backed arrays alive through sampling and output construction
+    with _prepare_point_pair_data(pointcloud, mask, mp_config) as pair_data:
+        return _sample_prepared_point_pairs(
+            pointcloud,
+            pair_data=pair_data,
+            n_pairs=n_pairs,
+            sampling=sampling,
+            min_distance=min_distance,
+            max_distance=max_distance,
+            random_state=random_state,
+            strategy=strategy,
+            n_bins=n_bins,
+            anchors_per_round=anchors_per_round,
+            attempts_per_anchor=attempts_per_anchor,
+            max_rounds=max_rounds,
+            cell_size=cell_size,
+            nn_tolerance=nn_tolerance,
+            nn_batch_size=nn_batch_size,
+            nn_oversample=nn_oversample,
+            nn_max_batches=nn_max_batches,
+            index_dtype=index_dtype,
+            distance_dtype=distance_dtype,
+        )
 
-    # Keep source row numbers so the result refers back to the original point table
-    original_indexes = np.flatnonzero(valid)
-    coordinates_valid, values_valid = coordinates[valid], values[valid]
+
+def _sample_prepared_point_pairs(
+    pointcloud: PointCloudBase,
+    *,
+    pair_data: _PointPairData,
+    n_pairs: int,
+    sampling: Literal["loglag", "random_xy"],
+    min_distance: float | None,
+    max_distance: float | None,
+    random_state: int | np.random.Generator | None,
+    strategy: Literal["kdtree", "hashgrid", "nn_logvector"],
+    n_bins: int,
+    anchors_per_round: int,
+    attempts_per_anchor: int,
+    max_rounds: int,
+    cell_size: float | None,
+    nn_tolerance: float,
+    nn_batch_size: int,
+    nn_oversample: float,
+    nn_max_batches: int,
+    index_dtype: Any,
+    distance_dtype: Any,
+) -> xr.Dataset:
+    """
+    Sample prepared finite point arrays and build the labelled pair dataset.
+
+    _IrregularPairSampler.sample() finds log-lag pairs, while the random path draws independent endpoints and removes
+    repeats with _deduplicate_pairs(). Original source row numbers are restored before _pair_dataset() builds the
+    common Xarray result.
+    """
+
+    # Use the same compact finite-row layout for eager and disk-backed point sources
+    coordinates_valid = pair_data.coordinates
+    values_valid = pair_data.values
+    original_indexes = pair_data.original_indexes
     if len(values_valid) < 2:
         raise ValueError("At least two finite points are required to sample pairs.")
 
@@ -1634,7 +1953,7 @@ def _sample_point_pairs(
     index_type, distance_type = np.dtype(index_dtype), np.dtype(distance_dtype)
     if not np.issubdtype(index_type, np.integer) or not np.issubdtype(distance_type, np.floating):
         raise TypeError("Arguments ``index_dtype`` and ``distance_dtype`` must be integer and floating, respectively.")
-    if len(values) - 1 > np.iinfo(index_type).max:
+    if pair_data.source_size - 1 > np.iinfo(index_type).max:
         raise ValueError("Argument ``index_dtype`` cannot represent every point in this point cloud.")
 
     # Choose default distances from the point extent and typical point spacing

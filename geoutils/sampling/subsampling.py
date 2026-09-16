@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import operator
 import warnings
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Callable, Literal, TypedDict, cast, overload
 
 import numpy as np
@@ -138,6 +139,47 @@ def _splitmix64(x: np.typing.NDArray[np.uint64]) -> NDArrayNum:
     return z.astype(np.uint64, copy=False)
 
 
+def _recover_splitmix64_indices(keys: np.typing.NDArray[np.uint64], seed: int) -> np.typing.NDArray[np.int64]:
+    """Recover global cell indexes from SplitMix64 keys without allocating another complete array."""
+
+    # Prepare the constants that undo the two multiplications in _splitmix64()
+    if len(keys) == 0:
+        return keys.view(np.int64)
+    second_multiplier_inverse = np.uint64(0x319642B2D24D8EC3)
+    first_multiplier_inverse = np.uint64(0x96DE1B173F119089)
+    initial_increment = np.uint64(0x9E3779B97F4A7C15)
+
+    # Reverse each mixing operation in small groups so temporary arrays stay independent of the sample size
+    temporary = np.empty(min(65_536, len(keys)), dtype=np.uint64)
+    for start in range(0, len(keys), len(temporary)):
+        values = keys[start : start + len(temporary)]
+        work = temporary[: len(values)]
+
+        # Undo the final shift and the second multiplication
+        np.right_shift(values, np.uint64(31), out=work)
+        np.bitwise_xor(values, work, out=values)
+        np.right_shift(values, np.uint64(62), out=work)
+        np.bitwise_xor(values, work, out=values)
+        np.multiply(values, second_multiplier_inverse, out=values)
+
+        # Undo the middle shift and the first multiplication
+        np.right_shift(values, np.uint64(27), out=work)
+        np.bitwise_xor(values, work, out=values)
+        np.right_shift(values, np.uint64(54), out=work)
+        np.bitwise_xor(values, work, out=values)
+        np.multiply(values, first_multiplier_inverse, out=values)
+
+        # Undo the first shift, initial increment and seed combination
+        np.right_shift(values, np.uint64(30), out=work)
+        np.bitwise_xor(values, work, out=values)
+        np.right_shift(values, np.uint64(60), out=work)
+        np.bitwise_xor(values, work, out=values)
+        np.subtract(values, initial_increment, out=values)
+        np.bitwise_xor(values, np.uint64(seed), out=values)
+
+    return keys.view(np.int64)
+
+
 @overload
 def _subsample_numpy(
     array: NDArrayNum | MArrayNum,
@@ -146,6 +188,7 @@ def _subsample_numpy(
     *,
     random_state: int | np.random.Generator | None = None,
     strategy: Literal["sequential", "topk"] = "sequential",
+    skip_nodata: bool = True,
     mask: NDArrayBool | None = None,
 ) -> NDArrayNum: ...
 
@@ -158,6 +201,7 @@ def _subsample_numpy(
     *,
     random_state: int | np.random.Generator | None = None,
     strategy: Literal["sequential", "topk"] = "sequential",
+    skip_nodata: bool = True,
     mask: NDArrayBool | None = None,
 ) -> tuple[NDArrayNum, ...]: ...
 
@@ -169,6 +213,7 @@ def _subsample_numpy(
     *,
     random_state: int | np.random.Generator | None = None,
     strategy: Literal["sequential", "topk"] = "sequential",
+    skip_nodata: bool = True,
     mask: NDArrayBool | None = None,
 ) -> NDArrayNum | tuple[NDArrayNum, ...]:
     """
@@ -182,15 +227,20 @@ def _subsample_numpy(
     :param strategy: Sampling strategy:
         - "sequential": Random draw from valid indices (chunk-dependent, different output than chunked implementation).
         - "topk": Deterministic key-per-pixel draw (chunk-invariant, same output in chunked implementation).
+    :param skip_nodata: Whether to exclude nodata values, and False cells in a boolean array.
     :param mask: Prepared boolean eligibility mask with the same shape as array.
 
     :returns: The subsampled array (1D) or the indices to extract (same shape as input array).
     """
 
-    # Determine valid pixels and their global linear indices (row * nx + col)
-    valid = ~get_mask_from_array(array).reshape(array.shape)
-    if mask is not None:
-        valid &= mask
+    # Return the complete grid directly when neither nodata nor a mask restricts it
+    if subsample == 1 and not skip_nodata and mask is None:
+        if return_indices:
+            return np.unravel_index(np.arange(array.size), array.shape)
+        return array.reshape(-1)
+
+    # Determine valid pixels according to skip_nodata and their global linear indices (row * nx + col)
+    valid = _valid_subsample_mask(array, mask, skip_nodata=skip_nodata)
     valids = np.flatnonzero(valid.ravel())  # Robust 1D index list (global linear indices)
     total_nb_valids = int(valids.size)
 
@@ -306,21 +356,37 @@ def _get_indices_block_per_subsample(
     return relative_index_per_block
 
 
-def _valid_subsample_mask(arr_chunk: NDArrayNum | NDArrayBool, mask_chunk: NDArrayBool | None = None) -> NDArrayBool:
-    """Find finite, unmasked values eligible for sampling, or eligible True values for boolean data."""
+def _valid_subsample_mask(
+    arr_chunk: NDArrayNum | NDArrayBool,
+    mask_chunk: NDArrayBool | None = None,
+    *,
+    skip_nodata: bool = True,
+) -> NDArrayBool:
+    """Find values eligible for sampling, or eligible True values for boolean data."""
 
-    valid = ~get_mask_from_array(arr_chunk).reshape(arr_chunk.shape)
-    if arr_chunk.dtype == np.bool_:
-        valid &= np.ma.getdata(arr_chunk)
+    # Include every source cell when nodata values and False boolean values are requested
+    if skip_nodata:
+        valid = ~get_mask_from_array(arr_chunk).reshape(arr_chunk.shape)
+        if arr_chunk.dtype == np.bool_:
+            valid &= np.ma.getdata(arr_chunk)
+    else:
+        valid = np.ones(arr_chunk.shape, dtype=bool)
+
+    # Apply the explicit sampling mask independently of source value validity
     if mask_chunk is not None:
         valid &= mask_chunk
     return valid
 
 
 @delayed
-def _delayed_nb_valids(arr_chunk: NDArrayNum | NDArrayBool, *, mask_chunk: NDArrayBool | None = None) -> NDArrayNum:
+def _delayed_nb_valids(
+    arr_chunk: NDArrayNum | NDArrayBool,
+    *,
+    skip_nodata: bool = True,
+    mask_chunk: NDArrayBool | None = None,
+) -> NDArrayNum:
     """Count number of valid values per block."""
-    valid = _valid_subsample_mask(arr_chunk, mask_chunk)
+    valid = _valid_subsample_mask(arr_chunk, mask_chunk, skip_nodata=skip_nodata)
     return np.array([np.count_nonzero(valid)]).reshape((1, 1))
 
 
@@ -333,6 +399,7 @@ def _delayed_topk_candidates_block(
     k: int,
     nx_full: int,  # Width of full array
     return_indices_local: bool,
+    skip_nodata: bool = True,
     mask_chunk: NDArrayBool | None = None,
 ) -> tuple[NDArrayNum, NDArrayNum | NDArrayBool]:
     """
@@ -352,8 +419,8 @@ def _delayed_topk_candidates_block(
     if k <= 0:
         return np.empty((0,), dtype=np.uint64), np.empty((0,), dtype=payload_dtype)
 
-    # Only valid values are sampled (finite for numerical arrays, True for boolean arrays)
-    valid = _valid_subsample_mask(arr_chunk, mask_chunk)
+    # Only valid values are sampled by default (finite for numerical arrays, True for boolean arrays)
+    valid = _valid_subsample_mask(arr_chunk, mask_chunk, skip_nodata=skip_nodata)
 
     # Get nonzero indices for flattened array, and number of valid values
     flat = np.flatnonzero(valid.ravel())
@@ -387,16 +454,12 @@ def _delayed_topk_candidates_block(
         return key_sel, gid_sel
     # Otherwise, returning values
     else:
-        # Extract values for selected valid pixels
-        if np.issubdtype(arr_chunk.dtype, np.bool_):
-            vals = np.ones(m, dtype=np.bool_)
-        else:
-            vals = arr_chunk.ravel()[flat[sel]]
+        # Extract values for selected pixels, including nodata when requested
+        vals = arr_chunk.ravel()[flat[sel]]
         return key_sel, vals
 
 
-@delayed
-def _delayed_merge_topk(
+def _merge_topk_candidates(
     keys_list: list[NDArrayNum],
     payload_list: list[NDArrayNum],
     *,
@@ -436,6 +499,18 @@ def _delayed_merge_topk(
 
 
 @delayed
+def _delayed_merge_topk(
+    keys_list: list[NDArrayNum],
+    payload_list: list[NDArrayNum],
+    *,
+    k: int,
+) -> tuple[NDArrayNum, NDArrayNum]:
+    """Combine one bounded group of delayed top-k candidates."""
+
+    return _merge_topk_candidates(keys_list, payload_list, k=k)
+
+
+@delayed
 def _delayed_gid_to_rc(gid: NDArrayNum, nx_full: int) -> tuple[NDArrayNum, NDArrayNum]:
     """
     Convert global linear indices back to (row, col) indices.
@@ -448,33 +523,39 @@ def _delayed_gid_to_rc(gid: NDArrayNum, nx_full: int) -> tuple[NDArrayNum, NDArr
 
 @delayed
 def _delayed_subsample_block(
-    arr_chunk: NDArrayNum | NDArrayBool, subsample_indices: NDArrayNum, *, mask_chunk: NDArrayBool | None = None
+    arr_chunk: NDArrayNum | NDArrayBool,
+    subsample_indices: NDArrayNum | slice,
+    *,
+    skip_nodata: bool = True,
+    mask_chunk: NDArrayBool | None = None,
 ) -> NDArrayNum | NDArrayBool:
     """Subsample the valid values at the corresponding 1D valid indices per block."""
 
-    valid = _valid_subsample_mask(arr_chunk, mask_chunk)
+    valid = _valid_subsample_mask(arr_chunk, mask_chunk, skip_nodata=skip_nodata)
     return arr_chunk[valid][subsample_indices]
 
 
 @delayed
 def _delayed_subsample_indices_block(
     arr_chunk: NDArrayNum | NDArrayBool,
-    subsample_indices: NDArrayNum,
+    subsample_indices: NDArrayNum | slice,
     block_id: dict[str, Any],
     *,
+    skip_nodata: bool = True,
     mask_chunk: NDArrayBool | None = None,
 ) -> NDArrayNum:
     """Return 2D indices from the subsampled 1D valid indices per block."""
 
     #  Unravel indices of valid data to the shape of the block
-    valid = _valid_subsample_mask(arr_chunk, mask_chunk)
-    ix, iy = np.unravel_index(np.argwhere(valid.flatten())[subsample_indices], shape=arr_chunk.shape)
+    valid = _valid_subsample_mask(arr_chunk, mask_chunk, skip_nodata=skip_nodata)
+    flat_valid = np.flatnonzero(valid.ravel())
+    ix, iy = np.unravel_index(flat_valid[subsample_indices], shape=arr_chunk.shape)
 
     # Convert to full-array indexes by adding the row and column starting indexes for this block
     ix += block_id["row_start"]
     iy += block_id["col_start"]
 
-    return np.hstack((ix, iy))
+    return np.column_stack((ix, iy))
 
 
 def _dask_subsample(
@@ -485,6 +566,7 @@ def _dask_subsample(
     strategy: Literal["sequential", "topk"] = "sequential",
     preserve_order: bool = False,
     *,
+    skip_nodata: bool = True,
     mask: da.Array | None = None,
 ) -> da.Array | tuple[da.Array, da.Array]:
     """
@@ -497,16 +579,30 @@ def _dask_subsample(
 
     :param preserve_order: Restore sequential random-draw order after collecting block results. The one-dimensional
         sampling adapter uses this to match NumPy point sampling; existing raster calls keep block order.
+    :param skip_nodata: Whether to exclude nodata values, and False cells in a boolean array.
     :param mask: Boolean array marking values eligible for sampling, with the same shape as darr.
     """
 
     # To raise appropriate error on missing optional dependency
     import_optional("dask")
 
+    # Flatten an unrestricted full grid lazily without reading its values to build indexes
+    if subsample == 1 and not skip_nodata and mask is None:
+        flat_values = darr.reshape(-1)
+        if not return_indices:
+            return flat_values
+        flat_indices = da.arange(int(darr.size), chunks=flat_values.chunks)
+        columns = int(darr.shape[1])
+        return flat_indices // columns, flat_indices % columns
+
     # Get random state
     # For method="sequential", we use the RNG stream based on valid orders (chunk-dependent)
     # For method="topk", we convert random_state into an integer seed used in the deterministic key function
     rng = np.random.default_rng(random_state)
+
+    # Use full-width row blocks so the complete result keeps the raster's row-by-row order
+    if subsample == 1 and darr.ndim == 2:
+        darr = darr.rechunk({1: darr.shape[1]})
 
     # Create a delayed object for each block, and flatten the blocks into a 1d shape
     blocks = darr.to_delayed().ravel()
@@ -518,7 +614,11 @@ def _dask_subsample(
 
     # Compute number of valid points for each block out-of-memory
     list_delayed_valids = [
-        da.from_delayed(_delayed_nb_valids(b, mask_chunk=m), shape=(1, 1), dtype=np.dtype("int32"))
+        da.from_delayed(
+            _delayed_nb_valids(b, skip_nodata=skip_nodata, mask_chunk=m),
+            shape=(1, 1),
+            dtype=np.dtype("int32"),
+        )
         for b, m in zip(blocks, mask_blocks)
     ]
     # Compute once, then flatten
@@ -555,36 +655,50 @@ def _dask_subsample(
     ]
 
     # STRATEGY 1: "sequential" (chunk-dependent)
-    if strategy == "sequential" or (preserve_order and subsample == 1):
+    if strategy == "sequential" or subsample == 1:
 
-        # Get random 1D indexes for the subsample size
-        indices_1d = (
-            np.arange(total_nb_valids)
-            if preserve_order and subsample == 1
-            else rng.choice(total_nb_valids, subsample_size, replace=False)
-        )
-        # Block selection sorts valid positions; recover the original draw order only when requested
-        draw_order = np.argsort(np.argsort(indices_1d)) if preserve_order else slice(None)
+        # Keep complete blocks compact; partial samples need only their selected positions within each block
+        ind_per_block: Sequence[list[int] | slice]
+        draw_order: NDArrayNum | slice
+        if subsample == 1:
+            ind_per_block = [slice(None)] * len(blocks)
+            selected_counts = nb_valids_per_block
+            draw_order = slice(None)
+        else:
+            # Get random 1D indexes for the subsample size
+            indices_1d = rng.choice(total_nb_valids, subsample_size, replace=False)
 
-        # Sort which indexes belong to which chunk
-        ind_per_block = _get_indices_block_per_subsample(
-            indices_1d, num_chunks=darr.numblocks, nb_valids_per_block=nb_valids_per_block.tolist()
-        )
+            # Block selection sorts valid positions; recover the original draw order only when requested
+            draw_order = np.argsort(np.argsort(indices_1d)) if preserve_order else slice(None)
+
+            # Sort which indexes belong to which chunk
+            relative_indices = _get_indices_block_per_subsample(
+                indices_1d, num_chunks=darr.numblocks, nb_valids_per_block=nb_valids_per_block.tolist()
+            )
+            ind_per_block = relative_indices
+            selected_counts = np.asarray([len(indices) for indices in relative_indices], dtype=np.int64)
 
         # To just get the subsample without indices
         if not return_indices:
             # Task a delayed subsample to be computed for each block, skipping blocks with no values to sample
-            used = [i for i in range(len(blocks)) if len(ind_per_block[i]) > 0]
+            used = np.flatnonzero(selected_counts).tolist()
             list_subsamples = [
                 _delayed_subsample_block(
-                    blocks[i], np.asarray(ind_per_block[i], dtype=np.int64), mask_chunk=mask_blocks[i]
+                    blocks[i],
+                    (
+                        ind_per_block[i]
+                        if isinstance(ind_per_block[i], slice)
+                        else np.asarray(ind_per_block[i], dtype=np.int64)
+                    ),
+                    skip_nodata=skip_nodata,
+                    mask_chunk=mask_blocks[i],
                 )
                 for i in used
             ]
 
             # Cast output to the right expected dtype and length, then compute and concatenate
             list_subsamples_da = [
-                da.from_delayed(s, shape=(len(ind_per_block[i]),), dtype=darr.dtype)
+                da.from_delayed(s, shape=(int(selected_counts[i]),), dtype=darr.dtype)
                 for s, i in zip(list_subsamples, used)
             ]
             return da.concatenate(list_subsamples_da, axis=0)[draw_order]
@@ -592,12 +706,17 @@ def _dask_subsample(
         # To return indices
         else:
             # Task delayed subsample indices to be computed for each block, skipping blocks with no values to sample
-            used = [i for i in range(len(blocks)) if len(ind_per_block[i]) > 0]
+            used = np.flatnonzero(selected_counts).tolist()
             list_subsample_indices = [
                 _delayed_subsample_indices_block(
                     blocks[i],
-                    np.asarray(ind_per_block[i], dtype=np.int64),
+                    (
+                        ind_per_block[i]
+                        if isinstance(ind_per_block[i], slice)
+                        else np.asarray(ind_per_block[i], dtype=np.int64)
+                    ),
                     block_id=block_ids[i],
+                    skip_nodata=skip_nodata,
                     mask_chunk=mask_blocks[i],
                 )
                 for i in used
@@ -605,7 +724,7 @@ def _dask_subsample(
 
             # Cast output to the right expected dtype and length, then compute and concatenate
             list_indices_da = [
-                da.from_delayed(s, shape=(len(ind_per_block[i]), 2), dtype=np.int32)
+                da.from_delayed(s, shape=(int(selected_counts[i]), 2), dtype=np.int64)
                 for s, i in zip(list_subsample_indices, used)
             ]
             indices = da.concatenate(list_indices_da, axis=0)[draw_order]
@@ -634,6 +753,7 @@ def _dask_subsample(
                 k=subsample_size,
                 nx_full=nx_full,
                 return_indices_local=return_indices,
+                skip_nodata=skip_nodata,
                 mask_chunk=mask_blocks[i],
             )
             for i in range(len(blocks))
@@ -644,6 +764,14 @@ def _dask_subsample(
         payload_list = [c[1] for c in cands]
 
         # Global merge to get the top-k across all blocks
+        # Combine at most eight candidate arrays at a time so the final task never receives every block's candidates
+        while len(keys_list) > 1:
+            merged_groups = [
+                _delayed_merge_topk(keys_list[start : start + 8], payload_list[start : start + 8], k=subsample_size)
+                for start in range(0, len(keys_list), 8)
+            ]
+            keys_list = [merged[0] for merged in merged_groups]
+            payload_list = [merged[1] for merged in merged_groups]
         merged = _delayed_merge_topk(keys_list, payload_list, k=subsample_size)
 
         # Lazily extract tuple elements
@@ -678,6 +806,7 @@ def _read_subsample_raster_block(
     tile_idx: NDArrayNum,
     *,
     band: int = 1,
+    skip_nodata: bool = True,
     mask: RasterLike | VectorLike | ArrayLike | None = None,
 ) -> tuple[NDArrayNum | NDArrayBool | MArrayNum, NDArrayBool]:
     """
@@ -697,8 +826,8 @@ def _read_subsample_raster_block(
     data = _as_array(rst_block.data)
     arr = data if data.ndim == 2 else data[band - 1]
 
-    # Exclude nodata and nonfinite values; boolean rasters sample only their True cells
-    valid = _valid_subsample_mask(arr)
+    # Exclude nodata and nonfinite values when requested; boolean rasters sample only their True cells by default
+    valid = _valid_subsample_mask(arr, skip_nodata=skip_nodata)
 
     # Read only the corresponding mask window, then combine it with the finite cells in this tile
     if mask is not None:
@@ -715,39 +844,54 @@ def _wrapper_multiproc_nb_valids_per_block(
     tile_idx: NDArrayNum,
     *,
     band: int = 1,
+    skip_nodata: bool = True,
     mask: RasterLike | VectorLike | ArrayLike | None = None,
 ) -> int:
     """Count valid values in one tile out-of-memory."""
 
-    _, valid = _read_subsample_raster_block(rst, tile_idx, band=band, mask=mask)
+    _, valid = _read_subsample_raster_block(rst, tile_idx, band=band, skip_nodata=skip_nodata, mask=mask)
     return int(np.count_nonzero(valid))
 
 
 def _wrapper_multiproc_subsample_values_block(
     rst: RasterBase,
     tile_idx: NDArrayNum,
-    subsample_indices_rel: NDArrayNum,
+    subsample_indices_rel: NDArrayNum | slice,
     *,
     band: int = 1,
+    skip_nodata: bool = True,
+    return_global_indices: bool = False,
     mask: RasterLike | VectorLike | ArrayLike | None = None,
-) -> NDArrayNum | NDArrayBool | MArrayNum:
+) -> NDArrayNum | NDArrayBool | MArrayNum | tuple[NDArrayNum, NDArrayNum | NDArrayBool | MArrayNum]:
     """
-    Subsample values in one tile using 1D indices relative to the tile's valid-value list.
+    Return values sampled from one raster tile, with global indexes when needed for ordering.
     """
 
     # Get tile out-of-memory
-    arr, valid = _read_subsample_raster_block(rst, tile_idx, band=band, mask=mask)
+    arr, valid = _read_subsample_raster_block(rst, tile_idx, band=band, skip_nodata=skip_nodata, mask=mask)
 
-    # Return subsample of finite values (or True values for boolean input)
-    return arr[valid].ravel()[subsample_indices_rel]
+    # Return subsample of finite values (or True values for boolean input), including nodata when requested
+    flat_valid = np.flatnonzero(valid.ravel())
+    flat_selected = flat_valid[subsample_indices_rel]
+    values = arr.ravel()[flat_selected]
+    if not return_global_indices:
+        return values
+
+    # Pair complete samples with their positions so the original row-by-row order can be restored
+    ncols = int(arr.shape[1])
+    rows = flat_selected // ncols + int(tile_idx[0])
+    columns = flat_selected % ncols + int(tile_idx[2])
+    global_indices = rows * int(rst.shape[1]) + columns
+    return global_indices.astype(np.int64), values
 
 
 def _wrapper_multiproc_subsample_indices_block(
     rst: RasterBase,
     tile_idx: NDArrayNum,
-    subsample_indices_rel: NDArrayNum,
+    subsample_indices_rel: NDArrayNum | slice,
     *,
     band: int = 1,
+    skip_nodata: bool = True,
     mask: RasterLike | VectorLike | ArrayLike | None = None,
 ) -> NDArrayNum:
     """
@@ -757,7 +901,7 @@ def _wrapper_multiproc_subsample_indices_block(
     """
 
     # Get tile out-of-memory
-    arr, valid = _read_subsample_raster_block(rst, tile_idx, band=band, mask=mask)
+    arr, valid = _read_subsample_raster_block(rst, tile_idx, band=band, skip_nodata=skip_nodata, mask=mask)
 
     # Get starting row/col of the tile
     row0 = int(tile_idx[0])
@@ -767,7 +911,12 @@ def _wrapper_multiproc_subsample_indices_block(
     flat_valid = np.flatnonzero(valid.ravel())
 
     # Use input to draw them
-    flat_sel = flat_valid[subsample_indices_rel.astype(np.int64)]
+    indexes = (
+        subsample_indices_rel
+        if isinstance(subsample_indices_rel, slice)
+        else np.asarray(subsample_indices_rel, dtype=np.int64)
+    )
+    flat_sel = flat_valid[indexes]
 
     # Transform back into absolute indices
     ncols = int(arr.shape[1])
@@ -785,28 +934,49 @@ def _wrapper_multiproc_topk_candidates_block(
     k: int,
     nx_full: int,
     return_indices: bool,
+    return_keys_only: bool = False,
     band: int = 1,
+    skip_nodata: bool = True,
     mask: RasterLike | VectorLike | ArrayLike | None = None,
-) -> tuple[NDArrayNum, NDArrayNum | NDArrayBool | MArrayNum]:
+) -> NDArrayNum | tuple[NDArrayNum, NDArrayNum | NDArrayBool | MArrayNum]:
     """
-    Return up to k candidates from one tile as (keys, payload).
+    Return up to k candidates from one tile as keys alone or as (keys, payload).
 
     keys: uint64 keys for selected valid pixels in this tile.
-    payload:
+    The key-only form avoids keeping a same-sized cell index array during selection. Otherwise, payload contains:
       - if return_indices=True: global linear indices (gid = row*nx_full + col) (int64)
       - else: sampled values (array dtype)
     """
     # If no subsample, early return
     if k <= 0:
+        if return_keys_only:
+            return np.empty((0,), dtype=np.uint64)
         payload_dtype = np.int64 if return_indices else rst.dtype
         return np.empty((0,), dtype=np.uint64), np.empty((0,), dtype=payload_dtype)
-
-    # Get tile out-of-memory
-    arr, valid = _read_subsample_raster_block(rst, tile_idx, band=band, mask=mask)
 
     # Tile offsets in full-array indices
     row0 = int(tile_idx[0])
     col0 = int(tile_idx[2])
+    row_stop = int(tile_idx[1])
+    col_stop = int(tile_idx[3])
+
+    # We don't need the raster values for sampling only indices
+    if return_indices and not skip_nodata and mask is None:
+        rows = np.arange(row0, row_stop, dtype=np.int64)[:, None]
+        columns = np.arange(col0, col_stop, dtype=np.int64)[None, :]
+        gid = (rows * np.int64(nx_full) + columns).ravel()
+        key = _splitmix64(np.uint64(seed) ^ gid.astype(np.uint64))
+        m = min(int(k), int(gid.size))
+        if return_keys_only:
+            if m < len(key):
+                key.partition(m - 1)
+                return key[:m].copy()
+            return key
+        sel = np.argpartition(key, m - 1)[:m]
+        return key[sel], gid[sel]
+
+    # Get tile out-of-memory
+    arr, valid = _read_subsample_raster_block(rst, tile_idx, band=band, skip_nodata=skip_nodata, mask=mask)
 
     # Get valids indices
     flat = np.flatnonzero(valid.ravel())
@@ -814,6 +984,8 @@ def _wrapper_multiproc_topk_candidates_block(
 
     # If no valid, early return
     if nvalid == 0:
+        if return_keys_only:
+            return np.empty((0,), dtype=np.uint64)
         payload_dtype = np.int64 if return_indices else arr.dtype
         return np.empty((0,), dtype=np.uint64), np.empty((0,), dtype=payload_dtype)
 
@@ -829,6 +1001,11 @@ def _wrapper_multiproc_topk_candidates_block(
 
     # Select the appropriate number of keys
     m = min(int(k), nvalid)
+    if return_keys_only:
+        if m < len(key):
+            key.partition(m - 1)
+            return key[:m].copy()
+        return key
     sel = np.argpartition(key, m - 1)[:m]
     key_sel = key[sel]
 
@@ -837,12 +1014,36 @@ def _wrapper_multiproc_topk_candidates_block(
         return key_sel, gid[sel]
 
     # If we return values
-    vals: NDArrayNum | NDArrayBool | MArrayNum
-    if np.issubdtype(arr.dtype, np.bool_):
-        vals = np.ones(m, dtype=np.bool_)
-    else:
-        vals = arr.ravel()[flat[sel]]
+    vals: NDArrayNum | NDArrayBool | MArrayNum = arr.ravel()[flat[sel]]
     return key_sel, vals
+
+
+def _wrapper_multiproc_topk_candidates_block_positional(
+    rst: RasterBase,
+    tile_idx: NDArrayNum,
+    seed: int,
+    k: int,
+    nx_full: int,
+    return_indices: bool,
+    return_keys_only: bool,
+    band: int,
+    skip_nodata: bool,
+    mask: RasterLike | VectorLike | ArrayLike | None,
+) -> NDArrayNum | tuple[NDArrayNum, NDArrayNum | NDArrayBool | MArrayNum]:
+    """Pass positional multiprocessing task arguments to the top-k tile calculation."""
+
+    return _wrapper_multiproc_topk_candidates_block(
+        rst,
+        tile_idx,
+        seed=seed,
+        k=k,
+        nx_full=nx_full,
+        return_indices=return_indices,
+        return_keys_only=return_keys_only,
+        band=band,
+        skip_nodata=skip_nodata,
+        mask=mask,
+    )
 
 
 def _multiproc_subsample(
@@ -854,7 +1055,9 @@ def _multiproc_subsample(
     strategy: Literal["sequential", "topk"] = "sequential",
     *,
     band: int = 1,
+    skip_nodata: bool = True,
     mask: RasterLike | VectorLike | ArrayLike | None = None,
+    return_linear_indices: bool = False,
 ) -> NDArrayNum | tuple[NDArrayNum, NDArrayNum]:
     """
     Subsample valid values out-of-memory from a 2D raster array using Multiprocessing tasks.
@@ -863,8 +1066,16 @@ def _multiproc_subsample(
     "sequential" is chunk-dependent but slightly faster.
 
     Returns a concatenated subsampled NumPy array collected from all tasks (either values or indices).
-    The mask must already match the source grid; each worker reads only its corresponding window.
     """
+
+    if return_linear_indices and (strategy != "topk" or subsample == 1):
+        raise ValueError("Linear index output is only available for partial top-k sampling.")
+
+    # Return complete unrestricted grid indexes without opening the source file
+    if subsample == 1 and not skip_nodata and mask is None and return_indices:
+        flat_indices = np.arange(int(np.prod(rst.shape)), dtype=np.int64)
+        rows, columns = np.unravel_index(flat_indices, rst.shape)
+        return rows.astype(np.int64), columns.astype(np.int64)
 
     # Get tiling
     tiling = compute_tiling(tile_size=config.chunks, raster_shape=rst.shape, overlap=0)
@@ -877,15 +1088,25 @@ def _multiproc_subsample(
     indexes_row, indexes_col = np.unravel_index(np.arange(num_blocks), shape=num_chunks)
     tile_ids = [tiling[indexes_row[i], indexes_col[i], :] for i in range(num_blocks)]
 
-    # Count valid values per tile in parallel
-    tasks = [
-        config.cluster.submit(_wrapper_multiproc_nb_valids_per_block, rst, tile_ids[i], band=band, mask=mask)
-        for i in range(num_blocks)
-    ]
-    try:
-        nb_valids_per_block = np.array(config.cluster.gather(tasks), dtype=np.int64)
-    except Exception as e:
-        raise RuntimeError(f"Error retrieving valid-count results from multiprocessing tasks: {e}")
+    # Count valid values per tile in parallel, unless skip_nodata=False makes every cell valid
+    if not skip_nodata and mask is None:
+        nb_valids_per_block = np.array([(tile[1] - tile[0]) * (tile[3] - tile[2]) for tile in tile_ids], dtype=np.int64)
+    else:
+        tasks = [
+            config.cluster.submit(
+                _wrapper_multiproc_nb_valids_per_block,
+                rst,
+                tile_ids[i],
+                band=band,
+                skip_nodata=skip_nodata,
+                mask=mask,
+            )
+            for i in range(num_blocks)
+        ]
+        try:
+            nb_valids_per_block = np.array(config.cluster.gather(tasks), dtype=np.int64)
+        except Exception as e:
+            raise RuntimeError(f"Error retrieving valid-count results from multiprocessing tasks: {e}")
 
     total_nb_valids = int(nb_valids_per_block.sum())
 
@@ -894,25 +1115,35 @@ def _multiproc_subsample(
 
     # Early exit if too few samples or valids
     if subsample_size <= 0 or total_nb_valids <= 0:
+        if return_linear_indices:
+            return np.empty((0,), dtype=np.int64)
         if return_indices:
             return np.empty((0,), dtype=np.int64), np.empty((0,), dtype=np.int64)
         return np.empty((0,), dtype=rst.dtype)
 
     # METHOD 1: sequential (chunk-dependent)
-    if strategy == "sequential":
+    if strategy == "sequential" or subsample == 1:
         rng = np.random.default_rng(random_state)
 
-        # Sample indices among the valids
-        indices_1d = rng.choice(total_nb_valids, subsample_size, replace=False)
+        # Keep complete tiles compact; partial samples need their selected positions within each tile
+        ind_per_block: Sequence[list[int] | slice]
+        if subsample == 1:
+            ind_per_block = [slice(None)] * num_blocks
+            selected_counts = nb_valids_per_block
+        else:
+            # Sample indices among the valids
+            indices_1d = rng.choice(total_nb_valids, subsample_size, replace=False)
 
-        # Map the sampled indices to per-tile relative indices
-        ind_per_block = _get_indices_block_per_subsample(
-            indices_1d=indices_1d,
-            num_chunks=num_chunks,
-            nb_valids_per_block=nb_valids_per_block.tolist(),
-        )
+            # Map the sampled indices to per-tile relative indices
+            relative_indices = _get_indices_block_per_subsample(
+                indices_1d=indices_1d,
+                num_chunks=num_chunks,
+                nb_valids_per_block=nb_valids_per_block.tolist(),
+            )
+            ind_per_block = relative_indices
+            selected_counts = np.asarray([len(indices) for indices in relative_indices], dtype=np.int64)
 
-        used = [i for i in range(num_blocks) if len(ind_per_block[i]) > 0]
+        used = np.flatnonzero(selected_counts).tolist()
 
         # Sample them through multiprocessing, either for indices or values
         if not return_indices:
@@ -921,20 +1152,32 @@ def _multiproc_subsample(
                     _wrapper_multiproc_subsample_values_block,
                     rst,
                     tile_ids[i],
-                    np.asarray(ind_per_block[i], dtype=np.int64),
+                    (
+                        ind_per_block[i]
+                        if isinstance(ind_per_block[i], slice)
+                        else np.asarray(ind_per_block[i], dtype=np.int64)
+                    ),
                     band=band,
+                    skip_nodata=skip_nodata,
+                    return_global_indices=subsample == 1,
                     mask=mask,
                 )
                 for i in used
             ]
 
             try:
-                list_vals = config.cluster.gather(tasks)
+                sampled_values = config.cluster.gather(tasks)
             except Exception as e:
                 raise RuntimeError(f"Error retrieving subsampled values from multiprocessing tasks: {e}")
 
+            # Restore a complete raster to its original row-by-row order
+            if subsample == 1:
+                global_indices = np.concatenate([indexes for indexes, _ in sampled_values])
+                values = np.concatenate([values for _, values in sampled_values])
+                return values[np.argsort(global_indices)]
+
             # Concatenate in tile order (this yields deterministic order given tiling; not random order)
-            return np.concatenate(list_vals, axis=0)
+            return np.concatenate(sampled_values, axis=0)
 
         else:
             tasks = [
@@ -942,8 +1185,13 @@ def _multiproc_subsample(
                     _wrapper_multiproc_subsample_indices_block,
                     rst,
                     tile_ids[i],
-                    np.asarray(ind_per_block[i], dtype=np.int64),
+                    (
+                        ind_per_block[i]
+                        if isinstance(ind_per_block[i], slice)
+                        else np.asarray(ind_per_block[i], dtype=np.int64)
+                    ),
                     band=band,
+                    skip_nodata=skip_nodata,
                     mask=mask,
                 )
                 for i in used
@@ -957,6 +1205,10 @@ def _multiproc_subsample(
             rc = np.concatenate(list_rc, axis=0)
             rows = rc[:, 0].astype(np.int64)
             cols = rc[:, 1].astype(np.int64)
+            if subsample == 1:
+                order = np.argsort(rows * np.int64(rst.shape[1]) + cols)
+                rows = rows[order]
+                cols = cols[order]
             return rows, cols
 
     # METHOD 2: topk (chunk-invariant)
@@ -972,52 +1224,119 @@ def _multiproc_subsample(
 
         # Get full-array width
         nx_full = int(rst.shape[1])
+        return_keys_only = return_indices or return_linear_indices
 
-        tasks = [
-            config.cluster.submit(
-                _wrapper_multiproc_topk_candidates_block,
+        from geoutils.multiproc.cluster import _map_bounded
+
+        arguments = (
+            (
                 rst,
                 tile_ids[i],
-                seed=seed,
-                k=subsample_size,
-                nx_full=nx_full,
-                return_indices=return_indices,
-                band=band,
-                mask=mask,
+                seed,
+                subsample_size,
+                nx_full,
+                return_keys_only,
+                return_keys_only,
+                band,
+                skip_nodata,
+                mask,
             )
             for i in range(num_blocks)
-        ]
+        )
 
+        # Keep only keys that can be changed back to indexes, avoiding a second full-size array during each merge
+        if return_keys_only:
+            max_tile_size = max(int((tile[1] - tile[0]) * (tile[3] - tile[2])) for tile in tile_ids)
+            max_candidates_per_tile = min(subsample_size, max_tile_size)
+            merge_group_size = 8
+            key_buffer = np.empty(subsample_size + merge_group_size * max_candidates_per_tile, dtype=np.uint64)
+            retained = 0
+            pending = 0
+            pending_tiles = 0
+
+            try:
+                for _, candidate_keys in _map_bounded(
+                    config.cluster, _wrapper_multiproc_topk_candidates_block_positional, arguments
+                ):
+                    candidates = np.asarray(candidate_keys, dtype=np.uint64).ravel()
+                    key_buffer[retained + pending : retained + pending + len(candidates)] = candidates
+                    pending += len(candidates)
+                    pending_tiles += 1
+
+                    # Reduce several tile results in the same reusable array to avoid repeated scans of the sample
+                    if pending_tiles == merge_group_size:
+                        merged_size = retained + pending
+                        if merged_size > subsample_size:
+                            key_buffer[:merged_size].partition(subsample_size - 1)
+                        retained = min(subsample_size, merged_size)
+                        pending = 0
+                        pending_tiles = 0
+            except Exception as e:
+                raise RuntimeError(f"Error retrieving topk candidates from multiprocessing tasks: {e}")
+
+            # Reduce the final shorter group, then restore cell indexes in their deterministic key order
+            merged_size = retained + pending
+            if merged_size > subsample_size:
+                key_buffer[:merged_size].partition(subsample_size - 1)
+            retained = min(subsample_size, merged_size)
+            key_buffer.resize(retained, refcheck=False)
+            key_buffer.sort()
+            gid = _recover_splitmix64_indices(key_buffer, seed)
+
+            if return_linear_indices:
+                return gid
+
+            # Reuse the recovered index array for columns so only the two public result arrays remain
+            rows = np.empty_like(gid)
+            np.floor_divide(gid, np.int64(nx_full), out=rows)
+            np.remainder(gid, np.int64(nx_full), out=gid)
+            return rows, gid
+
+        # Merge bounded groups of completed tiles so memory depends on the sample size, not the number of tiles
+        keys: NDArrayNum = np.empty((0,), dtype=np.uint64)
+        payload = np.empty((0,), dtype=np.int64 if return_indices or return_linear_indices else rst.dtype)
+        pending_keys: list[NDArrayNum] = []
+        pending_payloads: list[NDArrayNum] = []
         try:
-            cand = config.cluster.gather(tasks)  # list of (keys, payload)
+            for _, (candidate_keys, candidate_payload) in _map_bounded(
+                config.cluster, _wrapper_multiproc_topk_candidates_block_positional, arguments
+            ):
+                pending_keys.append(np.asarray(candidate_keys, dtype=np.uint64).ravel())
+                pending_payloads.append(np.asarray(candidate_payload).ravel())
+                if len(pending_keys) == 8:
+                    keys, payload = _merge_topk_candidates(
+                        [keys, *pending_keys], [payload, *pending_payloads], k=subsample_size
+                    )
+                    pending_keys.clear()
+                    pending_payloads.clear()
         except Exception as e:
             raise RuntimeError(f"Error retrieving topk candidates from multiprocessing tasks: {e}")
 
-        keys_list = [np.asarray(k, dtype=np.uint64).ravel() for k, _ in cand]
-        payload_list = [np.asarray(p).ravel() for _, p in cand]
-
-        keys = np.concatenate(keys_list) if keys_list else np.empty((0,), dtype=np.uint64)
-        payload = np.concatenate(payload_list) if payload_list else np.empty((0,), dtype=np.int64)
+        if pending_keys:
+            keys, payload = _merge_topk_candidates(
+                [keys, *pending_keys], [payload, *pending_payloads], k=subsample_size
+            )
 
         if keys.size == 0:
+            if return_linear_indices:
+                return np.empty((0,), dtype=np.int64)
             if return_indices:
                 return np.empty((0,), dtype=np.int64), np.empty((0,), dtype=np.int64)
             return np.empty((0,), dtype=rst.dtype)
 
-        m = min(int(subsample_size), int(keys.size))
-        sel = np.argpartition(keys, m - 1)[:m]
-        sel = sel[np.argsort(keys[sel])]
+        payload_sel = payload
 
-        payload_sel = payload[sel]
-
-        if not return_indices:
+        if not (return_indices or return_linear_indices):
             return payload_sel
 
+        if return_linear_indices:
+            return payload_sel.astype(np.int64, copy=False)
+
         # payload is gid -> (row, col)
-        gid = payload_sel.astype(np.int64)
+        gid = payload_sel.astype(np.int64, copy=False)
         rows = gid // np.int64(nx_full)
-        cols = gid - rows * np.int64(nx_full)
-        return rows.astype(np.int64), cols.astype(np.int64)
+        cols = gid % np.int64(nx_full)
+        return rows, cols
 
     else:
         raise ValueError(f"Unknown ``strategy`` {strategy!r}. Choose 'sequential' or 'topk'.")
@@ -1037,23 +1356,25 @@ def _subsample(
     random_state: int | np.random.Generator | None = None,
     strategy: Literal["sequential", "topk"] = "sequential",
     mp_config: MultiprocConfig | None = None,
+    skip_nodata: bool = True,
     mask: RasterLike | VectorLike | ArrayLike | None = None,
+    return_linear_indices: bool = False,
 ) -> Any:
     """
-    Subsample an array at valid values, dispatching automatically to NumPy, Dask or Multiprocessing implementation.
-
-    _mask_at_support() places masks on the source grid before the NumPy and Dask samplers count eligible values.
-    _multiproc_subsample() instead places masks within each tile to keep unloaded inputs out of memory.
-    All paths keep eligibility separate from data values so masking preserves the sampled dtype and indices.
+    Subsample an array at either all or only at valid values, dispatching automatically to NumPy,
+    Dask or Multiprocessing implementation.
 
     :param source_raster: Raster or raster accessor providing band values and their optional Dask chunks.
-    :param subsample: Positive fraction of finite values at most one, or maximum number of values above one.
+    :param subsample: Subsample size, either as a fraction of values (0 to 1), or maximum number of values (above 1).
+        Use 1 to return all samples.
     :param band: Raster band to subsample, counting from one.
     :param return_indices: If True, return (rows, cols) indices instead of values.
     :param random_state: Seed or Generator.
     :param strategy: Either "sequential" (chunk/order dependent) or "topk" (chunk-invariant).
     :param mp_config: Tile sizes and worker cluster for multiprocessing. Cannot be combined with a Dask source.
+    :param skip_nodata: Whether to exclude nodata values, and False cells in a boolean raster.
     :param mask: Boolean array, aligned mask raster, or vector geometries restricting eligible cells.
+    :param return_linear_indices: Return the multiprocessing sample as one compact index array.
 
     :returns: One-dimensional sampled values, or a tuple of row and column index arrays. Dask generally returns
         lazy arrays after computing finite counts; an empty Dask sample returns NumPy arrays.
@@ -1086,12 +1407,14 @@ def _subsample(
         return_indices: bool
         random_state: int | np.random.Generator | None
         strategy: Literal["sequential", "topk"]
+        skip_nodata: bool
 
     subsample_kwargs: _SubsampleKwargs = {
         "subsample": subsample,
         "return_indices": return_indices,
         "random_state": random_state,
         "strategy": strategy,
+        "skip_nodata": skip_nodata,
     }
 
     # Validate masks before worker dispatch, keeping spatial masks available for reading one tile at a time
@@ -1119,8 +1442,16 @@ def _subsample(
             sampling_raster._bands = (source_raster.bands[band - 1],)
             sampling_band = 1
         return _multiproc_subsample(
-            sampling_raster, config=mp_config, band=sampling_band, mask=mask, **subsample_kwargs
+            sampling_raster,
+            config=mp_config,
+            band=sampling_band,
+            mask=mask,
+            return_linear_indices=return_linear_indices,
+            **subsample_kwargs,
         )
+
+    if return_linear_indices:
+        raise ValueError("Linear index output is only available for internal multiprocessing calls.")
 
     # Read one band without converting masked integer values to floating point
     data = _as_array(source_raster.data)

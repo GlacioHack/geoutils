@@ -20,10 +20,10 @@
 
 from __future__ import annotations
 
-import operator
 import pathlib
 import tempfile
-from typing import TYPE_CHECKING, Any, Iterable, Literal
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Iterable, Literal, cast
 
 import affine
 import geopandas as gpd
@@ -34,9 +34,8 @@ from rasterio.crs import CRS
 
 from geoutils._dispatch import get_geo_attr, has_geo_attr, is_dask_array
 from geoutils._misc import import_optional
-from geoutils._typing import NDArrayNum
-from geoutils.raster.array import get_mask_from_array
-from geoutils.raster.referencing import _default_nodata, _xy2ij
+from geoutils._typing import DTypeLike, NDArrayNum
+from geoutils.raster.referencing import _default_nodata, _ij2xy, _xy2ij
 
 if TYPE_CHECKING:
     from geoutils.multiproc import MultiprocConfig
@@ -77,16 +76,21 @@ def _regular_pointcloud_to_raster(
         # Input checks
         if (
             not isinstance(grid_coords, tuple)
+            or len(grid_coords) != 2
             or not (isinstance(grid_coords[0], np.ndarray) and grid_coords[0].ndim == 1)
             or not (isinstance(grid_coords[1], np.ndarray) and grid_coords[1].ndim == 1)
         ):
             raise TypeError("Input grid coordinates must be 1D arrays.")
+        if len(grid_coords[0]) < 2 or len(grid_coords[1]) < 2:
+            raise ValueError("Grid coordinates must contain at least two values along X and Y.")
 
         diff_x = np.diff(grid_coords[0])
         diff_y = np.diff(grid_coords[1])
 
-        if not all(diff_x == diff_x[0]) and all(diff_y == diff_y[0]):
+        if not np.allclose(diff_x, diff_x[0]) or not np.allclose(diff_y, diff_y[0]):
             raise ValueError("Grid coordinates must be regular (equally spaced, independently along X and Y).")
+        if diff_x[0] <= 0 or diff_y[0] <= 0:
+            raise ValueError("Grid coordinates must increase along X and Y.")
 
         # Build transform from min X, max Y and step in both
         out_transform = rio.transform.from_origin(np.min(grid_coords[0]), np.max(grid_coords[1]), diff_x[0], diff_y[0])
@@ -116,8 +120,12 @@ def _regular_pointcloud_to_raster(
     )
 
     # If coordinates are not integer type (forced in xy2ij), then some points are not falling on exact coordinates
-    if not np.issubdtype(i.dtype, np.integer) or not np.issubdtype(i.dtype, np.integer):
+    if not np.issubdtype(i.dtype, np.integer) or not np.issubdtype(j.dtype, np.integer):
         raise ValueError("Some point cloud coordinates differ from the grid coordinates.")
+
+    # Reject positions outside the requested grid before NumPy can wrap negative indexes around an array edge
+    if np.any(i < 0) or np.any(i >= out_shape[0]) or np.any(j < 0) or np.any(j >= out_shape[1]):
+        raise ValueError("Some point cloud coordinates fall outside the grid.")
 
     # Set values
     mask = np.ones(np.shape(arr), dtype=bool)
@@ -130,85 +138,1048 @@ def _regular_pointcloud_to_raster(
     return raster_arr, out_transform, gdf_pc.crs, out_nodata, area_or_point
 
 
-#########################
-# 2/ RASTER TO POINT CLOUD
-#########################
+###################################
+# 2/ RASTER TO REGULAR POINT CLOUD
+###################################
 
 
-def _raster_to_pointcloud_partition(
+########################
+# 2A/ SHARED HELPERS
+########################
+
+
+def _sample_raster_cell_indices(
     source_raster: RasterType,
-    flat_indices: slice | NDArray[np.int64],
+    data_band: int,
+    subsample: float | int,
+    skip_nodata: bool,
+    random_state: int | np.random.Generator | None,
+    mp_config: MultiprocConfig | None,
+) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
+    """
+    Get row and column indexes of the requested subsample.
+
+    See description of _raster_to_pointcloud_from_indices() for details on the overall logic.
+    """
+
+    # We use subsample() only with "topk" to keep full-grid order, nodata handling, and partial sampling consistent
+    indices = source_raster.subsample(
+        subsample=subsample,
+        band=data_band,
+        return_indices=True,
+        random_state=random_state,
+        strategy="topk",
+        mp_config=mp_config,
+        skip_nodata=skip_nodata,
+    )
+    if any(is_dask_array(index) for index in indices):
+        indices = import_optional("dask").compute(*indices)
+    rows, columns = indices
+    return np.asarray(rows, dtype=np.int64), np.asarray(columns, dtype=np.int64)
+
+
+def _extract_raster_cell_values(
+    source_raster: RasterType,
+    bands: list[int],
+    rows: NDArray[np.int64],
+    columns: NDArray[np.int64],
+    mp_config: MultiprocConfig | None,
+) -> Any:
+    """
+    Read every band at the raster row/columns of the subsample.
+
+    See description of _raster_to_pointcloud_from_indices() for details on the overall logic.
+    """
+
+    # Choose how to read the requested subsample from a lazy array, memory, or the raster file
+    data = source_raster.data if source_raster.is_loaded or source_raster._is_xr else None
+
+    # Dask
+    if data is not None and is_dask_array(data):
+        import dask.array as da
+
+        # Select each requested band lazily at the row/column of the subsample
+        dask_data: Any = data
+        band_values = [
+            dask_data.vindex[rows, columns] if dask_data.ndim == 2 else dask_data[band - 1].vindex[rows, columns]
+            for band in bands
+        ]
+
+        # Join the selected bands while keeping their values lazy
+        pixel_data = da.stack(band_values, axis=0)
+
+    # Eager
+    elif data is not None:
+        # Select each requested band directly from the raster array in memory
+        band_values = [data[rows, columns] if data.ndim == 2 else data[band - 1, rows, columns] for band in bands]
+
+        # Respect nodata masks when a band has one
+        pixel_data = (
+            np.ma.stack(band_values, axis=0)
+            if any(np.ma.isMaskedArray(values) for values in band_values)
+            else np.stack(band_values, axis=0)
+        )
+
+    # Multiproc
+    else:
+        from geoutils.multiproc import MultiprocConfig
+        from geoutils.multiproc.cluster import _map_bounded
+        from geoutils.multiproc.readers import _read_selected_raster_bands
+
+        # Prepare small raster tiles for reading the requested cells from the file
+        read_config = mp_config if mp_config is not None else MultiprocConfig(chunks=512)
+
+        # Convert row/column to a flat index so that every band reads the same raster cells
+        flat_indices = rows * source_raster.shape[1] + columns
+        chunk_rows, chunk_columns = (
+            (read_config.chunks, read_config.chunks) if isinstance(read_config.chunks, int) else read_config.chunks
+        )
+        tile_columns = (source_raster.shape[1] + chunk_columns - 1) // chunk_columns
+        tile_ids = (rows // chunk_rows) * tile_columns + columns // chunk_columns
+
+        # Group the sample positions once so each selected tile reads every requested band in one worker call
+        order = np.argsort(tile_ids, kind="stable")
+        boundaries = np.flatnonzero(np.diff(tile_ids[order])) + 1
+        positions_by_tile = np.split(order, boundaries) if len(order) > 0 else []
+        arguments = (
+            (source_raster, flat_indices[positions], bands, read_config.chunks) for positions in positions_by_tile
+        )
+        dtype = np.dtype(bool if source_raster.is_mask else source_raster.dtype)
+        pixel_data = np.ma.masked_all((len(bands), len(flat_indices)), dtype=dtype)
+        for positions, (_, values) in zip(
+            positions_by_tile,
+            _map_bounded(read_config.cluster, _read_selected_raster_bands, arguments),
+        ):
+            pixel_data.data[:, positions] = np.ma.getdata(values)
+            pixel_data.mask[:, positions] = np.ma.getmaskarray(values)
+
+    return pixel_data
+
+
+def _raster_to_pointcloud_from_indices(
+    source_raster: RasterType,
+    bands: list[int],
+    column_names: list[str],
+    data_column_name: str,
+    subsample: float | int,
+    skip_nodata: bool,
+    random_state: int | np.random.Generator | None,
+    force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"],
+    as_array: bool,
+    read_config: MultiprocConfig | None,
+) -> Any:
+    """
+    Build the complete point cloud or X/Y/data array for the subsample.
+
+    All subsample indices and values will at some point concatenate in memory at once.
+
+    Thus, this function is used by:
+    - Eager,
+    - Dask only for sample sizes smaller than raster chunk size, otherwise it requires different logic explained in
+        chunked helpers below),
+    - Multiproc for small sample sizes too, but also when as_array=True, because Multiproc cannot stream chunk-by-chunk
+        to an array like Dask (only to a point cloud file).
+    """
+
+    # 1/ Select indices through subsample()
+    rows, columns = _sample_raster_cell_indices(
+        source_raster=source_raster,
+        data_band=bands[0],  # We can use the same indices for all bands
+        subsample=subsample,
+        skip_nodata=skip_nodata,
+        random_state=random_state,
+        mp_config=read_config,
+    )
+
+    # 2/ Read every output band at the positions selected from the main band
+    pixel_data = _extract_raster_cell_values(
+        source_raster=source_raster,
+        bands=bands,
+        rows=rows,
+        columns=columns,
+        mp_config=read_config,
+    )
+
+    # 3/ Normalize nodata values after cell selection
+    if is_dask_array(pixel_data) and skip_nodata:
+        import dask.array as da
+
+        pixel_data = da.ma.getdata(pixel_data)
+    elif np.ma.isMaskedArray(pixel_data):
+        pixel_data = pixel_data.data
+
+    # Convert retained nodata values to NaN in a floating output array
+    if not skip_nodata:
+        pixel_data = pixel_data.astype(np.result_type(pixel_data.dtype, np.float32))
+        if is_dask_array(pixel_data):
+            import dask.array as da
+
+            pixel_data = da.ma.filled(pixel_data, np.nan)
+            if source_raster.nodata is not None:
+                pixel_data = da.where(pixel_data == source_raster.nodata, np.nan, pixel_data)
+        elif source_raster.nodata is not None:
+            pixel_data[pixel_data == source_raster.nodata] = np.nan
+
+    # 4/ Calculate coordinates from affine transform and pixel offset
+    x_coords, y_coords = _ij2xy(
+        i=rows,
+        j=columns,
+        transform=source_raster.transform,
+        area_or_point=source_raster.area_or_point,
+        shift_area_or_point=False,
+        force_offset=force_pixel_offset,
+    )
+
+    # 5/ Build output, lazy for Dask, otherwise eager
+    if is_dask_array(pixel_data):
+        import dask.array as da
+
+        if not is_dask_array(x_coords):
+            x_coords = da.from_array(np.asarray(x_coords), chunks=pixel_data.chunks[1])
+            y_coords = da.from_array(np.asarray(y_coords), chunks=pixel_data.chunks[1])
+        if as_array:
+            return da.stack((x_coords, y_coords, *[pixel_data[index] for index in range(len(bands))]), axis=1)
+
+        from geoutils.pointcloud.dataframe import (
+            _build_pointcloud_output,
+            _import_dask_dataframe,
+        )
+        from geoutils.vector.pd_accessor import _import_dask_geopandas
+
+        # Build matching Dask series so dataframe values keep their raster dtype and continuous point index
+        point_chunks = pixel_data.chunks[1]
+        x_coords = x_coords.rechunk(point_chunks)
+        y_coords = y_coords.rechunk(point_chunks)
+        dask_dataframe = _import_dask_dataframe()
+        dask_geopandas = _import_dask_geopandas()
+        dataframe = dask_dataframe.from_dask_array(pixel_data.T, columns=column_names)
+        coordinate_frame = dask_dataframe.concat(
+            [
+                dask_dataframe.from_dask_array(x_coords, columns="x"),
+                dask_dataframe.from_dask_array(y_coords, columns="y"),
+            ],
+            axis=1,
+        )
+        geometry = dask_geopandas.points_from_xy(coordinate_frame, x="x", y="y", crs=source_raster.crs)
+        dataframe = dataframe.assign(geometry=geometry)
+        dataframe = dask_geopandas.from_dask_dataframe(dataframe, geometry="geometry")
+
+        # Finalize point metadata; the shared builder also adds ``.pc`` and ``.vct`` to this Dask frame
+        return _build_pointcloud_output(dataframe, data_column=data_column_name, as_dataframe=True)
+
+    # Build an eager array or PointCloud result
+    if as_array:
+        return np.vstack((np.asarray(x_coords), np.asarray(y_coords), pixel_data)).T
+
+    from geoutils.pointcloud import PointCloud
+
+    dataframe = gpd.GeoDataFrame(
+        pixel_data.T,
+        columns=column_names,
+        geometry=gpd.points_from_xy(np.asarray(x_coords), np.asarray(y_coords)),
+        crs=source_raster.crs,
+    )
+    return PointCloud(dataframe, data_column=data_column_name)
+
+
+#################################
+# 2B/ CHUNKED-ONLY HELPERS
+#################################
+
+
+def _subsample_exceeds_largest_chunk(subsample: float | int, raster_shape: tuple[int, int], largest_chunk: int) -> bool:
+    """
+    Check whether the requested subsample contains more points than the largest raster chunk.
+
+    If the subsample size exceed the size of a raster chunk, it cannot concatenate all keys in memory to find the
+    subsampled point indices directly, and instead uses the algorithm described in _iterative_topk_cutoff().
+    """
+
+    return (0 < subsample <= 1 and subsample * int(np.prod(raster_shape)) > largest_chunk) or subsample > largest_chunk
+
+
+def _raster_values_to_point_partition(
+    band_values: Any,
+    selected_indices: NDArray[np.int64],
+    raster_shape: tuple[int, int],
+    transform: affine.Affine,
+    area_or_point: Literal["Area", "Point"] | None,
+    crs: CRS | None,
+    nodata: int | float | None,
+    column_names: list[str],
+    skip_nodata: bool,
+    force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"],
+    topk_selection: tuple[int, np.uint64] | None,
+    as_array: bool,
+) -> NDArrayNum | gpd.GeoDataFrame:
+    """
+    Convert the values and global indexes of cells selected in one chunk into point rows.
+
+    Used only when the requested subsample is larger than one chunk.
+
+    The objective is eventually to write each raster chunk subsamples out-of-memory into a point partition of the point
+    file output.
+    """
+
+    band_values = band_values.reshape((len(column_names), -1))
+
+    # Keep cells with random key at or below the cutoff
+    from geoutils.sampling.subsampling import _splitmix64, _valid_subsample_mask
+
+    if topk_selection is not None:
+        seed, cutoff = topk_selection
+        if skip_nodata:
+            eligible = _valid_subsample_mask(band_values[0], skip_nodata=True).reshape(-1)
+            selected_indices = selected_indices[eligible]
+            band_values = band_values[:, eligible]
+        keys = _splitmix64(np.uint64(seed) ^ selected_indices.astype(np.uint64))
+        selected = keys <= cutoff
+        selected_indices = selected_indices[selected]
+        band_values = band_values[:, selected]
+
+    # Remove cells with nodata in the main band, or replace nodata values with NaN
+    elif skip_nodata:
+        keep = _valid_subsample_mask(band_values[0], skip_nodata=True).reshape(-1)
+        selected_indices = selected_indices[keep]
+        band_values = band_values[:, keep]
+
+    if skip_nodata:
+        band_values = np.ma.getdata(band_values)
+    else:
+        band_values = np.ma.filled(band_values.astype(np.result_type(band_values.dtype, np.float32)), np.nan)
+        if nodata is not None:
+            band_values[band_values == nodata] = np.nan
+
+    # Derive point coordinates from the geotransform and pixel interpretation
+    rows, columns = np.unravel_index(selected_indices, raster_shape)
+    x_coords, y_coords = _ij2xy(
+        i=rows,
+        j=columns,
+        transform=transform,
+        area_or_point=area_or_point,
+        shift_area_or_point=False,
+        force_offset=force_pixel_offset,
+    )
+
+    # Return array rows for Dask or a point dataframe for Dask/multiprocessing
+    if as_array:
+        return np.column_stack((x_coords, y_coords, *band_values))
+    return gpd.GeoDataFrame(
+        {name: band_values[index] for index, name in enumerate(column_names)},
+        geometry=gpd.points_from_xy(x_coords, y_coords),
+        crs=crs,
+    )
+
+
+def _raster_chunk_topk_keys(
+    array: Any | None,
+    tile_idx: NDArrayNum,
+    raster_width: int,
+    seed: int,
+    skip_nodata: bool,
+) -> NDArray[np.uint64]:
+    """
+    Calculate a deterministic random key for every valid cell in a raster chunk, re-using the same logic as in the
+    subsampling module "topk" method.
+
+    Used only when the requested subsample is larger than one chunk.
+    """
+
+    # Build local positions for every cell or only those allowed by the main raster band
+    row_start, row_stop, column_start, column_stop = (int(value) for value in tile_idx)
+    tile_width = column_stop - column_start
+    if skip_nodata:
+        if array is None:
+            raise RuntimeError("Raster values are required when missing cells are excluded.")
+        from geoutils.sampling.subsampling import _valid_subsample_mask
+
+        valid = _valid_subsample_mask(array, skip_nodata=True)
+        flat_positions = np.flatnonzero(valid.ravel())
+    else:
+        flat_positions = np.arange((row_stop - row_start) * tile_width, dtype=np.int64)
+
+    # Convert local positions to full-raster indexes before calculating their repeatable random keys
+    local_rows, local_columns = np.divmod(flat_positions, tile_width)
+    global_indices = (local_rows + row_start) * np.int64(raster_width) + local_columns + column_start
+    from geoutils.sampling.subsampling import _splitmix64
+
+    return np.asarray(_splitmix64(np.uint64(seed) ^ global_indices.astype(np.uint64)), dtype=np.uint64)
+
+
+def _topk_key_histogram(keys: NDArray[np.uint64], prefix: int, prefix_bits: int, digit_bits: int) -> NDArray[np.int64]:
+    """
+    Count keys in the next set of ranges for one chunk of a large requested subsample.
+
+    See description of _iterative_topk_cutoff() for details on the implementation logic.
+    """
+
+    # Keep only keys in the range chosen by earlier passes
+    if prefix_bits:
+        prefix_matches = keys >> np.uint64(64 - prefix_bits) == np.uint64(prefix)
+        keys = keys[prefix_matches]
+
+    # Split the remaining keys into smaller ranges and count each range
+    shift = 64 - prefix_bits - digit_bits
+    digit_mask = np.uint64((1 << digit_bits) - 1)
+    digits = ((keys >> np.uint64(shift)) & digit_mask).astype(np.intp)
+    return np.bincount(digits, minlength=1 << digit_bits).astype(np.int64, copy=False)
+
+
+def _topk_prefix_keys(keys: NDArray[np.uint64], prefix: int, prefix_bits: int) -> NDArray[np.uint64]:
+    """
+    Return keys from one chunk in the range chosen for the requested subsample.
+
+    See description of _iterative_topk_cutoff() for details on the implementation logic.
+    """
+
+    prefix_matches = keys >> np.uint64(64 - prefix_bits) == np.uint64(prefix)
+    return keys[prefix_matches]
+
+
+def _iterative_topk_cutoff(
+    subsample: float | int,
+    random_state: int | np.random.Generator | None,
+    largest_chunk: int,
+    number_chunks: int,
+    histogram_for_prefix: Callable[[int, int, int, int], NDArray[np.int64]],
+    keys_for_prefix: Callable[[int, int, int, int], NDArray[np.uint64]],
+) -> tuple[int, int, np.uint64 | None]:
+    """
+    Find the cutoff separating cells in/out of the subsample without loading all indexes in memory.
+
+    Dask and multiprocessing use this method only when the sample size exceeds the largest raster chunk.
+
+    This function finds the "k" value that separates the "topk" samples kept for the subsample,
+    but in a chunk-by-chunk manner for cases where the subsample itself is very large (e.g. 80% of the raster).
+    This requires several iterations to converge towards the right value.
+
+    The cutoff algorithm follows these steps:
+    1. Start with the full unsigned 64-bit key interval (0 through 2**64 - 1), split it into subranges, and count,
+       across all chunks, how many keys fall in each subrange.
+    2. Use the cumulative counts and requested sample size to identify the subrange containing the cutoff, and discard
+       the other subranges.
+    3. Repeat the count within that range until it contains no more keys than the largest raster chunk.
+    4. Collect the remaining keys and select the exact cutoff value.
+
+    References
+    ----------
+    - NIST Dictionary of Algorithms and Data Structures, "Selection problem"
+      https://xlinux.nist.gov/dads/HTML/selectkth.html
+    - Alabi et al., "Fast k-selection algorithms for graphics processing units", Journal of Experimental
+      Algorithmics 17, 2012. https://doi.org/10.1145/2133803.2345676
+    """
+
+    from geoutils.sampling.subsampling import _get_subsample_size_from_user_input
+
+    # Convert the random state once so every pass calculates the same key for each raster cell
+    if isinstance(random_state, np.random.Generator):
+        seed = int(random_state.integers(0, np.iinfo(np.uint32).max, dtype=np.uint32))
+    elif random_state is None:
+        seed = 0
+    else:
+        seed = int(random_state)
+
+    # Keep count arrays small while using more ranges when the raster contains many chunks
+    digit_bits = min(12, max(8, (number_chunks - 1).bit_length()))
+    prefix = 0
+    prefix_bits = 0
+    rank = -1
+    sample_size = 0
+    while prefix_bits < 64:
+        current_digit_bits = min(digit_bits, 64 - prefix_bits)
+        histogram = histogram_for_prefix(seed, prefix, prefix_bits, current_digit_bits)
+
+        # Use the first set of counts to calculate the requested number of points
+        if prefix_bits == 0:
+            sample_size = _get_subsample_size_from_user_input(subsample, int(histogram.sum()))
+            if sample_size == 0:
+                return 0, seed, None
+            rank = sample_size - 1
+
+        # Find the key range containing the last selected point (subsample size)
+        cumulative_counts = np.cumsum(histogram)
+        digit = int(np.searchsorted(cumulative_counts, rank, side="right"))
+        preceding_count = 0 if digit == 0 else int(cumulative_counts[digit - 1])
+        rank -= preceding_count
+        prefix = (prefix << current_digit_bits) | digit
+        prefix_bits += current_digit_bits
+        group_size = int(histogram[digit])
+
+        # Find the exact cutoff from no more than one chunk of keys
+        if group_size <= largest_chunk:
+            if prefix_bits == 64:
+                return sample_size, seed, np.uint64(prefix)
+            group_keys = keys_for_prefix(seed, prefix, prefix_bits, group_size)
+            if len(group_keys) != group_size:
+                raise RuntimeError("The number of random keys changed while finding the subsample cutoff.")
+            group_keys.partition(rank)
+            return sample_size, seed, group_keys[rank]
+
+    raise RuntimeError("Could not find the subsample cutoff.")
+
+
+#########################################
+# 2C/ EAGER RASTER TO POINT CLOUD
+#########################################
+
+
+def _eager_raster_to_pointcloud(
+    source_raster: RasterType,
+    bands: list[int],
+    column_names: list[str],
+    data_column_name: str,
+    subsample: float | int,
+    skip_nodata: bool,
+    random_state: int | np.random.Generator | None,
+    force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"],
+    as_array: bool,
+) -> Any:
+    """
+    Build an eager point output, reading an unloaded partial raster in bounded tiles.
+
+    If the entire raster should be converted (subsample == 1), it is loaded.
+    For a smaller requested subsample, values are read in small parts without loading the source raster.
+     (mirroring Xarray.isel() default behaviour)
+    """
+
+    read_config = None
+    if not source_raster.is_loaded and not source_raster._is_xr:
+        if subsample == 1:
+            source_raster.load()
+        else:
+            from geoutils.multiproc import MultiprocConfig
+
+            read_config = MultiprocConfig(chunks=512)
+
+    return _raster_to_pointcloud_from_indices(
+        source_raster,
+        bands,
+        column_names,
+        data_column_name,
+        subsample,
+        skip_nodata,
+        random_state,
+        force_pixel_offset,
+        as_array,
+        read_config,
+    )
+
+
+########################################
+# 2D/ DASK RASTER TO POINT CLOUD
+########################################
+
+
+def _wrapper_raster_topk_histogram_dask(
+    array: Any | None,
+    tile_idx: NDArrayNum,
+    raster_width: int,
+    seed: int,
+    prefix: int,
+    prefix_bits: int,
+    digit_bits: int,
+    skip_nodata: bool,
+) -> NDArray[np.int64]:
+    """Count random keys in one Dask chunk during one pass over the requested subsample."""
+
+    keys = _raster_chunk_topk_keys(array, tile_idx, raster_width, seed, skip_nodata)
+    return _topk_key_histogram(keys, prefix, prefix_bits, digit_bits)
+
+
+def _wrapper_raster_topk_prefix_keys_dask(
+    array: Any | None,
+    tile_idx: NDArrayNum,
+    raster_width: int,
+    seed: int,
+    prefix: int,
+    prefix_bits: int,
+    skip_nodata: bool,
+) -> NDArray[np.uint64]:
+    """Return keys in the range chosen for the requested subsample from one Dask chunk."""
+
+    keys = _raster_chunk_topk_keys(array, tile_idx, raster_width, seed, skip_nodata)
+    return _topk_prefix_keys(keys, prefix, prefix_bits)
+
+
+def _sum_topk_histograms(histograms: list[NDArray[np.int64]]) -> NDArray[np.int64]:
+    """Add key counts for the requested subsample from a group of up to eight Dask chunks."""
+
+    return np.sum(histograms, axis=0, dtype=np.int64)
+
+
+def _dask_raster_topk_cutoff(
+    main_blocks: list[Any],
+    tiles: NDArrayNum,
+    raster_shape: tuple[int, int],
+    largest_chunk: int,
+    subsample: float | int,
+    skip_nodata: bool,
+    random_state: int | np.random.Generator | None,
+) -> tuple[int, int, np.uint64 | None]:
+    """
+    Find the key cutoff for the subsample, with Dask delayed operations.
+
+    Only used for a subsample size larger than a raster chunk.
+    """
+
+    dask = import_optional("dask")
+    delayed = dask.delayed
+
+    def histogram_for_prefix(seed: int, prefix: int, prefix_bits: int, digit_bits: int) -> NDArray[np.int64]:
+        """Count keys for the requested subsample in every Dask chunk and add the results."""
+
+        histograms = [
+            delayed(_wrapper_raster_topk_histogram_dask)(
+                block if skip_nodata else None,
+                tile,
+                raster_shape[1],
+                seed,
+                prefix,
+                prefix_bits,
+                digit_bits,
+                skip_nodata,
+            )
+            for block, tile in zip(main_blocks, tiles)
+        ]
+        while len(histograms) > 1:
+            histograms = [
+                delayed(_sum_topk_histograms)(histograms[start : start + 8]) for start in range(0, len(histograms), 8)
+            ]
+        return cast(NDArray[np.int64], dask.compute(histograms[0])[0])
+
+    def keys_for_prefix(seed: int, prefix: int, prefix_bits: int, group_size: int) -> NDArray[np.uint64]:
+        """Collect keys in the last range chosen for the requested subsample from every Dask chunk."""
+
+        key_parts = [
+            delayed(_wrapper_raster_topk_prefix_keys_dask)(
+                block if skip_nodata else None,
+                tile,
+                raster_shape[1],
+                seed,
+                prefix,
+                prefix_bits,
+                skip_nodata,
+            )
+            for block, tile in zip(main_blocks, tiles)
+        ]
+        group_keys = np.empty(group_size, dtype=np.uint64)
+        offset = 0
+        for chunk_keys in dask.compute(*key_parts):
+            stop = offset + len(chunk_keys)
+            group_keys[offset:stop] = chunk_keys
+            offset = stop
+        return group_keys[:offset]
+
+    return _iterative_topk_cutoff(
+        subsample,
+        random_state,
+        largest_chunk,
+        len(tiles),
+        histogram_for_prefix,
+        keys_for_prefix,
+    )
+
+
+def _wrapper_raster_to_pointcloud_partition_dask(
+    band_values: Any,
+    tile_idx: NDArrayNum,
+    raster_shape: tuple[int, int],
+    transform: affine.Affine,
+    area_or_point: Literal["Area", "Point"] | None,
+    crs: CRS | None,
+    nodata: int | float | None,
+    column_names: list[str],
+    skip_nodata: bool,
+    force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"],
+    topk_selection: tuple[int, np.uint64] | None,
+    as_array: bool,
+) -> NDArrayNum | gpd.GeoDataFrame:
+    """
+    Convert one Dask raster chunk into one lazy part of the point result.
+
+    Only used for a subsample size larger than a raster chunk.
+    """
+
+    # Build the global cell indexes covered by this raster chunk
+    row_slice = slice(int(tile_idx[0]), int(tile_idx[1]))
+    column_slice = slice(int(tile_idx[2]), int(tile_idx[3]))
+    rows = np.arange(row_slice.start, row_slice.stop, dtype=np.int64)[:, None]
+    columns = np.arange(column_slice.start, column_slice.stop, dtype=np.int64)[None, :]
+    selected_indices = (rows * raster_shape[1] + columns).ravel()
+
+    return _raster_values_to_point_partition(
+        band_values,
+        selected_indices,
+        raster_shape,
+        transform,
+        area_or_point,
+        crs,
+        nodata,
+        column_names,
+        skip_nodata,
+        force_pixel_offset,
+        topk_selection,
+        as_array,
+    )
+
+
+def _build_dask_pointcloud_partitions(
+    parts: list[Any],
+    column_names: list[str],
+    column_dtype: DTypeLike,
+    crs: CRS | None,
+    data_column_name: str,
+) -> Any:
+    """
+    Build one lazy point dataframe from the point rows produced for each Dask chunk.
+
+    Only used for a subsample size larger than a raster chunk.
+    """
+
+    from geoutils.pointcloud.dataframe import (
+        _build_pointcloud_output,
+        _import_dask_dataframe,
+    )
+    from geoutils.vector.pd_accessor import _import_dask_geopandas
+
+    empty_frame = gpd.GeoDataFrame(
+        {name: np.empty(0, dtype=column_dtype) for name in column_names},
+        geometry=gpd.GeoSeries([], crs=crs),
+        crs=crs,
+    )
+    dask_dataframe = _import_dask_dataframe()
+    dataframe = (
+        dask_dataframe.from_delayed(parts, meta=empty_frame)
+        if parts
+        else dask_dataframe.from_pandas(empty_frame, npartitions=1)
+    )
+    dataframe = _import_dask_geopandas().from_dask_dataframe(dataframe, geometry="geometry")
+    return _build_pointcloud_output(dataframe, data_column=data_column_name, as_dataframe=True)
+
+
+def _dask_raster_to_pointcloud(
+    source_raster: RasterType,
+    bands: list[int],
+    column_names: list[str],
+    data_column_name: str,
+    subsample: float | int,
+    skip_nodata: bool,
+    random_state: int | np.random.Generator | None,
+    force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"],
+    as_array: bool,
+) -> Any:
+    """
+    Build a lazy Dask point output from raster chunks.
+
+    If subsample size is smaller than a raster chunk, we use subsample() directly through
+    _raster_to_pointcloud_from_indices().
+
+    If subsample size is larger than a raster chunk, we use _dask_raster_topk_cutoff() to find the subsample
+    indices without loading more than a single raster chunk, then build the output with
+    _build_dask_pointcloud_partitions().
+    """
+
+    dask = import_optional("dask")
+    import dask.array as da
+
+    data: Any = source_raster.data
+    main_data = data if data.ndim == 2 else data[bands[0] - 1]
+    row_chunks, column_chunks = main_data.chunks
+    row_starts = np.cumsum((0, *row_chunks))
+    column_starts = np.cumsum((0, *column_chunks))
+    tiles = np.array(
+        [
+            (row_starts[row], row_starts[row + 1], column_starts[column], column_starts[column + 1])
+            for row in range(len(row_chunks))
+            for column in range(len(column_chunks))
+        ],
+        dtype=np.int64,
+    )
+    largest_chunk = max(int(rows * columns) for rows in row_chunks for columns in column_chunks)
+
+    # Collect all indexes in memory when the subsample has no more points than the largest raster chunk
+    if subsample != 1 and not _subsample_exceeds_largest_chunk(subsample, source_raster.shape, largest_chunk):
+        return _raster_to_pointcloud_from_indices(
+            source_raster,
+            bands,
+            column_names,
+            data_column_name,
+            subsample,
+            skip_nodata,
+            random_state,
+            force_pixel_offset,
+            as_array,
+            read_config=None,
+        )
+
+    # Otherwise, find the key cutoff for the subsample, and write partition by partition to a point cloud file
+    topk_selection = None
+    if subsample != 1:
+        main_blocks = main_data.to_delayed().ravel().tolist()
+        sample_size, seed, cutoff = _dask_raster_topk_cutoff(
+            main_blocks,
+            tiles,
+            source_raster.shape,
+            largest_chunk,
+            subsample,
+            skip_nodata,
+            random_state,
+        )
+        if sample_size == 0:
+            empty = np.empty((0, 2 + len(bands)), dtype=np.result_type(np.float64, source_raster.dtype))
+            if as_array:
+                return da.from_array(empty, chunks=empty.shape)
+            return _build_dask_pointcloud_partitions(
+                [],
+                column_names,
+                source_raster.dtype,
+                source_raster.crs,
+                data_column_name,
+            )
+        assert cutoff is not None
+        topk_selection = (seed, cutoff)
+
+    # Select input bands in one block per raster chunk
+    band_data = data[None, ...] if data.ndim == 2 else data[[band - 1 for band in bands]]
+    band_data = band_data.rechunk({0: len(bands)})
+    band_blocks = band_data.to_delayed()[0].ravel().tolist()
+    parts = [
+        dask.delayed(_wrapper_raster_to_pointcloud_partition_dask)(
+            block,
+            tile,
+            source_raster.shape,
+            source_raster.transform,
+            source_raster.area_or_point,
+            source_raster.crs,
+            source_raster.nodata,
+            column_names,
+            skip_nodata,
+            force_pixel_offset,
+            topk_selection,
+            as_array,
+        )
+        for block, tile in zip(band_blocks, tiles)
+    ]
+
+    # Assemble rows lazily
+    if as_array:
+        dtype = np.result_type(np.float64, source_raster.dtype)
+        arrays = [da.from_delayed(part, shape=(np.nan, 2 + len(bands)), dtype=dtype) for part in parts]
+        return da.concatenate(arrays, axis=0)
+
+    column_dtype = np.result_type(source_raster.dtype, np.float32) if not skip_nodata else source_raster.dtype
+    return _build_dask_pointcloud_partitions(
+        parts,
+        column_names,
+        column_dtype,
+        source_raster.crs,
+        data_column_name,
+    )
+
+
+###################################################
+# 2E/ MULTIPROCESSING RASTER TO POINT CLOUD
+###################################################
+
+
+def _raster_tile_topk_keys(
+    source_raster: RasterType,
+    tile_idx: NDArrayNum,
+    seed: int,
+    band: int,
+    skip_nodata: bool,
+) -> NDArray[np.uint64]:
+    """Calculate random keys for usable cells in one multiprocessing tile of a large requested subsample."""
+
+    # Read the main band only when its values determine which cells may be selected
+    array = None
+    if skip_nodata:
+        from geoutils.sampling.subsampling import _read_subsample_raster_block
+
+        array, _ = _read_subsample_raster_block(source_raster, tile_idx, band=band, skip_nodata=True)
+
+    return _raster_chunk_topk_keys(array, tile_idx, source_raster.shape[1], seed, skip_nodata)
+
+
+def _wrapper_raster_topk_histogram_mp(
+    source_raster: RasterType,
+    tile_idx: NDArrayNum,
+    seed: int,
+    prefix: int,
+    prefix_bits: int,
+    digit_bits: int,
+    band: int,
+    skip_nodata: bool,
+) -> NDArray[np.int64]:
+    """Count random keys in one tile during one pass over the requested subsample."""
+
+    # Calculate keys only for cells that may appear in the output
+    keys = _raster_tile_topk_keys(source_raster, tile_idx, seed, band, skip_nodata)
+    return _topk_key_histogram(keys, prefix, prefix_bits, digit_bits)
+
+
+def _wrapper_raster_topk_prefix_keys_mp(
+    source_raster: RasterType,
+    tile_idx: NDArrayNum,
+    seed: int,
+    prefix: int,
+    prefix_bits: int,
+    band: int,
+    skip_nodata: bool,
+) -> NDArray[np.uint64]:
+    """Return keys in the range chosen for the requested subsample from one multiprocessing tile."""
+
+    # Calculate keys only for cells that may appear in the output
+    keys = _raster_tile_topk_keys(source_raster, tile_idx, seed, band, skip_nodata)
+    return _topk_prefix_keys(keys, prefix, prefix_bits)
+
+
+def _multiproc_raster_topk_cutoff(
+    source_raster: RasterType,
+    tiles: NDArrayNum,
+    largest_chunk: int,
+    subsample: float | int,
+    band: int,
+    skip_nodata: bool,
+    random_state: int | np.random.Generator | None,
+    mp_config: MultiprocConfig,
+) -> tuple[int, int, np.uint64 | None]:
+    """
+    Find the key cutoff for the subsample, with Multiproc per-chunk operations.
+
+    Only used for a subsample size larger than a raster chunk.
+    """
+
+    from geoutils.multiproc.cluster import _map_bounded
+
+    def histogram_for_prefix(seed: int, prefix: int, prefix_bits: int, digit_bits: int) -> NDArray[np.int64]:
+        """Count keys for the requested subsample in every multiprocessing tile and add the results."""
+
+        arguments = (
+            (
+                source_raster,
+                tile,
+                seed,
+                prefix,
+                prefix_bits,
+                digit_bits,
+                band,
+                skip_nodata,
+            )
+            for tile in tiles
+        )
+        histogram = np.zeros(1 << digit_bits, dtype=np.int64)
+        for _, tile_histogram in _map_bounded(mp_config.cluster, _wrapper_raster_topk_histogram_mp, arguments):
+            histogram += tile_histogram
+        return histogram
+
+    def keys_for_prefix(seed: int, prefix: int, prefix_bits: int, group_size: int) -> NDArray[np.uint64]:
+        """Collect keys in the last range chosen for the requested subsample from every multiprocessing tile."""
+
+        arguments = ((source_raster, tile, seed, prefix, prefix_bits, band, skip_nodata) for tile in tiles)
+        group_keys = np.empty(group_size, dtype=np.uint64)
+        offset = 0
+        for _, tile_keys in _map_bounded(mp_config.cluster, _wrapper_raster_topk_prefix_keys_mp, arguments):
+            stop = offset + len(tile_keys)
+            group_keys[offset:stop] = tile_keys
+            offset = stop
+        return group_keys[:offset]
+
+    return _iterative_topk_cutoff(
+        subsample,
+        random_state,
+        largest_chunk,
+        len(tiles),
+        histogram_for_prefix,
+        keys_for_prefix,
+    )
+
+
+def _wrapper_raster_to_pointcloud_partition_mp(
+    source_raster: RasterType,
+    flat_indices: NDArray[np.int64] | tuple[slice, slice],
     bands: list[int],
     column_names: list[str],
     skip_nodata: bool,
-    row_offset: float,
-    column_offset: float,
+    force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"],
     chunks: int | tuple[int, int],
     filename: pathlib.Path,
+    topk_selection: tuple[int, np.uint64] | None = None,
 ) -> pathlib.Path:
-    """Read selected raster cells into one ordered point partition and stage it for the common file writer."""
+    """
+    Convert cells from one raster tile in a multiprocessing worker and save its point rows.
 
-    # Expand compact full-conversion ranges while preserving the supplied order of sampled cell indexes
-    total_pixels = int(np.prod(source_raster.shape))
-    if isinstance(flat_indices, slice):
-        start, stop, step = flat_indices.indices(total_pixels)
-        selected_indices = np.arange(start, stop, step, dtype=np.int64)
+    Every multiprocessing point cloud saved to a file uses this function.
+
+    A complete conversion passes a tile slice, a subsample no larger than the biggest tile passes the indexes of its selected raster cells, and a larger
+    subsample passes a tile slice with the key separating selected and unselected cells. Processing one tile per call
+    limits raster reads and point construction to that tile. Multiprocessing array output collects the indexes of all
+    raster cells selected for the requested subsample instead.
+    """
+
+    # 1/ Build indexes for the complete tile, or keep its sampled cell indexes
+    if isinstance(flat_indices, tuple):
+        row_slice, column_slice = flat_indices
+        rows = np.arange(row_slice.start, row_slice.stop, dtype=np.int64)[:, None]
+        columns = np.arange(column_slice.start, column_slice.stop, dtype=np.int64)[None, :]
+        selected_indices = (rows * source_raster.shape[1] + columns).ravel()
     else:
         selected_indices = np.asarray(flat_indices, dtype=np.int64)
-    rows, columns = np.unravel_index(selected_indices, source_raster.shape)
 
-    # Group requested cells by raster tile so each worker reads bounded windows instead of individual samples
-    chunk_rows, chunk_columns = (chunks, chunks) if isinstance(chunks, int) else chunks
-    tile_columns = (source_raster.shape[1] + chunk_columns - 1) // chunk_columns
-    tile_ids = (rows // chunk_rows) * tile_columns + columns // chunk_columns
-    dtype = np.dtype(bool if source_raster.is_mask else source_raster.dtype)
-    band_values = np.ma.masked_all((len(bands), len(selected_indices)), dtype=dtype)
-    native_bands = [source_raster.bands[band - 1] for band in bands]
+    from geoutils.multiproc.readers import _read_selected_raster_bands
 
-    assert source_raster.name is not None
-    with rio.open(source_raster.name) as dataset:
-        for tile_id in np.unique(tile_ids):
-            selected = np.flatnonzero(tile_ids == tile_id)
-            tile_row, tile_column = divmod(int(tile_id), tile_columns)
-            row_start = tile_row * chunk_rows
-            column_start = tile_column * chunk_columns
-            row_stop = min(row_start + chunk_rows, source_raster.shape[0])
-            column_stop = min(column_start + chunk_columns, source_raster.shape[1])
+    selected_main_values = None
+    if topk_selection is not None:
+        seed, cutoff = topk_selection
+        if skip_nodata:
+            from geoutils.sampling.subsampling import _valid_subsample_mask
 
-            # Read every requested band once for this tile and restore values to their output positions
-            block = dataset.read(
-                native_bands,
-                window=((row_start, row_stop), (column_start, column_stop)),
-                masked=True,
-            )
-            local_rows = rows[selected] - row_start
-            local_columns = columns[selected] - column_start
-            selected_values = block[:, local_rows, local_columns]
-            band_values.data[:, selected] = np.ma.getdata(selected_values)
-            band_values.mask[:, selected] = np.ma.getmaskarray(selected_values)
+            selected_main_values = _read_selected_raster_bands(source_raster, selected_indices, bands[:1], chunks)
+            eligible = _valid_subsample_mask(selected_main_values[0], skip_nodata=True).reshape(-1)
+            selected_indices = selected_indices[eligible]
+            selected_main_values = selected_main_values[:, eligible]
 
-    # Use main-band validity for every output column, matching eager and Dask selection behavior
-    if skip_nodata:
-        keep = ~get_mask_from_array(band_values[0]).reshape(-1)
-        selected_indices = selected_indices[keep]
-        band_values = band_values[:, keep].data
+        from geoutils.sampling.subsampling import _splitmix64
+
+        keys = _splitmix64(np.uint64(seed) ^ selected_indices.astype(np.uint64))
+        selected = keys <= cutoff
+        selected_indices = selected_indices[selected]
+        if selected_main_values is not None:
+            selected_main_values = selected_main_values[:, selected]
+        topk_selection = None
+
+    # 2/ Read every requested band from small raster tiles
+    if selected_main_values is None:
+        band_values = _read_selected_raster_bands(source_raster, selected_indices, bands, chunks)
+    elif len(bands) == 1:
+        band_values = selected_main_values
     else:
-        band_values = np.ma.filled(band_values.astype("float32"), np.nan)
-        if source_raster.nodata is not None:
-            band_values[band_values == source_raster.nodata] = np.nan
+        auxiliary_values = _read_selected_raster_bands(source_raster, selected_indices, bands[1:], chunks)
+        band_values = np.ma.concatenate((selected_main_values, auxiliary_values), axis=0)
 
-    # Convert row/column positions with the full affine transform and requested pixel offset
-    rows, columns = np.unravel_index(selected_indices, source_raster.shape)
-    transform = source_raster.transform
-    x_coords = transform.c + transform.a * (columns + column_offset) + transform.b * (rows + row_offset)
-    y_coords = transform.f + transform.d * (columns + column_offset) + transform.e * (rows + row_offset)
-    dataframe = gpd.GeoDataFrame(
-        {name: band_values[index] for index, name in enumerate(column_names)},
-        geometry=gpd.points_from_xy(x_coords, y_coords),
-        crs=source_raster.crs,
+    # 3/ Convert the selected raster values and positions to one point partition
+    dataframe = cast(
+        gpd.GeoDataFrame,
+        _raster_values_to_point_partition(
+            band_values,
+            selected_indices,
+            source_raster.shape,
+            source_raster.transform,
+            source_raster.area_or_point,
+            source_raster.crs,
+            source_raster.nodata,
+            column_names,
+            skip_nodata,
+            force_pixel_offset,
+            topk_selection,
+            as_array=False,
+        ),
     )
-    dataframe.to_pickle(filename)
-    return filename
+
+    # 4/ Save the point partition to a temporary file
+    from geoutils.pointcloud.writing import _stage_pointcloud_partition
+
+    return _stage_pointcloud_partition(dataframe, filename)
 
 
 def _multiproc_raster_to_pointcloud(
@@ -219,21 +1190,41 @@ def _multiproc_raster_to_pointcloud(
     subsample: float | int,
     skip_nodata: bool,
     random_state: int | np.random.Generator | None,
-    row_offset: float,
-    column_offset: float,
+    force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"],
     mp_config: MultiprocConfig,
+    as_array: bool,
 ) -> Any:
     """
-    Convert raster cells in bounded workers and return an unloaded point cloud at the configured output path.
+    Build a Multiproc point output from raster chunks.
 
-    _raster_to_pointcloud_partition() reads raster windows and saves each group of output points as a GeoDataFrame.
-    _write_pointcloud_partitions() writes those saved groups to the requested file one at a time, so the parent process
-    never holds all point values at once.
+    If subsample size is smaller than a raster chunk or as_array=True, we use subsample() directly through
+    _raster_to_pointcloud_from_indices().
+
+    If subsample size is larger than a raster chunk, we use _multiproc_raster_topk_cutoff() to find the subsample
+    indices without loading more than a single raster chunk, then build the output chunk by chunk with
+    _write_pointcloud_partitions().
     """
+
+    if as_array:
+        # Use loaded values directly instead of sending the complete in-memory raster to worker tasks
+        read_config = None if source_raster.is_loaded else mp_config
+        return _raster_to_pointcloud_from_indices(
+            source_raster,
+            bands,
+            column_names,
+            data_column_name,
+            subsample,
+            skip_nodata,
+            random_state,
+            force_pixel_offset,
+            as_array=True,
+            read_config=read_config,
+        )
 
     from geoutils.multiproc.cluster import _map_bounded
     from geoutils.pointcloud.writing import (
         _resolve_pointcloud_output,
+        _stage_pointcloud_partition,
         _write_pointcloud_partitions,
     )
 
@@ -251,79 +1242,99 @@ def _multiproc_raster_to_pointcloud(
 
         # Give workers an unloaded file even when the caller supplied an in-memory raster or Xarray accessor
         worker_source = source_raster
-        if source_raster.is_loaded or source_raster._is_xr or source_raster.name is None:
+        if source_raster.is_loaded or source_raster.name is None:
             from geoutils.raster import Raster
 
             source_filename = temporary_directory / "source.tif"
             source_raster.to_file(source_filename)
             worker_source = Raster(source_filename, load_data=False)
 
-        total_pixels = int(np.prod(worker_source.shape))
-        chunk_shape = (mp_config.chunks, mp_config.chunks) if isinstance(mp_config.chunks, int) else mp_config.chunks
-        output_partition_size = int(np.prod(chunk_shape))
+        from geoutils.multiproc import compute_tiling
 
-        # Keep the full path compact; sampled paths preserve their deterministic selection order across partitions
-        if subsample == 1:
-            selected_parts: list[slice | NDArray[np.int64]] = [
-                slice(start, min(start + output_partition_size, total_pixels))
-                for start in range(0, total_pixels, output_partition_size)
-            ]
-        elif not skip_nodata:
-            from geoutils.sampling.subsampling import (
-                _get_subsample_size_from_user_input,
-            )
+        tiling = compute_tiling(mp_config.chunks, worker_source.shape, overlap=0)
+        tiles = tiling.reshape((-1, 4))
+        largest_chunk = max(int((tile[1] - tile[0]) * (tile[3] - tile[2])) for tile in tiles)
+        sample_exceeds_largest_chunk = _subsample_exceeds_largest_chunk(subsample, worker_source.shape, largest_chunk)
 
-            sample_size = _get_subsample_size_from_user_input(subsample, total_pixels)
-            flat_indices = np.random.default_rng(random_state).choice(total_pixels, sample_size, replace=False)
-            selected_parts = [
-                flat_indices[start : start + output_partition_size]
-                for start in range(0, len(flat_indices), output_partition_size)
-            ]
-        else:
-            from geoutils.sampling.subsampling import _subsample
-
-            stable_random_state = random_state
-            if stable_random_state is None:
-                stable_random_state = int(np.random.default_rng().integers(0, np.iinfo(np.uint32).max, dtype=np.uint32))
-            row_indices, column_indices = _subsample(
-                source_raster=worker_source,
-                subsample=subsample,
-                band=bands[0],
-                return_indices=True,
-                random_state=stable_random_state,
-                strategy="topk",
-                mp_config=mp_config,
-            )
-            flat_indices = np.asarray(row_indices, dtype=np.int64) * worker_source.shape[1] + np.asarray(
-                column_indices, dtype=np.int64
-            )
-            selected_parts = [
-                flat_indices[start : start + output_partition_size]
-                for start in range(0, len(flat_indices), output_partition_size)
-            ]
-
-        # Preserve a valid empty output schema when no eligible cells were selected
-        if not selected_parts:
-            selected_parts = [np.empty(0, dtype=np.int64)]
-        arguments = (
-            (
+        # Materialize a bounded sample, save it once, and return an unloaded wrapper for the requested output
+        if not sample_exceeds_largest_chunk:
+            pointcloud = _raster_to_pointcloud_from_indices(
                 worker_source,
-                selected,
                 bands,
                 column_names,
+                data_column_name,
+                subsample,
                 skip_nodata,
-                row_offset,
-                column_offset,
-                mp_config.chunks,
-                temporary_directory / f"partition_{index}.pkl",
+                random_state,
+                force_pixel_offset,
+                as_array=False,
+                read_config=mp_config,
             )
-            for index, selected in enumerate(selected_parts)
-        )
-        partition_filenames = [
-            filename for _, filename in _map_bounded(mp_config.cluster, _raster_to_pointcloud_partition, arguments)
-        ]
+            partition_filenames: Iterable[pathlib.Path] = (
+                _stage_pointcloud_partition(pointcloud.ds, temporary_directory / "partition.pkl"),
+            )
 
-        # Assemble one ordered file and return its metadata-only PointCloud wrapper
+        # Split complete conversions by raster tile
+        elif subsample == 1:
+            selected_parts: Iterable[
+                tuple[int, NDArray[np.int64] | tuple[slice, slice], tuple[int, np.uint64] | None]
+            ] = (
+                (
+                    tile_id,
+                    (slice(int(tile[0]), int(tile[1])), slice(int(tile[2]), int(tile[3]))),
+                    None,
+                )
+                for tile_id, tile in enumerate(tiles)
+            )
+
+        # Find cutoff key out-of-memory when subsample size exceeds one raster chunk size
+        else:
+            sample_size, seed, cutoff = _multiproc_raster_topk_cutoff(
+                source_raster=worker_source,
+                tiles=tiles,
+                largest_chunk=largest_chunk,
+                subsample=subsample,
+                band=bands[0],
+                skip_nodata=skip_nodata,
+                random_state=random_state,
+                mp_config=mp_config,
+            )
+            if sample_size == 0:
+                selected_parts = ((0, np.empty(0, dtype=np.int64), None),)
+            else:
+                assert cutoff is not None
+                selected_parts = (
+                    (
+                        tile_id,
+                        (slice(int(tile[0]), int(tile[1])), slice(int(tile[2]), int(tile[3]))),
+                        (seed, cutoff),
+                    )
+                    for tile_id, tile in enumerate(tiles)
+                )
+
+        if sample_exceeds_largest_chunk:
+            arguments = (
+                (
+                    worker_source,
+                    selected,
+                    bands,
+                    column_names,
+                    skip_nodata,
+                    force_pixel_offset,
+                    mp_config.chunks,
+                    temporary_directory / f"partition_{tile_id}.pkl",
+                    topk_selection,
+                )
+                for tile_id, selected, topk_selection in selected_parts
+            )
+            partition_filenames = (
+                filename
+                for _, filename in _map_bounded(
+                    mp_config.cluster, _wrapper_raster_to_pointcloud_partition_mp, arguments
+                )
+            )
+
+        # Finally, we assemble the final file and return it as an unloaded PointCloud!
         return _write_pointcloud_partitions(
             output_filename,
             partition_filenames,
@@ -334,12 +1345,17 @@ def _multiproc_raster_to_pointcloud(
         )
 
 
+##########################################
+# 2F/ RASTER TO POINT CLOUD PARENT
+##########################################
+
+
 def _raster_to_pointcloud(
     source_raster: RasterType,
     data_column_name: str = "b1",
     data_band: int = 1,
-    auxiliary_data_bands: list[int] | None = None,
-    auxiliary_column_names: list[str] | None = None,
+    auxiliary_data_bands: Iterable[int] | None = None,
+    auxiliary_column_names: Iterable[str] | None = None,
     subsample: float | int = 1,
     skip_nodata: bool = True,
     as_array: bool = False,
@@ -348,7 +1364,29 @@ def _raster_to_pointcloud(
     mp_config: MultiprocConfig | None = None,
 ) -> Any:
     """
-    Convert a raster to a point cloud. See Raster.to_pointcloud() for details.
+    Convert raster to a point cloud with eager, Dask, or multiprocessing implementation.
+
+    See RasterBase.to_pointcloud() for details on the arguments.
+
+    Internally, this function checks user inputs, then passes on to:
+    - _eager_raster_to_pointcloud() for a in-memory input,
+    - _dask_raster_to_pointcloud() for a Dask input, reading chunk by chunk and returning a lazy Dask array or
+        GeoDataFrame, optionally written chunk-by-chunk as well,
+    - _multiproc_raster_to_pointcloud() for a Multiproc input, reading the raster chunk by chunk and writing to a point
+    cloud file, optionally chunk-by-chunk too.
+
+    Without subsampling, the array is reshaped chunk-by-chunk to a lazy Dask object or point cloud file.
+
+    With subsampling, the "topk" subsampling method is used as it is deterministic, and we read the raster
+    chunk-by-chunk as in raster.subsample().
+    Then, depending on subsampling size, two scenarios are triggered:
+    - For a subsample size smaller than one raster chunk, the input reading happens chunk-by-chunk, but the output
+        subsample is computed all once in memory (whether eagerly for MP, or computed lazily for Dask).
+    - For a subsample size larger than one raster chunk, both Dask/Multiproc implementations call an
+        iterative algorithm to find the k cutoff of the "topk" algorithm without loading the equivalent of the subsample
+        size in memory. Then, the output subsampled points are written chunk-by-chunk to file/lazy Dask objects.
+
+    Altogether, this ensures that never more than a multiple of raster input chunksize is loaded or returned at once!
     """
 
     # 1/ Input checks
@@ -369,7 +1407,10 @@ def _raster_to_pointcloud(
     if auxiliary_column_names is not None and auxiliary_data_bands is None:
         raise ValueError("Passing auxiliary column names requires passing auxiliary data band numbers as well.")
     if auxiliary_data_bands is not None:
-        if not (isinstance(auxiliary_data_bands, Iterable) and all(isinstance(b, int) for b in auxiliary_data_bands)):
+        if not isinstance(auxiliary_data_bands, Iterable):
+            raise ValueError("Auxiliary data band number must be an iterable containing only integers.")
+        auxiliary_data_bands = list(auxiliary_data_bands)
+        if not all(isinstance(b, int) for b in auxiliary_data_bands):
             raise ValueError("Auxiliary data band number must be an iterable containing only integers.")
         if any((1 > b or source_raster.count < b) for b in auxiliary_data_bands):
             raise ValueError(
@@ -382,9 +1423,10 @@ def _raster_to_pointcloud(
 
         # Ensure auxiliary column name is defined if auxiliary data bands is not None
         if auxiliary_column_names is not None:
-            if not (
-                isinstance(auxiliary_column_names, Iterable) and all(isinstance(b, str) for b in auxiliary_column_names)
-            ):
+            if not isinstance(auxiliary_column_names, Iterable) or isinstance(auxiliary_column_names, (str, bytes)):
+                raise ValueError("Auxiliary column names must be an iterable containing only strings.")
+            auxiliary_column_names = list(auxiliary_column_names)
+            if not all(isinstance(b, str) for b in auxiliary_column_names):
                 raise ValueError("Auxiliary column names must be an iterable containing only strings.")
             if not len(auxiliary_column_names) == len(auxiliary_data_bands):
                 raise ValueError(
@@ -403,6 +1445,11 @@ def _raster_to_pointcloud(
         all_bands = [data_band]
         all_column_names = [data_column_name]
 
+    if len(set(all_column_names)) != len(all_column_names) or "geometry" in all_column_names:
+        raise ValueError("Point cloud data column names must be unique and cannot be 'geometry'.")
+
+    # 2/ Validate execution backend and point coordinate convention
+
     # One operation cannot be scheduled by Dask and multiprocessing at the same time
     dask_backend = source_raster._chunks is not None
     if dask_backend and mp_config is not None:
@@ -410,16 +1457,32 @@ def _raster_to_pointcloud(
             "Cannot use Multiprocessing and Dask simultaneously. To use Dask, remove ``mp_config`` from "
             "to_pointcloud(). To use Multiprocessing, open the raster without ``chunks``."
         )
+    if source_raster._is_xr and mp_config is not None:
+        raise ValueError("Argument ``mp_config`` requires a Raster input rather than an Xarray accessor.")
 
     # Validate the coordinate convention before launching lazy or multiprocessing work
-    offsets = {"center": (0.5, 0.5), "ul": (0.0, 0.0), "ur": (0.0, 1.0), "ll": (1.0, 0.0), "lr": (1.0, 1.0)}
-    try:
-        row_offset, column_offset = offsets[force_pixel_offset]
-    except KeyError as exception:
-        raise ValueError(f"Unknown pixel offset {force_pixel_offset!r}.") from exception
+    if force_pixel_offset not in ("center", "ul", "ur", "ll", "lr"):
+        raise ValueError(f"Unknown pixel offset {force_pixel_offset!r}.")
 
-    # Multiprocessing point output is assembled on disk and returned without loading its values in the parent
-    if mp_config is not None and not as_array:
+    # Use one seed so every tile participates in the same random subsample
+    if random_state is None and subsample != 1:
+        random_state = int(np.random.default_rng().integers(0, np.iinfo(np.uint32).max, dtype=np.uint32))
+
+    # 3/ Call the relevant backend depending on input type (eager, Dask, Multiproc)
+    if dask_backend:
+        return _dask_raster_to_pointcloud(
+            source_raster=source_raster,
+            bands=all_bands,
+            column_names=all_column_names,
+            data_column_name=data_column_name,
+            subsample=subsample,
+            skip_nodata=skip_nodata,
+            random_state=random_state,
+            force_pixel_offset=force_pixel_offset,
+            as_array=as_array,
+        )
+
+    if mp_config is not None:
         return _multiproc_raster_to_pointcloud(
             source_raster=source_raster,
             bands=all_bands,
@@ -428,235 +1491,19 @@ def _raster_to_pointcloud(
             subsample=subsample,
             skip_nodata=skip_nodata,
             random_state=random_state,
-            row_offset=row_offset,
-            column_offset=column_offset,
+            force_pixel_offset=force_pixel_offset,
             mp_config=mp_config,
+            as_array=as_array,
         )
 
-    # Preserve eager full-conversion loading, while file-backed chunked conversions use window reads
-    sampling_config = mp_config
-    if not dask_backend and not source_raster.is_loaded and sampling_config is None:
-        if subsample == 1:
-            source_raster.load()
-        else:
-            from geoutils.multiproc import MultiprocConfig
-
-            sampling_config = MultiprocConfig(chunks=512)
-
-    data = source_raster.data if source_raster.is_loaded or source_raster._is_xr else None
-    total_pixels = int(np.prod(source_raster.shape))
-
-    # Flatten complete rasters directly, reading file-backed inputs in whole tiles without random sampling
-    if subsample == 1:
-        if data is not None:
-            band_values = [data.reshape(-1) if data.ndim == 2 else data[band - 1].reshape(-1) for band in all_bands]
-            main_values = data.reshape(-1) if data.ndim == 2 else data[data_band - 1].reshape(-1)
-        else:
-            from geoutils.multiproc import MultiprocConfig
-            from geoutils.multiproc.chunked import iter_chunk_slices
-            from geoutils.multiproc.cluster import _map_bounded
-            from geoutils.multiproc.readers import _read_values, _ValueReader
-
-            read_config = sampling_config if sampling_config is not None else MultiprocConfig(chunks=512)
-            tile_slices = list(iter_chunk_slices(source_raster.shape, read_config.chunks))
-            band_values = []
-            for band in all_bands:
-                reader = _ValueReader(source_raster, band)
-                arguments = [(reader.block(slices),) for slices in tile_slices]
-                pieces = [piece for _, piece in _map_bounded(read_config.cluster, _read_values, arguments)]
-
-                # Place rectangular tiles on the raster grid before taking a row-major flattened view
-                raster_values = np.ma.masked_all(source_raster.shape, dtype=reader.dtype)
-                for slices, piece in zip(tile_slices, pieces):
-                    raster_values.data[slices] = np.ma.getdata(piece)
-                    raster_values.mask[slices] = np.ma.getmaskarray(piece)
-                band_values.append(raster_values.reshape(-1))
-            main_values = band_values[0]
-
-        if data is not None and is_dask_array(data):
-            import dask.array as da
-
-            dask = import_optional("dask")
-            flat_indices: Any = da.arange(total_pixels, chunks=main_values.chunks)
-
-            # Find the output size of each lazy block before constructing arrays with a ragged validity filter
-            if skip_nodata:
-                valid = da.isfinite(main_values)
-                if source_raster.nodata is not None:
-                    valid &= main_values != source_raster.nodata
-                valid_blocks = valid.to_delayed().ravel()
-                valid_counts = dask.compute(*[dask.delayed(np.count_nonzero)(block) for block in valid_blocks])
-
-                # Apply each validity block to the flat indices and bands while keeping their values lazy
-                if sum(valid_counts) != total_pixels:
-                    selected_values = []
-                    for values in [flat_indices, *band_values]:
-                        value_blocks = values.rechunk(valid.chunks).to_delayed().ravel()
-                        selected_blocks = [
-                            da.from_delayed(
-                                dask.delayed(operator.getitem)(value_block, valid_block),
-                                shape=(int(count),),
-                                dtype=values.dtype,
-                            )
-                            for value_block, valid_block, count in zip(value_blocks, valid_blocks, valid_counts)
-                        ]
-                        selected_values.append(da.concatenate(selected_blocks))
-                    flat_indices, *band_values = selected_values
-
-            pixel_data = da.stack(band_values, axis=0)
-        else:
-            # Keep the common all-finite case as reshaped views, filtering only when the main band has missing cells
-            flat_indices = np.arange(total_pixels, dtype=np.int64)
-            if skip_nodata:
-                invalid = get_mask_from_array(main_values).reshape(-1)
-                if np.any(invalid):
-                    flat_indices = np.flatnonzero(~invalid)
-                    band_values = [values[flat_indices] for values in band_values]
-            if len(band_values) == 1:
-                pixel_data = band_values[0].reshape(1, -1)
-            elif any(np.ma.isMaskedArray(values) for values in band_values):
-                pixel_data = np.ma.stack(band_values, axis=0)
-            else:
-                pixel_data = np.stack(band_values, axis=0)
-
-        rows = flat_indices // source_raster.shape[1]
-        columns = flat_indices % source_raster.shape[1]
-
-    else:
-        from geoutils.sampling.subsampling import (
-            _get_subsample_size_from_user_input,
-            _subsample,
-        )
-
-        # Select missing cells when requested, otherwise use stable keys for identical results from every backend
-        if not skip_nodata:
-            sample_size = _get_subsample_size_from_user_input(subsample, total_pixels)
-            flat_indices = np.random.default_rng(random_state).choice(total_pixels, sample_size, replace=False)
-            rows, columns = np.unravel_index(flat_indices, source_raster.shape)
-        else:
-            stable_random_state = random_state
-            if stable_random_state is None:
-                stable_random_state = int(np.random.default_rng().integers(0, np.iinfo(np.uint32).max, dtype=np.uint32))
-            indices = _subsample(
-                source_raster=source_raster,
-                subsample=subsample,
-                band=data_band,
-                return_indices=True,
-                random_state=stable_random_state,
-                strategy="topk",
-                mp_config=sampling_config,
-            )
-            if any(is_dask_array(index) for index in indices):
-                indices = import_optional("dask").compute(*indices)
-            rows, columns = (np.asarray(index, dtype=np.int64) for index in indices)
-
-        # Gather the selected values lazily, from memory, or through file windows
-        if data is not None and is_dask_array(data):
-            import dask.array as da
-
-            dask_data: Any = data
-            band_values = [
-                dask_data.vindex[rows, columns] if dask_data.ndim == 2 else dask_data[band - 1].vindex[rows, columns]
-                for band in all_bands
-            ]
-            pixel_data = da.stack(band_values, axis=0)
-        elif data is not None:
-            band_values = [
-                data[rows, columns] if data.ndim == 2 else data[band - 1, rows, columns] for band in all_bands
-            ]
-            pixel_data = (
-                np.ma.stack(band_values, axis=0)
-                if any(np.ma.isMaskedArray(values) for values in band_values)
-                else np.stack(band_values, axis=0)
-            )
-        else:
-            from geoutils.multiproc import MultiprocConfig
-            from geoutils.multiproc.readers import _read_selected_values, _ValueReader
-
-            read_config = sampling_config if sampling_config is not None else MultiprocConfig(chunks=512)
-            flat_indices = rows * source_raster.shape[1] + columns
-            band_values = [
-                _read_selected_values(_ValueReader(source_raster, band), flat_indices, read_config)
-                for band in all_bands
-            ]
-            pixel_data = (
-                np.ma.stack(band_values, axis=0)
-                if any(np.ma.isMaskedArray(values) for values in band_values)
-                else np.stack(band_values, axis=0)
-            )
-
-    # Remove mask metadata after valid cells are selected; kept nodata cells are converted to NaN below
-    if is_dask_array(pixel_data) and skip_nodata:
-        import dask.array as da
-
-        pixel_data = da.ma.getdata(pixel_data)
-    elif np.ma.isMaskedArray(pixel_data):
-        pixel_data = pixel_data.data
-
-    # If nodata values were not skipped, convert them to NaNs and change data type
-    if not skip_nodata:
-        pixel_data = pixel_data.astype("float32")
-        if is_dask_array(pixel_data):
-            import dask.array as da
-
-            pixel_data = da.ma.filled(pixel_data, np.nan)
-            if source_raster.nodata is not None:
-                pixel_data = da.where(pixel_data == source_raster.nodata, np.nan, pixel_data)
-        elif source_raster.nodata is not None:
-            pixel_data[pixel_data == source_raster.nodata] = np.nan
-
-    # Calculate coordinates with the complete affine transform, including rotation and the requested pixel offset
-    transform = source_raster.transform
-    x_coords = transform.c + transform.a * (columns + column_offset) + transform.b * (rows + row_offset)
-    y_coords = transform.f + transform.d * (columns + column_offset) + transform.e * (rows + row_offset)
-
-    # Preserve Dask execution in both array and point dataframe outputs
-    if is_dask_array(pixel_data):
-        import dask.array as da
-
-        if not is_dask_array(x_coords):
-            x_coords = da.from_array(np.asarray(x_coords), chunks=pixel_data.chunks[1])
-            y_coords = da.from_array(np.asarray(y_coords), chunks=pixel_data.chunks[1])
-        if as_array:
-            return da.stack((x_coords, y_coords, *[pixel_data[index] for index in range(len(all_bands))]), axis=1)
-
-        from geoutils.pointcloud.dataframe import (
-            _build_pointcloud_output,
-            _import_dask_dataframe,
-        )
-        from geoutils.vector.pd_accessor import _import_dask_geopandas
-
-        # Build matching Dask series so dataframe values keep their raster dtype and continuous point index
-        point_chunks = pixel_data.chunks[1]
-        x_coords = x_coords.rechunk(point_chunks)
-        y_coords = y_coords.rechunk(point_chunks)
-        dask_dataframe = _import_dask_dataframe()
-        dask_geopandas = _import_dask_geopandas()
-        dataframe = dask_dataframe.from_dask_array(pixel_data.T, columns=all_column_names)
-        coordinate_frame = dask_dataframe.concat(
-            [
-                dask_dataframe.from_dask_array(x_coords, columns="x"),
-                dask_dataframe.from_dask_array(y_coords, columns="y"),
-            ],
-            axis=1,
-        )
-        geometry = dask_geopandas.points_from_xy(coordinate_frame, x="x", y="y", crs=source_raster.crs)
-        dataframe = dataframe.assign(geometry=geometry)
-        dataframe = dask_geopandas.from_dask_dataframe(dataframe, geometry="geometry")
-
-        # Finalize point metadata; the shared builder also adds ``.pc`` and ``.vct`` to this Dask frame
-        return _build_pointcloud_output(dataframe, data_column=data_column_name, as_dataframe=True)
-
-    # Build the established eager array or PointCloud result
-    if as_array:
-        return np.vstack((np.asarray(x_coords), np.asarray(y_coords), pixel_data)).T
-
-    from geoutils.pointcloud import PointCloud
-
-    dataframe = gpd.GeoDataFrame(
-        pixel_data.T,
-        columns=all_column_names,
-        geometry=gpd.points_from_xy(np.asarray(x_coords), np.asarray(y_coords)),
-        crs=source_raster.crs,
+    return _eager_raster_to_pointcloud(
+        source_raster=source_raster,
+        bands=all_bands,
+        column_names=all_column_names,
+        data_column_name=data_column_name,
+        subsample=subsample,
+        skip_nodata=skip_nodata,
+        random_state=random_state,
+        force_pixel_offset=force_pixel_offset,
+        as_array=as_array,
     )
-    return PointCloud(dataframe, data_column=data_column_name)

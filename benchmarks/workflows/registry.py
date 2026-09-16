@@ -38,6 +38,7 @@ OperationName = Literal[
     "statistics",
     "grouped_stats",
     "subsample",
+    "to_pointcloud",
     "interp_points",
     "polygonize",
     "write",
@@ -119,6 +120,7 @@ OPERATION_CASES: tuple[OperationCase, ...] = (
     # Multiprocessing currently tiles arrays already resident in the client, so only Dask is out of core
     OperationCase("grouped_stats", ("dask",), 1),
     OperationCase("subsample", ("dask", "multiprocessing"), 1),
+    OperationCase("to_pointcloud", ("dask", "multiprocessing"), 1),
     OperationCase("interp_points", ("dask", "multiprocessing"), 1),
     OperationCase("polygonize", ("dask", "multiprocessing"), 1),
     OperationCase("write", ("dask",), 1),
