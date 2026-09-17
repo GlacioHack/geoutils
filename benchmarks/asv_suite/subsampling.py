@@ -12,6 +12,7 @@ from benchmarks.asv_suite import asv_parameter_values
 from geoutils._misc import import_optional
 from geoutils.profiler import profile_call
 from geoutils.sampling.subsampling import _splitmix64
+from geoutils.sampling.subsampling import _subsample as _subsample_values
 
 
 class DaskTopkComparison:
@@ -50,7 +51,8 @@ class DaskTopkComparison:
 
         with dask.config.set(scheduler="threads", num_workers=1):
             if implementation == "geoutils":
-                rows, columns = self.raster.rst.subsample(
+                rows, columns = _subsample_values(
+                    self.raster.rst,
                     subsample_size,
                     return_indices=True,
                     random_state=42,
@@ -118,7 +120,7 @@ class DaskCutoffComparison:
         row_chunks, column_chunks = self.values.chunks
         row_starts = np.cumsum((0, *row_chunks))
         column_starts = np.cumsum((0, *column_chunks))
-        self.tiles = np.array(
+        tiles = np.array(
             [
                 (row_starts[row], row_starts[row + 1], column_starts[column], column_starts[column + 1])
                 for row in range(len(row_chunks))
@@ -127,6 +129,15 @@ class DaskCutoffComparison:
             dtype=np.int64,
         )
         self.blocks = self.values.to_delayed().ravel().tolist()
+        self.block_ids = [
+            {
+                "row_start": int(tile[0]),
+                "row_stop": int(tile[1]),
+                "col_start": int(tile[2]),
+                "col_stop": int(tile[3]),
+            }
+            for tile in tiles
+        ]
         self.largest_chunk = max(int(rows * columns) for rows in row_chunks for columns in column_chunks)
 
     def _run(self, implementation: Literal["geoutils_cutoff", "dask_topk"], subsample_size: int) -> None:
@@ -137,18 +148,22 @@ class DaskCutoffComparison:
 
         with dask.config.set(scheduler="threads", num_workers=1):
             if implementation == "geoutils_cutoff":
-                from geoutils.interface.raster_point import _dask_raster_topk_cutoff
-
-                sample_size, _, cutoff = _dask_raster_topk_cutoff(
-                    self.blocks,
-                    self.tiles,
-                    self.shape,
-                    self.largest_chunk,
-                    subsample_size,
-                    True,
-                    42,
+                from geoutils.sampling.subsampling import (
+                    SubsampleMeta,
+                    _dask_array_topk_cutoff,
                 )
-                if sample_size != subsample_size or cutoff is None:
+
+                subsample_meta = _dask_array_topk_cutoff(
+                    blocks=self.blocks,
+                    mask_blocks=[None] * len(self.blocks),
+                    block_ids=self.block_ids,
+                    array_shape=self.shape,
+                    largest_chunk=self.largest_chunk,
+                    subsample=subsample_size,
+                    subsample_meta=SubsampleMeta(sample_size=subsample_size, seed=42, cutoff=None),
+                    skip_nodata=True,
+                )
+                if subsample_meta.sample_size != subsample_size or subsample_meta.cutoff is None:
                     raise AssertionError("The cutoff search did not find the requested selection boundary.")
                 return
 

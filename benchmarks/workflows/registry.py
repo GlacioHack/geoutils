@@ -100,8 +100,6 @@ OPERATION_STRATEGIES: tuple[OperationStrategy, ...] = (
     OperationStrategy("grouped_stats", "dense"),
     OperationStrategy("grouped_stats", "sparse"),
     OperationStrategy("grouped_stats", "groupwise"),
-    OperationStrategy("subsample", "sequential"),
-    OperationStrategy("subsample", "topk", default=True),
     OperationStrategy("polygonize", "label_union"),
     OperationStrategy("polygonize", "label_stitch", default=True),
     OperationStrategy("polygonize", "geometry_stitch"),

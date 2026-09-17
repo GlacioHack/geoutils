@@ -470,7 +470,7 @@ class PointCloudBase(VectorBase):
         random_state: int | np.random.Generator | None = None,
         strategy: Literal["auto", "dense", "sparse", "groupwise"] = "auto",
         backend: Literal["geoutils", "flox"] = "geoutils",
-        subsampling_strategy: Literal["sequential", "topk"] = "sequential",
+        subsampling_strategy: Literal["sequential", "topk"] = "topk",
         interpolation: InterpolationMethod = "linear",
         align: Literal["raise", "reproject"] = "raise",
         observed: bool = True,
@@ -567,54 +567,89 @@ class PointCloudBase(VectorBase):
     def subsample(
         self,
         subsample: int | float,
-        return_indices: Literal[False] = False,
         *,
-        random_state: int | np.random.Generator | None = None,
         mask: RasterLike | PointCloudLike | VectorLike | ArrayLike | None = None,
+        random_state: int | np.random.Generator | None = None,
+        as_array: Literal[False] = False,
+        return_indices: Literal[False] = False,
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> PointCloudLike: ...
+
+    @overload
+    def subsample(
+        self,
+        subsample: int | float,
+        *,
+        mask: RasterLike | PointCloudLike | VectorLike | ArrayLike | None = None,
+        random_state: int | np.random.Generator | None = None,
+        as_array: Literal[True],
+        return_indices: Literal[False] = False,
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
     ) -> NDArrayNum: ...
 
     @overload
     def subsample(
         self,
         subsample: int | float,
-        return_indices: Literal[True],
         *,
-        random_state: int | np.random.Generator | None = None,
         mask: RasterLike | PointCloudLike | VectorLike | ArrayLike | None = None,
+        random_state: int | np.random.Generator | None = None,
+        as_array: Literal[True],
+        return_indices: Literal[True],
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
     ) -> tuple[NDArrayNum, ...]: ...
 
     @overload
     def subsample(
         self,
         subsample: float | int,
-        return_indices: bool = False,
-        random_state: int | np.random.Generator | None = None,
         *,
         mask: RasterLike | PointCloudLike | VectorLike | ArrayLike | None = None,
-    ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
+        random_state: int | np.random.Generator | None = None,
+        as_array: bool = False,
+        return_indices: bool = False,
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> PointCloudLike | NDArrayNum | tuple[NDArrayNum, ...]: ...
 
     @profiler.profile("geoutils.pointcloud.base.subsample", memprof=True)
     def subsample(
         self,
         subsample: float | int,
-        return_indices: bool = False,
-        random_state: int | np.random.Generator | None = None,
         *,
         mask: RasterLike | PointCloudLike | VectorLike | ArrayLike | None = None,
-    ) -> NDArrayNum | tuple[NDArrayNum, ...]:
+        random_state: int | np.random.Generator | None = None,
+        as_array: bool = False,
+        return_indices: bool = False,
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> Any:
         """
-        Randomly sample finite point cloud values allowed by mask, without replacement.
+        Randomly sample point rows allowed by mask, without replacement.
 
-        :param subsample: Fraction of eligible finite values to sample when at most 1, otherwise the maximum number
-            of values. The mask is applied before calculating this size.
-        :param return_indices: Whether to return sampled row positions instead of values.
+        :param subsample: Fraction (e.g. 0.1 for 10%) or maximum count (e.g. 10000) of eligible locations to use.
+            A value of 1 keeps all locations.
+        :param mask: Mask of inlier points to consider: True in a boolean array or spatial mask, or inside vector
+            geometries. Arrays must have the same length as the point cloud, point cloud masks must have the same
+            ordered coordinates, and raster masks use nearest interpolation.
         :param random_state: Random generator or seed used to make sampling reproducible.
-        :param mask: Eligible points: True in a boolean array or spatial mask, or inside vector geometries.
-            Arrays must have one entry per point. Point masks must follow the same ordered coordinates;
-            raster masks use nearest interpolation. Point and raster masks must share this point cloud's CRS.
-            Missing mask entries are excluded (e.g. mask=points.data > 0).
-        :returns: One-dimensional NumPy values with the source dtype, or a one-element tuple of indices into the
-            original row order. These indices are positions, independent of any dataframe index labels.
+        :param as_array: Whether to return an array with only sampled values or row indices, instead of a point cloud.
+        :param return_indices: With ``as_array=True``, whether to return sampled row indices instead of values.
+        :param strategy: Random sampling strategy. "topk" keeps the same seeded sample across partitions and therefore
+            gives a deterministic result whether chunked or in-memory; "sequential" draws in row order.
+        :param force_output_to_memory: Bypass automatic cutoff selection and return the complete output in memory.
+        :param mp_config: Point partition size and output file used by multiprocessing. Point output uses GeoPackage;
+            array output uses NumPy format when a sample exceeds one partition. Cannot be combined with Dask input.
+        :returns: A point cloud containing every selected row by default. With ``as_array=True``, returns
+            one-dimensional values or a one-element tuple of positions into the original row order.
         """
 
         return _subsample_pointcloud(
@@ -622,6 +657,10 @@ class PointCloudBase(VectorBase):
             subsample=subsample,
             return_indices=return_indices,
             random_state=random_state,
+            as_array=as_array,
+            strategy=strategy,
+            mp_config=mp_config,
+            force_output_to_memory=force_output_to_memory,
             mask=mask,
         )
 
@@ -670,8 +709,7 @@ class PointCloudBase(VectorBase):
         :param mask_mode: Whether a vector mask keeps locations "inside" or "outside" its geometries.
         :param subsample: Fraction of common finite locations (e.g. 0.1), or maximum count (e.g. 1000); 1 keeps all.
         :param random_state: Seed or random generator for reproducible sampling (e.g. 42).
-        :param strategy: Raster sampling with "topk" or "sequential"; "topk" keeps the same seeded sample across chunk
-            sizes. Point output always uses "sequential".
+        :param strategy: Sampling with "topk" or "sequential"; "topk" keeps the same seeded sample across chunk sizes.
         :param raster_point_mode: Conversion direction: "grid_points" places points on a raster, "resample_raster"
             reads rasters at points. Defaults to at's locations, or this point cloud's locations. Must agree with at.
         :param grid_method: Point gridding by SciPy interpolation ("nearest", "linear", "cubic"), or circular "idw",

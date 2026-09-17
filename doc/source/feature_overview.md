@@ -90,7 +90,7 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
   - NumPy / SciPy
 
 * - {meth}`~geoutils.Raster.subsample()`
-  - Randomly sample valid values. Chunk-invariant seed ensures reproducibility.
+  - Randomly sample raster cells as a point cloud or value/index array.
   - ✅
   - NumPy
 

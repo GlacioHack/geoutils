@@ -20,6 +20,7 @@ from pyproj.crs import CompoundCRS
 
 import geoutils as gu
 from geoutils import PointCloud, Raster
+from geoutils._dispatch import is_dask_dataframe
 from geoutils.multiproc import MultiprocConfig
 from geoutils.pointcloud.base import PointCloudBase
 from geoutils.pointcloud.pd_accessor import PointCloudAccessor
@@ -473,11 +474,12 @@ class TestAccessorDask:
         )
         assert not ds.pc.is_loaded
 
-        # Subsampling computes only the requested small point selection
-        assert_output_equal(
-            pc.subsample(subsample=2, random_state=42),
-            ds.pc.subsample(subsample=2, random_state=42),
-        )
+        # Subsampling keeps the requested point rows lazy until the Dask result is computed
+        expected = pc.subsample(subsample=2, random_state=42)
+        result = ds.pc.subsample(subsample=2, random_state=42)
+        assert is_dask_dataframe(result)
+        assert result.pc.data_column == "b1"
+        assert_geodataframe_equal(expected.ds, result.compute())
         assert not ds.pc.is_loaded
 
     @pytest.mark.skipif(find_spec("laspy") is None, reason="Only runs if laspy is installed.")

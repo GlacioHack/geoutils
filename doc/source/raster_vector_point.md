@@ -222,13 +222,13 @@ plt.tight_layout()
 
 ### Raster to points
 
-{func}`geoutils.Raster.to_pointcloud`
+{func}`geoutils.Raster.subsample`
 
 **A raster can be converted exactly into a point cloud**, which each pixel in the raster is associated to its pixel
 values to create a point cloud on a regular grid.
 
 ```{code-cell} ipython3
-pc = rast.to_pointcloud(subsample=10000)
+pc = rast.subsample(10000)
 ```
 
 ```{code-cell} ipython3

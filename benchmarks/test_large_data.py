@@ -181,7 +181,7 @@ class TestLargeData:
         if backend == "dask":
             pytest.importorskip("dask")
             pytest.importorskip("distributed")
-            if operation in ("grid", "to_pointcloud"):
+            if operation in ("grid", "subsample", "to_pointcloud"):
                 pytest.importorskip("dask_geopandas")
 
         # The uncompressed input must exceed the configured limit before claiming a large data test
@@ -242,7 +242,7 @@ class TestLargeData:
 
         # Request more point rows than one raster chunk so point conversion checks its bounded cutoff path
         config = large_data_config
-        if split_operation_case(case_name)[1] == "to_pointcloud":
+        if split_operation_case(case_name)[1] in ("subsample", "to_pointcloud"):
             config = replace(large_data_config, subsample_size=int(np.prod(large_data_config.chunks)) + 1)
 
         self._check_case(case_name=case_name, large_data_config=config)

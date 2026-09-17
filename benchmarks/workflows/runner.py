@@ -36,7 +36,7 @@ from benchmarks.workflows.registry import (
     OperationStrategyName,
     resolve_operation_parameters,
 )
-from geoutils._dispatch import is_dask_array, is_dask_dataframe
+from geoutils._dispatch import is_dask_dataframe
 from geoutils._misc import (
     _get_process_mem_mb,
     _prepare_benchmark_process,
@@ -565,7 +565,7 @@ class BenchmarkRunner:
 
         from geoutils.multiproc import MultiprocConfig
 
-        suffix = ".gpkg" if operation == "to_pointcloud" else ".tif"
+        suffix = ".gpkg" if operation in ("subsample", "to_pointcloud") else ".tif"
         return MultiprocConfig(
             chunks=self.config.chunks,
             outfile=self._output_path(operation, suffix=suffix),
@@ -834,32 +834,34 @@ class BenchmarkRunner:
             return self._grouped_statistics(raster, operation_method, operation_strategy)
 
         if operation == "subsample":
-            # Return only a fixed-size selection from the much larger raster
-            mp_config = self._multiproc_config(operation) if self.backend == "multiprocessing" else None
-            subsample_kwargs: dict[str, Any] = {"random_state": 42}
-            if operation_strategy is not None:
-                subsample_kwargs["strategy"] = operation_strategy
-            sample = (
-                raster.rst.subsample(
-                    self.config.subsample_size,
-                    **subsample_kwargs,
-                )
-                if self.backend == "dask"
-                else raster.subsample(
-                    self.config.subsample_size,
-                    **subsample_kwargs,
-                    mp_config=mp_config,
-                )
-            )
+            # Build a fixed-size point result while the source remains larger than worker memory
+            options = {"subsample": self.config.subsample_size, "random_state": 42}
             if self.backend == "dask":
-                if not is_dask_array(sample) or raster._in_memory:
-                    raise AssertionError("Dask subsample() input and output must remain lazy before computation.")
-                sample = sample.compute()
+                points = raster.rst.subsample(**options)
+                if not is_dask_dataframe(points) or points.pc.is_loaded:
+                    raise AssertionError("Dask subsample() output must remain lazy before computation.")
+                dataframe = points.compute()
+                if points.pc.is_loaded:
+                    raise AssertionError("Computing a Dask result must not load its original point cloud wrapper.")
                 if raster._in_memory:
-                    raise AssertionError("Computing a Dask sample must not load its source raster.")
-            elif raster.is_loaded:
-                raise AssertionError("Multiprocessing subsample() must not load its source raster.")
-            return float(np.asarray(sample).mean())
+                    raise AssertionError("Computing a Dask subsample must not load its source raster.")
+            else:
+                points = raster.subsample(**options, mp_config=self._multiproc_config(operation))
+                if points.is_loaded:
+                    raise AssertionError("Multiprocessing subsample() output must remain unloaded.")
+                self._last_output_file = str(points.name)
+                import pyogrio
+
+                dataframe = pyogrio.read_dataframe(self._last_output_file, columns=["b1"])
+                if points.is_loaded:
+                    raise AssertionError("Reading the output file must not load its PointCloud wrapper.")
+                if raster.is_loaded:
+                    raise AssertionError("Multiprocessing subsample() must not load its source raster.")
+
+            # Check the requested count and constant source values without retaining the complete raster
+            if len(dataframe) != self.config.subsample_size:
+                raise AssertionError("Subsampling returned an unexpected number of rows.")
+            return float(dataframe["b1"].mean())
 
         if operation == "to_pointcloud":
             # Build a fixed-size point result while the source remains larger than worker memory

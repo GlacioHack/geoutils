@@ -36,6 +36,7 @@ from geoutils._typing import ArrayLike, NDArrayBool, NDArrayNum
 from geoutils.interface.gridding import GriddingMethod
 from geoutils.raster.array import _selected_raster_data
 from geoutils.sampling.subsampling import _sample_valid_indices
+from geoutils.sampling.subsampling import _subsample as _subsample_values
 from geoutils.sampling.support import (
     _aligned_pointcloud,
     _aligned_raster,
@@ -611,8 +612,13 @@ def _cosample_raster_mp(
     if subsample == 1:
         has_valid = any(map_blocks(_wrapper_has_finite_raster_block, validity_raster, intermediate))
     else:
-        indices = validity_raster.subsample(
-            subsample, return_indices=True, random_state=random_state, strategy=strategy, mp_config=intermediate
+        indices = _subsample_values(
+            validity_raster,
+            subsample,
+            return_indices=True,
+            random_state=random_state,
+            strategy=strategy,
+            mp_config=intermediate,
         )
         has_valid = len(indices[0]) > 0
 
@@ -774,6 +780,7 @@ def _cosample_on_points(
     mask_mode: str,
     subsample: int | float,
     random_state: int | np.random.Generator | None,
+    strategy: Literal["sequential", "topk"],
     resample_method: InterpolationMethod,
     resample_kwargs: Mapping[str, Any],
     align: Literal["raise", "reproject"],
@@ -851,7 +858,7 @@ def _cosample_on_points(
     selected_rows = common_validity
     if subsample != 1:
         (indices,) = _sample_valid_indices(
-            common_validity, subsample=subsample, random_state=random_state, strategy="sequential"
+            common_validity, subsample=subsample, random_state=random_state, strategy=strategy
         )
         if indices.size == 0:
             raise ValueError("There is no finite data common to all cosampled values.")
@@ -974,8 +981,7 @@ def _cosample(
     :param mask_mode: Whether a vector mask keeps locations "inside" or "outside" its geometries.
     :param subsample: Fraction of common finite locations (e.g. 0.1), or maximum count (e.g. 1000); 1 keeps all.
     :param random_state: Seed or random generator for reproducible sampling (e.g. 42).
-    :param strategy: Raster sampling with "topk" or "sequential"; "topk" keeps the same seeded sample across chunk
-        sizes. Point output always uses "sequential".
+    :param strategy: Sampling with "topk" or "sequential"; "topk" keeps the same seeded sample across chunk sizes.
     :param raster_point_mode: Conversion direction: "grid_points" places points on a raster, "resample_raster" reads
         rasters at points. Defaults to at's locations, or point locations when available. Must agree with at.
     :param grid_method: Point gridding by SciPy interpolation ("nearest", "linear", "cubic"), or circular "idw",
@@ -1097,6 +1103,7 @@ def _cosample(
             mask_mode=mask_mode,
             subsample=subsample,
             random_state=random_state,
+            strategy=strategy,
             resample_method=cast("InterpolationMethod", resample_method),
             resample_kwargs=resample_kwargs,
             align=align,
