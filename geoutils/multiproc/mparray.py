@@ -104,6 +104,7 @@ class MultiprocConfig:
         :param cluster: A cluster object for distributed computing, or None for sequential processing.
         """
         self.chunks = _validate_chunk_size(chunks)
+        self._outfile_is_temporary = outfile is None
         if outfile is None:
             with tempfile.NamedTemporaryFile() as tmp:
                 self.outfile = tmp.name
@@ -117,7 +118,10 @@ class MultiprocConfig:
         self.cluster = cluster
 
     def copy(self) -> MultiprocConfig:
-        return MultiprocConfig(chunks=self.chunks, outfile=self.outfile, driver=self.driver, cluster=self.cluster)
+        """Copy this configuration, reserving a fresh path when the output is implicit."""
+
+        outfile = None if self._outfile_is_temporary else self.outfile
+        return MultiprocConfig(chunks=self.chunks, outfile=outfile, driver=self.driver, cluster=self.cluster)
 
     @contextmanager
     def temporary(self) -> Iterator[MultiprocConfig]:

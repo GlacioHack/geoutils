@@ -66,6 +66,7 @@ class BenchmarkConfig:
     profile_interval: float = 0.05
     raster_value: float = 1.0
     subsample_size: int = 2048
+    pointcloud_subsample_size: int | None = None
     ninterp: int = 2048
     point_partition_size: int = 16
     polygon_regions_per_axis: int = 1
@@ -890,8 +891,14 @@ class BenchmarkRunner:
             return value
 
         if operation == "to_pointcloud":
-            # Convert every raster cell while the source remains larger than worker memory
-            options = {"subsample": 1, "force_pixel_offset": "center"}
+            # Convert every cell by default, or use a bounded sample for the larger-than-memory contract
+            point_count = self.config.pointcloud_subsample_size
+            options = {
+                "subsample": 1 if point_count is None else point_count,
+                "random_state": 42,
+                "force_pixel_offset": "center",
+            }
+            expected_count = self.config.shape[0] * self.config.shape[1] if point_count is None else point_count
             if self.backend == "dask":
                 points = raster.rst.to_pointcloud(**options)
                 if not is_dask_dataframe(points) or points.pc.is_loaded:
@@ -914,8 +921,8 @@ class BenchmarkRunner:
                 if raster.is_loaded:
                     raise AssertionError("Multiprocessing point conversion must not load its source raster.")
 
-            # Check the complete cell count and constant source values without retaining the complete raster
-            if output_count != self.config.shape[0] * self.config.shape[1]:
+            # Check the requested count and constant source values without retaining the complete raster
+            if output_count != expected_count:
                 raise AssertionError("Point conversion returned an unexpected number of rows.")
             return value
 

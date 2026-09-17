@@ -240,10 +240,14 @@ class TestLargeData:
     def test_operation_stays_out_of_core(self, case_name: str, large_data_config: BenchmarkConfig) -> None:
         """Complete one larger-than-memory operation without loading its full raster."""
 
-        # Request more point rows than one raster chunk so point conversion checks its bounded cutoff path
+        # Request more point rows than one raster chunk so point operations check their bounded cutoff paths
         config = large_data_config
-        if split_operation_case(case_name)[1] in ("subsample", "to_pointcloud"):
-            config = replace(large_data_config, subsample_size=int(np.prod(large_data_config.chunks)) + 1)
+        operation = split_operation_case(case_name)[1]
+        sample_size = int(np.prod(large_data_config.chunks)) + 1
+        if operation == "subsample":
+            config = replace(large_data_config, subsample_size=sample_size)
+        elif operation == "to_pointcloud":
+            config = replace(large_data_config, pointcloud_subsample_size=sample_size)
 
         self._check_case(case_name=case_name, large_data_config=config)
 

@@ -639,6 +639,24 @@ class TestArraySubsampleChunked:
         np.testing.assert_array_equal(result_array, expected_array)
         assert not source.is_loaded
 
+    def test_subsample__multiproc_implicit_outputs_are_distinct(self) -> None:
+        """Checks that repeated memory-mapped samples use separate implicit output files."""
+
+        # Request more values than one 2 x 3 tile so each call returns a memory-mapped array
+        values = np.arange(20).reshape((4, 5))
+        source = gu.Raster.from_array(values, from_origin(0, 4, 1, 1), 32633)
+        config = MultiprocConfig(chunks=(2, 3))
+
+        # Keep the first map open while writing another result through the same configuration
+        first = _subsample_values(source, 7, random_state=42, strategy="topk", mp_config=config)
+        second = _subsample_values(source, 7, random_state=43, strategy="topk", mp_config=config)
+
+        # Separate backing files let both results remain readable on platforms that lock mapped files
+        assert isinstance(first, np.memmap) and isinstance(second, np.memmap)
+        assert first.filename != second.filename
+        np.testing.assert_array_equal(first, _subsample_values(source, 7, random_state=42, strategy="topk"))
+        np.testing.assert_array_equal(second, _subsample_values(source, 7, random_state=43, strategy="topk"))
+
     def test_subsample__multiproc_force_output_to_memory(
         self,
         monkeypatch: pytest.MonkeyPatch,

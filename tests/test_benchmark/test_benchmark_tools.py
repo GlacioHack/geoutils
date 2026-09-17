@@ -42,7 +42,7 @@ from benchmarks.workflows.grouped_reference import (
     compute_grouped_reference,
     prepare_grouped_reference,
 )
-from benchmarks.workflows.runner import BenchmarkConfig
+from benchmarks.workflows.runner import BenchmarkConfig, BenchmarkRunner
 from benchmarks.workflows.variography import (
     prepare_pair_pointcloud,
     prepare_pair_raster,
@@ -125,6 +125,35 @@ class TestComparisonReport:
         assert (tmp_path / DOCUMENTATION_TIME_PLOT).is_file()
         assert (tmp_path / DOCUMENTATION_MEMORY_PLOT).is_file()
         assert (tmp_path / DOCUMENTATION_DATA).is_file()
+
+
+@pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
+class TestBenchmarkRunner:
+    """Test module for bounded operation outputs produced by BenchmarkRunner."""
+
+    @pytest.mark.parametrize("execution_mode", ["dask", "multiprocessing"])
+    def test_to_pointcloud__bounded_sample(
+        self, execution_mode: Literal["dask", "multiprocessing"], tmp_path: Path
+    ) -> None:
+        """Checks that the large-data point conversion can request a bounded sample from either backend."""
+
+        if execution_mode == "dask":
+            pytest.importorskip("distributed")
+
+        # Request more point rows than one 3 x 4 raster chunk to use the bounded cutoff path
+        config = BenchmarkConfig(
+            shape=(8, 10),
+            chunks=(3, 4),
+            pointcloud_subsample_size=17,
+            directory=str(tmp_path / execution_mode),
+        )
+
+        # Run the shared workflow and let its internal count check validate all 17 output rows
+        with BenchmarkRunner(execution_mode, config) as runner:
+            result = runner.run("to_pointcloud", profile=False)
+
+        # The constant raster gives the same compact correctness value through both backends
+        assert result.value == config.raster_value
 
 
 @pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")

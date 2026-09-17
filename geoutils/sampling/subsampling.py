@@ -2008,6 +2008,8 @@ def _multiproc_subsample(
     sample_exceeds_largest_chunk = _subsample_exceeds_largest_chunk(subsample_size, largest_chunk)
     write_chunked = sample_exceeds_largest_chunk and not force_output_to_memory and not return_linear_indices
     if write_chunked and (subsample == 1 or strategy == "topk"):
+        # Give each implicit memory-mapped result its own file because Windows cannot replace an open mapped file
+        output_config = config.copy()
         if subsample == 1:
             subsample_meta = SubsampleMeta(sample_size=subsample_size, seed=0, cutoff=None)
         else:
@@ -2031,7 +2033,7 @@ def _multiproc_subsample(
             rst,
             tile_ids,
             subsample_meta,
-            config,
+            output_config,
             return_indices,
             band,
             skip_nodata,
