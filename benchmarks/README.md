@@ -10,8 +10,8 @@ Mainly, it contains tools for running:
 
 ## Organization
 
-- `workflows/` defines deterministic inputs (e.g. raster/point-cloud data), operations (e.g. ``reproject()``, ``grid()``), 
-  methods (e.g. ``resampling="linear"``), calculation engines (e.g., SciPy, Numba), chunk strategies (e.g., "dense" or 
+- `workflows/` defines deterministic inputs (e.g. raster/point-cloud data), operations (e.g. ``reproject()``, ``grid()``),
+  methods (e.g. ``resampling="linear"``), calculation engines (e.g., SciPy, Numba), chunk strategies (e.g., "dense" or
   "sparse" for grouped stats), and execution modes (eager, Dask, multiprocessing),
   to setup all possible computations that can be run by a given suite (ASV benchmark + large data tests),
 - `asv_suite/operations.py` sets up ASV to measure individual operations at one fixed configuration,
@@ -19,7 +19,7 @@ Mainly, it contains tools for running:
 - `asv_suite/render_results.py` renders the raw measurements into comparisons and graphics used by the GitHub pages and documentation,
 - `gdal_comparison/` contains GDAL CLI equivalent operations for performance comparison,
 - `pdal_comparison/` contains PDAL pipelines equivalent operations for performance comparison,
-- `test_large_data.py` is a Pytest module to verify that every supported Dask/Multiprocessingoperation computes correctly without 
+- `test_large_data.py` is a Pytest module to verify that every supported Dask/Multiprocessingoperation computes correctly without
   loading the complete raster into memory.
 
 When running ASV, local outputs are generated under the gitignored `results/` directory:
@@ -81,26 +81,26 @@ python -m benchmarks.asv_suite.render_results --doc-only --doc-dir benchmarks/re
 
 ### How our ASV benchmarks run in CI
 
-Three workflows are related to ASV benchmark in our continuous integration. 
+Three workflows are related to ASV benchmark in our continuous integration.
 
-1. For every PR commit, `benchmark-asv-check` runs a quick check (~10min) of benchmark setups (it uses the `GEOUTILS_ASV_PR_CHECK=1` 
+1. For every PR commit, `benchmark-asv-check` runs a quick check (~10min) of benchmark setups (it uses the `GEOUTILS_ASV_PR_CHECK=1`
 environment variable to run quick check on reduced parameters, and otherwise relies on ``asv check``).
 
-2. For every PR merge into `main`, or on weekly schedule, `benchmark-asv` runs the full suite (1h+) and records 
-the performance results to an `asv-results` branch on the GeoUtils repository (relying on ``asv run``). 
+2. For every PR merge into `main`, or on weekly schedule, `benchmark-asv` runs the full suite (1h+) and records
+the performance results to an `asv-results` branch on the GeoUtils repository (relying on ``asv run``).
 
-3. After a successful run of the previous `benchmark-asv`, `benchmark-publish` automatically rebuilds the 
+3. After a successful run of the previous `benchmark-asv`, `benchmark-publish` automatically rebuilds the
 saved history from `asv-results`, re-renders the graphics, and deploys the benchmarking webpage to GitHub Pages.
 
-Note that the last two workflows can be triggered manually. Additionally, the user documentation on ReadTheDocs contains direct 
-links to the latest graphics published on the Benchmarking page (which are therefore always updated to the latest benchmark build, 
+Note that the last two workflows can be triggered manually. Additionally, the user documentation on ReadTheDocs contains direct
+links to the latest graphics published on the Benchmarking page (which are therefore always updated to the latest benchmark build,
 on all documentation versions).
 
 
 ## Large data tests
 
-Normal Pytest tests (that run across all OSs and Python versions) skip large data tests by default. 
-In the CI, they run once on Ubuntu with Python 3.12 for every PR commit. 
+Normal Pytest tests (that run across all OSs and Python versions) skip large data tests by default.
+In the CI, they run once on Ubuntu with Python 3.12 for every PR commit.
 
 Locally, run the complete suite with:
 
@@ -108,5 +108,5 @@ Locally, run the complete suite with:
 python -m pytest --large-data -m large_data -ra
 ```
 
-To save time while developing, select one specific test with `-k`  and/or add `--lf` to repeat only failed cases. 
+To save time while developing, select one specific test with `-k`  and/or add `--lf` to repeat only failed cases.
 Other practical instructions and environment variables to set are documented at the top of `test_large_data.py`.

@@ -11,7 +11,7 @@ output file is incorrect, a Dask worker is replaced, multiprocessing workers dis
 reaches the size of the full raster.
 Otherwise, it passes.
 
-Default Pytest runs skip this module. To run it, use``python -m pytest --large-data -m large_data -ra``.
+Default Pytest runs skip this module. To run it, use ``python -m pytest --large-data -m large_data -ra``.
 
 Size/chunk parameters can be modified by defining environment variables before the above call (defaults shown below):
 ``GEOUTILS_LARGE_DATA_SHAPE`` (12288), ``GEOUTILS_LARGE_DATA_CHUNKS`` (1024),
