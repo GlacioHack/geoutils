@@ -479,6 +479,38 @@ class TestRasterPointChunked:
         np.testing.assert_array_equal(np.sort(multiprocessing_result["b1"].to_numpy()), np.sort(expected_values))
         assert not multiprocessing_source.is_loaded
 
+    @pytest.mark.parametrize("suffix", [".las", ".laz"])
+    def test_to_pointcloud__multiproc_las_elevation(self, suffix: str, tmp_path: Path) -> None:
+        """Checks that LAS and LAZ conversion stores the main raster band as elevation."""
+
+        # Write three raster bands with exact integer values and projected pixel-center coordinates
+        main_values = np.arange(80, dtype=np.int16).reshape((8, 10))
+        values = np.stack((main_values, main_values + 100, main_values + 200))
+        source_file = tmp_path / "las-point-source.tif"
+        output_file = tmp_path / f"raster-points{suffix}"
+        gu.Raster.from_array(values, rio.transform.from_origin(500000, 8600000, 20, 20), 32633).to_file(source_file)
+        expected = gu.Raster(source_file).to_pointcloud(auxiliary_data_bands=[2, 3], force_pixel_offset="center").ds
+        source = gu.Raster(source_file)
+
+        # Convert every raster cell, mapping band one to Z and preserving the other bands as extra dimensions
+        result = source.to_pointcloud(
+            auxiliary_data_bands=[2, 3],
+            force_pixel_offset="center",
+            mp_config=MultiprocConfig(chunks=(3, 4), outfile=str(output_file)),
+        )
+
+        # Compare the complete file after sorting the tile-ordered result by its X/Y coordinates
+        assert output_file.exists() and not source.is_loaded and not result.is_loaded
+        assert result.data_column == "Z"
+        result.load(columns=["Z", "b2", "b3"])
+        expected_order = np.lexsort((expected.geometry.x, expected.geometry.y))
+        result_order = np.lexsort((result.geometry.x, result.geometry.y))
+        np.testing.assert_allclose(result.geometry.x.iloc[result_order], expected.geometry.x.iloc[expected_order])
+        np.testing.assert_allclose(result.geometry.y.iloc[result_order], expected.geometry.y.iloc[expected_order])
+        np.testing.assert_array_equal(result.data[result_order], expected["b1"].iloc[expected_order])
+        np.testing.assert_array_equal(result.ds["b2"].iloc[result_order], expected["b2"].iloc[expected_order])
+        np.testing.assert_array_equal(result.ds["b3"].iloc[result_order], expected["b3"].iloc[expected_order])
+
     def test_to_pointcloud__error_dask_with_multiproc(self) -> None:
         """Checks that to_pointcloud() rejects multiprocessing with Dask without loading the source."""
 

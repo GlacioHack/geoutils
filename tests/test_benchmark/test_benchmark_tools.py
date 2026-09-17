@@ -1,4 +1,4 @@
-"""Minimal tests for benchmark workflows, reports and GDAL commands."""
+"""Minimal tests for benchmark workflows, reports and external CLI commands."""
 
 from __future__ import annotations
 
@@ -33,6 +33,10 @@ from benchmarks.asv_suite.render_results import (
 from benchmarks.gdal_comparison.commands import (
     COMPARISON_OPERATIONS,
     build_gdal_command,
+)
+from benchmarks.pdal_comparison.commands import (
+    PDAL_COMPARISON_OPERATIONS,
+    build_pdal_command,
 )
 from benchmarks.workflows.grouped_reference import (
     compute_grouped_reference,
@@ -266,3 +270,58 @@ class TestGdalCommands:
         assert expected_source in command
         assert comparison.output_file in command
         assert command[cache_index + 1] == str(config.gdal_cachemax_mb)
+
+
+class TestPdalCommands:
+    """Test module for building PDAL pipelines used by external benchmark comparisons."""
+
+    @pytest.mark.parametrize("operation", PDAL_COMPARISON_OPERATIONS)
+    @pytest.mark.parametrize("driver", ["GPKG", "LAS", "LAZ"])
+    def test_comparison_command__essential_stages(
+        self,
+        operation: str,
+        driver: Literal["GPKG", "LAS", "LAZ"],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """Checks that each PDAL comparison reads the raster and writes the expected point output."""
+
+        # Return the command name directly because this test checks the pipeline without running PDAL
+        monkeypatch.setattr("benchmarks.pdal_comparison.commands._require_command", lambda name: name)
+        config = BenchmarkConfig(
+            shape=(64, 96),
+            chunks=(32, 32),
+            subsample_size=17,
+            directory=str(tmp_path),
+            point_output_driver=driver,
+        )
+
+        # Build the pipeline and read the JSON passed to the PDAL command
+        comparison = build_pdal_command(operation, config, raster_file="source-raster.tif")  # type: ignore[arg-type]
+        pipeline = json.loads(Path(comparison.pipeline_file).read_text(encoding="utf-8"))["pipeline"]
+        stage_types = [stage["type"] for stage in pipeline]
+
+        # Conversion keeps every point, while subsampling randomizes first and keeps the requested count
+        writer = "writers.ogr" if driver == "GPKG" else "writers.las"
+        point_stages = ["readers.gdal"]
+        if driver in ("LAS", "LAZ"):
+            point_stages.append("filters.ferry")
+            assert pipeline[1]["dimensions"] == "band_1=>Z"
+        expected_stages = [*point_stages, writer]
+        if operation == "subsample":
+            expected_stages = [*point_stages, "filters.randomize", "filters.head", writer]
+            assert pipeline[-3]["seed"] == 42
+            assert pipeline[-2]["count"] == config.subsample_size
+        assert stage_types == expected_stages
+
+        # Both paths use the configured cache, source raster and point output
+        assert comparison.command == ["pdal", "pipeline", comparison.pipeline_file]
+        assert pipeline[0]["filename"] == "source-raster.tif"
+        assert pipeline[0]["gdalopts"] == [f"GDAL_CACHEMAX={config.gdal_cachemax_mb}"]
+        assert pipeline[-1]["filename"] == comparison.output_file
+        assert Path(comparison.output_file).suffix == f".{driver.lower()}"
+        if driver == "GPKG":
+            assert pipeline[-1]["ogrdriver"] == "GPKG"
+        else:
+            assert pipeline[-1]["compression"] == (driver == "LAZ")
+            assert pipeline[-1]["extra_dims"] == "all"

@@ -8,10 +8,12 @@ This directory contains repeatable performance measurements and pass/fail large 
   and result computation shared by every suite (ASV benchmark + large data tests),
 - `asv_suite/operations.py` measures operations without a dedicated scaling comparison at one fixed configuration,
 - `asv_suite/comparisons.py` defines one-axis comparisons and generates their valid ASV cases and classes, with fixed
-  Numba worker checks and the GDAL CLI kept as a separate external reference,
-- `asv_suite/render_results.py` renders the raw measurements into method, engine, strategy and execution-mode
-  comparisons and the two concise graphics used by the documentation,
+  Numba worker checks and external CLI references kept separate,
+- `asv_suite/render_results.py` renders the raw measurements into method, engine, strategy, execution-mode and point
+  output format comparisons and the two concise graphics used by the documentation,
 - `gdal_comparison/` contains the GDAL CLI equivalent operations for performance comparison,
+- `pdal_comparison/` contains PDAL pipelines for raster point conversion and subsampling comparisons in GeoPackage,
+  LAS and LAZ,
 - `test_large_data.py` verifies that every supported Dask and Multiprocessing operation computes correctly without
   loading the complete raster into memory.
 

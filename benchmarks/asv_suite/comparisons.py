@@ -10,6 +10,8 @@ from typing import Literal, cast
 from benchmarks.asv_suite import asv_parameter_values, asv_pr_check_enabled
 from benchmarks.gdal_comparison.commands import ComparisonOperation
 from benchmarks.gdal_comparison.runner import GdalRunner
+from benchmarks.pdal_comparison.commands import PdalComparisonOperation
+from benchmarks.pdal_comparison.runner import PdalRunner
 from benchmarks.workflows.grouped_reference import (
     compute_grouped_reference,
     prepare_grouped_reference,
@@ -32,11 +34,12 @@ from geoutils.profiler import profile_call
 # Comparison dimensions and case helpers #
 #########################################
 
-# Comparisons vary one GeoUtils choice at a time: method, calculation engine, chunk strategy or execution mode
+# Comparisons vary one choice at a time: method, calculation engine, chunk strategy, execution mode or output format
 # The label dictionaries give the stored values readable names in plots
-ComparisonDimension = Literal["method", "calculation_engine", "strategy", "execution_mode"]
-ExternalReference = Literal["gdal_cli", "flox"]
+ComparisonDimension = Literal["method", "calculation_engine", "strategy", "execution_mode", "output_format"]
+ExternalReference = Literal["gdal_cli", "pdal_cli", "flox"]
 GDAL_CLI_LABEL = "GDAL CLI"
+PDAL_CLI_LABEL = "PDAL CLI"
 
 EXECUTION_MODE_LABELS: dict[ExecutionMode, str] = {
     "eager": "Eager",
@@ -85,6 +88,7 @@ class BenchmarkCase:
     calculation_engine: CalculationEngine | None
     strategy: OperationStrategyName | None
     execution_mode: ExecutionMode
+    output_driver: Literal["GPKG", "LAS", "LAZ"] = "GPKG"
     pr_check: bool = False
 
     @property
@@ -93,6 +97,7 @@ class BenchmarkCase:
 
         values = (
             self.execution_mode,
+            None if self.output_driver == "GPKG" else self.output_driver,
             self.method,
             self.calculation_engine,
             self.strategy,
@@ -109,6 +114,7 @@ class ExternalReferenceCase:
     operation: OperationName
     method: str | None
     external_reference: ExternalReference
+    output_driver: Literal["GPKG", "LAS", "LAZ"] = "GPKG"
     pr_check: bool = False
     strategy: None = None
     execution_mode: ExecutionMode | None = None
@@ -117,7 +123,13 @@ class ExternalReferenceCase:
     def benchmark_class(self) -> str:
         """Return the generated public ASV class name for this reference."""
 
-        values = (self.external_reference, self.execution_mode, self.method, self.comparison_group)
+        values = (
+            self.external_reference,
+            None if self.output_driver == "GPKG" else self.output_driver,
+            self.execution_mode,
+            self.method,
+            self.comparison_group,
+        )
         return "".join(_class_token(value) for value in values if value is not None)
 
 
@@ -130,6 +142,7 @@ def _execution_cases(
     strategy: OperationStrategyName | None = None,
     execution_modes: tuple[ExecutionMode, ...] = ("eager", "dask", "multiprocessing"),
     pr_modes: tuple[ExecutionMode, ...] = (),
+    output_driver: Literal["GPKG", "LAS", "LAZ"] = "GPKG",
 ) -> tuple[BenchmarkCase, ...]:
     """Generate an execution-mode comparison around fixed numerical dimensions."""
 
@@ -141,6 +154,7 @@ def _execution_cases(
             calculation_engine,
             strategy if execution_mode != "eager" else None,
             execution_mode,
+            output_driver=output_driver,
             pr_check=execution_mode in pr_modes,
         )
         for execution_mode in execution_modes
@@ -241,6 +255,7 @@ def _merge_cases(*groups: tuple[BenchmarkCase, ...]) -> tuple[BenchmarkCase, ...
                 case.calculation_engine,
                 case.strategy,
                 case.execution_mode,
+                case.output_driver,
             )
             existing = cases.get(key)
             cases[key] = replace(case, pr_check=True) if existing is not None and case.pr_check else existing or case
@@ -252,11 +267,20 @@ def _external_case(
     operation: OperationName,
     method: str | None,
     *,
+    external_reference: Literal["gdal_cli", "pdal_cli"] = "gdal_cli",
     pr_check: bool = False,
+    output_driver: Literal["GPKG", "LAS", "LAZ"] = "GPKG",
 ) -> ExternalReferenceCase:
-    """Define one GDAL CLI reference equivalent to a GeoUtils operation."""
+    """Define one external CLI reference equivalent to a GeoUtils operation."""
 
-    return ExternalReferenceCase(comparison_group, operation, method, "gdal_cli", pr_check=pr_check)
+    return ExternalReferenceCase(
+        comparison_group,
+        operation,
+        method,
+        external_reference,
+        output_driver=output_driver,
+        pr_check=pr_check,
+    )
 
 
 ##############################
@@ -289,7 +313,30 @@ _SUBSAMPLE_MODES = _execution_cases(
     execution_modes=("dask", "multiprocessing"),
 )
 _TO_POINTCLOUD_MODES = _execution_cases(
-    "to-pointcloud-size", "to_pointcloud", None, None, execution_modes=("dask", "multiprocessing")
+    "to-pointcloud-raster-size", "to_pointcloud", None, None, execution_modes=("dask", "multiprocessing")
+)
+_POINT_OUTPUT_DRIVERS: tuple[Literal["LAS", "LAZ"], ...] = ("LAS", "LAZ")
+_LAS_SUBSAMPLE_MODES = tuple(
+    _execution_cases(
+        "subsample-las-laz-size",
+        "subsample",
+        None,
+        None,
+        execution_modes=("multiprocessing",),
+        output_driver=driver,
+    )[0]
+    for driver in _POINT_OUTPUT_DRIVERS
+)
+_LAS_TO_POINTCLOUD_MODES = tuple(
+    _execution_cases(
+        "to-pointcloud-las-laz-size",
+        "to_pointcloud",
+        None,
+        None,
+        execution_modes=("multiprocessing",),
+        output_driver=driver,
+    )[0]
+    for driver in _POINT_OUTPUT_DRIVERS
 )
 
 # Isolate input size, chunk size, membership layout and group count for shared grouped-statistic kernels
@@ -423,6 +470,8 @@ BENCHMARK_CASES = _merge_cases(
     _RASTERIZATION_MODES,
     _SUBSAMPLE_MODES,
     _TO_POINTCLOUD_MODES,
+    _LAS_SUBSAMPLE_MODES,
+    _LAS_TO_POINTCLOUD_MODES,
     *tuple(_GRID_MODE_CASES.values()),
     _GRID_METHOD_CASES,
     *tuple(_GRID_ENGINE_CASES.values()),
@@ -444,14 +493,52 @@ _GRID_REFERENCES = {
     for method in _GRID_METHODS
 }
 _GRID_POINT_REFERENCE = _external_case("gridding-point-count", "grid", "nearest")
+_SUBSAMPLE_REFERENCE = _external_case(
+    "subsample-size",
+    "subsample",
+    None,
+    external_reference="pdal_cli",
+    pr_check=True,
+)
+_TO_POINTCLOUD_REFERENCE = _external_case(
+    "to-pointcloud-raster-size",
+    "to_pointcloud",
+    None,
+    external_reference="pdal_cli",
+    pr_check=True,
+)
+_LAS_SUBSAMPLE_REFERENCES = tuple(
+    _external_case(
+        "subsample-las-laz-size",
+        "subsample",
+        None,
+        external_reference="pdal_cli",
+        output_driver=driver,
+    )
+    for driver in _POINT_OUTPUT_DRIVERS
+)
+_LAS_TO_POINTCLOUD_REFERENCES = tuple(
+    _external_case(
+        "to-pointcloud-las-laz-size",
+        "to_pointcloud",
+        None,
+        external_reference="pdal_cli",
+        output_driver=driver,
+    )
+    for driver in _POINT_OUTPUT_DRIVERS
+)
 
-# Collect GDAL runs separately because the CLI is neither a GeoUtils engine nor an execution mode
+# Collect external runs separately because they are neither GeoUtils engines nor execution modes
 EXTERNAL_REFERENCE_CASES = (
     _REPROJECTION_REFERENCE,
     _POLYGONIZATION_REFERENCE,
     _RASTERIZATION_REFERENCE,
     *_GRID_REFERENCES.values(),
     _GRID_POINT_REFERENCE,
+    _SUBSAMPLE_REFERENCE,
+    _TO_POINTCLOUD_REFERENCE,
+    *_LAS_SUBSAMPLE_REFERENCES,
+    *_LAS_TO_POINTCLOUD_REFERENCES,
     *_GROUPED_FLOX_REFERENCES,
 )
 
@@ -485,12 +572,34 @@ def _comparison_series(
     dimension: ComparisonDimension,
     external_reference: ExternalReferenceCase | None = None,
 ) -> tuple[tuple[str, str], ...]:
-    """Return labelled ASV classes for one plot, optionally followed by the GDAL CLI."""
+    """Return labelled ASV classes for one plot, optionally followed by an external CLI."""
 
     series = tuple((_series_label(case, dimension), case.benchmark_class) for case in cases)
     if external_reference is not None:
-        return (*series, (GDAL_CLI_LABEL, external_reference.benchmark_class))
+        external_label = {
+            "gdal_cli": GDAL_CLI_LABEL,
+            "pdal_cli": PDAL_CLI_LABEL,
+        }[external_reference.external_reference]
+        return (*series, (external_label, external_reference.benchmark_class))
     return series
+
+
+def _point_output_series(
+    cases: tuple[BenchmarkCase, ...], references: tuple[ExternalReferenceCase, ...]
+) -> tuple[tuple[str, str], ...]:
+    """Return GeoUtils and PDAL series for each registered LAS/LAZ output format."""
+
+    series = []
+    for driver in _POINT_OUTPUT_DRIVERS:
+        case = next(item for item in cases if item.output_driver == driver)
+        reference = next(item for item in references if item.output_driver == driver)
+        series.extend(
+            (
+                (f"GeoUtils {driver}", case.benchmark_class),
+                (f"PDAL {driver}", reference.benchmark_class),
+            )
+        )
+    return tuple(series)
 
 
 @dataclass(frozen=True)
@@ -732,11 +841,12 @@ COMPARISONS: tuple[Comparison, ...] = (
         slug="subsample-size",
         title="Raster subsampling by execution mode",
         description=(
-            "Selects cells with random seed 42, calculates their coordinates and band values, and completes the "
-            "Dask dataframe or multiprocessing GeoPackage output."
+            "Selects a fixed number of cells, calculates their center coordinates and band values, and completes "
+            "the Dask dataframe or GeoPackage output. Both GeoUtils and PDAL use random seed 42 before keeping "
+            "the requested count."
         ),
         parameter_label="Number of output points",
-        series=_comparison_series(_SUBSAMPLE_MODES, "execution_mode"),
+        series=_comparison_series(_SUBSAMPLE_MODES, "execution_mode", _SUBSAMPLE_REFERENCE),
         operation="subsample",
         method=None,
         workload_template=("2,048 × 2,048 source raster; {parameter} output points; 512 × 512 chunks"),
@@ -745,20 +855,54 @@ COMPARISONS: tuple[Comparison, ...] = (
         documentation=False,
     ),
     Comparison(
-        slug="to-pointcloud-size",
-        title="Raster to point cloud by selected cell count",
+        slug="to-pointcloud-raster-size",
+        title="Raster to point cloud by raster size",
         description=(
-            "Selects cells with random seed 42, calculates their coordinates and values, and completes the "
-            "Dask dataframe or multiprocessing GeoPackage output."
+            "Converts every raster cell to its center coordinate and band value, then completes the Dask dataframe "
+            "or GeoPackage output."
         ),
-        parameter_label="Number of output points",
-        series=_comparison_series(_TO_POINTCLOUD_MODES, "execution_mode"),
+        parameter_label="Size of raster (pixels per side)",
+        series=_comparison_series(_TO_POINTCLOUD_MODES, "execution_mode", _TO_POINTCLOUD_REFERENCE),
         operation="to_pointcloud",
         method=None,
-        workload_template=("2,048 × 2,048 source raster; {parameter} output points; 512 × 512 chunks"),
+        workload_template=("{parameter} × {parameter} source raster; one output point per cell; 512 × 512 chunks"),
         series_dimension="execution_mode",
+        documentation=False,
+    ),
+    Comparison(
+        slug="subsample-las-laz-size",
+        title="LAS/LAZ raster subsampling compared with PDAL",
+        description=(
+            "Selects a fixed number of raster cells and writes their center coordinates with the raster value as "
+            "native elevation. GeoUtils multiprocessing and PDAL CLI each write both LAS and LAZ."
+        ),
+        parameter_label="Number of output points",
+        series=_point_output_series(_LAS_SUBSAMPLE_MODES, _LAS_SUBSAMPLE_REFERENCES),
+        operation="subsample",
+        method=None,
+        workload_template=("2,048 × 2,048 source raster; {parameter} output points; 512 × 512 chunks"),
+        series_dimension="output_format",
+        execution_mode="multiprocessing",
         logarithmic_x=True,
         documentation=False,
+        summary=False,
+    ),
+    Comparison(
+        slug="to-pointcloud-las-laz-size",
+        title="LAS/LAZ raster to point cloud conversion compared with PDAL",
+        description=(
+            "Converts every raster cell to its center coordinate and writes the raster value as native elevation. "
+            "GeoUtils multiprocessing and PDAL CLI each write both LAS and LAZ."
+        ),
+        parameter_label="Size of raster (pixels per side)",
+        series=_point_output_series(_LAS_TO_POINTCLOUD_MODES, _LAS_TO_POINTCLOUD_REFERENCES),
+        operation="to_pointcloud",
+        method=None,
+        workload_template=("{parameter} × {parameter} source raster; one output point per cell; 512 × 512 chunks"),
+        series_dimension="output_format",
+        execution_mode="multiprocessing",
+        documentation=False,
+        summary=False,
     ),
     *tuple(
         Comparison(
@@ -889,15 +1033,21 @@ class _ComparisonBenchmark:
         # Input generation remains outside all three measured boundaries
         self._tmpdir = tempfile.TemporaryDirectory(prefix="geoutils-asv-comparison-")
         self.config = self.make_config(parameter)
+        self.config.point_output_driver = selected_case.output_driver
         self.config.operation_method = self.operation_method
         self.config.calculation_engine = self.calculation_engine
         self.config.operation_strategy = self.operation_strategy
         self.config.directory = self._tmpdir.name
         self.sources = BenchmarkRunner("eager", self.config).prepare_sources()
 
-        if self.external_reference is not None:
-            operation = cast(ComparisonOperation, self.operation)
-            self.runner: BenchmarkRunner | GdalRunner = GdalRunner(operation, self.config, self.sources)
+        if self.external_reference == "gdal_cli":
+            gdal_operation = cast(ComparisonOperation, self.operation)
+            self.runner: BenchmarkRunner | GdalRunner | PdalRunner = GdalRunner(
+                gdal_operation, self.config, self.sources
+            )
+        elif self.external_reference == "pdal_cli":
+            pdal_operation = cast(PdalComparisonOperation, self.operation)
+            self.runner = PdalRunner(pdal_operation, self.config, self.sources)
         else:
             assert self.execution_mode is not None
             self.runner = BenchmarkRunner(self.execution_mode, self.config).start()
@@ -915,7 +1065,7 @@ class _ComparisonBenchmark:
     def time_operation(self, parameter: int) -> None:
         """Measure a complete operation after execution-mode initialization."""
 
-        if isinstance(self.runner, GdalRunner):
+        if isinstance(self.runner, (GdalRunner, PdalRunner)):
             self.runner._execute()
         else:
             self.runner._execute(self.operation)
@@ -925,7 +1075,7 @@ class _ComparisonBenchmark:
 
         if self.external_reference is not None:
             start_time = time.perf_counter()
-            assert isinstance(self.runner, GdalRunner)
+            assert isinstance(self.runner, (GdalRunner, PdalRunner))
             self.runner._execute()
             return time.perf_counter() - start_time
 
@@ -945,7 +1095,7 @@ class _ComparisonBenchmark:
     def track_peak_process_tree_mem_mb(self, parameter: int) -> float:
         """Measure peak memory for the benchmark process and execution-mode children."""
 
-        if isinstance(self.runner, GdalRunner):
+        if isinstance(self.runner, (GdalRunner, PdalRunner)):
             return self.runner.run().peak_process_tree_mem_mb
         return self.runner.run(self.operation).peak_process_tree_mem_mb
 
@@ -1035,16 +1185,16 @@ class _SubsampleSize(_ComparisonBenchmark):
         return BenchmarkConfig(shape=(2048, 2048), chunks=(512, 512), subsample_size=parameter)
 
 
-class _PointcloudSampleSize(_ComparisonBenchmark):
-    """Keep raster and chunks fixed while varying the number of output points."""
+class _PointcloudRasterSize(_ComparisonBenchmark):
+    """Keep chunk size fixed while converting every cell from rasters of varying size."""
 
-    param_names = ["subsample_size"]
-    params = [asv_parameter_values([256, 16384, 524288], pr_check_value=256)]
+    param_names = ["raster_size"]
+    params = [asv_parameter_values([256, 512, 1024], pr_check_value=256)]
 
     def make_config(self, parameter: int) -> BenchmarkConfig:
-        """Select enough points to cover both compact and tile-sized selection paths."""
+        """Place the selected raster size around the complete point conversion."""
 
-        return BenchmarkConfig(shape=(2048, 2048), chunks=(512, 512), subsample_size=parameter)
+        return BenchmarkConfig(shape=(parameter, parameter), chunks=(512, 512))
 
 
 class _GriddingRasterSize(_ComparisonBenchmark):
@@ -1257,7 +1407,9 @@ _SCENARIO_BASES: dict[str, type[_ComparisonBenchmark]] = {
     "polygonization-raster-size": _PolygonizationRasterSize,
     "rasterization-raster-size": _RasterizationRasterSize,
     "subsample-size": _SubsampleSize,
-    "to-pointcloud-size": _PointcloudSampleSize,
+    "subsample-las-laz-size": _SubsampleSize,
+    "to-pointcloud-raster-size": _PointcloudRasterSize,
+    "to-pointcloud-las-laz-size": _PointcloudRasterSize,
     "gridding-raster-size": _GriddingRasterSize,
     "gridding-point-count": _NearestGriddingPointCount,
     "worker-integration": _NumbaWorkerIntegration,

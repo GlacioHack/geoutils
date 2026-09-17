@@ -617,6 +617,59 @@ def _build_laspy_header(
     return header
 
 
+def _las_coordinate_bounds(dataframe: gpd.GeoDataFrame, elevation_column: str | None) -> np.ndarray[Any, Any] | None:
+    """Return finite X/Y/elevation bounds for one dataframe partition, or None when it is empty."""
+
+    if len(dataframe) == 0:
+        return None
+    elevation = dataframe[elevation_column].to_numpy() if elevation_column is not None else dataframe.geometry.z
+    coordinates = np.column_stack((dataframe.geometry.x, dataframe.geometry.y, elevation))
+    if not np.isfinite(coordinates).all():
+        raise ValueError("LAS and LAZ output requires finite X, Y and elevation values.")
+    return np.stack((coordinates.min(axis=0), coordinates.max(axis=0)))
+
+
+def _build_laspy_header_from_partitions(
+    partition_filenames: Sequence[str | pathlib.Path],
+    elevation_column: str | None,
+    partition_bounds: Sequence[np.ndarray[Any, Any] | None] | None = None,
+) -> Any:
+    """Build one LAS header from saved partition schemas and provided or scanned coordinate bounds."""
+
+    if len(partition_filenames) == 0:
+        raise ValueError("LAS output requires at least one saved partition.")
+    if partition_bounds is not None and len(partition_bounds) != len(partition_filenames):
+        raise ValueError("LAS partition bounds must match the saved partitions.")
+
+    # Read the first partition for its schema, then use worker bounds or scan every saved partition
+    first = pd.read_pickle(partition_filenames[0])
+    if partition_bounds is None:
+        partition_bounds = [
+            _las_coordinate_bounds(first if index == 0 else pd.read_pickle(filename), elevation_column)
+            for index, filename in enumerate(partition_filenames)
+        ]
+    finite_bounds = [bounds for bounds in partition_bounds if bounds is not None]
+
+    # Use millimeter precision for projected coordinates and elevation, and finer precision for geographic X/Y
+    crs = None if first.crs is None else CRS.from_user_input(first.crs)
+    scales = np.array([1e-8, 1e-8, 1e-3] if crs is not None and crs.is_geographic else [1e-3, 1e-3, 1e-3])
+    offsets = np.zeros(3)
+    if finite_bounds:
+        minimum = np.min([bounds[0] for bounds in finite_bounds], axis=0)
+        maximum = np.max([bounds[1] for bounds in finite_bounds], axis=0)
+        offsets = minimum + (maximum - minimum) / 2
+        required_scales = (maximum - minimum) / (2 * (np.iinfo(np.int32).max - 1))
+        scales = np.maximum(scales, required_scales)
+
+    return _build_laspy_header(
+        first,
+        data_column=elevation_column,
+        offsets=tuple(offsets),
+        scales=tuple(scales),
+        crs=crs,
+    )
+
+
 def _dataframe_to_lasdata(pc: gpd.GeoDataFrame | pd.DataFrame, data_column: str | None, header: Any) -> Any:
     """Convert one eager dataframe partition to records for the shared LAS stream."""
 
@@ -647,11 +700,27 @@ def _dataframe_to_lasdata(pc: gpd.GeoDataFrame | pd.DataFrame, data_column: str 
     return las
 
 
+def _check_las_attributes(dataframe: gpd.GeoDataFrame, data_column: str | None, encoded: Any) -> None:
+    """Check that LAS dimension types preserve every non-coordinate dataframe value exactly."""
+
+    columns = [column for column in dataframe.columns if column not in (dataframe.geometry.name, data_column)]
+    for column in columns:
+        expected_values = dataframe[column].to_numpy()
+        encoded_values = np.asarray(encoded[column])
+
+        # Compare Python scalars so mixed numeric types do not hide integer rounding during NumPy promotion
+        equal_values = expected_values.astype(object) == encoded_values.astype(object)
+        equal_values |= pd.isna(expected_values) & pd.isna(encoded_values)
+        if not np.all(equal_values):
+            raise ValueError(f"LAS output cannot preserve the values in column {column!r} with its dimension type.")
+
+
 def _write_laspy_partitions(
     filename: str | pathlib.Path,
     partitions: Iterable[gpd.GeoDataFrame | pd.DataFrame],
     data_column: str | None,
     header: Any,
+    check_attributes: bool = False,
 ) -> None:
     """Append eager dataframe partitions from any backend to one LAS/LAZ stream."""
 
@@ -664,8 +733,37 @@ def _write_laspy_partitions(
         for part in partitions:
             if len(part) == 0:
                 continue
-            las = _dataframe_to_lasdata(pc=part, data_column=data_column, header=header)
+            dataframe = _as_geodataframe(part)
+            if check_attributes:
+                try:
+                    las = _dataframe_to_lasdata(pc=dataframe, data_column=data_column, header=header)
+                except OverflowError as error:
+                    raise ValueError(
+                        "LAS output cannot preserve point attributes with the selected dimension types."
+                    ) from error
+                _check_las_attributes(dataframe, data_column, las)
+            else:
+                las = _dataframe_to_lasdata(pc=dataframe, data_column=data_column, header=header)
             writer.write_points(las.points)
+
+
+def _write_laspy_saved_partitions(
+    filename: str | pathlib.Path,
+    partition_filenames: Iterable[str | pathlib.Path],
+    data_column: str | None,
+    header: Any,
+    check_attributes: bool = False,
+) -> None:
+    """Read saved dataframe partitions one at a time and append them directly to one LAS/LAZ stream."""
+
+    partitions = (pd.read_pickle(partition_filename) for partition_filename in partition_filenames)
+    _write_laspy_partitions(
+        filename=filename,
+        partitions=partitions,
+        data_column=data_column,
+        header=header,
+        check_attributes=check_attributes,
+    )
 
 
 # Eager and Dask partition writers
@@ -747,16 +845,7 @@ def _write_laspy_temp_partition(
                 "LAS output cannot preserve point attributes with the selected dimension types."
             ) from error
 
-        columns = [column for column in dataframe.columns if column not in (dataframe.geometry.name, data_column)]
-        for column in columns:
-            expected_values = dataframe[column].to_numpy()
-            encoded_values = np.asarray(encoded[column])
-
-            # Compare Python scalars so mixed numeric types do not hide integer rounding during NumPy promotion
-            equal_values = expected_values.astype(object) == encoded_values.astype(object)
-            equal_values |= pd.isna(expected_values) & pd.isna(encoded_values)
-            if not np.all(equal_values):
-                raise ValueError(f"LAS output cannot preserve the values in column {column!r} with its dimension type.")
+        _check_las_attributes(dataframe, data_column, encoded)
         encoded.write(filename)
         return os.fspath(filename)
 

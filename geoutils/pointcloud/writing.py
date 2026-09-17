@@ -19,7 +19,6 @@
 
 from __future__ import annotations
 
-import math
 import os
 import pathlib
 import tempfile
@@ -32,16 +31,19 @@ import numpy as np
 import pandas as pd
 import pyogrio
 
-from geoutils.pointcloud.las import _write_laspy_multiproc_partitions
+from geoutils.pointcloud.las import (
+    _build_laspy_header_from_partitions,
+    _write_laspy_saved_partitions,
+)
 
 if TYPE_CHECKING:
-    from geoutils.multiproc import MultiprocConfig
     from geoutils.pointcloud.pointcloud import PointCloud
 
 
 PointCloudDriver = Literal["GPKG", "LAS", "LAZ"]
 _POINTCLOUD_FORMATS: dict[str, PointCloudDriver] = {".gpkg": "GPKG", ".las": "LAS", ".laz": "LAZ"}
-_GPKG_WRITE_BATCH_ROWS = 65_536
+_GPKG_DIRECT_WRITE_ROWS = 524_288
+_GPKG_WRITE_BATCH_ROWS = 524_288
 
 
 def _stage_pointcloud_partition(dataframe: gpd.GeoDataFrame, filename: str | pathlib.Path) -> pathlib.Path:
@@ -104,6 +106,26 @@ def _check_gpkg_attributes(dataframe: gpd.GeoDataFrame) -> None:
                 raise ValueError(f"GeoPackage cannot preserve nullable integer values in column {name!r}.")
 
 
+def _write_gpkg_batch(
+    dataframes: list[gpd.GeoDataFrame],
+    filename: pathlib.Path,
+    *,
+    append: bool,
+    layer_options: dict[str, str],
+) -> None:
+    """Combine one bounded dataframe batch and write its rows to a GeoPackage."""
+
+    combined = dataframes[0] if len(dataframes) == 1 else pd.concat(dataframes)
+    pyogrio.write_dataframe(
+        combined,
+        filename,
+        layer="points",
+        driver="GPKG",
+        append=append,
+        layer_options=layer_options,
+    )
+
+
 def _write_pointcloud_partitions(
     filename: str | pathlib.Path,
     partition_filenames: Iterable[str | pathlib.Path],
@@ -111,16 +133,16 @@ def _write_pointcloud_partitions(
     driver: PointCloudDriver,
     data_column: str | None,
     geometry_type: Literal["Point", "Point Z"],
-    mp_config: MultiprocConfig,
     las_header: Any | None = None,
     las_elevation_column: str | None = None,
+    las_bounds: Sequence[np.ndarray[Any, Any] | None] | None = None,
 ) -> PointCloud:
     """
     Combine saved dataframe partitions into one file and return an unloaded PointCloud.
 
     The operation producing points saves each partition as a pickle so workers and the parent exchange only filenames.
-    GeoPackage output combines small partitions before appending them. LAS/LAZ output asks the LAS writer to encode
-    the partitions in workers and join their records into one file.
+    GeoPackage output combines small partitions before appending them. LAS/LAZ output scans partition bounds for a
+    shared header, then reads and appends one saved partition at a time.
     """
 
     from geoutils.pointcloud.pointcloud import PointCloud
@@ -171,18 +193,27 @@ def _write_pointcloud_partitions(
                         output_created = True
                     continue
 
-                # Retain only a modest number of point rows before writing the next ordered file batch
+                # Flush small pending partitions before writing an already large partition directly
+                if len(dataframe) >= _GPKG_DIRECT_WRITE_ROWS and pending_dataframes:
+                    _write_gpkg_batch(
+                        pending_dataframes,
+                        temporary_output,
+                        append=output_created,
+                        layer_options=layer_options,
+                    )
+                    output_created = True
+                    pending_dataframes.clear()
+                    pending_rows = 0
+
+                # Combine small partitions while avoiding copies of already large raster tiles
                 pending_dataframes.append(dataframe)
                 pending_rows += len(dataframe)
-                if pending_rows < _GPKG_WRITE_BATCH_ROWS:
+                if len(dataframe) < _GPKG_DIRECT_WRITE_ROWS and pending_rows < _GPKG_WRITE_BATCH_ROWS:
                     continue
 
-                combined = pending_dataframes[0] if len(pending_dataframes) == 1 else pd.concat(pending_dataframes)
-                pyogrio.write_dataframe(
-                    combined,
+                _write_gpkg_batch(
+                    pending_dataframes,
                     temporary_output,
-                    layer="points",
-                    driver="GPKG",
                     append=output_created,
                     layer_options=layer_options,
                 )
@@ -192,28 +223,25 @@ def _write_pointcloud_partitions(
 
             # Write the final short batch after every worker partition has been consumed
             if pending_dataframes:
-                combined = pending_dataframes[0] if len(pending_dataframes) == 1 else pd.concat(pending_dataframes)
-                pyogrio.write_dataframe(
-                    combined,
+                _write_gpkg_batch(
+                    pending_dataframes,
                     temporary_output,
-                    layer="points",
-                    driver="GPKG",
                     append=output_created,
                     layer_options=layer_options,
                 )
         else:
+            saved_partitions = [first_filename, *partitions]
             if las_header is None:
-                raise ValueError("LAS and LAZ point cloud output requires a shared LAS header.")
+                las_header = _build_laspy_header_from_partitions(
+                    saved_partitions, las_elevation_column, partition_bounds=las_bounds
+                )
 
-            # Let the LAS module encode and join the saved partitions without loading them in the parent
-            chunk_size = mp_config.chunks if isinstance(mp_config.chunks, int) else math.prod(mp_config.chunks)
-            _write_laspy_multiproc_partitions(
+            # Encode each saved partition once into the final ordered LAS/LAZ stream
+            _write_laspy_saved_partitions(
                 filename=temporary_output,
-                partitions=[first_filename, *partitions],
+                partition_filenames=saved_partitions,
                 data_column=las_elevation_column,
                 header=las_header,
-                chunk_size=chunk_size,
-                cluster=mp_config.cluster,
                 check_attributes=True,
             )
 

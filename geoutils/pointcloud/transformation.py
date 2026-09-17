@@ -246,7 +246,6 @@ def _reproject_pointcloud(source: PointCloudBase, crs: CRS, mp_config: Multiproc
             driver=driver,
             data_column=source.data_column,
             geometry_type="Point Z" if source._has_z else "Point",
-            mp_config=mp_config,
             las_header=las_header,
             las_elevation_column=elevation_column,
         )

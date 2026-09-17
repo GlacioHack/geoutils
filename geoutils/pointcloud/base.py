@@ -646,8 +646,9 @@ class PointCloudBase(VectorBase):
         :param strategy: Random sampling strategy. "topk" keeps the same seeded sample across partitions and therefore
             gives a deterministic result whether chunked or in-memory; "sequential" draws in row order.
         :param force_output_to_memory: Bypass automatic cutoff selection and return the complete output in memory.
-        :param mp_config: Point partition size and output file used by multiprocessing. Point output uses GeoPackage;
-            array output uses NumPy format when a sample exceeds one partition. Cannot be combined with Dask input.
+        :param mp_config: Point partition size and output file used by multiprocessing. Point output uses GeoPackage,
+            LAS or LAZ; LAS/LAZ stores the main point value as elevation. Array output uses NumPy format when a sample
+            exceeds one partition. Cannot be combined with Dask input.
         :returns: A point cloud containing every selected row by default. With ``as_array=True``, returns
             one-dimensional values or a one-element tuple of positions into the original row order.
         """

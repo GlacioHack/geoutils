@@ -2007,8 +2007,9 @@ class RasterBase(ABC):
         :param random_state: Random state or seed number.
         :param force_pixel_offset: Force offset to derive point coordinate with. Raster coordinates normally only
             associate to upper-left corner "ul" ("Area" definition) or center ("Point" definition).
-        :param mp_config: Worker, tile and output settings for multiprocessing. Point output uses a GeoPackage at
-            ``outfile``; array output does not write a file. Cannot be combined with a Dask source.
+        :param mp_config: Worker, tile and output settings for multiprocessing. Point output uses GeoPackage, LAS or
+            LAZ; LAS/LAZ stores the main raster value as elevation. Array output does not write a file. Cannot be
+            combined with a Dask source.
         :param force_output_to_memory: Keep the complete output in memory instead of using the automatic chunked path.
 
         :raises ValueError: If the sample count or fraction is poorly formatted.
@@ -2262,8 +2263,8 @@ class RasterBase(ABC):
         :param strategy: Use chunk-independent top-k sampling or sequential sampling.
         :param force_pixel_offset: Pixel position used to calculate each point coordinate.
         :param force_output_to_memory: Keep the complete output in memory instead of using the automatic chunked path.
-        :param mp_config: Worker, tile, and output settings for multiprocessing. Point output uses GeoPackage; large
-            array output uses NumPy format.
+        :param mp_config: Worker, tile, and output settings for multiprocessing. Point output uses GeoPackage, LAS or
+            LAZ; LAS/LAZ stores the first selected band as elevation. Large array output uses NumPy format.
 
         :returns: Point output with one row per sampled cell, one-dimensional sampled values, or row/column positions.
         """

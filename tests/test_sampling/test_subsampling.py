@@ -963,6 +963,40 @@ class TestPointSubsampleChunked:
             result.reset_index(drop=True), expected, check_dtype=False, check_like=True
         )
 
+    @pytest.mark.parametrize("suffix", [".las", ".laz"])
+    def test_subsample__point_multiproc_las_elevation(self, suffix: str, tmp_path: Path) -> None:
+        """Checks that LAS and LAZ point subsampling stores the main data column as elevation."""
+
+        # Build a loaded point cloud with one main value and one numeric auxiliary column
+        dataframe = gpd.GeoDataFrame(
+            {
+                "height": np.arange(20, dtype=np.int16),
+                "quality": np.arange(20, dtype=np.uint8) + 100,
+            },
+            geometry=gpd.points_from_xy(np.arange(20), np.arange(20) + 50),
+            crs=32633,
+        )
+        source = gu.PointCloud(dataframe, data_column="height")
+        expected = source.subsample(7, random_state=42).ds
+        output_file = tmp_path / f"sampled-points{suffix}"
+
+        # Select the same rows into LAS/LAZ, mapping the active height values to native Z
+        result = source.subsample(
+            7,
+            random_state=42,
+            mp_config=MultiprocConfig(chunks=6, outfile=str(output_file)),
+        )
+
+        # Keep the result unloaded, then compare its elevations and auxiliary values with the eager sample
+        assert output_file.exists() and not result.is_loaded
+        assert result.data_column == "Z"
+        result.load(columns=["Z", "quality"])
+        expected = expected.sort_values("height").reset_index(drop=True)
+        np.testing.assert_array_equal(result.geometry.x, expected.geometry.x)
+        np.testing.assert_array_equal(result.geometry.y, expected.geometry.y)
+        np.testing.assert_array_equal(result.data, expected["height"])
+        np.testing.assert_array_equal(result.ds["quality"], expected["quality"])
+
     def test_subsample__unloaded_point_output_uses_npy(self, tmp_path: Path) -> None:
         """Checks that point values are read and written in partitions without loading their source file."""
 
@@ -1648,6 +1682,37 @@ class TestRasterSubsampleChunked:
         assert written_rows == [17]
         assert result.point_count == 17
         assert not source.is_loaded and not result.is_loaded
+
+    @pytest.mark.parametrize("suffix", [".las", ".laz"])
+    def test_subsample__raster_multiproc_las_elevation(self, suffix: str, tmp_path: Path) -> None:
+        """Checks that LAS and LAZ raster subsampling stores the first selected band as elevation."""
+
+        # Write two raster bands whose selected values and projected coordinates are exactly representable in LAS
+        height = np.arange(80, dtype=np.int16).reshape((8, 10))
+        values = np.stack((height, height + 100))
+        source_file = tmp_path / "las-sample-source.tif"
+        output_file = tmp_path / f"raster-sample{suffix}"
+        gu.Raster.from_array(values, rio.transform.from_origin(500000, 8600000, 20, 20), 32633).to_file(source_file)
+        source = gu.Raster(source_file)
+        options = {"subsample": 17, "bands": {"height": 1, "quality": 2}, "random_state": 42}
+        expected = source.subsample(**options).ds
+
+        # Select the same cells into LAS/LAZ, mapping height to native Z and quality to an extra dimension
+        result = source.subsample(
+            **options,
+            mp_config=MultiprocConfig(chunks=(3, 4), outfile=str(output_file)),
+        )
+
+        # Compare tile-ordered file rows with the eager sample after sorting both by X/Y coordinates
+        assert output_file.exists() and not source.is_loaded and not result.is_loaded
+        assert result.data_column == "Z"
+        result.load(columns=["Z", "quality"])
+        expected_order = np.lexsort((expected.geometry.x, expected.geometry.y))
+        result_order = np.lexsort((result.geometry.x, result.geometry.y))
+        np.testing.assert_allclose(result.geometry.x.iloc[result_order], expected.geometry.x.iloc[expected_order])
+        np.testing.assert_allclose(result.geometry.y.iloc[result_order], expected.geometry.y.iloc[expected_order])
+        np.testing.assert_array_equal(result.data[result_order], expected["height"].iloc[expected_order])
+        np.testing.assert_array_equal(result.ds["quality"].iloc[result_order], expected["quality"].iloc[expected_order])
 
     @pytest.mark.parametrize("backend", ["dask", "multiprocessing"])
     @pytest.mark.parametrize("as_array", [False, True])

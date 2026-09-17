@@ -25,6 +25,7 @@ import pathlib
 import tempfile
 import warnings
 from collections.abc import Callable, Iterable, Sequence
+from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast, overload
 
@@ -1816,56 +1817,59 @@ def _write_multiproc_subsample_npy(
     record_fields.extend([("row", np.int64), ("column", np.int64)] if return_indices else [("value", output_dtype)])
     with tempfile.TemporaryDirectory(prefix=".geoutils-subsample-", dir=output_path.parent) as directory:
         temporary_output = pathlib.Path(directory) / "output.npy"
-        records = np.lib.format.open_memmap(
-            pathlib.Path(directory) / "selected.npy",
-            mode="w+",
-            dtype=np.dtype(record_fields),
-            shape=(subsample_meta.sample_size,),
-        )
-
-        # Keep worker results bounded while collecting every selected key and payload
-        arguments = (
-            (
-                rst,
-                tile,
-                subsample_meta.seed,
-                subsample_meta.cutoff,
-                return_indices,
-                band,
-                skip_nodata,
-                mask,
+        with ExitStack() as memory_maps:
+            records = np.lib.format.open_memmap(
+                pathlib.Path(directory) / "selected.npy",
+                mode="w+",
+                dtype=np.dtype(record_fields),
+                shape=(subsample_meta.sample_size,),
             )
-            for tile in tile_ids
-        )
-        offset = 0
-        for _, (keys, selected) in _map_bounded(config.cluster, _wrapper_multiproc_cutoff_block, arguments):
-            selected = np.asarray(selected)
-            count = len(selected)
-            records["key"][offset : offset + count] = keys
-            if return_indices:
-                records["row"][offset : offset + count] = selected[:, 0]
-                records["column"][offset : offset + count] = selected[:, 1]
-            else:
-                records["value"][offset : offset + count] = selected
-            offset += count
+            memory_maps.callback(records._mmap.close)
 
-        if offset != subsample_meta.sample_size:
-            raise RuntimeError("The number of selected values changed while writing the subsample.")
-        records.sort(order="key", kind="heapsort")
+            # Keep worker results bounded while collecting every selected key and payload
+            arguments = (
+                (
+                    rst,
+                    tile,
+                    subsample_meta.seed,
+                    subsample_meta.cutoff,
+                    return_indices,
+                    band,
+                    skip_nodata,
+                    mask,
+                )
+                for tile in tile_ids
+            )
+            offset = 0
+            for _, (keys, selected) in _map_bounded(config.cluster, _wrapper_multiproc_cutoff_block, arguments):
+                selected = np.asarray(selected)
+                count = len(selected)
+                records["key"][offset : offset + count] = keys
+                if return_indices:
+                    records["row"][offset : offset + count] = selected[:, 0]
+                    records["column"][offset : offset + count] = selected[:, 1]
+                else:
+                    records["value"][offset : offset + count] = selected
+                offset += count
 
-        # Copy only the requested 1D values or 2D indexes into the public NumPy file
-        output = np.lib.format.open_memmap(temporary_output, mode="w+", dtype=output_dtype, shape=output_shape)
-        chunk_size = max(int((tile[1] - tile[0]) * (tile[3] - tile[2])) for tile in tile_ids)
-        for start in range(0, subsample_meta.sample_size, chunk_size):
-            stop = min(subsample_meta.sample_size, start + chunk_size)
-            if return_indices:
-                output[0, start:stop] = records["row"][start:stop]
-                output[1, start:stop] = records["column"][start:stop]
-            else:
-                output[start:stop] = records["value"][start:stop]
-        output.flush()
-        del output
-        del records
+            if offset != subsample_meta.sample_size:
+                raise RuntimeError("The number of selected values changed while writing the subsample.")
+            records.sort(order="key", kind="heapsort")
+
+            # Copy only the requested 1D values or 2D indexes into the public NumPy file
+            output = np.lib.format.open_memmap(temporary_output, mode="w+", dtype=output_dtype, shape=output_shape)
+            memory_maps.callback(output._mmap.close)
+            chunk_size = max(int((tile[1] - tile[0]) * (tile[3] - tile[2])) for tile in tile_ids)
+            for start in range(0, subsample_meta.sample_size, chunk_size):
+                stop = min(subsample_meta.sample_size, start + chunk_size)
+                if return_indices:
+                    output[0, start:stop] = records["row"][start:stop]
+                    output[1, start:stop] = records["column"][start:stop]
+                else:
+                    output[start:stop] = records["value"][start:stop]
+            output.flush()
+
+        # Close every map before moving files, which Windows does not allow while a file is mapped
         temporary_output.replace(output_path)
 
     # Reopen read-only so the returned arrays remain file-backed
@@ -1893,21 +1897,24 @@ def _write_multiproc_point_subsample_npy(
     # Write a replacement file so existing memory maps of the same configured path remain valid
     with tempfile.TemporaryDirectory(prefix=".geoutils-subsample-", dir=output_path.parent) as directory:
         temporary_output = pathlib.Path(directory) / "output.npy"
-        output = np.lib.format.open_memmap(temporary_output, mode="w+", dtype=output_dtype, shape=output_shape)
-        for axis, array in enumerate(arrays):
-            offset = 0
-            for delayed_part in array.to_delayed().ravel():
-                part = np.asarray(dask.compute(delayed_part)[0]).ravel()
-                stop = offset + len(part)
-                if return_indices:
-                    output[axis, offset:stop] = part
-                else:
-                    output[offset:stop] = part
-                offset = stop
-            if offset != sample_size:
-                raise RuntimeError("The number of selected values changed while writing the subsample.")
-        output.flush()
-        del output
+        with ExitStack() as memory_maps:
+            output = np.lib.format.open_memmap(temporary_output, mode="w+", dtype=output_dtype, shape=output_shape)
+            memory_maps.callback(output._mmap.close)
+            for axis, array in enumerate(arrays):
+                offset = 0
+                for delayed_part in array.to_delayed().ravel():
+                    part = np.asarray(dask.compute(delayed_part)[0]).ravel()
+                    stop = offset + len(part)
+                    if return_indices:
+                        output[axis, offset:stop] = part
+                    else:
+                        output[offset:stop] = part
+                    offset = stop
+                if offset != sample_size:
+                    raise RuntimeError("The number of selected values changed while writing the subsample.")
+            output.flush()
+
+        # Close the map before moving its file, which Windows does not allow while the file is mapped
         temporary_output.replace(output_path)
 
     stored = np.load(output_path, mmap_mode="r")
@@ -2636,8 +2643,10 @@ def _stage_point_subsample_partition(
     count: int,
     positions: NDArray[np.int64],
     filename: pathlib.Path,
-) -> pathlib.Path:
-    """Read selected rows from one point partition and stage them for multiprocessing output."""
+    las_output: bool,
+    las_elevation_column: str | None,
+) -> tuple[pathlib.Path, np.ndarray[Any, Any] | None]:
+    """Read and stage selected point rows, returning their coordinate bounds for LAS/LAZ output."""
 
     # Read only this source partition when the point cloud remains file-backed
     if isinstance(source, pathlib.Path):
@@ -2657,7 +2666,13 @@ def _stage_point_subsample_partition(
     # Keep all geometry and attribute columns for the selected point rows
     from geoutils.pointcloud.writing import _stage_pointcloud_partition
 
-    return _stage_pointcloud_partition(dataframe.iloc[positions].copy(), filename)
+    selected = dataframe.iloc[positions].copy()
+    bounds = None
+    if las_output:
+        from geoutils.pointcloud.las import _las_coordinate_bounds
+
+        bounds = _las_coordinate_bounds(selected, las_elevation_column)
+    return _stage_pointcloud_partition(selected, filename), bounds
 
 
 def _multiproc_subsample_pointcloud(
@@ -2683,7 +2698,7 @@ def _multiproc_subsample_pointcloud(
     output_filename, driver = _resolve_pointcloud_output(
         mp_config.outfile,
         mp_config.driver,
-        supported_drivers=("GPKG",),
+        supported_drivers=("GPKG", "LAS", "LAZ"),
         operation_name="point cloud subsampling",
     )
     output_filename.parent.mkdir(parents=True, exist_ok=True)
@@ -2703,7 +2718,7 @@ def _multiproc_subsample_pointcloud(
         dataframe = source_pointcloud.ds
 
     # Select row positions through the array path, using a temporary NumPy file for a large sample
-    with mp_config.temporary() as index_config:
+    with mp_config.temporary() as index_config, ExitStack() as memory_maps:
         index_config.outfile += ".npy"
         sampled_indices = _subsample_pointcloud_array(
             source_pointcloud,
@@ -2715,7 +2730,9 @@ def _multiproc_subsample_pointcloud(
             mask=mask,
         )[0]
         if isinstance(sampled_indices, np.memmap):
+            sampled_indices._mmap.close()
             sampled_indices = np.load(index_config.outfile, mmap_mode="r+")[0]
+            memory_maps.callback(sampled_indices._mmap.close)
         else:
             sampled_indices = np.asarray(sampled_indices, dtype=np.int64)
         sampled_indices.sort(kind="heapsort")
@@ -2743,24 +2760,28 @@ def _multiproc_subsample_pointcloud(
                         count,
                         local_positions,
                         temporary_directory / f"partition_{start}.pkl",
+                        driver != "GPKG",
+                        source_pointcloud.data_column,
                     )
                 )
 
-            partition_filenames = [
-                filename
-                for _, filename in _map_bounded(
+            partition_results = [
+                result
+                for _, result in _map_bounded(
                     mp_config.cluster,
                     _stage_point_subsample_partition,
                     arguments,
                 )
             ]
+            partition_filenames = [filename for filename, _ in partition_results]
             pointcloud = _write_pointcloud_partitions(
                 output_filename,
                 partition_filenames,
                 driver=driver,
-                data_column=source_pointcloud.data_column,
+                data_column=source_pointcloud.data_column if driver == "GPKG" else None,
                 geometry_type="Point Z" if source_pointcloud._has_z else "Point",
-                mp_config=mp_config,
+                las_elevation_column=source_pointcloud.data_column,
+                las_bounds=[bounds for _, bounds in partition_results] if driver != "GPKG" else None,
             )
 
     # Accessors return an eager GeoDataFrame while PointCloud inputs keep the output file unloaded
@@ -3469,7 +3490,9 @@ def _wrapper_subsample_raster_partition_mp(
     chunks: int | tuple[int, int],
     filename: pathlib.Path,
     topk_selection: tuple[int, np.uint64] | None = None,
-) -> pathlib.Path:
+    las_output: bool = False,
+    las_elevation_column: str | None = None,
+) -> tuple[pathlib.Path, np.ndarray[Any, Any] | None]:
     """
     Convert cells from one raster tile in a multiprocessing worker and save its point rows.
 
@@ -3479,6 +3502,8 @@ def _wrapper_subsample_raster_partition_mp(
     its selected raster cells. A larger subsample passes a tile slice with the key separating selected and unselected
     cells. Processing one tile per call limits raster reads and point construction to that tile. Multiprocessing array
     output collects the indexes of all raster cells selected for the requested subsample instead.
+    LAS/LAZ output also returns each partition's coordinate bounds so the parent can build one shared header without
+    rereading every row.
     """
 
     # 1/ Build indexes for the complete tile, or keep its sampled cell indexes
@@ -3539,7 +3564,12 @@ def _wrapper_subsample_raster_partition_mp(
     # 4/ Save the point partition to a temporary file
     from geoutils.pointcloud.writing import _stage_pointcloud_partition
 
-    return _stage_pointcloud_partition(dataframe, filename)
+    bounds = None
+    if las_output:
+        from geoutils.pointcloud.las import _las_coordinate_bounds
+
+        bounds = _las_coordinate_bounds(dataframe, las_elevation_column)
+    return _stage_pointcloud_partition(dataframe, filename), bounds
 
 
 def _multiproc_subsample_raster(
@@ -3594,7 +3624,7 @@ def _multiproc_subsample_raster(
     output_filename, driver = _resolve_pointcloud_output(
         mp_config.outfile,
         mp_config.driver,
-        supported_drivers=("GPKG",),
+        supported_drivers=("GPKG", "LAS", "LAZ"),
         operation_name="raster subsampling",
     )
     output_filename.parent.mkdir(parents=True, exist_ok=True)
@@ -3649,9 +3679,14 @@ def _multiproc_subsample_raster(
                 as_array=False,
                 read_config=mp_config,
             )
-            partition_filenames: Iterable[pathlib.Path] = (
-                _stage_pointcloud_partition(pointcloud.ds, temporary_directory / "partition.pkl"),
-            )
+            partition_filename = _stage_pointcloud_partition(pointcloud.ds, temporary_directory / "partition.pkl")
+            partition_filenames: Iterable[pathlib.Path] = (partition_filename,)
+            if driver == "GPKG":
+                las_bounds = None
+            else:
+                from geoutils.pointcloud.las import _las_coordinate_bounds
+
+                las_bounds = [_las_coordinate_bounds(pointcloud.ds, data_column_name)]
 
         # Split complete conversions by raster tile
         elif subsample == 1:
@@ -3708,22 +3743,27 @@ def _multiproc_subsample_raster(
                     mp_config.chunks,
                     temporary_directory / f"partition_{tile_id}.pkl",
                     topk_selection,
+                    driver != "GPKG",
+                    data_column_name,
                 )
                 for tile_id, selected, topk_selection in selected_parts
             )
-            partition_filenames = (
-                filename
-                for _, filename in _map_bounded(mp_config.cluster, _wrapper_subsample_raster_partition_mp, arguments)
-            )
+            partition_results = [
+                result
+                for _, result in _map_bounded(mp_config.cluster, _wrapper_subsample_raster_partition_mp, arguments)
+            ]
+            partition_filenames = [filename for filename, _ in partition_results]
+            las_bounds = [bounds for _, bounds in partition_results] if driver != "GPKG" else None
 
         # Finally, we assemble the final file and return it as an unloaded PointCloud!
         return _write_pointcloud_partitions(
             output_filename,
             partition_filenames,
             driver=driver,
-            data_column=data_column_name,
+            data_column=data_column_name if driver == "GPKG" else None,
             geometry_type="Point",
-            mp_config=mp_config,
+            las_elevation_column=data_column_name,
+            las_bounds=las_bounds,
         )
 
 

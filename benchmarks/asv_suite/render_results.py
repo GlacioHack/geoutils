@@ -22,6 +22,7 @@ from benchmarks.asv_suite.comparisons import (
     EXTERNAL_REFERENCE_CASE_BY_CLASS,
     GDAL_CLI_LABEL,
     METHOD_LABELS,
+    PDAL_CLI_LABEL,
     STRATEGY_LABELS,
     Comparison,
     ComparisonDimension,
@@ -51,6 +52,7 @@ SERIES_COLORS = {
     "Dask": "#E69F00",
     "Multiprocessing": "#009E73",
     GDAL_CLI_LABEL: "#6C6C6C",
+    PDAL_CLI_LABEL: "#CC79A7",
 }
 
 # Group plots by the GeoUtils choice represented by their separate lines; every plot still scales a numeric input
@@ -71,6 +73,10 @@ COMPARISON_SECTION_DETAILS: dict[ComparisonDimension, tuple[str, str]] = {
     "strategy": (
         "Chunk strategies",
         "Compare how chunked operations reconcile partial results at chunk boundaries.",
+    ),
+    "output_format": (
+        "Point output formats",
+        "Compare file-to-file LAS and LAZ output from GeoUtils multiprocessing and PDAL CLI.",
     ),
 }
 
@@ -166,6 +172,7 @@ class ComparisonMeasurement:
     strategy: OperationStrategyName | None
     execution_mode: ExecutionMode | None
     external_reference: ExternalReference | None
+    output_driver: Literal["GPKG", "LAS", "LAZ"]
     series_dimension: ComparisonDimension
     parameter: int
     operation_time_s: float
@@ -195,12 +202,16 @@ class _PreviewResult:
                 parameter_values = (3, 9, 33)
             elif comparison.parameter_label == "Number of sampled values":
                 parameter_values = (256, 2048, 16384)
+            elif comparison.parameter_label == "Number of output points":
+                parameter_values = (256, 16384, 524288)
             elif comparison.parameter_label == "Number of groups per axis":
                 parameter_values = (4, 16, 65)
             elif comparison.parameter_label == "Size of chunks (pixels per side)":
                 parameter_values = (64, 193, 512) if comparison.operation == "grouped_stats" else (256, 512, 1024)
             elif comparison.slug == "grouped-flox-raster-size":
                 parameter_values = (256, 1024, 4096)
+            elif comparison.operation == "to_pointcloud":
+                parameter_values = (256, 512, 1024)
             elif comparison.operation in {"grid", "grouped_stats"}:
                 parameter_values = (512, 1024, 2048)
             else:
@@ -418,6 +429,7 @@ def collect_comparison_measurements(
                     strategy=benchmark_case.strategy if benchmark_case is not None else None,
                     execution_mode=selected_case.execution_mode,
                     external_reference=(reference_case.external_reference if reference_case is not None else None),
+                    output_driver=selected_case.output_driver,
                     series_dimension=comparison.series_dimension,
                     parameter=parameter,
                     operation_time_s=operation_time,
@@ -1225,11 +1237,14 @@ def _headline_summary_table(records: list[ComparisonMeasurement]) -> str:
     )
 
 
-def _choice_tables(dimension: Literal["method", "strategy"], records: list[ComparisonMeasurement]) -> str:
-    """Render representative time and memory for methods or chunk strategies."""
+def _choice_tables(
+    dimension: Literal["method", "strategy", "output_format"], records: list[ComparisonMeasurement]
+) -> str:
+    """Render representative time and memory for methods, strategies or point output formats."""
 
     articles = []
-    choice_name = "method" if dimension == "method" else "chunk strategy"
+    choice_name = {"method": "method", "strategy": "chunk strategy", "output_format": "output and writer"}[dimension]
+    choice_title = choice_name.title() if dimension == "output_format" else f"GeoUtils {choice_name}"
     for comparison in (item for item in COMPARISONS if item.series_dimension == dimension):
         parameter = _summary_reference_parameter(comparison, records)
         measurements = [
@@ -1254,7 +1269,7 @@ def _choice_tables(dimension: Literal["method", "strategy"], records: list[Compa
             f'<p class="workload"><strong>Reference workload:</strong> '
             f"{_workload_html(comparison, parameter)}</p>"
             '<div class="table-wrap"><table class="choice-table"><thead>'
-            f'<tr><th colspan="{len(measurements)}" scope="colgroup">GeoUtils {choice_name}</th></tr>'
+            f'<tr><th colspan="{len(measurements)}" scope="colgroup">{choice_title}</th></tr>'
             f"<tr>{headers}</tr></thead><tbody><tr>{cells}</tr></tbody></table></div>"
             f'<p><a href="scaling.html#{html.escape(comparison.slug)}">View how this comparison scales</a></p>'
             "</article>"
@@ -1272,8 +1287,8 @@ def _markdown_report(result: Any, *, includes_performance_change: bool = False) 
         f"Commit `{result.commit_hash}` on machine `{machine}`",
         "",
         "Operation-only time starts after execution-mode initialization. Elapsed time runs from prepared inputs "
-        "through completed output and is the comparable boundary for GeoUtils versus GDAL CLI. Peak memory combines "
-        "the benchmark process and all child workers.",
+        "through completed output and is the comparable boundary for GeoUtils versus external CLIs. "
+        "Peak memory combines the benchmark process and all child workers.",
         "",
         "Raw values: [CSV](comparisons.csv) · [JSON](comparisons.json)",
     ]
@@ -1515,6 +1530,17 @@ def _gdal_reference_note() -> str:
     )
 
 
+def _pdal_reference_note() -> str:
+    """Explain the purpose and limits of the external PDAL comparison."""
+
+    return (
+        '<p class="comparison-note"><strong>PDAL CLI reference.</strong> Raster point conversion uses a '
+        "readers.gdal pipeline, followed by writers.ogr for GeoPackage or writers.las for LAS/LAZ. Subsampling adds "
+        "filters.randomize with seed 42 and filters.head to match the requested output count. LAS/LAZ output maps "
+        "the first raster band to native elevation.</p>"
+    )
+
+
 def _data_size_note() -> str:
     """Give compact raw-data context for the representative workload."""
 
@@ -1526,7 +1552,7 @@ def _data_size_note() -> str:
 
 
 def _concept_map() -> str:
-    """Introduce the four GeoUtils choices and keep the GDAL CLI visibly separate."""
+    """Introduce the four GeoUtils choices and keep external CLIs visibly separate."""
 
     return "".join(
         [
@@ -1551,9 +1577,9 @@ def _concept_map() -> str:
             '<span class="chip">Polygonization — Label stitch</span>'
             '<span class="chip">Grouped statistics — Dense / Sparse / Complete groups</span></div></div>',
             "</div>",
-            '<div class="external-card"><strong>External reference: GDAL CLI</strong>',
-            "<span>Standalone GDAL file-to-file command run outside GeoUtils. It is distinct from Rasterio/GDAL, "
-            "which GeoUtils uses as a calculation engine for some operations.</span></div></div>",
+            '<div class="external-card"><strong>External references: GDAL and PDAL CLI</strong>',
+            "<span>Standalone file-to-file commands run outside GeoUtils. GDAL covers raster and gridding "
+            "operations, while PDAL covers raster point conversion and subsampling.</span></div></div>",
         ]
     )
 
@@ -1576,12 +1602,13 @@ def _comparison_html(
         [
             '<section class="hero"><span class="eyebrow">Options</span>',
             "<h1>Compare GeoUtils options</h1>",
-            '<p class="lede">Each section changes one GeoUtils option at a common workload while keeping the others '
+            '<p class="lede">Each section changes one option at a common workload while keeping the others '
             "fixed. Runs use one worker and one thread.</p>",
             _run_metadata(result),
             '<div class="local-links"><a href="#execution-modes">Execution modes</a>',
             '<a href="#calculation-engines">Calculation engines</a><a href="#operation-methods">Methods</a>',
-            '<a href="#chunk-strategies">Chunk strategies</a></div></section>',
+            '<a href="#chunk-strategies">Chunk strategies</a><a href="#point-output-formats">Point output formats</a>',
+            "</div></section>",
             _metric_guide(),
             '<section class="option-section" id="execution-modes">',
             f"<h2>{html.escape(COMPARISON_SECTION_DETAILS['execution_mode'][0])}</h2>",
@@ -1603,6 +1630,10 @@ def _comparison_html(
             f"<h2>{html.escape(COMPARISON_SECTION_DETAILS['strategy'][0])}</h2>",
             f'<p class="section-intro">{html.escape(COMPARISON_SECTION_DETAILS["strategy"][1])}</p>',
             f'<div class="choice-grid">{_choice_tables("strategy", records)}</div></section>',
+            '<section class="option-section" id="point-output-formats">',
+            f"<h2>{html.escape(COMPARISON_SECTION_DETAILS['output_format'][0])}</h2>",
+            f'<p class="section-intro">{html.escape(COMPARISON_SECTION_DETAILS["output_format"][1])}</p>',
+            f'<div class="choice-grid">{_choice_tables("output_format", records)}</div></section>',
             '<p class="footer-links">',
             change_link,
             '<a href="comparisons.csv">Download CSV</a> · <a href="comparisons.json">Download JSON</a></p>',
@@ -1629,6 +1660,7 @@ def _scaling_html(
         "calculation_engine": "Calculation engines",
         "method": "Methods",
         "strategy": "Chunk strategies",
+        "output_format": "Point output formats",
     }
     toc = []
     sections = []
@@ -1747,8 +1779,8 @@ def _site_index(
             _run_metadata(result),
             "</section>",
             "<section><h2>How GeoUtils operations vary</h2>",
-            '<p class="section-intro">Each comparison changes one GeoUtils option at a time. GDAL CLI is a separate '
-            "external reference.</p>",
+            '<p class="section-intro">Each comparison changes one option at a time. GDAL and PDAL CLI are '
+            "separate external references.</p>",
             _concept_map(),
             "</section>",
             "<section><h2>Performance table</h2>",
@@ -1756,6 +1788,7 @@ def _site_index(
             "parameters and input size). All options run without parallelism: one computational process using one "
             "thread.</p>",
             _gdal_reference_note(),
+            _pdal_reference_note(),
             _metric_guide(include_ratios=False),
             _data_size_note(),
             _headline_summary_table(records),
