@@ -134,11 +134,12 @@ def stack_rasters(
     """
     Stack a list of rasters on their maximum extent into a multi-band raster.
 
-    The input rasters can have any transform or CRS, and will be reprojected to the
-    reference raster's CRS and resolution.
-    The output multi-band raster has an extent that is the union of all raster extents,
-    except if `use_ref_bounds` is used,
-    and the number of band equal to the number of input rasters.
+    All input rasters are reprojected and resampled to a common grid defined by the reference raster.
+
+    The input rasters can have any transform or CRS, and will be reprojected to the reference raster's CRS
+    and resolution.
+    The output multi-band raster has an extent that is the union of all raster extents, except if `use_ref_bounds` is
+    used, and number of bands equals the sum of the bands from this raster and all additional rasters.
 
     Use diff=True to return directly the difference to the reference raster.
 
