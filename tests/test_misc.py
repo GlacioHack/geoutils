@@ -10,7 +10,12 @@ import yaml  # type: ignore
 from packaging.version import Version
 
 import geoutils
-from geoutils._misc import copy_doc, deprecate, diff_environment_yml
+from geoutils._misc import (
+    _trim_process_memory,
+    copy_doc,
+    deprecate,
+    diff_environment_yml,
+)
 
 
 class TestMisc:
@@ -183,3 +188,17 @@ class TestMisc:
             return 1
 
         assert doesnotexist.__doc__ == "This function documentation does not exist in GeoPandas (likely deprecated)."
+
+    def test_trim_process_memory__missing_process_library(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Checks that memory trimming is skipped when the platform does not support it."""
+
+        import ctypes
+
+        # Simulate Windows, where CDLL(None) raises TypeError instead of exposing the C process library
+        def reject_null_library(name: str | None) -> None:
+            assert name is None
+            raise TypeError("argument of type 'NoneType' is not iterable")
+        monkeypatch.setattr(ctypes, "CDLL", reject_null_library)
+
+        # Check the worker stays usable
+        _trim_process_memory()
