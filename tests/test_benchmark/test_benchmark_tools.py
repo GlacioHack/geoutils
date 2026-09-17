@@ -11,8 +11,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from benchmarks.asv_suite import comparisons as benchmark_comparisons
-from benchmarks.asv_suite.comparisons import (
+from benchmarks.asv_suite import parameter_sweeps as benchmark_parameter_sweeps
+from benchmarks.asv_suite.parameter_sweeps import (
     BENCHMARK_CASE_BY_CLASS,
     BENCHMARK_CASES,
     COMPARISONS,
@@ -55,8 +55,9 @@ class TestComparisonReport:
     """
     Test module for benchmark registration and report generation.
 
-    Those are minimal tests to ensure changes to benchmarks/ don't break the routines, even if ASV can do quick checks,
-    it's easier to have a detailed traceback here through Pytest.
+    Those are minimal tests to ensure changes to ``benchmarks/`` don't break the routines.
+    Even if ASV runs quick checks of the benchmarking setup through CI, it's easier to have a detailed traceback here
+    through Pytest for some aspects.
     We especially tests our custom routines/rendering for the benchmark webpage, comparisons to external refs (e.g.
     GDAL CLI), and across variables (raster/point size, chunk size, etc) and categories (e.g. eager/Dask/MP, method,
     etc) of interest.
@@ -69,10 +70,10 @@ class TestComparisonReport:
         registered = set(BENCHMARK_CASE_BY_CLASS) | set(EXTERNAL_REFERENCE_CASE_BY_CLASS)
         plotted = {class_name for comparison in COMPARISONS for _, class_name in comparison.series}
 
-        # Importing comparisons.py should create every class needed by ASV and the report
+        # Importing parameter_sweeps.py should create every class needed by ASV and the report
         assert BENCHMARK_CASES and COMPARISONS
         assert plotted <= registered
-        assert all(hasattr(benchmark_comparisons, class_name) for class_name in registered)
+        assert all(hasattr(benchmark_parameter_sweeps, class_name) for class_name in registered)
 
     def test_render_preview__essential_files(self, tmp_path: Path) -> None:
         """Checks that preview rendering writes the main pages, data exports and plots."""
@@ -191,7 +192,7 @@ class TestGroupedReferenceChunked:
             for case in BENCHMARK_CASES
             if case.comparison_group == "grouped-flox-raster-size" and case.execution_mode == "multiprocessing"
         )
-        benchmark = getattr(benchmark_comparisons, case.benchmark_class)()
+        benchmark = getattr(benchmark_parameter_sweeps, case.benchmark_class)()
 
         # Use a small raster but follow ASV's normal setup/run/teardown order, including its real worker process
         parameter = 32

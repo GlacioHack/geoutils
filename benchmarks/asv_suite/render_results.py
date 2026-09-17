@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from benchmarks.asv_suite.comparisons import (
+from benchmarks.asv_suite.parameter_sweeps import (
     BENCHMARK_CASE_BY_CLASS,
     CALCULATION_ENGINE_LABELS,
     COMPARISONS,
@@ -36,7 +36,7 @@ from benchmarks.workflows.registry import (
 )
 
 # Name the files written by this renderer and linked from the benchmark website and documentation
-COMPARISON_BENCHMARK_MODULE = "asv_suite.comparisons"
+COMPARISON_BENCHMARK_MODULE = "asv_suite.parameter_sweeps"
 COMPARISON_REPORT_DIRECTORY = "comparisons"
 SCALING_REPORT_PAGE = "scaling.html"
 HISTORY_REPORT_PAGE = "history.html"

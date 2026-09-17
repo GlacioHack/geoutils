@@ -1,4 +1,4 @@
-"""Generate ASV cases that measure time and RAM while varying one benchmark dimension at a time."""
+"""Generate ASV cases that measure time and RAM across one-dimensional parameter ranges."""
 
 from __future__ import annotations
 

@@ -198,6 +198,7 @@ class TestMisc:
         def reject_null_library(name: str | None) -> None:
             assert name is None
             raise TypeError("argument of type 'NoneType' is not iterable")
+
         monkeypatch.setattr(ctypes, "CDLL", reject_null_library)
 
         # Check the worker stays usable

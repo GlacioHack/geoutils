@@ -1,25 +1,25 @@
 """
 Large data tests for every Dask and multiprocessing operation.
 
-Each operation and backend (Dask, multiprocessing) runs in a separate process with an input raster whose
-size exceeds the memory limit. The operation must complete with less additional worker memory than the full raster
-would require.
+Each operation and backend (Dask, multiprocessing) runs in a separate process with an input raster size that
+exceeds the memory limit.
 
-A test fails if the input opens eagerly, the operation raises an error or times out, its representative result or
+This file runs pass/fail computation and memory tests (not a benchmark like the ASV suite).
+
+A test fails if the input opens eagerly, the operation raises an error or times out, its result or
 output file is incorrect, a Dask worker is replaced, multiprocessing workers disappear, or additional worker memory
 reaches the size of the full raster.
+Otherwise, it passes.
 
-This is a pass/fail computation and memory test (not a benchmark like the ASV suite).
+Default Pytest runs skip this module. To run it, use``python -m pytest --large-data -m large_data -ra``.
 
-Default Pytest run skips this module. Run it with ``python -m pytest --large-data -m large_data -ra``.
-The parameters can be changed by defining environment variables before the above call (defaults shown below):
+Size/chunk parameters can be modified by defining environment variables before the above call (defaults shown below):
 ``GEOUTILS_LARGE_DATA_SHAPE`` (12288), ``GEOUTILS_LARGE_DATA_CHUNKS`` (1024),
 ``GEOUTILS_LARGE_DATA_MEMORY_LIMIT`` (512MB), ``GEOUTILS_LARGE_DATA_PROFILE_INTERVAL`` (0.1 seconds) and
 ``GEOUTILS_LARGE_DATA_TIMEOUT`` (1800 seconds).
 Shape and chunk variables accept one square size or ``rows,columns``.
 
-Pytest records failed tests in .pytest_cache/v/cache/lastfailed.
-During local development, add ``--lf`` to the large data command to rerun only those cases and save time!
+During local development, add ``--lf`` to rerun only failed cases and save time!
 """
 
 from __future__ import annotations
