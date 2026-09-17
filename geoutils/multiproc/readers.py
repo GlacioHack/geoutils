@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 import pyogrio
+import rasterio as rio
 
 from geoutils._dispatch import _get_pointcloud_interface, _get_raster_interface
 from geoutils._misc import import_optional
@@ -306,6 +307,53 @@ class _BlockReader:
 ########################################
 # 2/ READ RASTER CELLS AND POINT ROWS
 ########################################
+
+
+def _read_selected_raster_bands(
+    source: RasterBase,
+    indexes: Any,
+    bands: list[int],
+    chunks: int | tuple[int, int],
+) -> Any:
+    """
+    Read several bands at selected raster cells without starting more worker tasks.
+
+    This helper is intended for code already running in a worker. It groups the requested cells by raster tile, reads
+    every band once per tile, and returns the values in the original cell order.
+    """
+
+    # 1/ Locate every requested cell and allocate its band-by-cell result
+    indexes = np.asarray(indexes, dtype=np.int64)
+    rows, columns = np.unravel_index(indexes, source.shape)
+    chunk_rows, chunk_columns = (chunks, chunks) if isinstance(chunks, int) else chunks
+    tile_columns = (source.shape[1] + chunk_columns - 1) // chunk_columns
+    tile_ids = (rows // chunk_rows) * tile_columns + columns // chunk_columns
+    dtype = np.dtype(bool if source.is_mask else source.dtype)
+    values = np.ma.masked_all((len(bands), len(indexes)), dtype=dtype)
+    native_bands = [source.bands[band - 1] for band in bands]
+
+    # 2/ Read each tile once and place its selected cells in the requested order
+    assert source.name is not None
+    with rio.open(source.name) as dataset:
+        for tile_id in np.unique(tile_ids):
+            selected = np.flatnonzero(tile_ids == tile_id)
+            tile_row, tile_column = divmod(int(tile_id), tile_columns)
+            row_start = tile_row * chunk_rows
+            column_start = tile_column * chunk_columns
+            row_stop = min(row_start + chunk_rows, source.shape[0])
+            column_stop = min(column_start + chunk_columns, source.shape[1])
+            tile = dataset.read(
+                native_bands,
+                window=((row_start, row_stop), (column_start, column_stop)),
+                masked=True,
+            )
+            local_rows = rows[selected] - row_start
+            local_columns = columns[selected] - column_start
+            selected_values = tile[:, local_rows, local_columns]
+            values.data[:, selected] = np.ma.getdata(selected_values)
+            values.mask[:, selected] = np.ma.getmaskarray(selected_values)
+
+    return values
 
 
 def _read_point_rows(source: PointCloudBase, rows: slice, selector: int | str | None) -> gpd.GeoDataFrame:

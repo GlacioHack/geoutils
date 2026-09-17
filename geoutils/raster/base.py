@@ -25,12 +25,11 @@ import pathlib
 import struct
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
-    Iterable,
     Literal,
     TypeVar,
     Union,
@@ -91,7 +90,7 @@ from geoutils.raster.referencing import (
 )
 from geoutils.raster.testing import _array_equal_or_close
 from geoutils.raster.transformation import _crop, _reproject, _translate
-from geoutils.sampling.subsampling import _subsample
+from geoutils.sampling.subsampling import _subsample, _subsample_raster
 from geoutils.stats.stats import stats as _stats
 from geoutils.stats.stats import variogram as _variogram
 
@@ -1928,29 +1927,16 @@ class RasterBase(ABC):
         self,
         data_column_name: str = "b1",
         data_band: int = 1,
-        auxiliary_data_bands: list[int] | None = None,
-        auxiliary_column_names: list[str] | None = None,
+        auxiliary_data_bands: Iterable[int] | None = None,
+        auxiliary_column_names: Iterable[str] | None = None,
         subsample: float | int = 1,
         skip_nodata: bool = True,
         *,
         as_array: Literal[False] = False,
         random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> NDArrayNum: ...
-
-    @overload
-    def to_pointcloud(
-        self,
-        data_column_name: str = "b1",
-        data_band: int = 1,
-        auxiliary_data_bands: list[int] | None = None,
-        auxiliary_column_names: list[str] | None = None,
-        subsample: float | int = 1,
-        skip_nodata: bool = True,
-        *,
-        as_array: Literal[True],
-        random_state: int | np.random.Generator | None = None,
-        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        mp_config: MultiprocConfig | None = None,
+        force_output_to_memory: bool = False,
     ) -> PointCloud: ...
 
     @overload
@@ -1958,68 +1944,73 @@ class RasterBase(ABC):
         self,
         data_column_name: str = "b1",
         data_band: int = 1,
-        auxiliary_data_bands: list[int] | None = None,
-        auxiliary_column_names: list[str] | None = None,
+        auxiliary_data_bands: Iterable[int] | None = None,
+        auxiliary_column_names: Iterable[str] | None = None,
+        subsample: float | int = 1,
+        skip_nodata: bool = True,
+        *,
+        as_array: Literal[True],
+        random_state: int | np.random.Generator | None = None,
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        mp_config: MultiprocConfig | None = None,
+        force_output_to_memory: bool = False,
+    ) -> NDArrayNum: ...
+
+    @overload
+    def to_pointcloud(
+        self,
+        data_column_name: str = "b1",
+        data_band: int = 1,
+        auxiliary_data_bands: Iterable[int] | None = None,
+        auxiliary_column_names: Iterable[str] | None = None,
         subsample: float | int = 1,
         skip_nodata: bool = True,
         *,
         as_array: bool = False,
         random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        mp_config: MultiprocConfig | None = None,
+        force_output_to_memory: bool = False,
     ) -> NDArrayNum | PointCloud: ...
 
     def to_pointcloud(
         self,
         data_column_name: str = "b1",
         data_band: int = 1,
-        auxiliary_data_bands: list[int] | None = None,
-        auxiliary_column_names: list[str] | None = None,
+        auxiliary_data_bands: Iterable[int] | None = None,
+        auxiliary_column_names: Iterable[str] | None = None,
         subsample: float | int = 1,
         skip_nodata: bool = True,
         as_array: bool = False,
         random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> NDArrayNum | PointCloud:
+        mp_config: MultiprocConfig | None = None,
+        force_output_to_memory: bool = False,
+    ) -> Any:
         """
-        Convert raster to point cloud.
+        Convert raster cells to a point cloud, optionally selecting a random subsample.
 
-        A point cloud is a vector of point geometries associated to a data column, and possibly other auxiliary data
-        columns, see geoutils.gu.PointCloud.
-
-        For a single band raster, the main data column name of the point cloud defaults to "b1" and stores values of
-        that single band.
-        For a multi-band raster, the main data column name of the point cloud defaults to "bX" where X is the data band
-        index chosen by the user (defaults to 1, the first band).
-        Optionally, all other bands can also be stored in columns "b1", "b2", etc. For more specific band selection,
-        use Raster.split_bands previous to converting to point cloud.
-
-        Optionally, randomly subsample valid pixels for the data band (nodata values can be skipped, but only for the
-        band that will be used as data column of the point cloud).
-        If 'subsample' is either 1, or is equal to the pixel count, all (valid) points are returned.
-        If 'subsample' is smaller than 1 (for fractions), or smaller than the pixel count, a random subsample
-        of (valid) points is returned.
-
-        If the raster is not loaded, sampling will be done from disk using rasterio.sample after loading only the masks
-        of the dataset.
-
-        Formats:
-            * `as_array` == False: A vector with dataframe columns ["b1", "b2", ..., "geometry"],
-            * `as_array` == True: A numpy ndarray of shape (N, 2 + count) with the columns [x, y, b1, b2..].
+        Cell selection and output construction use the same implementation as subsample(). With the default
+        ``subsample=1``, every eligible cell is returned, while this method keeps conversion arguments first.
 
         :param data_column_name: Name to use for point cloud data column, defaults to "bX" where X is the data band
             number.
         :param data_band: (Only for multi-band rasters) Band to use for data column, defaults to first. Band counting
             starts at 1.
-        :param auxiliary_data_bands: (Only for multi-band rasters) Whether to save other band numbers as auxiliary data
-            columns, defaults to none.
+        :param auxiliary_data_bands: (Only for multi-band rasters) Other bands to save as auxiliary data columns,
+            defaulting to every band other than ``data_band``. Pass an empty iterable to keep only the main band.
         :param auxiliary_column_names: (Only for multi-band rasters) Names to use for auxiliary data bands, only if
             auxiliary data bands is not none, defaults to "b1", "b2", etc.
-        :param subsample: Subsample size. If > 1, parsed as a count, otherwise a fraction.
+        :param subsample: Fraction or maximum number of eligible cells to return, with 1 selecting every cell.
         :param skip_nodata: Whether to skip nodata values.
         :param as_array: Return an array instead of a vector.
         :param random_state: Random state or seed number.
         :param force_pixel_offset: Force offset to derive point coordinate with. Raster coordinates normally only
             associate to upper-left corner "ul" ("Area" definition) or center ("Point" definition).
+        :param mp_config: Worker, tile and output settings for multiprocessing. Point output uses GeoPackage, LAS or
+            LAZ; LAS/LAZ stores the main raster value as elevation. Array output does not write a file. Cannot be
+            combined with a Dask source.
+        :param force_output_to_memory: Keep the complete output in memory instead of using the automatic chunked path.
 
         :raises ValueError: If the sample count or fraction is poorly formatted.
 
@@ -2037,6 +2028,8 @@ class RasterBase(ABC):
             as_array=as_array,
             random_state=random_state,
             force_pixel_offset=force_pixel_offset,
+            mp_config=mp_config,
+            force_output_to_memory=force_output_to_memory,
         )
         if as_array:
             return output
@@ -2166,83 +2159,179 @@ class RasterBase(ABC):
     def subsample(
         self,
         subsample: int | float,
-        return_indices: Literal[False] = False,
         *,
-        band: int = 1,
-        random_state: int | np.random.Generator | None = None,
-        strategy: Literal["sequential", "topk"] = "sequential",
-        mp_config: MultiprocConfig | None = None,
+        bands: int | Iterable[int] | Mapping[str, int] | None = None,
         mask: RasterLike | VectorLike | ArrayLike | None = None,
+        skip_nodata: bool = True,
+        random_state: int | np.random.Generator | None = None,
+        as_array: Literal[False] = False,
+        return_indices: Literal[False] = False,
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> PointCloud: ...
+
+    @overload
+    def subsample(
+        self,
+        subsample: int | float,
+        *,
+        bands: int | None = None,
+        mask: RasterLike | VectorLike | ArrayLike | None = None,
+        skip_nodata: bool = True,
+        random_state: int | np.random.Generator | None = None,
+        as_array: Literal[True],
+        return_indices: Literal[False] = False,
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
     ) -> NDArrayNum: ...
 
     @overload
     def subsample(
         self,
         subsample: int | float,
-        return_indices: Literal[True],
         *,
-        band: int = 1,
-        random_state: int | np.random.Generator | None = None,
-        strategy: Literal["sequential", "topk"] = "sequential",
-        mp_config: MultiprocConfig | None = None,
+        bands: int | None = None,
         mask: RasterLike | VectorLike | ArrayLike | None = None,
+        skip_nodata: bool = True,
+        random_state: int | np.random.Generator | None = None,
+        as_array: Literal[True],
+        return_indices: Literal[True],
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
     ) -> tuple[NDArrayNum, ...]: ...
 
     @overload
     def subsample(
         self,
         subsample: float | int,
-        return_indices: bool = False,
-        band: int = 1,
-        random_state: int | np.random.Generator | None = None,
-        strategy: Literal["sequential", "topk"] = "sequential",
-        mp_config: MultiprocConfig | None = None,
         *,
+        bands: int | Iterable[int] | Mapping[str, int] | None = None,
         mask: RasterLike | VectorLike | ArrayLike | None = None,
-    ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
+        skip_nodata: bool = True,
+        random_state: int | np.random.Generator | None = None,
+        as_array: bool = False,
+        return_indices: bool = False,
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> NDArrayNum | tuple[NDArrayNum, ...] | PointCloud: ...
 
     @profiler.profile("geoutils.raster.base.subsample", memprof=True)
     def subsample(
         self,
         subsample: float | int,
-        return_indices: bool = False,
-        band: int = 1,
-        random_state: int | np.random.Generator | None = None,
-        strategy: Literal["sequential", "topk"] = "sequential",
-        mp_config: MultiprocConfig | None = None,
         *,
+        bands: int | Iterable[int] | Mapping[str, int] | None = None,
         mask: RasterLike | VectorLike | ArrayLike | None = None,
-    ) -> NDArrayNum | tuple[NDArrayNum, ...]:
+        skip_nodata: bool = True,
+        random_state: int | np.random.Generator | None = None,
+        as_array: bool = False,
+        return_indices: bool = False,
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> Any:
         """
-        Randomly sample valid raster values allowed by mask, without replacement.
+        Randomly sample raster cells without replacement.
 
-        :param subsample: Subsample size. If <= 1, a fraction of eligible finite pixels to extract.
-            If > 1, the maximum number of pixels. The mask is applied before calculating this size.
-        :param band: Band to subsample. Use return_indices=True and indexing to subsample the same points over
-            several bands.
-        :param return_indices: Whether to return the extracted indices only.
-        :param random_state: Random state or seed number.
-        :param strategy: "sequential" draws using the traversal order and can depend on chunk layout; "topk" keeps
-            the same seeded sample across chunk layouts.
-        :param mp_config: Worker and tile settings for multiprocessing. Cannot be combined with a Dask source.
-        :param mask: Eligible cells: True in a boolean array or aligned mask raster, or inside vector geometries.
-            Arrays must match the raster shape; mask rasters must share its grid and CRS. Missing mask entries are
-            excluded (e.g. mask=raster.data > 0).
+        The first selected band defines eligible cells when ``skip_nodata=True``. Its selected row and column positions
+        are applied to every requested band, so values and point coordinates remain aligned. Auxiliary band nodata
+        alone does not remove a point.
 
-        :returns: One-dimensional sampled values with the source dtype, or a tuple of row and column index arrays
-            referring to the original grid, including when mask restricts the sample.
+        Raster inputs return a PointCloud by default. Xarray accessor inputs return a GeoDataFrame, and Dask-backed
+        accessors return a lazy Dask GeoDataFrame. With ``as_array=True``, return values from one band or their source
+        row and column positions.
+
+        :param subsample: Fraction of eligible cells to extract when at most 1, otherwise the maximum cell count.
+        :param bands: Bands to return. By default, point output includes every band and array output includes band one.
+            An integer selects one band. An iterable selects bands with default ``b<band>`` column names, while a
+            mapping gives column names as keys and band numbers as values. The first selected band controls eligible
+            cells. Array output accepts only one integer band.
+        :param mask: With ``as_array=True``, restrict eligible raster cells with a boolean or spatial mask.
+        :param skip_nodata: Whether to exclude cells where the first selected band is nodata.
+        :param random_state: Random generator or seed used to make sampling reproducible.
+        :param as_array: Return sampled values or positions instead of a point cloud or dataframe.
+        :param return_indices: With ``as_array=True``, return row and column positions instead of values.
+        :param strategy: Use chunk-independent top-k sampling or sequential sampling.
+        :param force_pixel_offset: Pixel position used to calculate each point coordinate.
+        :param force_output_to_memory: Keep the complete output in memory instead of using the automatic chunked path.
+        :param mp_config: Worker, tile, and output settings for multiprocessing. Point output uses GeoPackage, LAS or
+            LAZ; LAS/LAZ stores the first selected band as elevation. Large array output uses NumPy format.
+
+        :returns: Point output with one row per sampled cell, one-dimensional sampled values, or row/column positions.
         """
 
-        return _subsample(
-            self,
+        if as_array:
+            if bands is None:
+                array_band = 1
+            elif isinstance(bands, int):
+                array_band = bands
+            else:
+                raise ValueError("Argument ``bands`` must be one band number when ``as_array=True``.")
+
+            return _subsample(
+                self,
+                subsample=subsample,
+                band=array_band,
+                return_indices=return_indices,
+                random_state=random_state,
+                strategy=strategy,
+                mp_config=mp_config,
+                skip_nodata=skip_nodata,
+                mask=mask,
+                force_output_to_memory=force_output_to_memory,
+            )
+        if return_indices:
+            raise ValueError("Argument ``return_indices=True`` requires ``as_array=True``.")
+
+        # Normalize band selections into the conversion-oriented internal arguments
+        if bands is None:
+            selected_bands = list(range(1, self.count + 1))
+            column_names = [f"b{band}" for band in selected_bands]
+        elif isinstance(bands, int):
+            selected_bands = [bands]
+            column_names = [f"b{bands}"]
+        elif isinstance(bands, Mapping):
+            selected_bands = list(bands.values())
+            column_names = list(bands)
+        elif isinstance(bands, Iterable) and not isinstance(bands, (str, bytes)):
+            selected_bands = list(bands)
+            column_names = [f"b{band}" for band in selected_bands]
+        else:
+            raise ValueError("Argument ``bands`` must be a band number, an iterable of band numbers, or a mapping.")
+
+        # Check the shared requirements before separating the first band from the remaining bands
+        if len(selected_bands) == 0:
+            raise ValueError("Argument ``bands`` must select at least one band.")
+        if not all(isinstance(band, int) for band in selected_bands):
+            raise ValueError("Argument ``bands`` must contain only integer band numbers.")
+        if len(set(selected_bands)) != len(selected_bands):
+            raise ValueError("Argument ``bands`` must not contain duplicate band numbers.")
+
+        output = _subsample_raster(
+            source_raster=self,
             subsample=subsample,
-            band=band,
-            return_indices=return_indices,
+            data_column_name=column_names[0],
+            data_band=selected_bands[0],
+            auxiliary_data_bands=selected_bands[1:],
+            auxiliary_column_names=column_names[1:],
+            skip_nodata=skip_nodata,
+            as_array=False,
             random_state=random_state,
-            strategy=strategy,
+            force_pixel_offset=force_pixel_offset,
             mp_config=mp_config,
-            mask=mask,
+            force_output_to_memory=force_output_to_memory,
+            rename_default_data_column=False,
         )
+        return self._cast_pointcloud_output(output)
 
     def cosample(
         self,
@@ -2292,8 +2381,7 @@ class RasterBase(ABC):
         :param mask_mode: Whether a vector mask keeps locations "inside" or "outside" its geometries.
         :param subsample: Fraction of common finite locations (e.g. 0.1), or maximum count (e.g. 1000); 1 keeps all.
         :param random_state: Seed or random generator for reproducible sampling (e.g. 42).
-        :param strategy: Raster sampling with "topk" or "sequential"; "topk" keeps the same seeded sample across chunk
-            sizes. Point output always uses "sequential".
+        :param strategy: Sampling with "topk" or "sequential"; "topk" keeps the same seeded sample across chunk sizes.
         :param raster_point_mode: Conversion direction: "grid_points" places points on a raster, "resample_raster"
             reads rasters at points. Defaults to at's locations, or point locations when available. Must agree with at.
         :param grid_method: Point gridding by SciPy interpolation ("nearest", "linear", "cubic"), or circular "idw",
@@ -2365,14 +2453,37 @@ class RasterBase(ABC):
         max_local_distance: float | None = None,
         index_dtype: DTypeLike = np.int32,
         distance_dtype: DTypeLike = np.float64,
+        mp_config: MultiprocConfig | None = None,
     ) -> xr.Dataset:
-        """Sample finite raster cell pairs for statistics by distance.
+        """Sample cell pairs in the raster.
 
-        Logarithmic lag sampling draws isotropic distances across short and long ranges. Anchor strategies reuse
-        raster cells and can confine part of the sample to source chunks, which limits reads from Dask-backed rasters.
+        This function provides different strategies for sampling short and long pairwise distances in large rasters.
+        It supports chunked Dask and Multiprocessing out-of-memory reads, with explicit pair subsampling to also limit
+        the returned data held in memory.
 
-        Strategy, duplicate, oversampling, anchor, and local distance controls apply to ``"loglag"``.
-        Both sampling schemes use ``batch_pairs`` and ``max_rounds``.
+        Sampling methods
+        ----------------
+
+        With the default ``sampling="loglag"``, distances are drawn across a logarithmic scale and directions are
+        drawn uniformly around the first cell, so that short and long distances are both represented. The resulting
+        offsets are rounded to the raster grid. The ``"independent"`` strategy draws a new first cell for every pair,
+        while ``"anchors"`` reuses a limited set of first cells. The default ``"chunk_anchors"`` also draws those
+        first cells from a limited number of source chunks to reduce reads. The ``"anchor_batched"`` strategy draws
+        several distances and directions together for each first cell.
+
+        With ``sampling="random_xy"``, both cells are drawn independently and pairs outside the requested distance
+        range are discarded. Pairs near ``min_distance`` or ``max_distance`` are usually rare, even though these
+        distance extremes are often important for spatial analysis. Log-lag strategy options do not apply;
+        ``batch_pairs`` and ``max_rounds`` control how candidates are collected.
+
+        Memory and chunked inputs
+        -------------------------
+
+        ``n_pairs`` limits the returned data held in memory, while ``batch_pairs`` limits temporary candidate arrays.
+        For Dask and Multiprocessing inputs, finite cells are counted separately by chunk or tile. Pair geometry is
+        generated from the raster grid, then only chunks or tiles containing candidate endpoints are read. The
+        complete raster band is not collected in memory and the Raster stays unloaded. Pair selection and the
+        returned Xarray Dataset are eager for both backends.
 
         :param band: Band to sample, counting from one.
         :param n_pairs: Requested number of pairs with two finite values; fewer may be returned if sampling stops early.
@@ -2400,6 +2511,8 @@ class RasterBase(ABC):
         :param max_local_distance: Largest proposed local distance in CRS units. Defaults to the largest chunk diagonal.
         :param index_dtype: Integer NumPy dtype for returned cell indexes (e.g. ``"int64"`` for very large rasters).
         :param distance_dtype: Floating NumPy dtype for returned distances (e.g. ``"float32"`` to reduce memory).
+        :param mp_config: Worker and tile settings for multiprocessing reads from an unloaded raster. Cannot be
+            combined with Dask inputs. The returned Xarray Dataset is eager.
         :returns: Xarray Dataset with pair and endpoint dimensions, containing cell indexes, values, coordinates,
             and distances.
         """
@@ -2428,6 +2541,7 @@ class RasterBase(ABC):
             max_local_distance=max_local_distance,
             index_dtype=index_dtype,
             distance_dtype=distance_dtype,
+            mp_config=mp_config,
         )
 
     def variogram(

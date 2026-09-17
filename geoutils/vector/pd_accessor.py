@@ -47,15 +47,21 @@ def _import_dask_geopandas() -> Any:
 
 
 def _register_dask_vector_accessor() -> None:
-    """Register the ``vct`` accessor on Dask DataFrames lazily."""
+    """
+    Add the ``.vct`` property to Dask DataFrames when lazy vector support is first needed.
+
+    The Pandas decorator on VectorAccessor does not affect Dask DataFrames because Dask keeps its own accessor list.
+    Registering here gives lazy GeoDataFrames the same GeoUtils vector API while keeping Dask DataFrame optional until
+    a caller requests chunked vector data.
+    """
 
     global _DASK_ACCESSOR_REGISTERED
 
-    # Dask warns if the same accessor is registered more than once
+    # Register once because the accessor is added to the shared Dask DataFrame class for the rest of the process
     if _DASK_ACCESSOR_REGISTERED:
         return
 
-    # Register only after Dask is available so the dependency remains optional
+    # Import Dask only when a lazy vector is requested, then attach VectorAccessor as its ``.vct`` property
     import_optional("dask")
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=FutureWarning, module="dask.dataframe")
@@ -93,7 +99,7 @@ def open_vector(filename: str, chunks: int | None = None, **kwargs: Any) -> gpd.
     """
 
     if chunks is not None:
-        # A positive feature count defines the target size of each lazy partition
+        # Load the optional Dask backend and add ``.vct`` before returning the lazy GeoDataFrame
         if chunks <= 0:
             raise ValueError("Argument 'chunks' must be a strictly positive integer.")
         dgpd = _import_dask_geopandas()

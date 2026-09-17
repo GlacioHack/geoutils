@@ -164,12 +164,15 @@ Statistics of a point cloud can be computed using {func}`~geoutils.PointCloud.st
 pc.stats(["mean", "max", "std"])
 ```
 
-A point cloud can also be quickly subsampled using {func}`~geoutils.PointCloud.subsample`, which considers only valid values, and returns either a point
-cloud or an array:
+A point cloud can also be quickly subsampled using {func}`~geoutils.PointCloud.subsample`, which considers only valid
+values and returns the complete selected point rows by default:
 
 ```{code-cell} ipython3
-# Get 500 random points in the point cloud
+# Get 500 random points
 pc_sub = pc.subsample(500)
+
+# Return only their values as an array
+values_sub = pc.subsample(500, as_array=True)
 ```
 
 See {ref}`stats` for more details.

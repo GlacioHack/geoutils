@@ -115,7 +115,7 @@ def _trim_process_memory() -> None:
     gc.collect()
     try:
         malloc_trim = ctypes.CDLL(None).malloc_trim
-    except (AttributeError, OSError):
+    except (AttributeError, OSError, TypeError):
         return
     malloc_trim(0)
 

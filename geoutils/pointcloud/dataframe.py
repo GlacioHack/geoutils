@@ -105,6 +105,15 @@ def _build_pointcloud_output(
     otherwise compute Dask rows before constructing a PointCloud.
     """
 
+    # Pandas registration does not add ``.pc`` or ``.vct`` to Dask DataFrames because Dask has a separate registry
+    # Add both properties here so every lazy point cloud returned by GeoUtils has the same public accessor API
+    if as_dataframe and is_dask_dataframe(dataframe):
+        from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
+        from geoutils.vector.pd_accessor import _register_dask_vector_accessor
+
+        _register_dask_vector_accessor()
+        _register_dask_pointcloud_accessor()
+
     # Copy supplied metadata and load Dask rows only when the caller needs a PointCloud object
     metadata = {} if attrs is None else dict(attrs)
     if not as_dataframe and is_dask_dataframe(dataframe):

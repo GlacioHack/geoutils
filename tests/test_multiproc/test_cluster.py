@@ -7,9 +7,11 @@ from typing import Any
 import pytest
 
 from geoutils.multiproc.cluster import (
+    AbstractCluster,
     BasicCluster,
     ClusterGenerator,
     MpCluster,
+    _map_bounded,
 )
 
 
@@ -24,11 +26,11 @@ def long_running_task(x: float) -> float:
     return x * 2
 
 
-def delayed_value(start_barrier: Any, delay: float, value: int) -> int:
-    """Wait for both worker tasks to start, then return a value after a controlled delay."""
+def wait_for_release(release_event: Any, value: int) -> int:
+    """Wait for the parent process to release this worker task, then return a value."""
 
-    start_barrier.wait(timeout=30)
-    time.sleep(delay)
+    if not release_event.wait(timeout=30):
+        raise TimeoutError("The parent process did not release the worker task.")
     return value
 
 
@@ -89,24 +91,62 @@ class TestClusterGenerator:
             MpCluster({"nb_workers": 1}, start_method="unavailable")  # type: ignore[arg-type]
 
     def test_mp_cluster_completion_order(self) -> None:
-        """Checks that iter_completed() yields a later submitted task when it finishes first."""
+        """Checks that iter_completed() yields a finished task before an earlier blocked task."""
 
-        # Start both tasks before either delay begins. Windows starts fresh worker processes, and one worker can
-        # otherwise run a complete task before the other worker has finished starting
+        # Keep the first task blocked so process startup and scheduling cannot let it finish before the second task
         with multiprocessing.Manager() as manager:
-            start_barrier = manager.Barrier(2)
+            release_first = manager.Event()
             with ClusterGenerator("multiprocessing", nb_workers=2) as cluster:
                 assert isinstance(cluster, MpCluster)
 
-                # Submit the longer task first, then collect results as each task finishes
+                # Submit the blocked task first and check that the immediately returning second task is yielded first
                 futures = [
-                    cluster.submit(delayed_value, start_barrier, 0.2, 0),
-                    cluster.submit(delayed_value, start_barrier, 0.01, 1),
+                    cluster.submit(wait_for_release, release_first, 0),
+                    cluster.submit(sample_function, 0, 1),
                 ]
-                completed = list(cluster.iter_completed(futures))
+                completed = cluster.iter_completed(futures)
+                first_completed = next(completed)
 
-        # The short second task must be reported before the long first task
-        assert completed == [(1, 1), (0, 0)]
+                # Release the first task only after observing the second task, then collect the remaining result
+                release_first.set()
+                remaining_completed = list(completed)
+
+        # The runnable second task must be reported before the blocked first task
+        assert [first_completed, *remaining_completed] == [(1, 1), (0, 0)]
+
+    def test_map_bounded__refills_workers_and_keeps_input_order(self) -> None:
+        """Checks that bounded mapping submits replacement work early and returns results in input order."""
+
+        class ReverseCompletionCluster(AbstractCluster):
+            """Return the newest pending result first while recording submitted inputs."""
+
+            def __init__(self) -> None:
+                super().__init__()
+                self.submitted: list[int] = []
+
+            def submit(self, fun: Any, *args: Any, **kwargs: Any) -> Any:
+                """Calculate and record one immediate result."""
+
+                self.submitted.append(args[0])
+                return fun(*args, **kwargs)
+
+            def iter_completed(self, futures: list[Any]) -> Any:
+                """Return the most recently submitted pending result."""
+
+                yield len(futures) - 1, futures[-1]
+
+            def close(self) -> None:
+                """Close this in-memory test cluster."""
+
+        # Delay the first returned result by reporting the second pending call as completed first
+        cluster = ReverseCompletionCluster()
+        mapped = _map_bounded(cluster, lambda value: value * 2, ((value,) for value in range(6)), max_pending=2)
+        first = next(mapped)
+
+        # Replacement calls start before the first ordered result is returned, while results still follow input order
+        assert first == (0, 0)
+        assert cluster.submitted == [0, 1, 2, 3]
+        assert [first, *mapped] == [(index, index * 2) for index in range(6)]
 
     def test_mp_cluster_termination(self) -> None:
         # Test that the pool terminates correctly after closing

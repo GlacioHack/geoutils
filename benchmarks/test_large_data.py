@@ -1,25 +1,25 @@
 """
 Large data tests for every Dask and multiprocessing operation.
 
-Each operation and backend (Dask, multiprocessing) runs in a separate process with an input raster whose
-size exceeds the memory limit. The operation must complete with less additional worker memory than the full raster
-would require.
+Each operation and backend (Dask, multiprocessing) runs in a separate process with an input raster size that
+exceeds the memory limit.
 
-A test fails if the input opens eagerly, the operation raises an error or times out, its representative result or
+This file runs pass/fail computation and memory tests (not a benchmark like the ASV suite).
+
+A test fails if the input opens eagerly, the operation raises an error or times out, its result or
 output file is incorrect, a Dask worker is replaced, multiprocessing workers disappear, or additional worker memory
 reaches the size of the full raster.
+Otherwise, it passes.
 
-This is a pass/fail computation and memory test (not a benchmark like the ASV suite).
+Default Pytest runs skip this module. To run it, use ``python -m pytest --large-data -m large_data -ra``.
 
-Default Pytest run skips this module. Run it with ``python -m pytest --large-data -m large_data -ra``.
-The parameters can be changed by defining environment variables before the above call (defaults shown below):
+Size/chunk parameters can be modified by defining environment variables before the above call (defaults shown below):
 ``GEOUTILS_LARGE_DATA_SHAPE`` (12288), ``GEOUTILS_LARGE_DATA_CHUNKS`` (1024),
 ``GEOUTILS_LARGE_DATA_MEMORY_LIMIT`` (512MB), ``GEOUTILS_LARGE_DATA_PROFILE_INTERVAL`` (0.1 seconds) and
 ``GEOUTILS_LARGE_DATA_TIMEOUT`` (1800 seconds).
 Shape and chunk variables accept one square size or ``rows,columns``.
 
-Pytest records failed tests in .pytest_cache/v/cache/lastfailed.
-During local development, add ``--lf`` to the large data command to rerun only those cases and save time!
+During local development, add ``--lf`` to rerun only failed cases and save time!
 """
 
 from __future__ import annotations
@@ -181,7 +181,7 @@ class TestLargeData:
         if backend == "dask":
             pytest.importorskip("dask")
             pytest.importorskip("distributed")
-            if operation == "grid":
+            if operation in ("grid", "subsample", "to_pointcloud"):
                 pytest.importorskip("dask_geopandas")
 
         # The uncompressed input must exceed the configured limit before claiming a large data test
@@ -199,6 +199,12 @@ class TestLargeData:
             assert os.path.exists(result.output_file)
             # Remove each checked output before the next large operation starts
             os.remove(result.output_file)
+
+        # The client must not build a temporary array as large as the complete raster
+        client_trace = result.metrics.client_mem_mb
+        assert client_trace
+        baseline_client_mb = client_trace[0][1]
+        assert result.metrics.peak_client_mem_mb - baseline_client_mb < logical_mb
 
         if backend == "dask":
             # Dask must complete without hiding a failure through nanny replacement
@@ -234,7 +240,16 @@ class TestLargeData:
     def test_operation_stays_out_of_core(self, case_name: str, large_data_config: BenchmarkConfig) -> None:
         """Complete one larger-than-memory operation without loading its full raster."""
 
-        self._check_case(case_name=case_name, large_data_config=large_data_config)
+        # Request more point rows than one raster chunk so point operations check their bounded cutoff paths
+        config = large_data_config
+        operation = split_operation_case(case_name)[1]
+        sample_size = int(np.prod(large_data_config.chunks)) + 1
+        if operation == "subsample":
+            config = replace(large_data_config, subsample_size=sample_size)
+        elif operation == "to_pointcloud":
+            config = replace(large_data_config, pointcloud_subsample_size=sample_size)
+
+        self._check_case(case_name=case_name, large_data_config=config)
 
     @pytest.mark.parametrize("case_name", ["dask-grid", "multiprocessing-grid"])
     @pytest.mark.parametrize("resampling", ["idw", "mean"])

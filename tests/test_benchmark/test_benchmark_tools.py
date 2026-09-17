@@ -1,4 +1,4 @@
-"""Minimal tests for benchmark workflows, reports and GDAL commands."""
+"""Minimal tests for benchmark workflows, reports and external CLI commands."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from benchmarks.asv_suite import comparisons as benchmark_comparisons
-from benchmarks.asv_suite.comparisons import (
+from benchmarks.asv_suite import parameter_sweeps as benchmark_parameter_sweeps
+from benchmarks.asv_suite.parameter_sweeps import (
     BENCHMARK_CASE_BY_CLASS,
     BENCHMARK_CASES,
     COMPARISONS,
@@ -34,11 +34,15 @@ from benchmarks.gdal_comparison.commands import (
     COMPARISON_OPERATIONS,
     build_gdal_command,
 )
+from benchmarks.pdal_comparison.commands import (
+    PDAL_COMPARISON_OPERATIONS,
+    build_pdal_command,
+)
 from benchmarks.workflows.grouped_reference import (
     compute_grouped_reference,
     prepare_grouped_reference,
 )
-from benchmarks.workflows.runner import BenchmarkConfig
+from benchmarks.workflows.runner import BenchmarkConfig, BenchmarkRunner
 from benchmarks.workflows.variography import (
     prepare_pair_pointcloud,
     prepare_pair_raster,
@@ -51,8 +55,9 @@ class TestComparisonReport:
     """
     Test module for benchmark registration and report generation.
 
-    Those are minimal tests to ensure changes to benchmarks/ don't break the routines, even if ASV can do quick checks,
-    it's easier to have a detailed traceback here through Pytest.
+    Those are minimal tests to ensure changes to ``benchmarks/`` don't break the routines.
+    Even if ASV runs quick checks of the benchmarking setup through CI, it's easier to have a detailed traceback here
+    through Pytest for some aspects.
     We especially tests our custom routines/rendering for the benchmark webpage, comparisons to external refs (e.g.
     GDAL CLI), and across variables (raster/point size, chunk size, etc) and categories (e.g. eager/Dask/MP, method,
     etc) of interest.
@@ -65,10 +70,10 @@ class TestComparisonReport:
         registered = set(BENCHMARK_CASE_BY_CLASS) | set(EXTERNAL_REFERENCE_CASE_BY_CLASS)
         plotted = {class_name for comparison in COMPARISONS for _, class_name in comparison.series}
 
-        # Importing comparisons.py should create every class needed by ASV and the report
+        # Importing parameter_sweeps.py should create every class needed by ASV and the report
         assert BENCHMARK_CASES and COMPARISONS
         assert plotted <= registered
-        assert all(hasattr(benchmark_comparisons, class_name) for class_name in registered)
+        assert all(hasattr(benchmark_parameter_sweeps, class_name) for class_name in registered)
 
     def test_render_preview__essential_files(self, tmp_path: Path) -> None:
         """Checks that preview rendering writes the main pages, data exports and plots."""
@@ -123,6 +128,35 @@ class TestComparisonReport:
         assert (tmp_path / DOCUMENTATION_DATA).is_file()
 
 
+@pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
+class TestBenchmarkRunner:
+    """Test module for bounded operation outputs produced by BenchmarkRunner."""
+
+    @pytest.mark.parametrize("execution_mode", ["dask", "multiprocessing"])
+    def test_to_pointcloud__bounded_sample(
+        self, execution_mode: Literal["dask", "multiprocessing"], tmp_path: Path
+    ) -> None:
+        """Checks that the large-data point conversion can request a bounded sample from either backend."""
+
+        if execution_mode == "dask":
+            pytest.importorskip("distributed")
+
+        # Request more point rows than one 3 x 4 raster chunk to use the bounded cutoff path
+        config = BenchmarkConfig(
+            shape=(8, 10),
+            chunks=(3, 4),
+            pointcloud_subsample_size=17,
+            directory=str(tmp_path / execution_mode),
+        )
+
+        # Run the shared workflow and let its internal count check validate all 17 output rows
+        with BenchmarkRunner(execution_mode, config) as runner:
+            result = runner.run("to_pointcloud", profile=False)
+
+        # The constant raster gives the same compact correctness value through both backends
+        assert result.value == config.raster_value
+
+
 @pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
 class TestGroupedReferenceChunked:
     """Test module for running grouped benchmark workflows with each execution path."""
@@ -158,7 +192,7 @@ class TestGroupedReferenceChunked:
             for case in BENCHMARK_CASES
             if case.comparison_group == "grouped-flox-raster-size" and case.execution_mode == "multiprocessing"
         )
-        benchmark = getattr(benchmark_comparisons, case.benchmark_class)()
+        benchmark = getattr(benchmark_parameter_sweeps, case.benchmark_class)()
 
         # Use a small raster but follow ASV's normal setup/run/teardown order, including its real worker process
         parameter = 32
@@ -266,3 +300,58 @@ class TestGdalCommands:
         assert expected_source in command
         assert comparison.output_file in command
         assert command[cache_index + 1] == str(config.gdal_cachemax_mb)
+
+
+class TestPdalCommands:
+    """Test module for building PDAL pipelines used by external benchmark comparisons."""
+
+    @pytest.mark.parametrize("operation", PDAL_COMPARISON_OPERATIONS)
+    @pytest.mark.parametrize("driver", ["GPKG", "LAS", "LAZ"])
+    def test_comparison_command__essential_stages(
+        self,
+        operation: str,
+        driver: Literal["GPKG", "LAS", "LAZ"],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """Checks that each PDAL comparison reads the raster and writes the expected point output."""
+
+        # Return the command name directly because this test checks the pipeline without running PDAL
+        monkeypatch.setattr("benchmarks.pdal_comparison.commands._require_command", lambda name: name)
+        config = BenchmarkConfig(
+            shape=(64, 96),
+            chunks=(32, 32),
+            subsample_size=17,
+            directory=str(tmp_path),
+            point_output_driver=driver,
+        )
+
+        # Build the pipeline and read the JSON passed to the PDAL command
+        comparison = build_pdal_command(operation, config, raster_file="source-raster.tif")  # type: ignore[arg-type]
+        pipeline = json.loads(Path(comparison.pipeline_file).read_text(encoding="utf-8"))["pipeline"]
+        stage_types = [stage["type"] for stage in pipeline]
+
+        # Conversion keeps every point, while subsampling randomizes first and keeps the requested count
+        writer = "writers.ogr" if driver == "GPKG" else "writers.las"
+        point_stages = ["readers.gdal"]
+        if driver in ("LAS", "LAZ"):
+            point_stages.append("filters.ferry")
+            assert pipeline[1]["dimensions"] == "band_1=>Z"
+        expected_stages = [*point_stages, writer]
+        if operation == "subsample":
+            expected_stages = [*point_stages, "filters.randomize", "filters.head", writer]
+            assert pipeline[-3]["seed"] == 42
+            assert pipeline[-2]["count"] == config.subsample_size
+        assert stage_types == expected_stages
+
+        # Both paths use the configured cache, source raster and point output
+        assert comparison.command == ["pdal", "pipeline", comparison.pipeline_file]
+        assert pipeline[0]["filename"] == "source-raster.tif"
+        assert pipeline[0]["gdalopts"] == [f"GDAL_CACHEMAX={config.gdal_cachemax_mb}"]
+        assert pipeline[-1]["filename"] == comparison.output_file
+        assert Path(comparison.output_file).suffix == f".{driver.lower()}"
+        if driver == "GPKG":
+            assert pipeline[-1]["ogrdriver"] == "GPKG"
+        else:
+            assert pipeline[-1]["compression"] == (driver == "LAZ")
+            assert pipeline[-1]["extra_dims"] == "all"

@@ -170,6 +170,7 @@ class TestClassVsAccessorConsistency:
         "georeferenced_grid_equal",
         "intersection",
         "edit",
+        "subsample",
     ]
     # List of methods that WILL NOT load the input for certain arguments
     methods_input_noload_allowed_args = {"info": {"stats": [False]}}
@@ -426,7 +427,10 @@ class TestClassVsAccessorConsistency:
                 noload_allowed_args=self.methods_input_noload_allowed_args,
             )
             assert raster.is_loaded is should_input_be_loaded
-            assert ds._in_memory is should_input_be_loaded
+            if method == "subsample":
+                assert ds._in_memory
+            else:
+                assert ds._in_memory is should_input_be_loaded
 
         # In the case of a Raster / DataArray output, check if output is loaded or not
         # (apart from in-place metadata setting, only a few functions don't load output, such as: crop/icrop, copy,
@@ -507,11 +511,7 @@ class TestClassVsAccessorConsistency:
         ("cosample", {"other": "self", "subsample": 100, "strategy": "topk", "random_state": 42}),
         (
             "subsample",
-            {"subsample": 100, "strategy": "topk"},
-        ),
-        (
-            "subsample",
-            {"subsample": 100, "strategy": "topk", "return_indices": True},
+            {"subsample": 100, "random_state": 42, "strategy": "topk", "as_array": True},
         ),
     )
 

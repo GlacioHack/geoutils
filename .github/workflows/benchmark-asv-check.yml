@@ -12,6 +12,7 @@ on:
       - "geoutils/**"
       - "benchmarks/asv_suite/**"
       - "benchmarks/gdal_comparison/**"
+      - "benchmarks/pdal_comparison/**"
       - "benchmarks/workflows/**"
       - "asv.conf.json"
       - "environment.yml"
@@ -57,13 +58,13 @@ jobs:
           key: conda-${{ runner.os }}-3.12-asv-check-${{ env.cache_date }}-${{ hashFiles('environment.yml', 'setup.cfg') }}-${{ env.CACHE_NUMBER }}
         env:
           # Increase this value to replace the cache without changing dependencies
-          CACHE_NUMBER: 0
+          CACHE_NUMBER: 1
 
       - name: Install base environment with Python 3.12
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           mamba install pyyaml python=3.12
-          python .github/scripts/generate_yml_env_fixed_py.py --pyv 3.12 --add "gdal<3.13.3" environment.yml
+          python .github/scripts/generate_yml_env_fixed_py.py --pyv 3.12 --add "gdal<3.13.3,pdal>=2.10" environment.yml
           mamba env update -n geoutils-dev -f environment-ci-py3.12.yml
 
       - name: Install GeoUtils and benchmark dependencies

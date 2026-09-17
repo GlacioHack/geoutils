@@ -34,7 +34,8 @@ dependencies:
   - flox # For grouped statistics
 
   # Test dependencies
-  - gdal<3.13.3  # To test functionalities against GDAL
+  - gdal<3.13.3  # To benchmark functionalities against GDAL
+  - pdal>=2.10  # To benchmark functionalities against PDAL
   - pytest=7.*
   - pytest-xdist
   - pytest-lazy-fixtures
