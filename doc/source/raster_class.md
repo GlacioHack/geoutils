@@ -419,11 +419,11 @@ rast_reproj.to_xarray()
 
 ## Statistics
 
-Statistics of a raster, optionally subsetting to an inlier mask, can be computed using {func}`~geoutils.Raster.get_stats`.
+Statistics of a raster, optionally subsetting to an inlier mask, can be computed using {func}`~geoutils.Raster.stats`.
 
 ```{code-cell} ipython3
 # Get mean, max and STD of the raster
-rast.get_stats(["mean", "max", "std"])
+rast.stats(["mean", "max", "std"])
 ```
 
 A raster can also be quickly subsampled using {func}`~geoutils.Raster.subsample`, which can consider only valid values, and return either a point cloud or an

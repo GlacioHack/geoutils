@@ -12,6 +12,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
+import xarray as xr
 from geopandas.testing import assert_geodataframe_equal
 from pandas.testing import assert_frame_equal
 from pyproj import CRS
@@ -71,6 +72,22 @@ def assert_output_equal(output_pc: Any, output_ds: Any, use_allclose: bool = Fal
     elif isinstance(output_pc, gpd.GeoDataFrame):
         assert_geodataframe_equal(output_pc, output_ds)
 
+    # For tabular statistics
+    elif isinstance(output_pc, pd.DataFrame):
+        assert_frame_equal(output_pc, output_ds)
+
+    # For lightweight variogram records
+    elif isinstance(output_pc, gu.Variogram):
+        assert isinstance(output_ds, gu.Variogram)
+        assert np.allclose(output_pc.lags, output_ds.lags)
+        assert np.allclose(output_pc.semivariance, output_ds.semivariance, equal_nan=True)
+        assert np.array_equal(output_pc.counts, output_ds.counts)
+        assert output_pc.model == output_ds.model
+
+    # For labelled pair samples
+    elif isinstance(output_pc, xr.Dataset):
+        assert output_pc.identical(output_ds)
+
     # For any other object type
     else:
         assert output_pc == output_ds
@@ -115,18 +132,45 @@ class TestClassVsAccessorConsistency:
     methods_and_kwargs = [
         ("set_data_column", {"new_data_column": "b2"}),
         ("copy", {}),
+        ("reproject", {"crs": 4326}),
         ("to_xyz", {}),
         ("to_array", {}),
         ("to_tuples", {}),
         ("pointcloud_equal", {"other": "self"}),
         ("pointcloud_allclose", {"other": "self"}),
         ("georeferenced_coords_equal", {"pc": "self"}),
+        ("stats", {}),
+        ("stats", {"by": {"group": "b2"}, "bins": {"group": 2}, "statistics": "mean"}),
         ("get_stats", {}),
         ("subsample", {"subsample": 2, "random_state": 42}),
+        ("cosample", {"other": "self", "subsample": 2, "random_state": 42}),
+        (
+            "pairsample",
+            {"n_pairs": 4, "min_distance": 0.5, "max_distance": 2, "strategy": "kdtree", "random_state": 42},
+        ),
+        (
+            "variogram",
+            {
+                "n_pairs": 4,
+                "n_lags": 2,
+                "min_lag": 0.5,
+                "max_lag": 2,
+                "strategy": "kdtree",
+                "random_state": 42,
+            },
+        ),
         ("to_geoutils", {}),
         (
             "grid",
             {"grid_coords": (np.array([0.0, 1.0]), np.array([0.0, 1.0])), "resampling": "nearest"},
+        ),
+        (
+            "grid",
+            {
+                "grid_coords": (np.array([0.0, 1.0]), np.array([0.0, 1.0])),
+                "resampling": "nearest",
+                "data_column": "b2",
+            },
         ),
     ]
 
@@ -139,6 +183,8 @@ class TestClassVsAccessorConsistency:
         pc = PointCloud(self.ds, data_column="b1")
         ds = self.ds.copy()
         ds.pc.set_data_column("b1")
+        if method == "variogram":
+            pytest.importorskip("skgstat")
 
         args_pc = kwargs.copy()
         args_ds = kwargs.copy()
@@ -315,7 +361,7 @@ class TestClassVsAccessorConsistency:
     def test_shared_methods_and_arithmetic_ownership(self) -> None:
         """Check that shared operations live in the base while arithmetic remains exclusive to PointCloud."""
 
-        shared_methods = {"from_xyz", "pointcloud_equal", "pointcloud_allclose", "get_stats", "grid"}
+        shared_methods = {"from_xyz", "pointcloud_equal", "pointcloud_allclose", "stats", "get_stats", "grid"}
         assert shared_methods <= set(PointCloudBase.__dict__)
         assert shared_methods.isdisjoint(PointCloud.__dict__)
         assert "__add__" not in PointCloudBase.__dict__

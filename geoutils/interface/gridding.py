@@ -1186,6 +1186,7 @@ def _grid_pointcloud_to_raster(
     dist_nodata_pixel: float = 1.0,
     nodata: int | float = -9999,
     *,
+    data_column: str | None = None,
     distance_power: float = 2.0,
     min_points: int = 1,
     chunksizes: tuple[int, int] | None = None,
@@ -1196,13 +1197,32 @@ def _grid_pointcloud_to_raster(
     nodata_propagation: NodataPropagation = "gdal",
     gridding_func: GridPointCloudCallable = _grid_pointcloud,
 ) -> Any:
-    """Grid a point cloud to a raster with eager, Dask, or Multiprocessing backends."""
+    """
+    Grid a point cloud to a raster with eager, Dask, or Multiprocessing backends.
+
+    A Dask reference selects lazy output even when the point source is eager. Its spatial chunks are reused unless
+    chunksizes is supplied, following the same reference-grid behavior as rasterization. An explicit data_column
+    selects values without copying the source or changing its active column.
+    """
+
+    # Resolve the value column from metadata so file-backed sources stay available for bounded worker reads
+    if data_column is not None and (
+        not isinstance(data_column, str) or data_column not in get_geo_attr(source_pointcloud, "columns")
+    ):
+        raise ValueError("Argument ``data_column`` must name an existing point column.")
+    data_column_name = get_geo_attr(source_pointcloud, "data_column") if data_column is None else data_column
+
+    # Follow a lazy output reference without converting an eager point cloud to a Dask dataframe
+    ref_chunks = get_geo_attr(ref, "_chunks") if ref is not None and has_geo_attr(ref, "_chunks") else None
+    if ref_chunks is not None:
+        ref_chunks = ref_chunks[-2:]
+        dask = True
 
     # A single operation must have one owner for scheduling and memory management
     if dask and mp_config is not None:
         raise ValueError(
             "Cannot use Multiprocessing and Dask simultaneously. To use Dask, remove mp_config. "
-            "To use Multiprocessing, use an eager PointCloud object."
+            "To use Multiprocessing, use an eager PointCloud and an unchunked raster reference."
         )
 
     if is_dask_dataframe(_source_dataframe(source_pointcloud)) and mp_config is not None:
@@ -1247,7 +1267,7 @@ def _grid_pointcloud_to_raster(
         array = _grid_pointcloud_block_from_source(
             source_pointcloud=source_pointcloud,
             geogrid=dst_geogrid,
-            data_column_name=get_geo_attr(source_pointcloud, "data_column"),
+            data_column_name=data_column_name,
             gridding_func=gridding_func,
             **kwargs,
         )
@@ -1258,7 +1278,6 @@ def _grid_pointcloud_to_raster(
         if mp_config is not None:
             chunksizes = _split_chunk_size(mp_config.chunks)
         else:
-            ref_chunks = get_geo_attr(ref, "_chunks") if ref is not None and has_geo_attr(ref, "_chunks") else None
             chunksizes = ref_chunks if ref_chunks is not None else (1024, 1024)
     assert chunksizes is not None
 
@@ -1273,7 +1292,7 @@ def _grid_pointcloud_to_raster(
             source_pointcloud=source_pointcloud,
             dst_geotiling=dst_geotiling,
             dst_block_geogrids=dst_block_geogrids,
-            data_column_name=get_geo_attr(source_pointcloud, "data_column"),
+            data_column_name=data_column_name,
             gridding_func=gridding_func,
             **kwargs,
         )
@@ -1294,7 +1313,7 @@ def _grid_pointcloud_to_raster(
         source_pointcloud=source_pointcloud,
         dst_geotiling=dst_geotiling,
         dst_block_geogrids=dst_block_geogrids,
-        data_column_name=get_geo_attr(source_pointcloud, "data_column"),
+        data_column_name=data_column_name,
         mp_config=mp_config,
         file_metadata=file_metadata,
         gridding_func=gridding_func,

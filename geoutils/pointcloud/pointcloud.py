@@ -67,7 +67,7 @@ if TYPE_CHECKING:
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 PointCloudType = TypeVar("PointCloudType", bound="PointCloud")
-PointCloudLike = Union["PointCloud", gpd.GeoDataFrame]
+PointCloudLike = Union[PointCloudBase, gpd.GeoDataFrame]
 
 # List of NumPy "array" functions that are handled.
 # Note: all universal function are supported: https://numpy.org/doc/stable/reference/ufuncs.html
@@ -1095,7 +1095,7 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
 
         if stats:
             as_str_split.append("\nStatistics:")
-            statistics = self.get_stats()
+            statistics = self.stats()
 
             # Determine the maximum length of the stat names for alignment
             max_len = max(len(name) for name in statistics.keys())

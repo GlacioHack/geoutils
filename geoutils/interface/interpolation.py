@@ -36,10 +36,13 @@ from geoutils._dispatch import _check_match_points, is_dask_geodataframe
 from geoutils._misc import import_optional
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface._nodata import NodataPropagation, _validate_nodata_propagation
-from geoutils.multiproc import MultiprocConfig, compute_tiling
+from geoutils.multiproc import MultiprocConfig
 from geoutils.multiproc.chunked import cached_cumsum, normalize_chunks
+from geoutils.multiproc.mparray import block_bounds_from_chunks
 from geoutils.projtools import reproject_from_latlon
 from geoutils.raster.referencing import _bounds, _coords, _outside_bounds, _res, _xy2ij
+
+InterpolationMethod = Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
 
 method_to_order = {"nearest": 0, "linear": 1, "cubic": 3, "quintic": 5, "slinear": 1, "pchip": 3, "splinef2d": 3}
 
@@ -49,10 +52,15 @@ if TYPE_CHECKING:
     from geoutils.raster.raster import Raster
 
 
-def _interp_output_dtype(dtype: DTypeLike) -> DTypeLike:
-    """Return an interpolation dtype that can represent NaNs."""
+def _interp_output_dtype(dtype: DTypeLike, *, validity_only: bool = False) -> DTypeLike:
+    """
+    Return an interpolation dtype that can represent NaNs.
 
-    return np.float32 if np.issubdtype(dtype, np.integer) else dtype
+    Validity-only interpolation uses float32 regardless of the original values, following _interp_points().
+    """
+
+    # Promote booleans too so missing interpolated values do not become True
+    return np.float32 if validity_only or np.issubdtype(dtype, np.integer) or np.issubdtype(dtype, np.bool_) else dtype
 
 
 def _destination_pixel_indices(
@@ -252,7 +260,7 @@ def _interpn_interpolator(
     fill_value: Number = np.nan,
     bounds_error: bool = False,
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
-    method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
+    method: InterpolationMethod = None,
 ) -> Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]:
     """
     Create SciPy interpolator with nodata spreading. Default method is linear and default spreading is at distance of
@@ -305,7 +313,6 @@ def _interpn_interpolator(
 
     # For the RegularGridInterpolator
     if method in RegularGridInterpolator._ALL_METHODS:
-
         # We create the classic interpolator
         interp = RegularGridInterpolator(
             points, values, method=method, bounds_error=bounds_error, fill_value=fill_value
@@ -313,7 +320,6 @@ def _interpn_interpolator(
 
         # We create a new interpolator callable that propagates nodata as defined above
         def regulargrid_interpolator_with_nan(xi: tuple[NDArrayNum, NDArrayNum]) -> NDArrayNum:
-
             # Get results
             results = interp(xi)
             # Get invalids
@@ -326,13 +332,11 @@ def _interpn_interpolator(
 
     # For the RectBivariateSpline
     else:
-
         # The coordinates must be in ascending order, which requires flipping the array too (more costly)
         interp = RectBivariateSpline(np.flip(points[0]), points[1], np.flip(values[:], axis=0))
 
         # We create a new interpolator callable that propagates nodata as defined above, and supports fill_value
         def rectbivariate_interpolator_with_fillvalue(xi: tuple[NDArrayNum, NDArrayNum]) -> NDArrayNum:
-
             # Get invalids
             invalids = interp_mask(xi)
 
@@ -421,13 +425,15 @@ def _interp_points_base(
     transform: rio.transform.Affine,
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
     area_or_point: Literal["Area", "Point"] | None = None,
-    method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] | None = None,
+    method: InterpolationMethod | None = None,
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     nodata_propagation: NodataPropagation = "gdal",
     *,
     return_interpolator: Literal[False] = False,
+    array_indices: tuple[NDArrayNum, NDArrayNum] | None = None,
+    _validity_only: bool = False,
     **kwargs: Any,
 ) -> NDArrayNum: ...
 
@@ -438,13 +444,15 @@ def _interp_points_base(
     transform: rio.transform.Affine,
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
     area_or_point: Literal["Area", "Point"] | None = None,
-    method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] | None = None,
+    method: InterpolationMethod | None = None,
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     nodata_propagation: NodataPropagation = "gdal",
     *,
     return_interpolator: Literal[True],
+    array_indices: tuple[NDArrayNum, NDArrayNum] | None = None,
+    _validity_only: bool = False,
     **kwargs: Any,
 ) -> Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]: ...
 
@@ -455,13 +463,15 @@ def _interp_points_base(
     transform: rio.transform.Affine,
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
     area_or_point: Literal["Area", "Point"] | None = None,
-    method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] | None = None,
+    method: InterpolationMethod | None = None,
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     nodata_propagation: NodataPropagation = "gdal",
     *,
     return_interpolator: bool = False,
+    array_indices: tuple[NDArrayNum, NDArrayNum] | None = None,
+    _validity_only: bool = False,
     **kwargs: Any,
 ) -> NDArrayNum | Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]: ...
 
@@ -471,18 +481,33 @@ def _interp_points_base(
     transform: rio.transform.Affine,
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | None,
     area_or_point: Literal["Area", "Point"] | None = None,
-    method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] | None = None,
+    method: InterpolationMethod | None = None,
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     nodata_propagation: NodataPropagation = "gdal",
     return_interpolator: bool = False,
+    array_indices: tuple[NDArrayNum, NDArrayNum] | None = None,
+    _validity_only: bool = False,
     **kwargs: Any,
 ) -> NDArrayNum | Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]:
+    """
+    Interpolate a raster at point coordinates.
+
+    This internal function can optionally reuse global pixel indices to work on chunks.
+    The private validity-only option follows _interp_points(); its conversion happens within this loaded array.
+    """
 
     # If interpolation method undefined, default to the global system config
     if method is None:
         method = config["interpolation_method"]
+
+    # Convert availability within the current block, preserving masked cells without copying the source values
+    if _validity_only:
+        finite = np.isfinite(array)
+        if np.ma.isMaskedArray(finite):
+            finite = finite.filled(False)
+        array = np.where(finite, np.float32(1), np.float32(np.nan))
 
     # If array is not a floating dtype (to support NaNs), convert dtype
     if not np.issubdtype(array.dtype, np.floating):
@@ -500,13 +525,16 @@ def _interp_points_base(
             """Interpolate point coordinates with the shared nearest or linear policy."""
 
             # Convert georeferenced coordinates to array indices before applying the common numeric kernel
-            i, j = _xy2ij(
-                x,
-                y,
-                transform=transform,
-                area_or_point=area_or_point,
-                shift_area_or_point=shift_area_or_point,
-            )
+            if array_indices is None:
+                i, j = _xy2ij(
+                    x,
+                    y,
+                    transform=transform,
+                    area_or_point=area_or_point,
+                    shift_area_or_point=shift_area_or_point,
+                )
+            else:
+                i, j = array_indices
             return _interpolate_array_band(
                 array=array,
                 src_rows=i,
@@ -595,7 +623,6 @@ def _interp_points_base(
             return scipy_interpolator
         else:
             rpoints = scipy_interpolator((y, x))  # type: ignore
-
     return rpoints
 
 
@@ -615,7 +642,6 @@ def _get_interp_indices_per_block(
     interp_y: NDArrayNum,
     starts: list[tuple[int, ...]],
     num_chunks: tuple[int, int],
-    chunksize: tuple[int, int],
     xres: float,
     yres: float,
     left: float,
@@ -625,15 +651,20 @@ def _get_interp_indices_per_block(
 
     # The argument "starts" contains the list of chunk first X/Y index for the full array, plus the last index
     ny, nx = num_chunks
-    y_chunksize, x_chunksize = chunksize
     y_starts, x_starts = starts
 
     # We use one bucket per block, assuming a flattened blocks shape
     ind_per_block = [[] for _ in range(ny * nx)]
     for i, (x, y) in enumerate(zip(interp_x, interp_y)):
-        # Because it is a regular grid, we know exactly in which block ID the coordinate will fall
-        xb = int(np.floor((x - left) / (xres * x_chunksize)))
-        yb = int(np.floor((top - y) / (yres * y_chunksize)))
+        # Use actual chunk boundaries because overlap can merge small edge chunks
+        xb = int(np.searchsorted(x_starts, (x - left) / xres, side="right") - 1)
+        yb = int(np.searchsorted(y_starts, (top - y) / yres, side="right") - 1)
+
+        # Assign outer half pixels to the first block, matching the interpolation kernel's finite support
+        if left - xres / 2 <= x < left:
+            xb = 0
+        if top < y <= top + yres / 2:
+            yb = 0
 
         if 0 <= xb < nx and 0 <= yb < ny:
             ind_per_block[yb * nx + xb].append(i)
@@ -696,6 +727,13 @@ def _dask_interp_points(
 
     # Convert input to 2D array
     points_arr = np.vstack((points[0], points[1]))
+    src_rows, src_cols = _xy2ij(
+        points[0],
+        points[1],
+        transform=transform,
+        area_or_point=kwargs["area_or_point"],
+        shift_area_or_point=kwargs["shift_area_or_point"],
+    )
 
     # Map depth of overlap required for each interpolation method
     depth = method_to_order[kwargs["method"]] + 1  # The overlap size is the order + 1
@@ -704,12 +742,11 @@ def _dask_interp_points(
     left, top = bounds.left, bounds.top
 
     # Expand dask array for overlapping computations
-    chunksize = darr.chunksize
     expanded = da.overlap.overlap(darr, depth=depth, boundary="nearest")
 
-    # Get starting 2D index for each chunk of the full array
-    # (mirroring what is done in block_id of dask.array.map_blocks)
-    starts = [cached_cumsum(c, initial_zero=True) for c in darr.chunks]
+    # Recover core chunk boundaries after any automatic merging required for overlap
+    core_chunks = [tuple(size - 2 * depth for size in axis) for axis in expanded.chunks]
+    starts = [cached_cumsum(axis, initial_zero=True) for axis in core_chunks]
     num_chunks = expanded.numblocks
 
     # Get samples indices per blocks
@@ -718,7 +755,6 @@ def _dask_interp_points(
         points_arr[1, :],
         starts,
         num_chunks,
-        chunksize,
         res[0],
         res[1],
         left,
@@ -742,9 +778,20 @@ def _dask_interp_points(
 
     # Compute values delayed
     used = [i for i in range(len(blocks)) if len(ind_per_block[i]) > 0]
-    list_interp = [
-        _delayed_interp_points_block(blocks[i], block_ids[i], points_arr[:, ind_per_block[i]], **kwargs) for i in used
-    ]
+    list_interp = []
+    for i in used:
+        # Translate global indices by integer offsets to keep interpolation weights identical across chunks
+        block_kwargs = kwargs.copy()
+        if kwargs["method"] in ("nearest", "linear"):
+            row_offset = starts[0][indexes_yi[i]] - depth
+            col_offset = starts[1][indexes_xi[i]] - depth
+            block_kwargs["array_indices"] = (
+                src_rows[ind_per_block[i]] - row_offset,
+                src_cols[ind_per_block[i]] - col_offset,
+            )
+        list_interp.append(
+            _delayed_interp_points_block(blocks[i], block_ids[i], points_arr[:, ind_per_block[i]], **block_kwargs)
+        )
 
     # We concatenate and re-order in a delayed manner
     def _concat_reorder(list_vals, list_inds):  # type: ignore
@@ -766,17 +813,10 @@ def _dask_interp_points(
     joined = dask.delayed(_concat_reorder)(list_interp, list_inds_used)
 
     # Join into one array using a floating type whenever source values cannot represent NaN
-    output_dtype = _interp_output_dtype(darr.dtype)
+    output_dtype = _interp_output_dtype(darr.dtype, validity_only=kwargs.get("_validity_only", False))
     interp_points = da.from_delayed(joined, shape=(len(points[0]),), dtype=output_dtype)
 
     # Padded edge chunks repeat their outer cells, so restore the bounds of the complete source raster
-    src_rows, src_cols = _xy2ij(
-        points[0],
-        points[1],
-        transform=transform,
-        area_or_point=kwargs["area_or_point"],
-        shift_area_or_point=kwargs["shift_area_or_point"],
-    )
     inside = (src_rows >= -0.5) & (src_rows < darr.shape[0] - 0.5)
     inside &= (src_cols >= -0.5) & (src_cols < darr.shape[1] - 0.5)
     interp_points = da.where(inside, interp_points, np.nan)
@@ -806,7 +846,7 @@ def _interp_points_partition(
     """Interpolate one point partition and return a point-cloud partition."""
 
     # Preserve the planned output structure even when Dask sends an empty partition
-    out_dtype = _interp_output_dtype(source_raster.dtype)
+    out_dtype = _interp_output_dtype(source_raster.dtype, validity_only=extra_kwargs.get("_validity_only", False))
     if len(part) == 0:
         return _empty_pointcloud_meta(data_column=data_column, crs=out_crs, dtype=out_dtype)
 
@@ -821,7 +861,10 @@ def _interp_points_partition(
         shift_area_or_point=interp_options["shift_area_or_point"],
     )
     # Detect partitions with no raster overlap before constructing interpolation work
-    ind_outofbounds: NDArrayBool = (i < 0) | (j < 0) | (i >= source_raster.shape[0]) | (j >= source_raster.shape[1])
+    # Include outer half pixels accepted by nearest and linear interpolation when selecting partitions
+    margin = 0.5 if interp_options["method"] in {"nearest", "linear"} else 0
+    ind_outofbounds: NDArrayBool = (i < -margin) | (j < -margin)
+    ind_outofbounds |= (i >= source_raster.shape[0] - margin) | (j >= source_raster.shape[1] - margin)
 
     if np.count_nonzero(~ind_outofbounds) == 0:
         z = np.full(len(part), np.nan, dtype=out_dtype)
@@ -850,7 +893,7 @@ def _interp_points_partition(
 def _interp_points_dask_pointcloud(
     source_raster: RasterBase,
     points: Any,
-    method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"],
+    method: InterpolationMethod,
     band: int,
     input_latlon: bool,
     as_array: bool,
@@ -876,7 +919,7 @@ def _interp_points_dask_pointcloud(
     out_crs = source_raster.crs
     points_in_crs = points if points.crs == out_crs else points.to_crs(out_crs)
     data_column = "z"
-    out_dtype = _interp_output_dtype(source_raster.dtype)
+    out_dtype = _interp_output_dtype(source_raster.dtype, validity_only=extra_kwargs.get("_validity_only", False))
     meta = _empty_pointcloud_meta(data_column=data_column, crs=out_crs, dtype=out_dtype)
 
     # Package stable interpolation options once for each partition task
@@ -900,25 +943,17 @@ def _interp_points_dask_pointcloud(
         out_crs,
         meta=meta,
     )
-    # Import at runtime to avoid the point-cloud base importing this interpolation module in return
-    from geoutils.pointcloud.base import _set_dataframe_attrs
-
-    # Restore the metadata expected by the GeoUtils ``pc`` accessor
-    _set_dataframe_attrs(
-        out,
-        {
-            "crs": out_crs,
-            "bounds": None,
-            "point_count": None,
-            "data_column": data_column,
-            "geometry_type": "Point",
-        },
-    )
 
     if as_array:
-        # Expose values as a Dask array without computing point partitions
-        return out[data_column].to_dask_array(lengths=True)
-    return out
+        # Read lengths from input points so array sizing does not execute the interpolation tasks
+        lengths = tuple(points.map_partitions(len).compute())
+        return out[data_column].to_dask_array(lengths=lengths)
+
+    # Import after package initialization because the point cloud package also imports interpolation
+    from geoutils.pointcloud.dataframe import _build_pointcloud_output
+
+    # Set point output metadata without computing the interpolation tasks
+    return _build_pointcloud_output(out, data_column=data_column, as_dataframe=True)
 
 
 # SAME WITH MULTIPROCESSING
@@ -928,9 +963,15 @@ def _wrapper_multiproc_interp_per_block(
     rst: Raster,
     block_id: dict[str, Any],
     interp_coords: NDArrayNum,
+    band: int = 1,
     **kwargs: Any,
 ) -> NDArrayNum:
-    """Wrapper to use interpolation per block."""
+    """
+    Read one raster tile and interpolate its selected band at the assigned points.
+
+    Band selection and interpolation options follow _interp_points(); validity conversion stays inside its
+    shared array kernel so workers never need a complete source validity raster.
+    """
 
     # Extract information out of block_id dictionary
     tile_idx = block_id["tile_idx"]
@@ -938,9 +979,14 @@ def _wrapper_multiproc_interp_per_block(
     # Crop input raster for the given block
     rst_block = rst.icrop((tile_idx[2], tile_idx[0], tile_idx[3], tile_idx[1]))
 
+    # Loaded rasters keep every band when cropped; unloaded rasters already read only the requested band
+    array = rst_block.data
+    if array.ndim == 3:
+        array = array[band - 1]
+
     # Interpolate to points by dispatching to base function
     interp_chunk = _interp_points_base(
-        array=rst_block.data,
+        array=array,
         transform=rst_block.transform,
         points=(interp_coords[0, :], interp_coords[1, :]),
         **kwargs,
@@ -954,14 +1000,28 @@ def _multiproc_interp_points(
     rst: RasterBase,
     points: tuple[NDArrayNum, NDArrayNum],
     config: MultiprocConfig,
+    band: int = 1,
     **kwargs: Any,
 ) -> NDArrayNum:
     """
     Interpolate raster at point coordinates on out-of-memory chunks.
+
+    Band selection and interpolation options follow _interp_points(); config supplies tile sizes and the cluster.
     """
 
     # Convert input to 2D array
     points_arr = np.vstack((points[0], points[1]))
+
+    # Compute global indices only for methods that pass them directly to blocks
+    src_indices = None
+    if kwargs["method"] in ("nearest", "linear"):
+        src_indices = _xy2ij(
+            points[0],
+            points[1],
+            transform=rst.transform,
+            area_or_point=kwargs["area_or_point"],
+            shift_area_or_point=kwargs["shift_area_or_point"],
+        )
 
     # Map depth of overlap required for each interpolation method
     depth = method_to_order[kwargs["method"]] + 1  # The overlap size is the order + 1
@@ -971,11 +1031,10 @@ def _multiproc_interp_points(
 
     # Get multiprocessing chunk sizes
     chunks = normalize_chunks(chunks=config.chunks, shape=rst.shape)
-    chunksize = (chunks[0][0], chunks[1][0])
 
     # Get starting 2D index for each chunk of the full array
     # (mirroring what is done in block_id of dask.array.map_blocks)
-    tiling = compute_tiling(tile_size=config.chunks, raster_shape=rst.shape, overlap=depth)
+    tiling = block_bounds_from_chunks(chunks=chunks, shape=rst.shape, overlap=depth)
     starts = [
         cached_cumsum(chunks[0], initial_zero=True),
         cached_cumsum(chunks[1], initial_zero=True),
@@ -989,7 +1048,6 @@ def _multiproc_interp_points(
         points_arr[1, :],
         starts,  # type: ignore
         num_chunks,
-        chunksize,
         res[0],
         res[1],
         left,
@@ -1003,6 +1061,16 @@ def _multiproc_interp_points(
     # Create tasks for multiprocessing
     tasks = []
     for i in range(len(block_ids)):
+        # Reuse the full raster fractional indices instead of recalculating from each tile transform
+        block_kwargs = kwargs.copy()
+        if src_indices is not None:
+            src_rows, src_cols = src_indices
+            row_offset, _, col_offset, _ = block_ids[i]["tile_idx"]
+            block_kwargs["array_indices"] = (
+                src_rows[ind_per_block[i]] - row_offset,
+                src_cols[ind_per_block[i]] - col_offset,
+            )
+
         # Launch the task on the cluster to process each tile
         tasks.append(
             config.cluster.submit(
@@ -1010,7 +1078,8 @@ def _multiproc_interp_points(
                 rst,
                 block_ids[i],
                 points_arr[:, ind_per_block[i]],
-                **kwargs,
+                band=band,
+                **block_kwargs,
             )
         )
 
@@ -1041,7 +1110,7 @@ def _multiproc_interp_points(
 def _interp_points(
     source_raster: RasterBase,
     points: tuple[NDArrayNum, NDArrayNum] | tuple[Number, Number] | PointCloudLike,
-    method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
+    method: InterpolationMethod = None,
     band: int = 1,
     input_latlon: bool = False,
     as_array: bool = False,
@@ -1051,9 +1120,19 @@ def _interp_points(
     return_interpolator: bool = False,
     mp_config: MultiprocConfig | None = None,
     nodata_propagation: NodataPropagation = "gdal",
+    _validity_only: bool = False,
     **kwargs: Any,
 ) -> Any:
-    """See description of Raster.interp_points."""
+    """
+    Check point interpolation inputs and dispatch to eager, Dask or multiprocessing calculation.
+
+    Public options follow Raster.interp_points(). The shared _interp_points_base() kernel can also interpolate
+    source availability, allowing cosampling to select common finite points before reading their actual values.
+
+    :param _validity_only: Replace finite source values by float32 one and missing values by NaN inside each loaded
+        array or worker block. Apply the same interpolation and nodata options to those values; the returned
+        numeric values describe availability and remain NaN where the interpolation cannot supply a value.
+    """
 
     # If interpolation method undefined, default to the global system config
     if method is None:
@@ -1062,7 +1141,6 @@ def _interp_points(
     propagation = _validate_nodata_propagation(nodata_propagation)
 
     # 1/ Input checks
-
     if is_dask_geodataframe(points):
         if mp_config is not None:
             raise ValueError("Dask point-cloud inputs cannot be combined with Multiprocessing interpolation.")
@@ -1078,7 +1156,7 @@ def _interp_points(
             shift_area_or_point=shift_area_or_point,
             force_scipy_function=force_scipy_function,
             return_interpolator=return_interpolator,
-            extra_kwargs=kwargs,
+            extra_kwargs={**kwargs, "_validity_only": _validity_only},
         )
 
     # Check and normalize input points
@@ -1107,13 +1185,15 @@ def _interp_points(
 
         i, j = _xy2ij(x, y, transform=transform, area_or_point=area_or_point, shift_area_or_point=shift_area_or_point)
 
-        # Get index of points outside of bounds (i = row index vs shape[0], j = column index vs shape[1])
-        ind_outofbounds: NDArrayBool = (i < 0) | (j < 0) | (i >= shape[0]) | (j >= shape[1])
+        # Retain the outer half pixels accepted by nearest and linear array interpolation
+        margin = 0.5 if method in {"nearest", "linear"} else 0
+        ind_outofbounds: NDArrayBool = (i < -margin) | (j < -margin)
+        ind_outofbounds |= (i >= shape[0] - margin) | (j >= shape[1] - margin)
 
         # If all points fell outside of bounds
         if np.count_nonzero(~ind_outofbounds) == 0:
             warnings.warn("All provided points were outside of raster bounds, returning only NaNs.")
-            output = np.full(x.shape[0], np.nan)
+            output = np.full(x.shape[0], np.nan, dtype=np.float32 if _validity_only else float)
             if as_array:
                 return output
             else:
@@ -1122,7 +1202,7 @@ def _interp_points(
                     PointCloud,  # Runtime import to avoid circular issues
                 )
 
-                return PointCloud.from_xyz(x=points[0], y=points[1], z=output, crs=source_raster.crs)
+                return PointCloud.from_xyz(x=x, y=y, z=output, crs=source_raster.crs)
 
         # Only work on points inside bounds
         pts_inbounds = x[~ind_outofbounds], y[~ind_outofbounds]
@@ -1132,12 +1212,13 @@ def _interp_points(
     # 2/ Dispatch to either base (in-memory) function, Dask function, or Multiprocessing function
     class _InterpKwargs(TypedDict):
         area_or_point: Literal["Area", "Point"] | None
-        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
+        method: InterpolationMethod
         dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None
         nodata_propagation: NodataPropagation
         shift_area_or_point: bool | None
         force_scipy_function: Literal["map_coordinates", "interpn"] | None
         return_interpolator: bool
+        _validity_only: bool
 
     interp_kwargs: _InterpKwargs = {
         "area_or_point": area_or_point,
@@ -1147,6 +1228,7 @@ def _interp_points(
         "shift_area_or_point": shift_area_or_point,
         "force_scipy_function": force_scipy_function,
         "return_interpolator": return_interpolator,
+        "_validity_only": _validity_only,
     }
 
     # Cannot use Multiprocessing backend and Dask backend simultaneously
@@ -1174,7 +1256,7 @@ def _interp_points(
         orig_bands = source_raster.bands
         source_raster._bands = (band,)
         z_inbounds = _multiproc_interp_points(
-            rst=source_raster, points=pts_inbounds, config=mp_config, **interp_kwargs, **kwargs
+            rst=source_raster, points=pts_inbounds, config=mp_config, band=band, **interp_kwargs, **kwargs
         )
         # Rewrite original bands
         source_raster._bands = orig_bands
@@ -1203,10 +1285,9 @@ def _interp_points(
         return z_inbounds
     # Otherwise, return array of input length with NaNs for outside-bound points
     else:
-
         # Get output length and dtype
         n = len(x)
-        dtype = source_raster.dtype
+        dtype = _interp_output_dtype(source_raster.dtype, validity_only=_validity_only)
 
         # Rebuild array (delayed if Dask, normal if NumPy)
         def _rebuild_with_nans(z_inbounds: NDArrayNum, mask_out: NDArrayBool, n: int, dtype: DTypeLike) -> NDArrayNum:
@@ -1229,7 +1310,7 @@ def _interp_points(
                 PointCloud,  # Runtime import to avoid circular issues
             )
 
-            return PointCloud.from_xyz(x=points[0], y=points[1], z=z, crs=source_raster.crs)
+            return PointCloud.from_xyz(x=x, y=y, z=z, crs=source_raster.crs)
 
 
 ##############################################################
@@ -1249,7 +1330,6 @@ def _reduce_points(
     as_array: bool = False,
     boundless: bool = True,
 ) -> NDArrayNum | tuple[NDArrayNum, NDArrayNum]:
-
     # Check and normalize input points
     pts, input_scalar = _check_match_points(source_raster, points)
 
@@ -1338,7 +1418,6 @@ def _reduce_points(
             win: NDArrayNum | dict[int, NDArrayNum] = data
 
         else:
-
             # Create rasterio's window for reading
             rio_window = rio.windows.Window(col, row, width, height)
 
@@ -1374,7 +1453,7 @@ def _reduce_points(
     )
 
     if not as_array:
-        output_val = PointCloud.from_xyz(x=points[0], y=points[1], z=output_val, crs=source_raster.crs)
+        output_val = PointCloud.from_xyz(x=x, y=y, z=output_val, crs=source_raster.crs)
 
     if return_window:
         return (output_val, output_win)

@@ -10,7 +10,7 @@ from benchmarks.workflows.registry import (
 from benchmarks.workflows.runner import BenchmarkConfig, BenchmarkRunner
 
 # Scaling comparisons already cover these operations at three input values
-_SCALING_OPERATIONS = {"filter", "reproject", "interp_points", "polygonize", "rasterize", "grid"}
+_SCALING_OPERATIONS = {"filter", "reproject", "interp_points", "polygonize", "rasterize", "grid", "grouped_stats"}
 
 # Remove operations already measured while varying raster, chunk or point count
 # The remaining operation/execution-mode pairs are measured once with a fixed input configuration

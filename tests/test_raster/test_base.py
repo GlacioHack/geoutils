@@ -16,7 +16,14 @@ from pandas.testing import assert_frame_equal
 from pyproj import CRS
 from pyproj.crs import CompoundCRS
 
-from geoutils import PointCloud, Raster, Vector, examples, open_raster
+from geoutils import (
+    PointCloud,
+    Raster,
+    Variogram,
+    Vector,
+    examples,
+    open_raster,
+)
 from geoutils.raster import MultiprocConfig
 from geoutils.raster.base import RasterBase
 from geoutils.raster.xr_accessor import RasterAccessor
@@ -71,6 +78,21 @@ def assert_output_equal(output1: Any, output2: Any, use_allclose: bool = False, 
         df1 = pd.DataFrame(index=[0], data=output1)
         df2 = pd.DataFrame(index=[0], data=output2)
         assert_frame_equal(df1, df2, check_dtype=False)
+
+    # For tabular statistics
+    elif isinstance(output1, pd.DataFrame):
+        assert_frame_equal(output1, output2)
+
+    # For lightweight variogram records
+    elif isinstance(output1, Variogram):
+        assert isinstance(output2, Variogram)
+        assert np.allclose(output1.lags, output2.lags)
+        assert np.allclose(output1.semivariance, output2.semivariance, equal_nan=True)
+        assert np.array_equal(output1.counts, output2.counts)
+        assert output1.model == output2.model
+    # For labelled pair samples
+    elif isinstance(output1, xr.Dataset):
+        assert output1.identical(output2)
     # For any other object type
     else:
         assert output1 == output2
@@ -299,9 +321,14 @@ class TestClassVsAccessorConsistency:
         ("to_pointcloud", {"subsample": 1, "random_state": 42}),
         ("polygonize", {"target_values": "all"}),
         ("subsample", {"subsample": 1000, "random_state": 42}),
+        ("cosample", {"other": "self", "subsample": 1_000, "random_state": 42}),
+        ("pairsample", {"n_pairs": 1_000, "random_state": 42}),
+        ("variogram", {"n_pairs": 1_000, "n_lags": 6, "random_state": 42}),
         ("filter", {"method": "median", "size": 7}),
         ("sieve", {"size": 7}),
         ("fill_nodata", {"max_search_distance": 3}),
+        ("stats", {}),
+        ("stats", {"by": {"group": 1}, "bins": {"group": 2}, "statistics": "mean"}),
         ("get_stats", {}),
         # 2.2. In-place methods
         ("load", {}),
@@ -326,6 +353,8 @@ class TestClassVsAccessorConsistency:
         # Open both objects
         ds = open_raster(path_raster)
         raster = Raster(path_raster)
+        if method == "variogram":
+            pytest.importorskip("skgstat")
 
         # Sieve follows GDAL and accepts integer categories rather than continuous values
         if method == "sieve":
@@ -368,11 +397,15 @@ class TestClassVsAccessorConsistency:
             args.update({"bbox": bbox})
         elif method in ["raster_equal", "raster_allclose", "georeferenced_grid_equal", "intersection"]:
             args.update({"other": ds.copy(deep=False)})
+        elif method == "cosample":
+            args.update({"other": raster})
         elif method == "copy" and "new_array" in args:
             args.update({"new_array": np.ones(ds.shape)})
 
         # Apply method for each class
         output_raster = getattr(raster, method)(**args)
+        if method == "cosample":
+            args.update({"other": ds.copy(deep=False)})
         output_ds = getattr(ds.rst, method)(**args)
 
         # Determine if operation was in-place or not
@@ -471,6 +504,7 @@ class TestClassVsAccessorConsistency:
     chunked_methods_and_args = (
         ("reproject", {"crs": CRS.from_epsg(4326)}),
         ("interp_points", {"points": "random", "as_array": True}),
+        ("cosample", {"other": "self", "subsample": 100, "strategy": "topk", "random_state": 42}),
         (
             "subsample",
             {"subsample": 100, "strategy": "topk"},
@@ -523,11 +557,16 @@ class TestClassVsAccessorConsistency:
             interp_y = raster.bounds.bottom + (rng.choice(raster.shape[1], ninterp) + rng.random(ninterp)) * res[1]
             kwargs.update({"points": (interp_x, interp_y)})
 
-        # Apply method for each
-        output_raster = getattr(raster, method)(**kwargs, mp_config=mp_config)
-        output_ds = getattr(ds.rst, method)(**kwargs)
-        output_raster2 = getattr(raster2, method)(**kwargs)
-        output_ds2 = getattr(ds2.rst, method)(**kwargs)
+        # Apply the same method through each backend, pairing cosample with its own input representation
+        outputs = []
+        for source, backend in ((raster, mp_config), (ds.rst, None), (raster2, None), (ds2.rst, None)):
+            options = kwargs.copy()
+            if method == "cosample":
+                options["other"] = source
+            if backend is not None:
+                options["mp_config"] = backend
+            outputs.append(getattr(source, method)(**options))
+        output_raster, output_ds, output_raster2, output_ds2 = outputs
 
         # For a raster-type output (reprojection, rasterize, create_mask, proximity, etc...)
         if isinstance(output_raster, Raster):

@@ -16,6 +16,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Run geospatial work in multiprocessing blocks and reuse unloaded raster and point cloud inputs across passes."""
+
 from geoutils.multiproc.chunked import *  # noqa
 from geoutils.multiproc.cluster import *  # noqa
 from geoutils.multiproc.mparray import *  # noqa

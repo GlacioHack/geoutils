@@ -25,6 +25,7 @@ import pathlib
 import struct
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -61,7 +62,11 @@ from geoutils.filters import _filter, _sieve
 from geoutils.gapfill import _fill_nodata
 from geoutils.interface._nodata import NodataPropagation
 from geoutils.interface.distance import _proximity_from_vector_or_raster
-from geoutils.interface.interpolation import _interp_points, _reduce_points
+from geoutils.interface.interpolation import (
+    InterpolationMethod,
+    _interp_points,
+    _reduce_points,
+)
 from geoutils.interface.raster_point import (
     _raster_to_pointcloud,
     _regular_pointcloud_to_raster,
@@ -86,8 +91,9 @@ from geoutils.raster.referencing import (
 )
 from geoutils.raster.testing import _array_equal_or_close
 from geoutils.raster.transformation import _crop, _reproject, _translate
-from geoutils.stats.sampling import _subsample
-from geoutils.stats.stats import _statistics
+from geoutils.sampling.subsampling import _subsample
+from geoutils.stats.stats import stats as _stats
+from geoutils.stats.stats import variogram as _variogram
 
 # Input/output is a RasterType (= Raster or RasterAccessor subclass)
 RasterType = TypeVar("RasterType", bound="RasterBase")
@@ -96,7 +102,10 @@ RasterLike = Union["RasterBase", xr.DataArray]
 _UNSET = object()
 
 if TYPE_CHECKING:
+    from geoutils.interface.gridding import GriddingMethod
     from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
+    from geoutils.stats.variography import Variogram
+    from geoutils.vector.base import VectorLike
     from geoutils.vector.vector import Vector, VectorType
 
 
@@ -739,7 +748,7 @@ class RasterBase(ABC):
                 self.load()
 
             if self.count == 1:
-                statistics = self.get_stats()
+                statistics = self.stats()
 
                 # Determine the maximum length of the stat names for alignment
                 max_len = max(len(name) for name in statistics.keys())
@@ -751,7 +760,7 @@ class RasterBase(ABC):
                 for b in range(self.count):
                     # try to keep with rasterio convention.
                     as_str.append(f"Band {b + 1}:")
-                    statistics = self.get_stats(band=b + 1)
+                    statistics = self.stats(values=b + 1)
                     if isinstance(statistics, dict):
                         max_len = max(len(name) for name in statistics.keys())
                         for name, value in statistics.items():
@@ -763,147 +772,137 @@ class RasterBase(ABC):
         else:
             return "\n".join(as_str)
 
-    @overload
-    def get_stats(
+    def stats(
         self,
-        stats_name: str | Callable[[NDArrayNum], np.floating[Any]],
-        inlier_mask: RasterType | NDArrayBool | None = None,
-        band: int = None,
-        counts: tuple[int, int] | None = None,
-    ) -> np.floating[Any] | dict[str, np.floating[Any]] | dict[str, dict[str, np.floating[Any]]]: ...
+        statistics: str | Callable[[Any], Any] | Iterable[str | Callable[[Any], Any]] | None = None,
+        *,
+        by: Mapping[str, Any] | None = None,
+        values: int | Iterable[int] | Mapping[str, Any] | None = None,
+        bins: Mapping[str, Any] | None = None,
+        categories: Mapping[str, Iterable[Any]] | None = None,
+        at: Literal["self"] | RasterLike | PointCloudLike | None = None,
+        mask: RasterLike | VectorLike | ArrayLike | None = None,
+        mask_mode: Literal["inside", "outside"] = "inside",
+        subsample: int | float = 1,
+        subsample_per_group: bool = False,
+        random_state: int | np.random.Generator | None = None,
+        strategy: Literal["auto", "dense", "sparse", "groupwise"] = "auto",
+        backend: Literal["geoutils", "flox"] = "geoutils",
+        subsampling_strategy: Literal["sequential", "topk"] = "topk",
+        interpolation: InterpolationMethod = "linear",
+        align: Literal["raise", "reproject"] = "raise",
+        observed: bool = True,
+        return_masks: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> Any:
+        """Calculate summary statistics or statistics grouped by categories, bins, or vector zones.
 
-    @overload
-    def get_stats(
-        self,
-        stats_name: list[str | Callable[[NDArrayNum], np.floating[Any]]] | None = None,
-        inlier_mask: RasterType | NDArrayBool | None = None,
-        band: int = None,
-        counts: tuple[int, int] | None = None,
-    ) -> dict[str, np.floating[Any]] | dict[str, np.floating[Any]] | dict[str, dict[str, np.floating[Any]]]: ...
+        Omit ``by`` to summarize raster values. With ``by``, provide ``categories`` for discrete groups, ``bins`` for
+        continuous groups, or a vector feature column for zonal statistics::
+
+            # Global statistics
+            raster.stats()
+            raster.stats("mean")
+            raster.stats(["mean", "std", "nmad"])
+
+            # Categorical stats
+            raster.stats(["mean", "std"], by={"landcover": landcover}, categories={"landcover": classes})
+            # Binned stats
+            raster.stats(["mean", "std"], by={"elevation": elevation}, bins={"elevation": elevation_bins})
+            # Zonal stats
+            raster.stats(["mean", "std"], by={"glacier": (glacier_outlines, "id")})
+
+            # Multiple grouping
+            raster.stats(["mean", "std"], by={"elevation": elevation, "glacier": (glacier_outlines, "id")},
+            bins={"elevation": elevation_bins})
+
+
+        :param statistics: Statistics to calculate (e.g. "mean", ["mean", "nmad"], or np.nanmedian). None returns
+            "min", "max", "mean", "median", "std", "nmad", "validcount", "totalcount" and "percentagevalidpoints".
+            "all" also includes "sum", "sumofsquares", "90thpercentile", "iqr", "le90" and "rmse", plus inlier counts
+            for masked global statistics. Grouped defaults replace "validcount" with "count"; every grouped result
+            includes "count".
+        :param by: Named variables to group by (e.g. {"elevation": elevation}); use {"glacier": (outlines, "id")}
+            for vector zones. Arrays must match the selected locations. Omit for global statistics.
+        :param values: Bands to summarize, counting from one (e.g. [1, 3]); defaults to all bands.
+            Use a mapping for named inputs (e.g. {"elevation": (dem, 1)}).
+        :param bins: Continuous bins keyed by grouping name (e.g. {"elevation": 10}). Each definition is a count of
+            equal-width bins, increasing edges (e.g. [0, 2, 5]), or a Pandas IntervalIndex to choose open/closed sides.
+        :param categories: Ordered categories keyed by grouping name (e.g. {"landcover": [100, 110, 120]}).
+            Values outside these categories are excluded.
+        :param at: Grid or ordered point locations on which to calculate statistics (e.g. at=reference or at="self").
+            Defaults to the first point input, if present, otherwise the source locations.
+        :param mask: Locations to include (True in a boolean mask, e.g. mask=dem > 1000, or features in a vector mask).
+            Global counts describe values before this mask; "all" adds counts for values kept by the mask.
+        :param mask_mode: Keep locations "inside" or "outside" vector features; ignored for boolean masks.
+        :param subsample: Fraction (e.g. 0.1 for 10%) or maximum count (e.g. 10000) of eligible locations to use.
+            A value of 1 keeps all locations. Counts describe the sampled locations.
+        :param subsample_per_group: Apply subsample within each combined group (True, stratified sampling) or once
+            across all groups (False). Without by, both use one global sample.
+        :param random_state: Seed to reproduce subsampling (e.g. 42), or an existing random generator.
+        :param strategy: Combine chunk statistics for all groups ("dense"), only groups present in each chunk
+            ("sparse"), or gather each complete group ("groupwise"). "auto" chooses from the statistics and group count;
+            exact quantiles and custom functions require "auto" or "groupwise" for chunked data.
+        :param backend: Use the GeoUtils reducer ("geoutils") or optional Flox reducer ("flox") for grouped statistics;
+            see stats() for the Flox restrictions.
+        :param subsampling_strategy: "topk" keeps the same sampled locations across chunk layouts for a fixed seed;
+            "sequential" draws random locations using traversal order and can depend on the chunks.
+        :param interpolation: Raster values at point locations use interp_points() with SciPy methods "nearest",
+            "linear", "slinear", "cubic", "quintic", "pchip" or "splinef2d".
+            Raster groupers listed in categories use "nearest".
+        :param align: "raise" rejects different grids or coordinate systems; "reproject" aligns them to the output
+            locations. Point inputs must still share the same ordered coordinates.
+        :param observed: Omit declared group combinations with no eligible locations (True), or include them (False).
+        :param return_masks: Also return masks keyed by group labels (e.g. table, masks = raster.stats(...)).
+            Masks cover complete groups before subsampling. Requires by.
+        :param mp_config: Worker and tile settings for multiprocessing, e.g. MultiprocConfig(chunks=512).
+            Cannot be combined with Dask inputs.
+        :returns: A statistic, summary dictionary, grouped dataframe, or grouped dataframe and mask mapping.
+        """
+
+        return _stats(
+            self,
+            statistics,
+            by=by,
+            values=values,
+            bins=bins,
+            categories=categories,
+            at=at,
+            mask=mask,
+            mask_mode=mask_mode,
+            subsample=subsample,
+            subsample_per_group=subsample_per_group,
+            random_state=random_state,
+            strategy=strategy,
+            backend=backend,
+            subsampling_strategy=subsampling_strategy,
+            interpolation=interpolation,
+            align=align,
+            observed=observed,
+            return_masks=return_masks,
+            mp_config=mp_config,
+        )
 
     @profiler.profile("geoutils.raster.base.get_stats", memprof=True)
     def get_stats(
         self,
         stats_name: (
-            str | Callable[[NDArrayNum], np.floating[Any]] | list[str | Callable[[NDArrayNum], np.floating[Any]]] | None
+            str
+            | Callable[[NDArrayNum], np.floating[Any]]
+            | Iterable[str | Callable[[NDArrayNum], np.floating[Any]]]
+            | None
         ) = None,
         inlier_mask: RasterType | NDArrayBool | None = None,
-        band: int = None,
-        counts: tuple[int, int] | None = None,
-    ) -> np.floating[Any] | dict[str, np.floating[Any]] | dict[str, dict[str, np.floating[Any]]]:
-        """
-        Retrieve specified statistics or all available statistics for the raster data. Allows passing custom callables
-        to calculate custom stats.
+        band: int | None = None,
+    ) -> Any:
+        """Call stats() with the legacy argument names; deprecated in favor of stats()."""
 
-        Common statistics are :
-
-        - Mean: arithmetic mean of the data, ignoring masked values.
-        - Median: middle value when the valid data points are sorted in increasing order, ignoring masked values.
-        - Max: maximum value among the data, ignoring masked values.
-        - Min: minimum value among the data, ignoring masked values.
-        - Sum: sum of all data, ignoring masked values.
-        - Sum of squares: sum of the squares of all data, ignoring masked values.
-        - 90th percentile: point below which 90% of the data falls, ignoring masked values.
-        - IQR (Interquartile Range): difference between the 75th and 25th percentile of a dataset, \
-        ignoring masked values.
-        - LE90 (Linear Error with 90% confidence): difference between the 95th and 5th percentiles of a dataset, \
-          representing the range within which 90% of the data points lie. Ignore masked values.
-        - NMAD (Normalized Median Absolute Deviation): robust measure of variability in the data, \
-        less sensitive to outliers compared to standard deviation. Ignore masked values.
-        - RMSE (Root Mean Square Error): commonly used to express the magnitude of errors or variability and can give \
-          insight into the spread of the data. Only relevant when the raster represents a difference of two objects. \
-          Ignore masked values.
-        - Std (Standard deviation): measures the spread or dispersion of the data around the mean, \
-        ignoring masked values.
-        - Valid count: number of finite data points in the array. It counts the non-masked elements.
-        - Total count: total size (width x height) of the raster.
-        - Percentage valid points: ratio between Valid count and Total count.
-
-        For all statistics up to and including "Std", NumPy Masked functions are used (directly or in the calculation)
-        in case of a masked array, NumPy module otherwise.
-
-        "Valid count" represents all non zero and not masked pixels in the input data (final_count_nonzero),
-        calculated before the mask application in case of an inlier_mask. NumPy Masked functions are used is this case
-        or if the Raster was already a masked array. "Percentage valid points" is calculated accordingly.
-
-        If an inlier mask is passed:
-
-        - Total inlier count: number of data points in the inlier mask.
-        - Valid inlier count: number of unmasked data points in the array after applying the inlier mask.
-        - Percentage inlier points: ratio between Valid inlier count and Valid count. Useful for classification \
-        statistics.
-        - Percentage valid inlier points: ratio between Valid inlier count and Total inlier count.
-
-        They are all computed based on the previously stated final_count_nonzero.
-
-        Callable functions are supported as well.
-
-        By default and without any specification, this function computes the following main statistics: minimum,
-        maximum, mean, standard deviation, NMAD, total count, and percentage of valid points.
-        To compute all available statistics, set `stats_name` to `all`.
-
-        :param stats_name: Name or list of names of the statistics to retrieve. If None, main statistics are returned.
-            Accepted names include:
-            `mean`, `median`, `max`, `min`, `sum`, `sum of squares`, `90th percentile`, `iqr`, `LE90`, `nmad`, `rmse`,
-            `std`, `valid count`, `total count`, `percentage valid points` and if an inlier mask is passed :
-            `valid inlier count`, `total inlier count`, `percentage inlier point`, `percentage valid inlier points`.
-            Custom callables can also be provided.
-            To compute all available statistics, set `stats_name` to `all`.
-        :param inlier_mask: Mask or boolean array of areas to include (inliers=True).
-        :param band: The index of the band for which to compute statistics. Default is 1.
-        :param counts: (number of finite data points in the array, number of valid points (=True, to keep)
-            in inlier_mask), initialize in case of an inlier_mask. DO NOT USE.
-        :returns: The requested statistic or a dictionary of statistics if multiple or all are requested.
-        """
-
-        # Case mono-band
-        if self.count == 1 and band is None:
-            band = 1
-
-        if band is not None:
-            # Get data band
-            data = self.data[band - 1, :, :] if self.count > 1 else self.data
-
-            # Derive inlier mask
-            if inlier_mask is not None:
-                valid_points = np.count_nonzero(np.logical_and(np.isfinite(data), ~data.mask))
-                if isinstance(inlier_mask, RasterBase) and inlier_mask.is_mask:
-                    mask = inlier_mask.data
-                else:
-                    mask = inlier_mask
-                inlier_points = np.count_nonzero(mask)
-
-                rast = self.copy()
-
-                # Mask pixels from the inlier_mask
-                if not np.ma.isMaskedArray(rast.data):
-                    rast[~mask] = np.nan  # type: ignore
-                else:
-                    rast.set_mask(~mask)  # type: ignore
-                return rast.get_stats(stats_name=stats_name, band=band, counts=(valid_points, inlier_points))
-
-            # Given list or all attributes to compute if None
-            if isinstance(stats_name, list) or stats_name is None or stats_name == "all":
-                return _statistics(data, stats_name, counts)  # type: ignore
-            else:
-                # Single attribute to compute
-                if isinstance(stats_name, str):
-                    return _statistics(data, [stats_name], counts)[stats_name]  # type: ignore
-                elif callable(stats_name):
-                    return stats_name(data)  # type: ignore
-                else:
-                    warnings.warn(
-                        "Statistic name " + str(stats_name) + " is a not recognized string", category=UserWarning
-                    )
-        else:
-            # Case multi-band
-            stats = {}
-            for band in range(1, self.count + 1):
-                stats["band " + str(band)] = self.get_stats(
-                    stats_name=stats_name, inlier_mask=inlier_mask, band=band, counts=counts
-                )
-
-            return stats  # type: ignore
+        warnings.warn(
+            "get_stats() is deprecated; use stats() with values and mask instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return _stats(self, statistics=stats_name, mask=inlier_mask, values=band)
 
     def _raster_equal_allclose(
         self,
@@ -948,11 +947,10 @@ class RasterBase(ABC):
 
             names = names + ["fill_value", "dtype", "transform", "crs", "nodata"]
             equalities = equalities_data + [
-                self.data.fill_value == other.data.fill_value,
+                np.array_equal(self.data.fill_value, other.data.fill_value, equal_nan=True),
                 self.data.dtype == other.data.dtype,
                 self.transform == other.transform,
                 self.crs == other.crs,
-                self.nodata == other.nodata,
             ]
         # For Raster or DataArray
         else:
@@ -960,7 +958,6 @@ class RasterBase(ABC):
             dtype = other.rst.dtype if isinstance(other, xr.DataArray) else other.dtype
             transform = other.rst.transform if isinstance(other, xr.DataArray) else other.transform
             crs = other.rst.crs if isinstance(other, xr.DataArray) else other.crs
-            nodata = other.rst.nodata if isinstance(other, xr.DataArray) else other.nodata
 
             # Three cases: masked/NaN, NaN/masked or NaN/NaN
             if np.ma.isMaskedArray(self.data):
@@ -987,8 +984,14 @@ class RasterBase(ABC):
                 self.dtype == dtype,
                 self.transform == transform,
                 self.crs == crs,
-                self.nodata == nodata,
             ]
+
+        # Compare nodata after data access, which can update metadata when a file is loaded as a boolean mask
+        other_nodata = other.rst.nodata if isinstance(other, xr.DataArray) else other.nodata
+        nodata_equal = self.nodata == other_nodata
+        if self.nodata is not None and other_nodata is not None:
+            nodata_equal = nodata_equal or bool(np.isnan(self.nodata) and np.isnan(other_nodata))
+        equalities.append(nodata_equal)
 
         complete_equality = all(equalities)
 
@@ -1437,6 +1440,8 @@ class RasterBase(ABC):
                 result_raster = open_raster(mp_config.outfile, is_mask=self.is_mask)
             else:
                 result_raster = self.__class__(mp_config.outfile)
+                # Restore logical interpretation without changing subclass constructor arguments
+                result_raster._is_mask = self.is_mask
             return self._cast_raster_output(result_raster)  # type: ignore
 
         # Not in-place
@@ -1637,7 +1642,7 @@ class RasterBase(ABC):
     def interp_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
-        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
+        method: InterpolationMethod = None,
         dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
         band: int = 1,
         input_latlon: bool = False,
@@ -1653,7 +1658,7 @@ class RasterBase(ABC):
     def interp_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
-        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
+        method: InterpolationMethod = None,
         dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
         band: int = 1,
         input_latlon: bool = False,
@@ -1669,7 +1674,7 @@ class RasterBase(ABC):
     def interp_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
-        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
+        method: InterpolationMethod = None,
         dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
         band: int = 1,
         input_latlon: bool = False,
@@ -1685,7 +1690,7 @@ class RasterBase(ABC):
     def interp_points(
         self,
         points: tuple[NDArrayNum, NDArrayNum] | tuple[Number, Number] | PointCloudLike,
-        method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"] = None,
+        method: InterpolationMethod = None,
         dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
         band: int = 1,
         input_latlon: bool = False,
@@ -1830,7 +1835,7 @@ class RasterBase(ABC):
         :param sigma: Optional standard deviation for Gaussian filtering.
             Only used when `method="gaussian"`.
         :param engine: Optional engine to use for filtering, either "scipy" (default) or "numba".
-            Only used when `method="median"`.
+            Only used with built-in filters.
         :param outlier_threshold:  The minimum difference abs(array - mean) for a pixel to be considered an outlier.
             Only used when `method="distance"`.
         :param kwargs : Additional keyword arguments passed to the underlying filter implementation.
@@ -2167,6 +2172,7 @@ class RasterBase(ABC):
         random_state: int | np.random.Generator | None = None,
         strategy: Literal["sequential", "topk"] = "sequential",
         mp_config: MultiprocConfig | None = None,
+        mask: RasterLike | VectorLike | ArrayLike | None = None,
     ) -> NDArrayNum: ...
 
     @overload
@@ -2179,6 +2185,7 @@ class RasterBase(ABC):
         random_state: int | np.random.Generator | None = None,
         strategy: Literal["sequential", "topk"] = "sequential",
         mp_config: MultiprocConfig | None = None,
+        mask: RasterLike | VectorLike | ArrayLike | None = None,
     ) -> tuple[NDArrayNum, ...]: ...
 
     @overload
@@ -2190,6 +2197,8 @@ class RasterBase(ABC):
         random_state: int | np.random.Generator | None = None,
         strategy: Literal["sequential", "topk"] = "sequential",
         mp_config: MultiprocConfig | None = None,
+        *,
+        mask: RasterLike | VectorLike | ArrayLike | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
 
     @profiler.profile("geoutils.raster.base.subsample", memprof=True)
@@ -2201,18 +2210,27 @@ class RasterBase(ABC):
         random_state: int | np.random.Generator | None = None,
         strategy: Literal["sequential", "topk"] = "sequential",
         mp_config: MultiprocConfig | None = None,
+        *,
+        mask: RasterLike | VectorLike | ArrayLike | None = None,
     ) -> NDArrayNum | tuple[NDArrayNum, ...]:
         """
-        Randomly sample the raster. Only valid values are considered.
+        Randomly sample valid raster values allowed by mask, without replacement.
 
-        :param subsample: Subsample size. If <= 1, a fraction of the total pixels to extract.
-            If > 1, the number of pixels.
+        :param subsample: Subsample size. If <= 1, a fraction of eligible finite pixels to extract.
+            If > 1, the maximum number of pixels. The mask is applied before calculating this size.
         :param band: Band to subsample. Use return_indices=True and indexing to subsample the same points over
             several bands.
         :param return_indices: Whether to return the extracted indices only.
         :param random_state: Random state or seed number.
+        :param strategy: "sequential" draws using the traversal order and can depend on chunk layout; "topk" keeps
+            the same seeded sample across chunk layouts.
+        :param mp_config: Worker and tile settings for multiprocessing. Cannot be combined with a Dask source.
+        :param mask: Eligible cells: True in a boolean array or aligned mask raster, or inside vector geometries.
+            Arrays must match the raster shape; mask rasters must share its grid and CRS. Missing mask entries are
+            excluded (e.g. mask=raster.data > 0).
 
-        :return: Array of sampled valid values, or array of sampled indices.
+        :returns: One-dimensional sampled values with the source dtype, or a tuple of row and column index arrays
+            referring to the original grid, including when mask restricts the sample.
         """
 
         return _subsample(
@@ -2223,4 +2241,255 @@ class RasterBase(ABC):
             random_state=random_state,
             strategy=strategy,
             mp_config=mp_config,
+            mask=mask,
+        )
+
+    def cosample(
+        self,
+        other: RasterLike | PointCloudLike | ArrayLike,
+        *,
+        band: int = 1,
+        other_band: int = 1,
+        auxiliary: Mapping[str, Any] | None = None,
+        auxiliary_at: Literal["self", "other"] | Mapping[str, Literal["self", "other"]] | None = None,
+        at: Literal["self", "other"] | RasterLike | PointCloudLike | None = None,
+        mask: RasterLike | VectorLike | ArrayLike | None = None,
+        mask_mode: Literal["inside", "outside"] = "inside",
+        subsample: int | float = 1,
+        random_state: int | np.random.Generator | None = None,
+        strategy: Literal["sequential", "topk"] = "topk",
+        raster_point_mode: Literal["grid_points", "resample_raster"] | None = None,
+        grid_method: GriddingMethod = "linear",
+        resample_method: InterpolationMethod | Literal["reduce"] = "linear",
+        grid_kwargs: Mapping[str, Any] | None = None,
+        resample_kwargs: Mapping[str, Any] | None = None,
+        align: Literal["raise", "reproject"] = "raise",
+        mp_config: MultiprocConfig | None = None,
+    ) -> RasterLike | PointCloudLike:
+        """
+        Sample this raster and another dataset at common finite locations.
+
+        By default, raster values are resampled at point locations when either primary input is a point cloud.
+        Use ``raster_point_mode="grid_points"`` to grid point values onto the raster instead. An explicit ``at``
+        chooses the exact output locations and must agree with any explicit mode. Raw auxiliary arrays must
+        identify the primary input whose grid or point ordering they follow.
+
+        Spatial inputs, explicit output support and raster or point masks must use one family: Raster/PointCloud
+        objects, or DataArray/GeoDataFrame objects. The latter may mix eager and Dask storage. Plain arrays and
+        vector outlines are accepted with either family.
+
+        :param other: Dataset to sample alongside this raster. A plain array follows this raster's grid.
+        :param band: Band selected from this raster, counting from one.
+        :param other_band: Band selected from other if it is a raster, counting from one.
+        :param auxiliary: Additional values by output name (e.g. {"slope": slope_raster}). Select a raster band with
+            {"slope": (slope_raster, 2)} or a point column with {"intensity": (points, "intensity")}. Spatial inputs
+            without a selector use the first raster band or active point values.
+        :param auxiliary_at: Input locations followed by plain auxiliary arrays: "self", "other", or a choice per name
+            (e.g. {"slope": "other"}). Spatial auxiliaries use their own coordinates.
+        :param at: Output locations: "self", "other", or a reference raster/point cloud. Defaults to the other point
+            cloud's locations when present, or this raster's grid otherwise.
+        :param mask: Locations eligible for sampling, defined by a boolean array, spatial mask, or vector outlines.
+        :param mask_mode: Whether a vector mask keeps locations "inside" or "outside" its geometries.
+        :param subsample: Fraction of common finite locations (e.g. 0.1), or maximum count (e.g. 1000); 1 keeps all.
+        :param random_state: Seed or random generator for reproducible sampling (e.g. 42).
+        :param strategy: Raster sampling with "topk" or "sequential"; "topk" keeps the same seeded sample across chunk
+            sizes. Point output always uses "sequential".
+        :param raster_point_mode: Conversion direction: "grid_points" places points on a raster, "resample_raster"
+            reads rasters at points. Defaults to at's locations, or point locations when available. Must agree with at.
+        :param grid_method: Point gridding by SciPy interpolation ("nearest", "linear", "cubic"), or circular "idw",
+            "mean", "minimum", "maximum", "range", "count", "stdev", "average_distance", "average_distance_pts".
+            The aliases "average", "min" and "max" select "mean", "minimum" and "maximum".
+        :param resample_method: Raster interpolation using the SciPy methods "nearest", "linear", "cubic", "quintic",
+            "slinear", "pchip" or "splinef2d". Window reduction ("reduce") is not implemented.
+        :param grid_kwargs: Options for PointCloud.grid(), e.g. {"dist_nodata_pixel": 2, "min_points": 3} sets a
+            two-pixel radius and minimum of three finite points for circular methods. Other options include
+            "distance_power" for IDW and "engine" ("scipy" or "numba").
+            Set locations and method with at and grid_method.
+        :param resample_kwargs: Options for Raster.interp_points(), e.g. {"nodata_propagation": "ignore"}. The nodata
+            policies are "gdal", "ignore" and "propagate"; "dist_nodata_spread" controls extra spreading in pixels.
+            Set locations, band and method with the corresponding cosample() arguments.
+        :param align: Handling of mismatched grids or coordinate systems: "raise" an error, or "reproject" to match at.
+            Point inputs must still share the same ordered coordinates when sampled at points.
+        :param mp_config: Worker and tile settings for multiprocessing. Raster output uses its outfile; cannot be
+            combined with Dask inputs.
+        :returns: Raster or point cloud on the selected support; Xarray DataArray or eager/lazy GeoDataFrame for
+            accessor calls. Bands or columns contain "self", "other", then auxiliaries in mapping order. Raster
+            band names are stored in ``tags["long_name"]`` (Xarray ``attrs["long_name"]``). Point outputs use
+            "self" as their active data column and preserve the support index and order.
+        """
+
+        from geoutils.sampling.cosampling import _cosample
+
+        return _cosample(
+            self,
+            other,
+            band=band,
+            other_band=other_band,
+            auxiliary=auxiliary,
+            auxiliary_at=auxiliary_at,
+            at=at,
+            mask=mask,
+            mask_mode=mask_mode,
+            subsample=subsample,
+            random_state=random_state,
+            strategy=strategy,
+            raster_point_mode=raster_point_mode,
+            grid_method=grid_method,
+            resample_method=resample_method,
+            grid_kwargs=grid_kwargs,
+            resample_kwargs=resample_kwargs,
+            align=align,
+            mp_config=mp_config,
+        )
+
+    def pairsample(
+        self,
+        *,
+        band: int = 1,
+        n_pairs: int = 1_000_000,
+        sampling: Literal["loglag", "random_xy"] = "loglag",
+        min_distance: float | None = None,
+        max_distance: float | None = None,
+        random_state: int | np.random.Generator | None = None,
+        mask: RasterLike | VectorLike | ArrayLike | None = None,
+        strategy: Literal["independent", "anchors", "chunk_anchors", "anchor_batched"] = "chunk_anchors",
+        deduplicate: Literal["none", "per_anchor", "global"] = "per_anchor",
+        batch_pairs: int = 2_000_000,
+        max_rounds: int = 50,
+        max_oversample: float = 8.0,
+        chunks_per_round: int = 8,
+        anchors_per_round: int = 20_000,
+        distances_per_anchor: int = 8,
+        angles_per_distance: int = 8,
+        hybrid_local_fraction: float = 0.0,
+        max_local_distance: float | None = None,
+        index_dtype: DTypeLike = np.int32,
+        distance_dtype: DTypeLike = np.float64,
+    ) -> xr.Dataset:
+        """Sample finite raster cell pairs for statistics by distance.
+
+        Logarithmic lag sampling draws isotropic distances across short and long ranges. Anchor strategies reuse
+        raster cells and can confine part of the sample to source chunks, which limits reads from Dask-backed rasters.
+
+        Strategy, duplicate, oversampling, anchor, and local distance controls apply to ``"loglag"``.
+        Both sampling schemes use ``batch_pairs`` and ``max_rounds``.
+
+        :param band: Band to sample, counting from one.
+        :param n_pairs: Requested number of pairs with two finite values; fewer may be returned if sampling stops early.
+        :param sampling: ``"loglag"`` balances short and long distances on a log scale; ``"random_xy"`` draws
+            endpoints uniformly.
+        :param min_distance: Smallest distance in CRS units (e.g. meters). Defaults to the smaller pixel spacing.
+        :param max_distance: Largest distance in CRS units. Defaults to the diagonal between outermost cell centers.
+        :param random_state: Seed for reproducible sampling (e.g. 42).
+        :param mask: Eligible cells: True in a mask array or aligned mask raster, or inside vector geometries.
+        :param strategy: GeoUtils log-lag strategy: ``"independent"`` draws each pair separately, ``"anchors"``
+            reuses first endpoints, ``"chunk_anchors"`` also limits source chunks, and ``"anchor_batched"`` draws
+            several distances and directions from each first endpoint.
+        :param deduplicate: ``"none"`` keeps repeats, ``"per_anchor"`` removes repeated targets within each anchor
+            batch, and ``"global"`` removes repeated pairs across all batches. ``"random_xy"`` always removes repeats.
+        :param batch_pairs: Maximum candidate pairs per batch; smaller batches use less temporary memory.
+        :param max_rounds: Maximum attempts to fill the sample after rejecting missing values or out-of-range pairs.
+        :param max_oversample: Maximum candidate count as a multiple of the target pair count (e.g. 8).
+        :param chunks_per_round: Maximum source chunks used when drawing anchors from selected chunks.
+        :param anchors_per_round: Maximum first endpoints reused per round by ``"anchors"``, ``"chunk_anchors"``,
+            or local ``"independent"`` sampling.
+        :param distances_per_anchor: Distances drawn per first endpoint with ``"anchor_batched"``.
+        :param angles_per_distance: Directions drawn per distance with ``"anchor_batched"``.
+        :param hybrid_local_fraction: Fraction of candidate pairs kept within the first endpoint's chunk (e.g. 0.5).
+            Zero samples across the full raster; one keeps all pairs local.
+        :param max_local_distance: Largest proposed local distance in CRS units. Defaults to the largest chunk diagonal.
+        :param index_dtype: Integer NumPy dtype for returned cell indexes (e.g. ``"int64"`` for very large rasters).
+        :param distance_dtype: Floating NumPy dtype for returned distances (e.g. ``"float32"`` to reduce memory).
+        :returns: Xarray Dataset with pair and endpoint dimensions, containing cell indexes, values, coordinates,
+            and distances.
+        """
+
+        from geoutils.sampling.pairsampling import _sample_raster_pairs
+
+        return _sample_raster_pairs(
+            self,
+            band=band,
+            n_pairs=n_pairs,
+            sampling=sampling,
+            min_distance=min_distance,
+            max_distance=max_distance,
+            random_state=random_state,
+            mask=mask,
+            strategy=strategy,
+            deduplicate=deduplicate,
+            batch_pairs=batch_pairs,
+            max_rounds=max_rounds,
+            max_oversample=max_oversample,
+            chunks_per_round=chunks_per_round,
+            anchors_per_round=anchors_per_round,
+            distances_per_anchor=distances_per_anchor,
+            angles_per_distance=angles_per_distance,
+            hybrid_local_fraction=hybrid_local_fraction,
+            max_local_distance=max_local_distance,
+            index_dtype=index_dtype,
+            distance_dtype=distance_dtype,
+        )
+
+    def variogram(
+        self,
+        *,
+        band: int = 1,
+        n_pairs: int = 1_000_000,
+        sampling: Literal["loglag", "random_xy"] = "loglag",
+        estimator: str | Callable[[NDArrayNum], float] = "dowd",
+        bins: Literal["log", "uniform"] | Iterable[float] = "log",
+        n_lags: int = 24,
+        min_lag: float | None = None,
+        max_lag: float | None = None,
+        n_runs: int = 1,
+        model: str | Callable[..., Any] | list[str | Callable[..., Any]] | None = None,
+        fit_kwargs: dict[str, Any] | None = None,
+        random_state: int | np.random.Generator | None = None,
+        mask: RasterLike | VectorLike | ArrayLike | None = None,
+        **pair_sampling_kwargs: Any,
+    ) -> Variogram:
+        """Estimate a lightweight empirical variogram from raster pairs.
+
+        :param band: Raster band to sample, counting from 1.
+        :param n_pairs: Number of finite pairs targeted in each run (e.g. 100_000).
+        :param sampling: How to select pairs: ``"loglag"`` balances short and long distances, while ``"random_xy"``
+            selects endpoints independently.
+        :param estimator: Semivariance estimator from SciKit-GStat: ``"dowd"``, ``"matheron"``, ``"cressie"``,
+            ``"genton"``, ``"minmax"``, ``"entropy"`` or ``"percentile"``. A function can instead map absolute pair
+            differences to one value per distance bin.
+        :param bins: Distance bins: ``"log"`` for logarithmic spacing, ``"uniform"`` for equal widths, or explicit
+            edges (e.g. [1, 10, 100]).
+        :param n_lags: Number of distance bins when bins is ``"log"`` or ``"uniform"``.
+        :param min_lag: Minimum sampled distance in CRS units; defaults to the smaller pixel dimension.
+        :param max_lag: Maximum sampled distance in CRS units; defaults to the diagonal between outermost cell centers.
+        :param n_runs: Independent samples to average; repeat sampling to estimate each distance bin's standard error.
+        :param model: SciKit-GStat model to fit: ``"spherical"``, ``"exponential"``, ``"gaussian"``, ``"cubic"``,
+            ``"stable"`` or ``"matern"``, or the corresponding model function. Sum a list of models ordered from short
+            to long range (e.g. ["spherical", "exponential"]). ``None`` keeps only the empirical variogram.
+        :param fit_kwargs: Options for Variogram.fit(): ``use_nugget``, ``bounds``, ``p0`` or ``maxfev``
+            (e.g. {"use_nugget": True}); optimization uses SciPy curve_fit().
+        :param random_state: Seed or NumPy generator for reproducible sampling across runs (e.g. 42).
+        :param mask: Cells to keep: True values in a boolean mask or aligned mask raster, or cells inside
+            vector geometries.
+        :param pair_sampling_kwargs: Extra pairsample() options (e.g. ``strategy`` or ``max_rounds``).
+        :returns: Variogram with distance bins, pair counts and semivariance, plus sampling errors and a fitted model
+            when requested.
+        """
+
+        return _variogram(
+            self,
+            band=band,
+            n_pairs=n_pairs,
+            sampling=sampling,
+            n_runs=n_runs,
+            estimator=estimator,
+            bins=bins,
+            n_lags=n_lags,
+            min_lag=min_lag,
+            max_lag=max_lag,
+            model=model,
+            fit_kwargs=fit_kwargs,
+            random_state=random_state,
+            mask=mask,
+            **pair_sampling_kwargs,
         )

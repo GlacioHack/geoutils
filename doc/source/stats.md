@@ -21,14 +21,10 @@ which is clearly defined.
 
 [//]: # (For a {class}`~geoutils.Vector`, statistics have to be performed on a specific column.)
 
-```{warning}
-The API for statistical features is preliminary and might change with the release of zonal and grouped statistics.
-```
-
 ## Estimators
 
-The {func}`~geoutils.Raster.get_stats` method allows to extract key statistical estimators from a raster or a point cloud, optionally subsetting to an
-inlier mask.
+The {func}`~geoutils.Raster.stats` method allows to extract key statistical estimators from a raster or a point cloud,
+optionally subsetting to a mask.
 
 Supported statistics are :
 - **Mean:** arithmetic mean of the data, ignoring masked values.
@@ -47,7 +43,7 @@ Supported statistics are :
 - **Total count:** total size of the raster.
 - **Percentage valid points:** ratio between **Valid count** and **Total count**.
 
-If an inlier mask is passed:
+If a mask is passed:
 - **Total inlier count:** number of data points in the inlier mask.
 - **Valid inlier count:** number of unmasked data points in the array after applying the inlier mask.
 - **Percentage inlier points:** ratio between **Valid inlier count** and **Valid count**. Useful for classification statistics.
@@ -68,35 +64,35 @@ rast
 By default and without any specification, this function computes the following main statistics:
 minimum, maximum, mean, standard deviation, normalized median absolute deviation, total count, and percentage of valid points.
 ```{code-cell} ipython3
-rast.get_stats()
+rast.stats()
 ```
 
-To compute all available statistics, set `stats_name` to `all`.
+To compute all available statistics, set `statistics` to `all`.
 ```{code-cell} ipython3
-rast.get_stats("all")
+rast.stats("all")
 ```
 
 Get a single statistic (e.g., 'mean') as a float:
 ```{code-cell} ipython3
-rast.get_stats("mean")
+rast.stats("mean")
 ```
 
 Get multiple statistics:
 ```{code-cell} ipython3
-rast.get_stats(["mean", "max", "std"])
+rast.stats(["mean", "max", "std"])
 ```
 
 Using a custom callable statistic:
 ```{code-cell} ipython3
 def custom_stat(data):
     return np.nansum(data > 100)  # Count the number of pixels above 100
-rast.get_stats(custom_stat)
+rast.stats(custom_stat)
 ```
 
-Passing an inlier mask:
+Passing a mask:
 ```{code-cell} ipython3
 inlier_mask = rast > 1500
-rast.get_stats(inlier_mask=inlier_mask)
+rast.stats(mask=inlier_mask)
 ```
 
 ## Subsampling

@@ -26,11 +26,48 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import xarray as xr
 
-from geoutils._dispatch import has_geo_attr
+from geoutils._dispatch import get_geo_attr, has_geo_attr
 from geoutils._typing import MArrayNum, NDArrayBool, NDArrayNum
 
 if TYPE_CHECKING:
     from geoutils.raster.base import RasterLike, RasterType
+
+
+#################################
+# 1/ INTERNAL ARRAY NORMALIZATION
+#################################
+
+
+def _selected_raster_data(raster: Any, band: int = 1, *, fill_value: float | bool = np.nan) -> Any:
+    """Select one raster band without loading lazy data."""
+
+    # Unwrap Xarray while preserving the laziness of its underlying array
+    data = get_geo_attr(raster, "data")
+    if isinstance(data, xr.DataArray):
+        data = data.data
+
+    # Validate the public one based index before selecting one data plane
+    if band < 1:
+        raise ValueError("band numbers start at 1.")
+    if data.ndim == 2:
+        if band != 1:
+            raise ValueError("A single band raster only accepts band=1.")
+        selected = data
+    elif data.ndim == 3:
+        if band > data.shape[0]:
+            raise ValueError("band exceeds the number of raster bands.")
+        selected = data[band - 1]
+    else:
+        raise ValueError("Raster values must have two spatial dimensions and an optional band dimension.")
+
+    # Preserve unmasked integer data and promote only when missing values require NaN
+    if np.ma.isMaskedArray(selected):
+        if not np.ma.is_masked(selected):
+            return np.ma.getdata(selected)
+        if np.isnan(fill_value):
+            selected = selected.astype(np.result_type(selected.dtype, np.float32))
+        selected = selected.filled(fill_value)
+    return selected
 
 
 def _masked_raster_data(source_raster: RasterLike) -> MArrayNum:
@@ -74,6 +111,11 @@ def _as_bands(array: MArrayNum) -> tuple[MArrayNum, bool]:
     if array.ndim == 3:
         return array, False
     raise ValueError("Raster processing expects a two-dimensional or multiband array.")
+
+
+##############################
+# 2/ MASK AND EXTENT FUNCTIONS
+##############################
 
 
 def get_mask_from_array(array: NDArrayNum | NDArrayBool | MArrayNum) -> NDArrayBool:
@@ -144,6 +186,11 @@ def get_valid_extent(array: NDArrayNum | NDArrayBool | MArrayNum) -> tuple[int, 
     cols_nonzero = np.where(np.count_nonzero(valid_mask, axis=0) > 0)[0]
     rows_nonzero = np.where(np.count_nonzero(valid_mask, axis=1) > 0)[0]
     return rows_nonzero[0], rows_nonzero[-1], cols_nonzero[0], cols_nonzero[-1]
+
+
+###########################
+# 3/ COORDINATE TRANSFORMS
+###########################
 
 
 def get_xy_rotated(raster: RasterType, along_track_angle: float) -> tuple[NDArrayNum, NDArrayNum]:

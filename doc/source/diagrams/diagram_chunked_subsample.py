@@ -9,7 +9,7 @@ from matplotlib.offsetbox import AnnotationBbox, HPacker, TextArea
 from matplotlib.patches import Rectangle
 
 from geoutils.raster.array import get_mask_from_array
-from geoutils.stats.sampling import (
+from geoutils.sampling.subsampling import (
     _get_subsample_size_from_user_input,
     _splitmix64,
     _subsample_numpy,

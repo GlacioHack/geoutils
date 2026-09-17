@@ -50,7 +50,8 @@ def open_raster(filename: str, is_mask: bool = False, **kwargs: Any) -> xr.DataA
     ds = rioxr.open_rasterio(filename, masked=True, **kwargs)
 
     # Remove the band dimension if there is only one
-    ds = ds.squeeze()  # Delete band coordinate (only one dimension)
+    if ds.sizes.get("band") == 1:
+        ds = ds.squeeze("band")  # Delete band coordinate (only one dimension)
 
     # If input needs to be interpreted as a boolean mask
     if is_mask:
@@ -278,8 +279,9 @@ class RasterAccessor(RasterBase):
             else:
                 data = np.ma.getdata(masked)
 
-        # Squeeze data
-        data = data.squeeze()
+        # Remove only a singleton band axis so one row or column still defines a raster grid
+        if data.ndim == 3 and data.shape[0] == 1:
+            data = data[0]
 
         # For a 2-d array
         if data.ndim == 2:
@@ -311,15 +313,18 @@ class RasterAccessor(RasterBase):
 
     def to_geoutils(self) -> RasterBase:
         """
-        Convert to Raster object from GeoUtils.
+        Convert the DataArray to an in-memory GeoUtils Raster.
 
-        :return:
+        :returns: A Raster with identical values and georeferencing. Dask inputs retain their lazy source graph;
+            ordinary file-backed DataArrays load their values during conversion.
         """
 
         from geoutils.raster import Raster  # Runtime import to avoid circularity issues
 
+        # Materialize a separate Dask result so conversion never replaces the source's lazy array
+        ds = self._obj.compute() if self._chunks is not None else self._obj
         return Raster.from_array(
-            data=self._obj.data,
+            data=ds.data,
             crs=self.crs,
             transform=self.transform,
             nodata=self.nodata,

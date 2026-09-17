@@ -25,8 +25,10 @@ from typing import Literal
 # Define the dimensions supported by GeoUtils and tested in benchmarks: execution modes,
 # calculation engines, operation names, operation methods and chunk strategies
 ExecutionMode = Literal["eager", "dask", "multiprocessing"]
-CalculationEngine = Literal["scipy", "numba", "rasterio"]
-OperationStrategyName = Literal["sequential", "topk", "label_union", "label_stitch", "geometry_stitch"]
+CalculationEngine = Literal["scipy", "numba", "rasterio", "numpy"]
+OperationStrategyName = Literal[
+    "sequential", "topk", "label_union", "label_stitch", "geometry_stitch", "auto", "dense", "sparse", "groupwise"
+]
 OperationName = Literal[
     "crop",
     "translate",
@@ -34,6 +36,7 @@ OperationName = Literal[
     "filter",
     "reproject",
     "statistics",
+    "grouped_stats",
     "subsample",
     "interp_points",
     "polygonize",
@@ -77,6 +80,8 @@ class OperationCase:
 # List the supported method and calculation-engine combinations for each numerical operation
 # Single-method operations stay explicit so the engine is always recorded in benchmark results
 OPERATION_METHODS: tuple[OperationMethod, ...] = (
+    OperationMethod("grouped_stats", "moments", ("numpy",), default=True),
+    OperationMethod("grouped_stats", "robust", ("numpy",)),
     OperationMethod("interp_points", "linear", ("scipy",), default=True),
     OperationMethod("reproject", "nearest", ("rasterio",), default=True),
     OperationMethod("filter", "mean", ("scipy",), default=True),
@@ -90,6 +95,10 @@ OPERATION_METHODS: tuple[OperationMethod, ...] = (
 
 # List the alternative ways chunked operations select or reconcile results; eager execution has no strategy
 OPERATION_STRATEGIES: tuple[OperationStrategy, ...] = (
+    OperationStrategy("grouped_stats", "auto", default=True),
+    OperationStrategy("grouped_stats", "dense"),
+    OperationStrategy("grouped_stats", "sparse"),
+    OperationStrategy("grouped_stats", "groupwise"),
     OperationStrategy("subsample", "sequential"),
     OperationStrategy("subsample", "topk", default=True),
     OperationStrategy("polygonize", "label_union"),
@@ -107,6 +116,8 @@ OPERATION_CASES: tuple[OperationCase, ...] = (
     OperationCase("filter", ("dask", "multiprocessing"), 1),
     OperationCase("reproject", ("dask", "multiprocessing"), 1),
     OperationCase("statistics", ("dask",), 1),
+    # Multiprocessing currently tiles arrays already resident in the client, so only Dask is out of core
+    OperationCase("grouped_stats", ("dask",), 1),
     OperationCase("subsample", ("dask", "multiprocessing"), 1),
     OperationCase("interp_points", ("dask", "multiprocessing"), 1),
     OperationCase("polygonize", ("dask", "multiprocessing"), 1),

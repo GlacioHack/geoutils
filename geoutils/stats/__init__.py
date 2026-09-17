@@ -16,6 +16,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Statistical functionalities: grouped/zonal/global stats, specific estimators, and variography/geostats. """
 from geoutils.stats.estimators import *  # noqa
-from geoutils.stats.sampling import *  # noqa
+from geoutils.stats.grouping import *  # noqa
 from geoutils.stats.stats import *  # noqa
+from geoutils.stats.variography import *  # noqa

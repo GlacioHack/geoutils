@@ -102,7 +102,7 @@ The **memory usage** column lists the number of input chunks loaded in memory fo
   - {bdg-secondary}`In-memory`
   - {bdg-secondary}`In-memory`
   - —
-* - {meth}`~geoutils.Raster.get_stats`
+* - {meth}`~geoutils.Raster.stats`
   - {bdg-secondary}`In-memory`
   - {bdg-secondary}`In-memory`
   - —
@@ -168,7 +168,7 @@ The **memory usage** column lists the number of input chunks loaded in memory fo
   -
   -
 
-* - {meth}`~geoutils.PointCloud.get_stats`
+* - {meth}`~geoutils.PointCloud.stats`
   - {bdg-secondary}`In-memory`
   - {bdg-secondary}`In-memory`
   - —

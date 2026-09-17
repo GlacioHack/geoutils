@@ -16,13 +16,17 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""Module defining array and configuration routines for chunked operations with Multiprocessing."""
+
+"""Module defining chunked array operations with Multiprocessing."""
 from __future__ import annotations
 
 import logging
 import tempfile
 import warnings
+from collections.abc import Iterator
+from contextlib import contextmanager
 from numbers import Integral
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Literal, overload
 
 import numpy as np
@@ -35,6 +39,7 @@ from geoutils.multiproc.chunked import ChunkSpec, normalize_chunks
 from geoutils.multiproc.cluster import AbstractCluster, ClusterGenerator
 
 if TYPE_CHECKING:
+    from geoutils.raster.base import RasterBase
     from geoutils.raster.raster import Raster
 
 
@@ -74,7 +79,7 @@ def _split_chunk_size(chunks: ChunkSize) -> tuple[int, int]:
 
 class MultiprocConfig:
     """
-    Configuration class for handling multiprocessing parameters in raster processing.
+    Configuration class for handling multiprocessing parameters in raster and point cloud processing.
 
     This class encapsulates settings related to multiprocessing, allowing users to specify
     chunks, output file, and an optional cluster for parallel processing.
@@ -85,16 +90,17 @@ class MultiprocConfig:
         self,
         chunks: ChunkSize,
         outfile: str | None = None,
-        driver: str = "GTiff",
+        driver: str | None = None,
         cluster: AbstractCluster | None = None,
     ):
         """
         Initialize the MultiprocConfig instance with multiprocessing settings.
 
         :param chunks: The size of the chunks for splitting raster data. Pass an integer for square chunks, or a
-            ``(rows, cols)`` tuple for rectangular chunks.
+            ``(rows, cols)`` tuple for rectangular chunks. Point cloud operations use an integer number of points.
         :param outfile: The file path where the output will be written.
-        :param driver: Driver to write file with.
+        :param driver: Output format. None uses GeoTIFF for rasters; point reprojection infers LAS/LAZ or GeoPackage
+            from the output filename, defaulting to GeoPackage when no extension is given.
         :param cluster: A cluster object for distributed computing, or None for sequential processing.
         """
         self.chunks = _validate_chunk_size(chunks)
@@ -112,6 +118,23 @@ class MultiprocConfig:
 
     def copy(self) -> MultiprocConfig:
         return MultiprocConfig(chunks=self.chunks, outfile=self.outfile, driver=self.driver, cluster=self.cluster)
+
+    @contextmanager
+    def temporary(self) -> Iterator[MultiprocConfig]:
+        """
+        Use a temporary output file while reusing this configuration's chunk sizes, driver and worker cluster.
+
+        Each context owns a separate directory for its output and any driver sidecar files. Keep the context open
+        while intermediate files are being read; leaving it removes the files without closing the shared cluster.
+
+        :returns: Context manager yielding a configuration with a unique output filename. The original
+            configuration remains unchanged, and temporary files are removed even when processing raises an error.
+        """
+
+        with tempfile.TemporaryDirectory() as directory:
+            yield MultiprocConfig(
+                chunks=self.chunks, outfile=str(Path(directory) / "output"), driver=self.driver, cluster=self.cluster
+            )
 
 
 def _generate_tiling_grid(
@@ -344,7 +367,7 @@ def _apply_func_block(
 
 def map_overlap(
     func: Callable[..., Raster],
-    raster_path: str | Raster,
+    raster_path: str | RasterBase,
     mp_config: MultiprocConfig,
     *args: Any,
     depth: int = 0,
@@ -359,13 +382,16 @@ def map_overlap(
     Use this function when `func` returns a :class:`geoutils.Raster`,
     as it ensures the processed data is written to `config.outfile`.
 
-    :param func: A function to apply to each raster tile. It must return a :class:`geoutils.Raster` object.
+    :param func: Function returning a Raster on the tile's grid. It may change the number of bands; every tile must
+        use the same output band count, dtype and nodata. Metadata comes from the first input tile's result.
     :param raster_path: Path to the input raster file or an existing :class:`geoutils.Raster` object.
     :param mp_config: Configuration object containing chunks, output file path, and an optional cluster.
         The `outfile` parameter in `config` must be provided.
     :param args: Additional positional arguments to pass to `func`.
     :param depth: The overlap size between blocks to avoid edge effects, default is 0.
     :param kwargs: Additional keyword arguments to pass to `func`.
+
+    :returns: File-backed raster with the output bands and metadata returned by func().
 
     :raises ValueError: If `config.outfile` is not provided.
     :raises RuntimeError: If an error occurs while processing the raster blocks.
@@ -391,19 +417,19 @@ def map_overlap(
             # Submit the block processing task on the cluster
             tasks.append(mp_config.cluster.submit(_apply_func_block, func, raster, tile, depth, *args, **kwargs))
 
-    # get first tile to retrieve dtype and nodata
+    # Read the first result's band count and metadata because the function may change them
     result_tile0, _ = mp_config.cluster.compute(tasks[0])
     file_metadata = {
         "width": raster.width,
         "height": raster.height,
-        "count": raster.count,
+        "count": result_tile0.count,
         "crs": raster.crs,
         "transform": raster.transform,
         "dtype": result_tile0.dtype,
         "nodata": result_tile0.nodata,
     }
 
-    raster_output = _write_multiproc_result(tasks, mp_config, file_metadata)
+    raster_output = _write_multiproc_result(tasks, mp_config, file_metadata, tags=dict(result_tile0.tags))
 
     # Warns user if output file is a BigTIFF
     if raster_output._is_bigtiff():
@@ -419,13 +445,31 @@ def _write_multiproc_result(
     tasks: list[Any],
     mp_config: MultiprocConfig,
     file_metadata: dict[str, Any],
+    *,
+    tags: dict[str, Any] | None = None,
 ) -> Raster:
+    """
+    Write completed worker tiles to their output windows without collecting the full raster in memory.
+
+    :param tasks: Worker results containing a Raster or NumPy tile and its row/column window boundaries.
+    :param mp_config: Worker cluster, output filename and driver, as described by map_overlap().
+    :param file_metadata: Rasterio output dimensions, band count, dtype, georeferencing and nodata.
+    :param tags: Optional output metadata, including AREA_OR_POINT when pixel interpretation is known. Rasterio
+        stores these as strings; the returned Raster keeps the supplied Python values.
+
+    :returns: File-backed Raster or mask with every completed tile written and its output metadata attached.
+    """
 
     # To avoid circular import, runtime here
     from geoutils.raster import Raster
 
     # Create a new raster file to save the processed results
-    with rio.open(mp_config.outfile, "w", driver=mp_config.driver, **file_metadata, BIGTIFF="IF_NEEDED") as dst:
+    with rio.open(
+        mp_config.outfile, "w", driver=mp_config.driver or "GTiff", **file_metadata, BIGTIFF="IF_NEEDED"
+    ) as dst:
+        # Preserve result metadata, including pixel interpretation, when the caller provides it
+        if tags is not None:
+            dst.update_tags(**tags)
         try:
             # Retrieve completed blocks promptly so worker results can be released after writing
             for task_index, completed in mp_config.cluster.iter_completed(tasks):
@@ -458,15 +502,17 @@ def _write_multiproc_result(
         except Exception as e:
             raise RuntimeError(f"Error retrieving raster blocks from multiprocessing tasks: {e}")
 
-    if is_mask:
-        return Raster(mp_config.outfile, as_mask=True)
-    return Raster(mp_config.outfile)
+    # Keep metadata types such as band-name tuples on the returned object after the normal file metadata read
+    output = Raster(mp_config.outfile, is_mask=is_mask)
+    if tags is not None:
+        output.tags.update(tags)
+    return output
 
 
 @overload
 def map_blocks(
     func: Callable[..., Any],
-    raster_path: str | Any,
+    raster_path: str | RasterBase,
     mp_config: MultiprocConfig,
     *args: Any,
     depth: int = 0,
@@ -478,7 +524,7 @@ def map_blocks(
 @overload
 def map_blocks(
     func: Callable[..., Any],
-    raster_path: str | Any,
+    raster_path: str | RasterBase,
     mp_config: MultiprocConfig,
     *args: Any,
     depth: int = 0,
@@ -490,7 +536,7 @@ def map_blocks(
 @overload
 def map_blocks(
     func: Callable[..., Any],
-    raster_path: str | Any,
+    raster_path: str | RasterBase,
     mp_config: MultiprocConfig,
     *args: Any,
     depth: int = 0,
@@ -501,7 +547,7 @@ def map_blocks(
 
 def map_blocks(
     func: Callable[..., Any],
-    raster_path: str | Raster,
+    raster_path: str | RasterBase,
     mp_config: MultiprocConfig,
     *args: Any,
     depth: int = 0,
@@ -571,7 +617,7 @@ def map_blocks(
 @deprecate(details="Use map_overlap() instead.")
 def map_overlap_multiproc_save(
     func: Callable[..., Raster],
-    raster_path: str | Raster,
+    raster_path: str | RasterBase,
     mp_config: MultiprocConfig,
     *args: Any,
     depth: int = 0,
@@ -585,7 +631,7 @@ def map_overlap_multiproc_save(
 @deprecate(details="Use map_blocks() with return_block_info instead.")
 def map_multiproc_collect(
     func: Callable[..., Any],
-    raster_path: str | Raster,
+    raster_path: str | RasterBase,
     mp_config: MultiprocConfig,
     *args: Any,
     depth: int = 0,

@@ -31,6 +31,7 @@ dependencies:
   - numba # For filters and point cloud gridding
   - dask # For out-of-memory operations
   - dask-geopandas # For out-of-memory vector/point operations
+  - flox # For grouped statistics
 
   # Test dependencies
   - gdal<3.13.3  # To test functionalities against GDAL
@@ -63,3 +64,7 @@ dependencies:
 
   - pip:
       - -e ./
+      - scikit-gstat>=1.0.23 # For variogram fitting
+      - gstools>=1.3 # For variogram conversion, kriging and random fields
+      - gpytorch>=1.11 # For Gaussian-process covariance conversion
+      - torch>=2 # GPyTorch backend (repeated here as not enforced in GPyTorch)

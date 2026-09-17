@@ -47,6 +47,18 @@ config_np.cluster = ClusterGenerator("multi", nb_workers=4)
 - **`outfile="output.tif"`**: The results will be saved under this file (if not provided, temporary file by default).
 - **`cluster=ClusterGenerator("multi", nb_workers=4)`**: Enables parallel processing.
 
+The `ClusterGenerator("multi", nb_workers=4)` call above creates an {class}`~geoutils.multiproc.MpCluster` internally.
+By default, `MpCluster` starts workers with `forkserver` when the current platform supports it and otherwise uses
+`spawn` (e.g. on Windows). To select another start method supported by the current platform, create the
+cluster directly:
+
+```{code-cell} ipython3
+from geoutils.multiproc import MpCluster
+
+# Select "spawn" method
+config_np.cluster = MpCluster({"nb_workers": 4}, start_method="spawn")
+```
+
 ---
 
 ## {func}`~geoutils.multiproc.map_overlap`: process and save large rasters
@@ -105,7 +117,7 @@ from typing import Any
 # Compute mean
 
 def compute_statistics(raster: gu.Raster) -> dict[str, np.floating[Any]]:
-    return raster.get_stats(stats_name=["mean", "valid_count"])
+    return raster.stats(["mean", "valid_count"])
 
 stats_results = map_blocks(compute_statistics, filename_rast, config_basic)
 total_count = sum([stats["valid_count"] for stats in stats_results])

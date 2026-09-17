@@ -33,13 +33,13 @@ from pyproj import CRS
 
 from geoutils._dispatch import is_dask_dataframe, is_dask_geodataframe
 from geoutils._misc import import_optional
-from geoutils.pointcloud.base import (
-    PointCloudBase,
+from geoutils.pointcloud.base import PointCloudBase
+from geoutils.pointcloud.dataframe import (
     _get_dataframe_attrs,
+    _import_dask_dataframe,
     _set_dataframe_attrs,
 )
 from geoutils.pointcloud.las import (
-    _empty_las_geodataframe,
     _is_laspy_supported,
     _load_laspy_data_slice,
     _load_laspy_metadata,
@@ -56,18 +56,6 @@ from geoutils.vector.pd_accessor import (
 _DASK_ACCESSOR_REGISTERED = False
 
 
-def _import_dask_dataframe() -> Any:
-    """Import Dask DataFrame while suppressing optional dask-expr warnings from older environments."""
-
-    # Delay the optional import until lazy LAS partitions are requested
-    import_optional("dask")
-    with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=FutureWarning, module="dask.dataframe")
-        import dask.dataframe as dd
-
-    return dd
-
-
 def _register_dask_pointcloud_accessor() -> None:
     """Register the ``pc`` accessor on Dask DataFrames lazily."""
 
@@ -78,6 +66,7 @@ def _register_dask_pointcloud_accessor() -> None:
         return
 
     # Register only after Dask is available so normal imports remain lightweight
+    # https://docs.dask.org/en/stable/dataframe-extend.html#accessors
     import_optional("dask")
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=FutureWarning, module="dask.dataframe")
@@ -92,9 +81,10 @@ def _register_dask_pointcloud_accessor() -> None:
 def _infer_data_column(ds: Any) -> str | None:
     """Infer a point cloud data column from dataframe metadata and columns."""
 
-    data_column = _get_dataframe_attrs(ds).get("data_column")
-    if data_column is not None:
-        return data_column
+    attrs = _get_dataframe_attrs(ds)
+    if "data_column" in attrs:
+        # An explicit None selects elevation from 3D geometry, even when auxiliary columns exist
+        return attrs["data_column"]
 
     nongeo_columns = [c for c in ds.columns if c != "geometry"]
     if "Z" in nongeo_columns:
@@ -238,9 +228,14 @@ def open_pointcloud(
         )
         for start in starts
     ]
+    # Read zero records to preserve each native LAS dtype in Dask metadata and empty results
+    empty = _load_laspy_data_slice_dataframe(filename, columns_to_load, start=0, count=0)
+    if not parts:
+        parts = [delayed(_load_laspy_data_slice_dataframe)(filename, columns_to_load, start=0, count=0)]
+
     # Keep LAS numeric dimensions unchanged while assembling the lazy dataframe
     with dask.config.set({"dataframe.convert-string": False}):
-        ddf = dd.from_delayed(parts, meta=_empty_las_geodataframe(columns_to_load, crs=metadata.crs))
+        ddf = dd.from_delayed(parts, meta=empty)
 
     # Add geospatial behavior and cache header metadata for accessor properties
     ddf = dgpd.from_dask_dataframe(ddf, geometry="geometry")
@@ -332,7 +327,8 @@ class PointCloudAccessor(PointCloudBase, VectorAccessor):
         """Coordinate reference system of the point cloud."""
 
         if self._is_dask:
-            return _get_dataframe_attrs(self.ds).get("crs")
+            # Direct Dask-GeoPandas construction retains CRS in geometry metadata without a GeoUtils cache
+            return _get_dataframe_attrs(self.ds).get("crs", self.ds.crs)
         return self.ds.crs
 
     @property
