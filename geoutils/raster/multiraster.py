@@ -26,7 +26,9 @@ from typing import Any, Callable
 import numpy as np
 import rasterio as rio
 import rasterio.warp
+from packaging.version import Version
 
+from geoutils._misc import deprecate
 from geoutils._typing import NDArrayNum
 from geoutils.projtools import align_bounds, merge_bounds
 from geoutils.raster.array import get_array_and_mask
@@ -124,7 +126,7 @@ def load_multiple_rasters(
     return output_rst
 
 
-def stack_rasters(
+def stack(
     rasters: list[Raster],
     reference: int | Raster = 0,
     resampling_method: str | rio.enums.Resampling = None,
@@ -239,6 +241,20 @@ def stack_rasters(
     return r
 
 
+@deprecate(
+    removal_version=Version("0.3.0"),
+    details="The function gu.raster.stack_rasters() will be soon deprecated, use gu.raster.stack() instead.",
+)  # type: ignore
+def stack_rasters(
+    rasters: list[Raster],
+    reference: int | Raster = 0,
+    resampling_method: str | rio.enums.Resampling = None,
+    use_ref_bounds: bool = False,
+    diff: bool = False,
+) -> Raster:
+    return stack(rasters, reference, resampling_method, use_ref_bounds, diff)
+
+
 def merge_rasters(
     rasters: list[Raster],
     reference: int | Raster = 0,
@@ -289,7 +305,7 @@ def merge_rasters(
         raise ValueError("reference should be either an integer or geoutils.Raster object")
 
     # Reproject and stack all rasters
-    raster_stack = stack_rasters(
+    raster_stack = stack(
         rasters,
         reference=reference,
         resampling_method=resampling_method,

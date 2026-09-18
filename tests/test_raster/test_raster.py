@@ -2098,7 +2098,7 @@ class TestRaster:
         img = gu.Raster(self.landsat_rgb_path)
         assert img._is_bigtiff() is False
 
-    def test_stack_rasters(self) -> None:
+    def test_stack(self) -> None:
         """Test Raster.merge_rasters using gu.raster.merge_rasters"""
 
         r1 = gu.Raster(self.landsat_b4_path)
@@ -2108,17 +2108,17 @@ class TestRaster:
         r1.set_nodata(0)
         r2.set_nodata(0)
 
-        assert r1.stack_rasters(r2).raster_equal(gu.raster.stack_rasters([r1, r2]))
-        assert r2.stack_rasters(r1).raster_equal(gu.raster.stack_rasters([r2, r1]))
+        assert r1.stack(r2).raster_equal(gu.raster.stack([r1, r2]))
+        assert r2.stack(r1).raster_equal(gu.raster.stack([r2, r1]))
 
-        assert r1.stack_rasters([r2, r1]).raster_equal(gu.raster.stack_rasters([r1, r2, r1]))
-        assert r2.stack_rasters([r1, r1]).raster_equal(gu.raster.stack_rasters([r2, r1, r1]))
+        assert r1.stack([r2, r1]).raster_equal(gu.raster.stack([r1, r2, r1]))
+        assert r2.stack([r1, r1]).raster_equal(gu.raster.stack([r2, r1, r1]))
 
-        assert r1.stack_rasters(r2, resampling_method="nearest").raster_equal(
-            gu.raster.stack_rasters([r1, r2], resampling_method="nearest")
+        assert r1.stack(r2, resampling_method="nearest").raster_equal(
+            gu.raster.stack([r1, r2], resampling_method="nearest")
         )
-        assert r1.stack_rasters(r2, reference=1, use_ref_bounds=True).shape == r2.shape
-        assert r2.stack_rasters(r1, reference=1, use_ref_bounds=True).shape == r1.shape
+        assert r1.stack(r2, reference=1, use_ref_bounds=True).shape == r2.shape
+        assert r2.stack(r1, reference=1, use_ref_bounds=True).shape == r1.shape
 
 
 class TestMask:

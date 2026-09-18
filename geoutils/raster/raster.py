@@ -2286,7 +2286,7 @@ class Raster(RasterBase):
 
         return raster_bands
 
-    def stack_rasters(
+    def stack(
         self,
         rasters: Raster | list[Raster],
         reference: int | Raster = 0,
@@ -2319,7 +2319,7 @@ class Raster(RasterBase):
         else:
             raster_list = [self] + rasters  # type: ignore
 
-        return gu.raster.stack_rasters(raster_list, reference, resampling_method, use_ref_bounds)
+        return gu.raster.stack(raster_list, reference, resampling_method, use_ref_bounds)
 
 
 class Mask(Raster):

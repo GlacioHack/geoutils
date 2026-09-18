@@ -159,8 +159,8 @@ class TestMultiRaster:
             lazy_fixtures("images_nodata_zero"),
         ],
     )  # type: ignore
-    def test_stack_rasters(self, rasters: Any) -> None:  # type: ignore
-        """Test stack_rasters"""
+    def test_stack(self, rasters: Any) -> None:  # type: ignore
+        """Test raster.stack"""
 
         # Silence the reprojection warning for default nodata value
         warnings.filterwarnings(
@@ -171,7 +171,7 @@ class TestMultiRaster:
 
         ########
         # Check when use_ref_bounds is False (so dst_bounds is merge of all inputs)
-        stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2])
+        stacked_img = gu.raster.stack([rasters.img1, rasters.img2])
 
         assert isinstance(stacked_img, gu.Raster)  # Check output object is always Raster, whatever input was given
         assert stacked_img.count == rasters.img1.count + rasters.img2.count
@@ -221,7 +221,7 @@ class TestMultiRaster:
 
         ########
         # Check when use_ref_bounds with the first image
-        stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2], use_ref_bounds=True)
+        stacked_img = gu.raster.stack([rasters.img1, rasters.img2], use_ref_bounds=True)
         assert stacked_img.count == rasters.img1.count + rasters.img2.count
         assert rasters.img1.bounds == stacked_img.bounds
 
@@ -241,7 +241,7 @@ class TestMultiRaster:
 
         ########
         # Check when use_ref_bounds with another image
-        stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2], reference=rasters.img, use_ref_bounds=True)
+        stacked_img = gu.raster.stack([rasters.img1, rasters.img2], reference=rasters.img, use_ref_bounds=True)
         assert stacked_img.count == rasters.img1.count + rasters.img2.count
         assert rasters.img.bounds == stacked_img.bounds
 
@@ -262,16 +262,16 @@ class TestMultiRaster:
 
         # Others than int or gu.Raster should raise a ValueError
         with pytest.raises(ValueError, match="reference should be .*"):
-            gu.raster.stack_rasters([rasters.img1, rasters.img2], reference="a string")  # type: ignore
+            gu.raster.stack([rasters.img1, rasters.img2], reference="a string")  # type: ignore
 
         # Check that use_ref_bounds works - use a img that do not cover the whole extent
 
         # This case should not preserve original extent
-        stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img3])
+        stacked_img = gu.raster.stack([rasters.img1, rasters.img3])
         assert stacked_img.bounds != rasters.img.bounds
 
         # This case should preserve original extent
-        stacked_img2 = gu.raster.stack_rasters([rasters.img1, rasters.img3], reference=rasters.img, use_ref_bounds=True)
+        stacked_img2 = gu.raster.stack([rasters.img1, rasters.img3], reference=rasters.img, use_ref_bounds=True)
         assert stacked_img2.bounds == rasters.img.bounds
 
         # This case should preserve unique data values through "nearest" resampling
@@ -279,10 +279,10 @@ class TestMultiRaster:
         rasters.img1[:] = 5
         rasters.img1[0:5, 0:5] = 1
         rasters.img2 = rasters.img1.translate(0.5, 0.5, distance_unit="pixel")
-        stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2], resampling_method="nearest")
+        stacked_img = gu.raster.stack([rasters.img1, rasters.img2], resampling_method="nearest")
         assert np.array_equal(np.unique(stacked_img.data.compressed()), np.array([1, 5]))
         # But not this case with a shifted raster resampled with "bilinear"
-        stacked_img = gu.raster.stack_rasters([rasters.img1, rasters.img2], resampling_method="bilinear")
+        stacked_img = gu.raster.stack([rasters.img1, rasters.img2], resampling_method="bilinear")
         assert not np.array_equal(np.unique(stacked_img.data.compressed()), np.array([1, 5]))
 
         # Check input nodata is not modified inplace (issue 609)
@@ -314,7 +314,7 @@ class TestMultiRaster:
         warnings.filterwarnings("ignore", category=UserWarning, message="For reprojection, nodata must be set.*")
         warnings.filterwarnings("ignore", category=UserWarning, message="Unmasked values equal to*")
 
-        # Ignore warning already checked in test_stack_rasters
+        # Ignore warning already checked in test_stack
         if rasters.img1.count > 1:
             warnings.filterwarnings(
                 "ignore",
