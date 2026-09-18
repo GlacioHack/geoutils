@@ -101,6 +101,8 @@ RasterLike = Union["RasterBase", xr.DataArray]
 _UNSET = object()
 
 if TYPE_CHECKING:
+    import matplotlib
+
     from geoutils.interface.gridding import GriddingMethod
     from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
     from geoutils.stats.variography import Variogram
@@ -770,6 +772,114 @@ class RasterBase(ABC):
             return None
         else:
             return "\n".join(as_str)
+
+    @overload
+    def plot(
+        self,
+        bands: int | tuple[int, ...] | None = None,
+        cmap: matplotlib.colors.Colormap | str | None = None,
+        max_pixels: Literal["auto"] | int | None = "auto",
+        vmin: float | int | None = None,
+        vmax: float | int | None = None,
+        alpha: float | int | None = None,
+        title: str | None = None,
+        cbar_title: str | None = None,
+        add_cbar: bool = True,
+        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
+        *,
+        ref_crs: RasterLike | VectorLike | CRS | str | int | None = None,
+        resampling: Resampling | str | None = None,
+        return_axes: Literal[False] = False,
+        savefig_fname: str | None = None,
+        **kwargs: Any,
+    ) -> None: ...
+
+    @overload
+    def plot(
+        self,
+        bands: int | tuple[int, ...] | None = None,
+        cmap: matplotlib.colors.Colormap | str | None = None,
+        max_pixels: Literal["auto"] | int | None = "auto",
+        vmin: float | int | None = None,
+        vmax: float | int | None = None,
+        alpha: float | int | None = None,
+        title: str | None = None,
+        cbar_title: str | None = None,
+        add_cbar: bool = True,
+        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
+        *,
+        ref_crs: RasterLike | VectorLike | CRS | str | int | None = None,
+        resampling: Resampling | str | None = None,
+        return_axes: Literal[True],
+        savefig_fname: str | None = None,
+        **kwargs: Any,
+    ) -> tuple[matplotlib.axes.Axes, matplotlib.axes.Axes | None]: ...
+
+    def plot(
+        self,
+        bands: int | tuple[int, ...] | None = None,
+        cmap: matplotlib.colors.Colormap | str | None = None,
+        max_pixels: Literal["auto"] | int | None = "auto",
+        vmin: float | int | None = None,
+        vmax: float | int | None = None,
+        alpha: float | int | None = None,
+        title: str | None = None,
+        cbar_title: str | None = None,
+        add_cbar: bool = True,
+        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
+        *,
+        ref_crs: RasterLike | VectorLike | CRS | str | int | None = None,
+        resampling: Resampling | str | None = None,
+        return_axes: bool = False,
+        savefig_fname: str | None = None,
+        **kwargs: Any,
+    ) -> None | tuple[matplotlib.axes.Axes, matplotlib.axes.Axes | None]:
+        r"""
+        Plot the raster.
+
+        This method performs automatic subsampling to facilitate the plotting of large datasets
+        out-of-memory, then wraps Matplotlib ``imshow`` to which keyword arguments are passed.
+
+        :param bands: Bands to plot, counting from 1 to self.count. Defaults to all bands.
+        :param cmap: Colormap to use. Defaults to ``matplotlib.rcParams['image.cmap']``.
+        :param max_pixels: The default ``"auto"`` limits output to the Matplotlib axes width and height in display
+            pixels, as set by the figure size and DPI. An integer limits the total number of plotted pixels, and None
+            keeps the native grid size.
+        :param vmin: Minimum value for the colorbar. Defaults to the plotted data minimum.
+        :param vmax: Maximum value for the colorbar. Defaults to the plotted data maximum.
+        :param alpha: Raster and colorbar transparency.
+        :param title: Plot title.
+        :param cbar_title: Colorbar label.
+        :param add_cbar: Whether to display a colorbar. Multi-band RGB(A) plots never add one.
+        :param ax: Matplotlib axes, ``"new"`` to create axes, or None to use the current axes.
+        :param ref_crs: CRS or georeferenced object whose CRS the temporary display raster should match.
+        :param resampling: Rasterio resampling method used when the display grid changes. Defaults to the configured
+            reprojection method, except for boolean rasters whose reprojection uses nearest-neighbor resampling.
+        :param return_axes: Whether to return the image and colorbar axes.
+        :param savefig_fname: Optional path at which to save the current figure.
+        :returns: None, or the image axes and optional colorbar axes when ``return_axes=True``.
+        """
+
+        from geoutils.raster.plotting import _plot_raster
+
+        return _plot_raster(
+            self,
+            bands=bands,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            alpha=alpha,
+            title=title,
+            cbar_title=cbar_title,
+            add_cbar=add_cbar,
+            ax=ax,
+            ref_crs=ref_crs,
+            max_pixels=max_pixels,
+            resampling=resampling,
+            return_axes=return_axes,
+            savefig_fname=savefig_fname,
+            **kwargs,
+        )
 
     def stats(
         self,

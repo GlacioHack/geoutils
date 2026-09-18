@@ -311,6 +311,7 @@ class TestClassVsAccessorConsistency:
         # 2.1. Not in-place
         ("copy", {"new_array": "placeholder"}),  # Copy with new array does load! Will create array of right size below.
         ("info", {"stats": True, "verbose": False}),  # Info with stats loads
+        ("plot", {"max_pixels": 1_000, "add_cbar": False}),
         ("reproject", {"crs": CRS.from_epsg(4326)}),
         ("raster_equal", {"other": "self"}),
         ("raster_allclose", {"other": "self"}),

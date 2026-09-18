@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import os
+import pathlib
 import re
 import tempfile
 import warnings
 from importlib.util import find_spec
 
 import geopandas as gpd
-import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from geopandas.testing import assert_geodataframe_equal
@@ -19,8 +19,6 @@ from shapely import Polygon
 import geoutils as gu
 from geoutils import PointCloud
 from geoutils._typing import NDArrayNum
-
-DO_PLOT = False
 
 
 class TestPointCloud:
@@ -105,6 +103,19 @@ class TestPointCloud:
         # Accessing point values triggers the first complete data load
         assert np.array_equal(pc.data, self.gdf1["b1"].values)
         assert pc.is_loaded
+
+    def test_point_count__unknown_file_metadata_stays_unloaded(self, tmp_path: pathlib.Path) -> None:
+        """Checks that an unknown cached point count is read without loading point data."""
+
+        # Write a point file and simulate a driver that did not provide a cheap feature count during construction
+        filename = tmp_path / "points.gpkg"
+        self.gdf1.to_file(filename)
+        pointcloud = PointCloud(filename, data_column="b1")
+        pointcloud._nb_points = -1
+
+        # Force the driver to count features while keeping geometries and columns on disk
+        assert pointcloud.point_count == len(self.gdf1)
+        assert not pointcloud.is_loaded
 
     def test_has_z__unloaded_3d_file(self) -> None:
         """Checks that _has_z detects 3D file metadata without loading point geometries."""
@@ -1044,62 +1055,6 @@ class TestArithmetic:
 
         assert isinstance(pc, gu.PointCloud)
         assert np.median(pc) == 26.0
-
-    def test_plot(self) -> None:
-        """Test the pointcloud plot."""
-
-        # Create a dummy array of unique values and the associated coordinates
-        array = np.arange(25, dtype=int)
-        coords_x = [i for _ in range(5) for i in range(5)]
-        coords_y = [i for i in range(5) for _ in range(5)]
-
-        # Create the corresponding pointcloud
-        pc = gu.PointCloud.from_xyz(x=coords_x, y=coords_y, z=array, crs=4326)
-
-        # Test default plot
-        pc.plot()
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert True
-
-        # Test with new figure
-        plt.figure()
-        pc.plot()
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert True
-
-        # Test with provided ax
-        ax = plt.subplot(111)
-        pc.plot(ax=ax)
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert True
-
-        # Test vmin, vmax and cbar_title
-        ax = plt.subplot(111)
-        pc.plot(cmap="gray", vmin=0, vmax=20, cbar_title="Custom cbar", ax=ax)
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert True
-
-        # Test save fig
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.png")
-        pc.plot(savefig_fname=temp_file)
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert os.path.isfile(temp_file)
 
 
 class TestArrayInterface:

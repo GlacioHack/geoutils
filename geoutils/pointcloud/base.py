@@ -36,6 +36,7 @@ from typing import (
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import pyogrio
 from pyproj import CRS
 
 from geoutils import profiler
@@ -61,6 +62,7 @@ from geoutils.vector.base import VectorBase
 from geoutils.vector.transformation import _get_reproject_crs
 
 if TYPE_CHECKING:
+    import matplotlib
     import xarray as xr
 
     from geoutils.interface.interpolation import InterpolationMethod
@@ -72,6 +74,16 @@ if TYPE_CHECKING:
 
 
 PointCloudBaseType = TypeVar("PointCloudBaseType", bound="PointCloudBase")
+
+
+def _validate_downsample(downsample: Number) -> float:
+    """Validate and normalize a point cloud opening downsampling factor."""
+
+    if isinstance(downsample, (bool, np.bool_)) or not isinstance(downsample, (int, float, np.integer, np.floating)):
+        raise TypeError("downsample must be of type int or float.")
+    if not np.isfinite(downsample) or downsample < 1:
+        raise ValueError("downsample must be a finite value greater than or equal to 1.")
+    return float(downsample)
 
 
 class PointCloudBase(VectorBase):
@@ -203,15 +215,84 @@ class PointCloudBase(VectorBase):
 
         if not self._is_pd and not self.is_loaded:
             count = getattr(self, "_nb_points", -1)
-            if count >= 0:
-                return int(count)
-            self.load()
+            if count < 0:
+                # Ask the file driver to count its features without loading their geometries or columns
+                count = int(pyogrio.read_info(self.name, force_feature_count=True)["features"])
+                if count < 0:
+                    raise RuntimeError("Could not determine the number of points from the file metadata.")
+                self._nb_points = count
+            downsample = getattr(self, "_downsample", 1)
+            return int(np.ceil(count / downsample))
         if self._is_dask:
             # Use file or construction metadata before falling back to a Dask row count
             count = _get_dataframe_attrs(self.ds).get("point_count")
             if count is not None:
                 return int(count)
         return len(self.ds)
+
+    def plot(  # type: ignore[override]
+        self,
+        column: str | None = None,
+        ref_crs: RasterLike | VectorLike | CRS | str | int | None = None,
+        cmap: matplotlib.colors.Colormap | str | None = None,
+        vmin: float | int | None = None,
+        vmax: float | int | None = None,
+        alpha: float | int | None = None,
+        cbar_title: str | None = None,
+        add_cbar: bool = True,
+        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
+        return_axes: bool = False,
+        savefig_fname: str | None = None,
+        *,
+        max_points: Literal["auto"] | int | None = "auto",
+        random_state: int | np.random.Generator | None = 0,
+        **kwargs: Any,
+    ) -> None | tuple[matplotlib.axes.Axes, matplotlib.axes.Axes | None]:
+        """
+        Plot the point cloud.
+
+        This method performs automatic subsampling to facilitate the plotting of large datasets
+        out-of-memory, then wraps GeoPandas ``plot`` to which keyword arguments are passed.
+
+        Use ``max_points`` to set the subsampled point count manually.
+
+        :param column: Column to plot. Defaults to the main point cloud data column.
+        :param ref_crs: CRS or georeferenced object whose CRS the temporary point sample should match.
+        :param cmap: Colormap to use. Defaults to Matplotlib's configured image colormap.
+        :param vmin: Colorbar minimum value.
+        :param vmax: Colorbar maximum value.
+        :param alpha: Point and colorbar transparency.
+        :param cbar_title: Colorbar label.
+        :param add_cbar: Whether to display a colorbar.
+        :param ax: Matplotlib axes, ``"new"`` to create axes, or None to use the current axes.
+        :param return_axes: Whether to return the plot and colorbar axes.
+        :param savefig_fname: Optional path at which to save the current figure.
+        :param max_points: The default ``"auto"`` limits the sample to the smaller of the Matplotlib axes pixel area
+            and 100,000 points, as set by the figure size and DPI. An integer sets an explicit point limit, and None
+            plots every point.
+        :param random_state: Random generator or seed used for deterministic point selection.
+        :returns: None, or the plot axes and optional colorbar axes when ``return_axes=True``.
+        """
+
+        from geoutils.pointcloud.plotting import _plot_pointcloud
+
+        return _plot_pointcloud(
+            self,
+            column=column,
+            ref_crs=ref_crs,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            alpha=alpha,
+            cbar_title=cbar_title,
+            add_cbar=add_cbar,
+            ax=ax,
+            max_points=max_points,
+            random_state=random_state,
+            return_axes=return_axes,
+            savefig_fname=savefig_fname,
+            **kwargs,
+        )
 
     @property
     def is_mask(self) -> bool:
