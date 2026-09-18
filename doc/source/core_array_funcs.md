@@ -82,15 +82,6 @@ Similar to with Python operators, NumPy's [logical comparison functions](https:/
 np.greater(rast, rast + np.random.normal(size=np.shape(arr)))
 ```
 
-`np.logical_and.reduce()` is not supported for a sequence of {class}`Rasters<geoutils.Raster>`. NumPy would test the
-truth value of an entire raster before GeoUtils receives the operation, so GeoUtils raises an error rather than return
-an incorrect result. Apply the universal function directly to each pair of rasters so that GeoUtils can check their
-georeferencing and preserve it in the result.
-
-```{code-cell} ipython3
-np.logical_and(rast > 10, rast < 200)
-```
-
 ## Array functions
 
 The second and last category of NumPy array functions supported by {class}`Rasters<geoutils.Raster>` through the array interface is that of array functions,
