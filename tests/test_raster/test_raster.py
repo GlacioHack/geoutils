@@ -3318,6 +3318,25 @@ class TestArrayInterface:
         # assert np.ma.allequal(outputs_ma[0], outputs_rst[0].data) and np.ma.allequal(
         #             outputs_ma[1], outputs_rst[1].data)
 
+    def test_array_ufunc__error_logical_reduce(self) -> None:
+        """Checks that logical reductions cannot silently test the truth value of an entire raster."""
+
+        # Create two boolean rasters with different values across the grid
+        rst1 = gu.Raster.from_array(self.mask1, transform=self.transform, crs=None)
+        rst2 = gu.Raster.from_array(self.mask2, transform=self.transform, crs=None)
+
+        # Check that the supported pairwise call returns the expected raster
+        direct = np.logical_and(rst1, rst2)
+        expected = np.logical_and(rst1.data, rst2.data)
+        assert isinstance(direct, gu.Raster)
+        assert np.array_equal(direct.data, expected)
+
+        # Check that both reduction forms explain why reducing Raster objects is unsupported
+        with pytest.raises(ValueError, match="truth value of a Raster is ambiguous"):
+            np.logical_and.reduce((rst1, rst2))
+        with pytest.raises(NotImplementedError, match="'reduce' method of NumPy ufuncs is not supported"):
+            np.logical_and.reduce(rst1)
+
     @pytest.mark.parametrize(
         "np_func_name", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout + handled_functions_2in
     )  # type: ignore
