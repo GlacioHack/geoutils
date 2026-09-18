@@ -2843,8 +2843,13 @@ class TestArithmetic:
     @pytest.mark.parametrize("power", [2, 3.14, -1])
     def test_power(self, power: float | int) -> None:
         if power > 0:  # Integers to negative integer powers are not allowed.
-            assert self.r1**power == self.from_array(self.r1.data**power, rst_ref=self.r1)
-        assert self.r1_f32**power == self.from_array(self.r1_f32.data**power, rst_ref=self.r1_f32)
+            result = self.r1**power
+            expected = self.from_array(self.r1.data**power, rst_ref=self.r1)
+            assert result.raster_equal(expected)
+
+        result_float = self.r1_f32**power
+        expected_float = self.from_array(self.r1_f32.data**power, rst_ref=self.r1_f32)
+        assert result_float.raster_equal(expected_float)
 
     @pytest.mark.parametrize("dtype", ["float32", "uint8", "int32"])
     def test_numpy_functions(self, dtype: str) -> None:
