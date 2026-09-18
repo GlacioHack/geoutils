@@ -287,7 +287,7 @@ class TestMultiRaster:
         merged_img2 = gu.raster.merge_rasters([rasters.img1, rasters.img2], reference=rasters.img, use_ref_bounds=True)
         # Check that only works if CRS were the same
         if all(rast.crs == rasters.img.crs for rast in [rasters.img1, rasters.img2]):
-            assert merged_img2 == merged_img
+            assert merged_img2.raster_equal(merged_img)
 
         # For merge algo: function not supporting the axis keyword argument but raising the right "axis" type error
         def custom_func(x: NDArrayNum) -> NDArrayNum:

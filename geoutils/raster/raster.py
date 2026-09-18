@@ -1673,6 +1673,11 @@ class Raster(RasterBase):
     #
     #     return self._data
 
+    def __bool__(self) -> bool:
+        """Reject a single truth value because a raster contains one value per pixel."""
+
+        raise ValueError("The truth value of a Raster is ambiguous. Use np.any(raster) or np.all(raster) instead.")
+
     def __array_ufunc__(
         self,
         ufunc: Callable[[NDArrayNum | tuple[NDArrayNum, NDArrayNum]], NDArrayNum | tuple[NDArrayNum, NDArrayNum]],
@@ -1690,6 +1695,11 @@ class Raster(RasterBase):
 
         # In addition to running ufuncs, this function takes over arithmetic operations (__add__, __multiply__, etc...)
         # when the first input provided is a NumPy array and second input a Raster.
+
+        # Reject ufunc methods that operate on the dimensions of a single array. A sequence of rasters is converted to
+        # an object array before dispatch and is instead rejected by __bool__ when a logical reduction tests its items.
+        if method != "__call__":
+            raise NotImplementedError(f"The '{method}' method of NumPy ufuncs is not supported for Raster objects.")
 
         # The Raster ufuncs behave exactly as arithmetic operations (+, *, .) of NumPy masked array (call np.ma instead
         # of np when available). There is an inconsistency when calling np.ma: operations return a full boolean mask
