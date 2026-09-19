@@ -19,7 +19,7 @@ vect = gu.Vector(filename_vect)
 # %%
 # Let's plot the raster and vector.
 rast.plot(cmap="Purples")
-vect.plot(ref_crs=rast, fc="none", ec="k", lw=2)
+vect.plot(ref=rast, fc="none", ec="k", lw=2)
 
 # %%
 # **First option:** using the raster as a reference to match, we rasterize the vector in any projection and georeferenced grid. We simply have to pass the

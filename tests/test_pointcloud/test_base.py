@@ -143,6 +143,7 @@ class TestClassVsAccessorConsistency:
         ("stats", {}),
         ("stats", {"by": {"group": "b2"}, "bins": {"group": 2}, "statistics": "mean"}),
         ("get_stats", {}),
+        ("plot", {"max_points": 2, "add_cbar": False}),
         ("subsample", {"subsample": 2, "random_state": 42}),
         ("cosample", {"other": "self", "subsample": 2, "random_state": 42}),
         (
