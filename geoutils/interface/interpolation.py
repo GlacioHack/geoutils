@@ -40,7 +40,7 @@ from geoutils.multiproc import MultiprocConfig
 from geoutils.multiproc.chunked import cached_cumsum, normalize_chunks
 from geoutils.multiproc.mparray import block_bounds_from_chunks
 from geoutils.projtools import reproject_from_latlon
-from geoutils.raster.referencing import _bounds, _coords, _outside_bounds, _res, _xy2ij
+from geoutils.raster.referencing import _bbox, _coords, _outside_bounds, _res, _xy2ij
 
 InterpolationMethod = Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
 
@@ -738,7 +738,7 @@ def _dask_interp_points(
     # Map depth of overlap required for each interpolation method
     depth = method_to_order[kwargs["method"]] + 1  # The overlap size is the order + 1
     res = _res(transform)
-    bounds = _bounds(transform=transform, shape=darr.shape)
+    bounds = _bbox(transform=transform, shape=darr.shape)
     left, top = bounds.left, bounds.top
 
     # Expand dask array for overlapping computations
@@ -1026,7 +1026,7 @@ def _multiproc_interp_points(
     # Map depth of overlap required for each interpolation method
     depth = method_to_order[kwargs["method"]] + 1  # The overlap size is the order + 1
     res = _res(rst.transform)
-    bounds = _bounds(transform=rst.transform, shape=rst.shape)
+    bounds = _bbox(transform=rst.transform, shape=rst.shape)
     left, top = bounds.left, bounds.top
 
     # Get multiprocessing chunk sizes

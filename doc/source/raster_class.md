@@ -53,7 +53,7 @@ A **raster** has **four main attributes**:
 A **raster** also contains many derivative attributes, with naming generally consistent with that of [GDAL's recently overhauled CLI](https://gdal.org/en/stable/programs/index.html) or Rasterio.
 
 A first category includes georeferencing attributes directly derived from {attr}`~geoutils.Raster.transform`, namely: {attr}`~geoutils.Raster.shape`,
-{attr}`~geoutils.Raster.height`, {attr}`~geoutils.Raster.width`, {attr}`~geoutils.Raster.res`, {attr}`~geoutils.Raster.bounds`.
+{attr}`~geoutils.Raster.height`, {attr}`~geoutils.Raster.width`, {attr}`~geoutils.Raster.res`, {attr}`~geoutils.Raster.bbox`.
 
 A second category concerns the attributes derived from the raster array shape and type: {attr}`~geoutils.Raster.count`, {attr}`~geoutils.Raster.bands` and
 {attr}`~geoutils.Raster.dtype`. The two former refer to the number of bands loaded in a **raster**, and the band indexes.
@@ -232,7 +232,7 @@ As with all geospatial handling methods, the {func}`~geoutils.Raster.reproject` 
 {class}`~geoutils.Vector` as a reference to match. In that case, no other argument is necessary.
 
 A **raster** reference will enforce to match its {attr}`~geoutils.Raster.transform` and {class}`~geoutils.Raster.crs`.
-A {class}`~geoutils.Vector` reference will enforce to match its {attr}`~geoutils.Vector.bounds` and {class}`~geoutils.Vector.crs`.
+A {class}`~geoutils.Vector` reference will enforce to match its {attr}`~geoutils.Vector.bbox` and {class}`~geoutils.Vector.crs`.
 
 See {ref}`core-match-ref` for more details.
 ```
@@ -243,7 +243,7 @@ attributes. For more details, see the {ref}`specific section and function descri
 ```{code-cell} ipython3
 # Original bounds and resolution
 print(rast.res)
-print(rast.bounds)
+print(rast.bbox)
 ```
 
 ```{code-cell} ipython3
@@ -305,7 +305,7 @@ Resampling methods are listed in **[the dedicated section of Rasterio's API](htt
 
 ## Crop
 
-Cropping a **raster** is done through the {func}`~geoutils.Raster.crop` function, which enforces new {attr}`~geoutils.Raster.bounds`.
+Cropping a **raster** is done through the {func}`~geoutils.Raster.crop` function, which enforces new {attr}`~geoutils.Raster.bbox`.
 Additionally, you can use the {func}`~geoutils.Raster.icrop` method to crop the raster using pixel coordinates instead of geographic bounds.
 Both cropping methods can be used before loading the raster's data into memory. This optimization can prevent loading unnecessary parts of the data, which is particularly useful when working with large rasters.
 

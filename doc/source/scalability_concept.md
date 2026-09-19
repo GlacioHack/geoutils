@@ -25,7 +25,7 @@ These mechanisms are often combined (e.g., Dask operations are always **chunked 
 
 ```{note}
 The above concepts only apply to operations that interact with the underlying **data arrays or geometries** of objects.
-Naturally, all **metadata operations** (e.g., accessing {attr}`~geoutils.Raster.crs`, {attr}`~geoutils.Raster.bounds`, or {meth}`~geoutils.Raster.info`) have no effect on the array, and therefore do not trigger any loading or scalable execution.
+Naturally, all **metadata operations** (e.g., accessing {attr}`~geoutils.Raster.crs`, {attr}`~geoutils.Raster.bbox`, or {meth}`~geoutils.Raster.info`) have no effect on the array, and therefore do not trigger any loading or scalable execution.
 ```
 
 ## Deferred I/O and implicit loading
@@ -127,8 +127,8 @@ If the output returned is still a Dask array, the operation was lazy.
 # Interpolate 30 points from array in chunk-by-chunk
 import numpy as np
 rng = np.random.default_rng(seed=42)
-x = rng.uniform(ds.rst.bounds.left, ds.rst.bounds.right, size=30)
-y = rng.uniform(ds.rst.bounds.bottom, ds.rst.bounds.top, size=30)
+x = rng.uniform(ds.rst.bbox.left, ds.rst.bbox.right, size=30)
+y = rng.uniform(ds.rst.bbox.bottom, ds.rst.bbox.top, size=30)
 ds_interp = ds.rst.interp_points((x, y), as_array=True)
 
 # Result is still lazy

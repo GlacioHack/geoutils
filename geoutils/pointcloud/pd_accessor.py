@@ -348,7 +348,7 @@ class PointCloudAccessor(PointCloudBase, VectorAccessor):
         return self.ds.crs
 
     @property
-    def bounds(self) -> rio.coords.BoundingBox:
+    def bbox(self) -> rio.coords.BoundingBox:
         """Total bounding box of the point cloud."""
 
         if self._is_dask:

@@ -86,7 +86,7 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
     ~raster.base.RasterBase.count
     ~raster.base.RasterBase.bands
     ~raster.base.RasterBase.res
-    ~raster.base.RasterBase.bounds
+    ~raster.base.RasterBase.bbox
     ~raster.base.RasterBase.footprint
     ~raster.base.RasterBase.dtype
 ```
@@ -249,12 +249,12 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
 
     Vector.ds
     Vector.crs
-    Vector.bounds
+    Vector.bbox
     Vector.name
 ```
 
 ```{caution}
-The {attr}`~geoutils.Vector.bounds` attribute of a {class}`~geoutils.Vector` corresponds to the {attr}`~geopandas.GeoDataFrame.total_bounds` attribute of a
+The {attr}`~geoutils.Vector.bbox` attribute of a {class}`~geoutils.Vector` corresponds to the {attr}`~geopandas.GeoDataFrame.total_bounds` attribute of a
 {class}`~geopandas.GeoDataFrame`, for consistency between rasters and vectors (and can also be accessed through {attr}`~geoutils.Vector.total_bounds`).
 
 The equivalent of {attr}`geopandas.GeoDataFrame.bounds` (i.e., a per-feature bounds) for {class}`Vectors<geoutils.Vector>` is {attr}`~geoutils.Vector.geom_bounds`.
@@ -537,6 +537,7 @@ documentation](https://shapely.readthedocs.io/en/stable/properties.html).
     PointCloud.data_column
     PointCloud.data
     PointCloud.crs
+    PointCloud.bbox
 ```
 
 ### Other attributes

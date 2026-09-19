@@ -66,8 +66,8 @@ class Vector(VectorBase):
             Geodataframe of the vector.
         crs: :class:`pyproj.crs.CRS`
             Coordinate reference system of the vector.
-        bounds: :class:`rio.coords.BoundingBox`
-            Coordinate bounds of the vector.
+        bbox: :class:`rio.coords.BoundingBox`
+            Bounding box of the vector.
 
     All other attributes are derivatives of those attributes, or read from the file on disk.
     See the API for more details.
@@ -86,7 +86,7 @@ class Vector(VectorBase):
         self._name: str | None = None
         self._ds: gpd.GeoDataFrame | None = None
         self._crs: CRS | None = None
-        self._bounds: rio.coords.BoundingBox | None = None
+        self._bbox: rio.coords.BoundingBox | None = None
         self._columns: pd.Index | None = None
         self._feature_count: int | None = None
         self._geometry_type: str | None = None
@@ -151,7 +151,7 @@ class Vector(VectorBase):
 
         self._crs = CRS.from_user_input(crs) if crs else None
         if total_bounds is not None:
-            self._bounds = rio.coords.BoundingBox(*total_bounds)
+            self._bbox = rio.coords.BoundingBox(*total_bounds)
         self._columns = pd.Index(list(info.get("fields", [])) + ["geometry"])
         self._feature_count = info.get("features")
         self._geometry_type = info.get("geometry_type")
@@ -160,7 +160,7 @@ class Vector(VectorBase):
         """Update cached vector metadata from an in-memory GeoDataFrame."""
 
         self._crs = ds.crs
-        self._bounds = rio.coords.BoundingBox(*ds.total_bounds)
+        self._bbox = rio.coords.BoundingBox(*ds.total_bounds)
         self._columns = ds.columns
         self._feature_count = len(ds)
         self._geometry_type = ds.geom_type.iloc[0] if len(ds) > 0 else None
@@ -314,13 +314,13 @@ class Vector(VectorBase):
     @property
     def total_bounds(self) -> rio.coords.BoundingBox:
         """Total bounds of the vector."""
-        if not self.is_loaded and self._bounds is not None:
-            return np.array(self._bounds)
+        if not self.is_loaded and self._bbox is not None:
+            return np.array(self._bbox)
         return self.ds.total_bounds
 
-    # Exception ! Vector.bounds corresponds to the total_bounds
+    # Exception ! Vector.bbox corresponds to the total_bounds
     @property
-    def bounds(self) -> rio.coords.BoundingBox:
+    def bbox(self) -> rio.coords.BoundingBox:
         """
         Total bounding box of the vector.
 
@@ -328,9 +328,15 @@ class Vector(VectorBase):
         but not ``GeoDataFrame.bounds`` (per-feature bounds) which is instead defined as
         ``Vector.geom_bounds``.
         """
-        if not self.is_loaded and self._bounds is not None:
-            return self._bounds
+        if not self.is_loaded and self._bbox is not None:
+            return self._bbox
         return rio.coords.BoundingBox(*self.ds.total_bounds)
+
+    @property
+    def __geo_interface__(self) -> dict[str, Any]:
+        """Return geometries and feature columns as a GeoJSON-like mapping."""
+
+        return self.ds.__geo_interface__
 
     # --------------------------------------------
     # GeoPandasBase - Methods that return a Series

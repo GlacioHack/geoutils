@@ -469,7 +469,7 @@ class Raster(RasterBase):
                 down_height = int(np.ceil(self.height / downsample))
                 out_shape = (down_height, down_width)
                 res = tuple(np.asarray(self.res) * downsample)
-                self.transform = rio.transform.from_origin(self.bounds.left, self.bounds.top, res[0], res[1])
+                self.transform = rio.transform.from_origin(self.bbox.left, self.bbox.top, res[0], res[1])
                 self._downsample = downsample
 
             # This will record the downsampled out_shape is data is only loaded later on by .load()
@@ -505,6 +505,18 @@ class Raster(RasterBase):
         if parse_sensor_metadata and self.name is not None:
             sensor_meta = parse_and_convert_metadata_from_filename(self.name, silent=silent)
             self._tags.update(sensor_meta)
+
+    @property
+    def __geo_interface__(self) -> dict[str, Any]:
+        """Return the raster extent as a GeoJSON-like polygon mapping."""
+
+        # Convert the named bounding box to plain floats used by the protocol
+        left, bottom, right, top = (float(value) for value in self.bbox)
+        bbox = (left, bottom, right, top)
+
+        # Follow the GeoJSON right-hand rule for the exterior rectangle
+        coordinates = (((left, bottom), (right, bottom), (right, top), (left, top), (left, bottom)),)
+        return {"type": "Polygon", "bbox": bbox, "coordinates": coordinates}
 
     @property
     def data(self) -> MArrayNum:
@@ -2212,7 +2224,7 @@ class Raster(RasterBase):
             raise ValueError("ax must be a matplotlib.axes.Axes instance, 'new' or None.")
 
         # Use data array directly, as rshow on self.ds will re-load data
-        extent = [self.bounds.left, self.bounds.right, self.bounds.bottom, self.bounds.top]
+        extent = [self.bbox.left, self.bbox.right, self.bbox.bottom, self.bbox.top]
         ax0.imshow(
             np.flip(data, axis=0),
             extent=extent,

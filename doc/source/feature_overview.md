@@ -171,7 +171,7 @@ These rely only on metadata and therefore **do not load or modify underlying dat
 * - {attr}`~geoutils.Raster.crs`
   - Coordinate reference system (CRS) of object.
 
-* - {attr}`~geoutils.Raster.bounds`
+* - {attr}`~geoutils.Raster.bbox`
   - Bounding box of object.
 
 * - {attr}`~geoutils.Raster.footprint`

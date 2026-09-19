@@ -192,6 +192,32 @@ class TestClassVsAccessorConsistency:
     # copy(new_array=not None) will load
     methods_output_noload_allowed_args = {"copy": {"deep": [True, False], "new_array": [None]}}
 
+    def test_geo_interface__bbox_polygon(self, lazy_test_files: list[str]) -> None:
+        """Checks that a raster exposes its bounding polygon without loading data."""
+
+        # Create matching class and accessor rasters with different X/Y pixel sizes
+        transform = rio.transform.from_origin(10, 20, 2, 3)
+        raster = Raster.from_array(np.ones((2, 3)), transform=transform, crs=32610)
+        array = RasterAccessor.from_array(np.ones((2, 3)), transform=transform, crs=32610)
+        expected_bbox = rio.coords.BoundingBox(left=10, bottom=14, right=16, top=20)
+        expected_interface = {
+            "type": "Polygon",
+            "bbox": tuple(expected_bbox),
+            "coordinates": (((10.0, 14.0), (16.0, 14.0), (16.0, 20.0), (10.0, 20.0), (10.0, 14.0)),),
+        }
+
+        # Check the common name and compatibility alias through both APIs, and the protocol on the Raster
+        assert raster.bbox == expected_bbox
+        assert raster.bounds == expected_bbox
+        assert array.rst.bbox == expected_bbox
+        assert array.rst.bounds == expected_bbox
+        assert raster.__geo_interface__ == expected_interface
+
+        # Read only file metadata and check that creating the mapping leaves the raster values unloaded
+        file_raster = Raster(lazy_test_files[0])
+        assert file_raster.__geo_interface__["bbox"] == tuple(file_raster.bbox)
+        assert not file_raster.is_loaded
+
     def test_info__crs_name(self) -> None:
         """Checks that info reports the CRS name for 2D, compound and missing CRS metadata."""
 

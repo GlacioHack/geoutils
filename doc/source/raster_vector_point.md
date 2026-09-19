@@ -168,8 +168,8 @@ rast =  gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
 
 # Get 50 random points to sample within the raster extent
 rng = np.random.default_rng(42)
-x_coords = rng.uniform(rast.bounds.left, rast.bounds.right, 50)
-y_coords = rng.uniform(rast.bounds.bottom, rast.bounds.top, 50)
+x_coords = rng.uniform(rast.bbox.left, rast.bbox.right, 50)
+y_coords = rng.uniform(rast.bbox.bottom, rast.bbox.top, 50)
 
 pc_int = rast.interp_points(points=(x_coords, y_coords))
 ```

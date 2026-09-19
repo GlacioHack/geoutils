@@ -193,8 +193,8 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
             Name of point cloud data column.
         crs: :class:`pyproj.crs.CRS`
             Coordinate reference system of the point cloud.
-        bounds: :class:`rio.coords.BoundingBox`
-            Coordinate bounds of the point cloud.
+        bbox: :class:`rio.coords.BoundingBox`
+            Bounding box of the point cloud.
 
 
     All other attributes are derivatives of those attributes, or read from the file on disk.
@@ -219,7 +219,7 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         self._name: str | None = None
         self._crs: CRS | None = None
         self._data_column: str | None = None
-        self._bounds: BoundingBox
+        self._bbox: BoundingBox
         self._columns: pd.Index | None = None
         self._feature_count: int | None = None
         self._geometry_type: str | None = None
@@ -248,7 +248,7 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
                 self._crs = metadata.crs
                 self._nb_points = metadata.point_count
                 self.__nongeo_columns = metadata.columns
-                self._bounds = metadata.bounds
+                self._bbox = metadata.bounds
                 self._columns = pd.Index(list(metadata.columns) + ["geometry"])
                 self._feature_count = metadata.point_count
                 self._geometry_type = "Point"
@@ -307,11 +307,13 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         return self._crs
 
     @property
-    def bounds(self) -> BoundingBox:
+    def bbox(self) -> BoundingBox:
+        """Total bounding box of the point cloud."""
+
         # Overriding method in Vector in case dataset is not loaded
         if self.is_loaded:
-            return super().bounds
-        return self._bounds
+            return super().bbox
+        return self._bbox
 
     @property
     def columns(self) -> pd.Index:
