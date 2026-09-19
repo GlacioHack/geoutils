@@ -643,8 +643,9 @@ class TestRaster:
         with pytest.raises(
             ValueError,
             match=re.escape(
-                "New data must be of the same shape as existing data: ({}, {}). Given: "
-                "{}.".format(str(width), str(height), str(new_shape))
+                "New data must be of the same shape as existing data: ({}, {}). Given: {}.".format(
+                    str(width), str(height), str(new_shape)
+                )
             ),
         ):
             rst.data = rst.data.reshape(new_shape)
@@ -1723,7 +1724,6 @@ class TestRaster:
 
         # Test dtypes that will modify the data
         for target_dtype2 in dtypes_nonpreserving:
-
             with pytest.warns(UserWarning, match="dtype conversion will result in a loss of information.*"):
                 rout = r.astype(target_dtype2)  # type: ignore
 
@@ -3206,9 +3206,7 @@ class TestArrayInterface:
         with pytest.raises(NotImplementedError, match="'reduce' method of NumPy ufuncs is not supported"):
             np.logical_and.reduce(rst1)
 
-    @pytest.mark.parametrize(
-        "np_func_name", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout + handled_functions_2in
-    )  # type: ignore
+    @pytest.mark.parametrize("np_func_name", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout + handled_functions_2in)  # type: ignore
     def test_raise_errors_2nin(self, np_func_name: str) -> None:
         """Check that proper errors are raised when input raster/array don't match (only 2-input functions)."""
 
@@ -3235,7 +3233,6 @@ class TestArrayInterface:
         # Strange errors happening only for these 4 functions...
         # See issue #457
         if np_func_name not in ["allclose", "isclose", "array_equal", "array_equiv"]:
-
             # Rasters with different CRS, transform, or shape
             # Different shape
             georef_tworaster_message = (

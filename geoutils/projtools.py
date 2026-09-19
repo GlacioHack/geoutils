@@ -343,9 +343,9 @@ def compare_proj(proj1: CRS, proj2: CRS) -> bool:
 
     :returns: True if the two projections are the same.
     """
-    assert all(
-        [isinstance(proj1, (pyproj.CRS, CRS)), isinstance(proj2, (pyproj.CRS, CRS))]
-    ), "proj1 and proj2 must be rasterio.crs.CRS objects."
+    assert all([isinstance(proj1, (pyproj.CRS, CRS)), isinstance(proj2, (pyproj.CRS, CRS))]), (
+        "proj1 and proj2 must be rasterio.crs.CRS objects."
+    )
     proj1 = pyproj.CRS(proj1.to_string())
     proj2 = pyproj.CRS(proj2.to_string())
 
@@ -395,7 +395,6 @@ def _densify_geometry(
 
     # For each segment, densify the points
     for i, seg in enumerate(segments):
-
         # Get the segment length
         length_m = seg.length
 

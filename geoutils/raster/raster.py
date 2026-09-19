@@ -250,7 +250,6 @@ def _cast_numeric_array_raster(
 
     # If other is a raster
     if isinstance(other, Raster):
-
         nodata2 = other.nodata
         dtype2 = other.data.dtype
         other_data: NDArrayNum | MArrayNum | Number = other.data
@@ -267,7 +266,6 @@ def _cast_numeric_array_raster(
 
     # If other is an array
     elif isinstance(other, np.ndarray):
-
         # Squeeze first axis of other data if possible
         if other.ndim == 3 and other.shape[0] == 1:
             other_data = other.squeeze(axis=0)
@@ -378,7 +376,6 @@ class Raster(RasterBase):
 
         # This is for Raster.from_array to work.
         if isinstance(filename_or_dataset, dict):
-
             self.tags = filename_or_dataset["tags"]
             # To have "area_or_point" user input go through checks of the set() function without shifting the transform
             self.set_area_or_point(filename_or_dataset["area_or_point"], shift_area_or_point=False)
@@ -609,7 +606,6 @@ class Raster(RasterBase):
 
         # 1/ If the new data is not a masked array and contains non-finite values such as NaNs, define a mask
         if not np.ma.isMaskedArray(new_data):
-
             # Have to write it this way, because wrapper np.ma.mask_invalid always creates a boolean array,
             # instead of attributing nomask (mask = False, single boolean) when no invalids exist
             mask = ~np.isfinite(new_data)
@@ -1489,7 +1485,9 @@ class Raster(RasterBase):
     def __and__(self: RasterType, other: RasterType | NDArrayBool) -> RasterType:
         """Bitwise and between masks, or a mask and an array."""
         self_data, other_data = _cast_numeric_array_raster(
-            self, other, operation_name="an arithmetic operation"  # type: ignore
+            self,
+            other,  # type: ignore[arg-type]
+            operation_name="an arithmetic operation",
         )[0:2]
 
         return self.copy(self_data & other_data)  # type: ignore
@@ -1503,7 +1501,9 @@ class Raster(RasterBase):
         """Bitwise or between masks, or a mask and an array."""
 
         self_data, other_data = _cast_numeric_array_raster(
-            self, other, operation_name="an arithmetic operation"  # type: ignore
+            self,
+            other,  # type: ignore[arg-type]
+            operation_name="an arithmetic operation",
         )[0:2]
 
         return self.copy(self_data | other_data)  # type: ignore
@@ -1517,7 +1517,9 @@ class Raster(RasterBase):
         """Bitwise xor between masks, or a mask and an array."""
 
         self_data, other_data = _cast_numeric_array_raster(
-            self, other, operation_name="an arithmetic operation"  # type: ignore
+            self,
+            other,  # type: ignore[arg-type]
+            operation_name="an arithmetic operation",
         )[0:2]
 
         return self.copy(self_data ^ other_data)  # type: ignore
@@ -1769,7 +1771,6 @@ class Raster(RasterBase):
 
         # If the universal function takes two inputs (Note: no ufunc exists that has three inputs or more)
         else:
-
             # Check the casting between Raster and array inputs, and return error messages if not consistent
             if isinstance(inputs[0], Raster):
                 raster = inputs[0]
@@ -1864,7 +1865,6 @@ class Raster(RasterBase):
         # First, if there are several outputs in a tuple which are arrays
         if isinstance(outputs, tuple) and isinstance(outputs[0], np.ndarray):
             if all(output.shape == args[0].data.shape for output in outputs):
-
                 # If casting was not necessary, copy all attributes except array
                 # Otherwise update array, nodata and
                 if cast_required:
@@ -1881,7 +1881,6 @@ class Raster(RasterBase):
         # Second, if there is a single output which is an array
         elif isinstance(outputs, np.ndarray):
             if outputs.shape == args[0].data.shape:
-
                 # If casting was not necessary, copy all attributes except array
                 if cast_required:
                     return self.from_array(

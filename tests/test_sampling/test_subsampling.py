@@ -28,11 +28,9 @@ from geoutils.sampling.subsampling import (
     _recover_splitmix64_indices,
     _sample_valid_indices,
     _splitmix64,
-)
-from geoutils.sampling.subsampling import _subsample as _subsample_values
-from geoutils.sampling.subsampling import (
     _subsample_numpy,
 )
+from geoutils.sampling.subsampling import _subsample as _subsample_values
 
 
 class TestArraySubsample:

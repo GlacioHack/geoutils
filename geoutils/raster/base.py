@@ -384,7 +384,6 @@ class RasterBase(ABC):
         else:
             # If we update mask or array, get the masked array
             if update_array or update_mask:
-
                 # Extract the data variable, so the self.data property doesn't have to be called a bunch of times
                 imgdata = self.data
 
@@ -1394,7 +1393,7 @@ class RasterBase(ABC):
 
             if self._is_xr:
                 raise NotImplementedError(
-                    "In-place cropping raster is deprecated and not supported through the 'rst' " "accessor."
+                    "In-place cropping raster is deprecated and not supported through the 'rst' accessor."
                 )
             else:
                 self._data = cropped_arr
@@ -1432,7 +1431,7 @@ class RasterBase(ABC):
 
             if self._is_xr:
                 raise NotImplementedError(
-                    "In-place cropping raster is deprecated and not supported through the 'rst' " "accessor."
+                    "In-place cropping raster is deprecated and not supported through the 'rst' accessor."
                 )
             else:
                 self._data = cropped_arr

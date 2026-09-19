@@ -13,10 +13,9 @@ import rasterio as rio
 from shapely.geometry import Point, Polygon
 
 import geoutils as gu
-from geoutils._dispatch import _check_coords  # Level-0 checks (manual input)
-from geoutils._dispatch import _grid_from_src  # Helpers for grid conversion
 from geoutils._dispatch import (  # Level-1 checks (match reference object)
     _check_bounds,
+    _check_coords,  # Level-0 checks (manual input)
     _check_crs,
     _check_match_bbox,
     _check_match_grid,
@@ -26,6 +25,7 @@ from geoutils._dispatch import (  # Level-1 checks (match reference object)
     _grid_from_bounds_res,
     _grid_from_bounds_shape,
     _grid_from_coords,
+    _grid_from_src,  # Helpers for grid conversion
     get_geo_interface,
 )
 from geoutils.exceptions import (

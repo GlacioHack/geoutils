@@ -8,7 +8,6 @@ from geoutils import examples
 
 
 class TestTiling:
-
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
 
     def test_subdivide_array(self) -> None:

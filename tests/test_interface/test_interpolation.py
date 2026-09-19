@@ -185,9 +185,7 @@ class TestInterpolate:
         assert np.array_equal(np.isnan(actual[1]), ~np.isfinite(source.data[1]))
         assert np.array_equal(actual[:, 0, 0], source.data[:, 0, 0])
 
-    @pytest.mark.parametrize(
-        "method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
-    )  # type: ignore
+    @pytest.mark.parametrize("method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"])  # type: ignore
     def test_interpn_interpolator_accuracy(
         self, method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
     ) -> None:
@@ -417,9 +415,7 @@ class TestInterpolate:
         assert not np.isfinite(vals[-1])
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
-    @pytest.mark.parametrize(
-        "method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
-    )  # type: ignore
+    @pytest.mark.parametrize("method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"])  # type: ignore
     def test_interp_points__real(
         self, example: str, method: Literal["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
     ) -> None:
@@ -616,7 +612,6 @@ class TestInterpolate:
 
         # Only check the accuracy with the default NaN spreading (half-order rounded up), otherwise anything can happen
         if dist == "half_order_up":
-
             # Get the interpolated values
             vals_near = r2.interp_points(
                 (x, y), method=method, force_scipy_function="map_coordinates", dist_nodata_spread=dist, as_array=True

@@ -230,7 +230,6 @@ class TestProfiling:
 
         # if profiling is activate
         if s_rd or s_gr:
-
             # in each case, output dir exist
             assert op.isdir(output_path)
 

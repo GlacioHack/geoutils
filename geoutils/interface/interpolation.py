@@ -218,7 +218,6 @@ try:
     import dask.array as da
     from dask import delayed
 except ImportError:
-
     da = None
 
     def delayed(*args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -1274,8 +1273,12 @@ def _interp_points(
             )
         # If using direct reprojection, process and return NumPy array
         else:
-            z_inbounds = _interp_points_base(
-                array=arr, transform=transform, points=pts_inbounds, **interp_kwargs, **kwargs  # type: ignore
+            z_inbounds = _interp_points_base(  # type: ignore[assignment]
+                array=arr,
+                transform=transform,
+                points=pts_inbounds,  # type: ignore[arg-type]
+                **interp_kwargs,
+                **kwargs,
             )
 
     # 3/ Output preparation and return

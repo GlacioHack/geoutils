@@ -64,9 +64,7 @@ def validate_interpolation_method(interpolation_method: bool | str | int) -> str
     if isinstance(interpolation_method, str) and interpolation_method.lower() in valid_methods:
         return interpolation_method.lower()
     else:
-        raise ValueError(
-            f"'{interpolation_method}' is not a valid interpolation method" f"Valid methods: {valid_methods}"
-        )
+        raise ValueError(f"'{interpolation_method}' is not a valid interpolation methodValid methods: {valid_methods}")
 
 
 def validate_dist_nodata_spread(dist_nodata_spread: bool | str | int) -> str | int:
@@ -78,8 +76,7 @@ def validate_dist_nodata_spread(dist_nodata_spread: bool | str | int) -> str | i
         return dist_nodata_spread
     else:
         raise ValueError(
-            f"'{dist_nodata_spread}' is not a valid dist_nodata_spread parameter"
-            f"Valid value: {valid_spreads} or integer"
+            f"'{dist_nodata_spread}' is not a valid dist_nodata_spread parameterValid value: {valid_spreads} or integer"
         )
 
 

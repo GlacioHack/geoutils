@@ -29,7 +29,6 @@ DO_PLOT = False
 
 
 class TestRasterTransformations:
-
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
     landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
     landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
@@ -619,7 +618,9 @@ class TestRasterTransformations:
         r2 = r.copy()
         r2.set_area_or_point("Point", shift_area_or_point=False)
 
-        with (pytest.warns(UserWarning, match="One raster has a pixel"),):
+        with (
+            pytest.warns(UserWarning, match="One raster has a pixel"),
+        ):
             r.reproject(r2)
 
         # Check that reprojecting preserves interpretation

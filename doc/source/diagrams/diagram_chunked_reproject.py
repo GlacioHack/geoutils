@@ -778,7 +778,7 @@ def plot_reprojection_chunk_diagram(
     ax1.text(
         0.7,
         1.65,
-        "Chunk size adapts " "\nto resolution change\n" "4×4 px → 2×2 px",
+        "Chunk size adapts \nto resolution change\n4×4 px → 2×2 px",
         transform=ax1.transAxes,
         ha="center",
         va="top",

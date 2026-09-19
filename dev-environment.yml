@@ -44,9 +44,7 @@ dependencies:
   - pytest-cov
   - coveralls
   - pyyaml
-  - flake8
   - netcdf4  # To write synthetic data with chunksizes
-  - pre-commit
 
   # Doc dependencies
   - sphinx

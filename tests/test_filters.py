@@ -518,7 +518,6 @@ def test_filter_against_center_value(method: str, np_filter: Callable[[NDArrayNu
 
 @pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
 class TestFilterChunked:
-
     @pytest.mark.parametrize("path_index", [0, 2])
     @pytest.mark.parametrize("method", ["gaussian", "median", "mean", "min", "max"])
     @pytest.mark.parametrize("size", [3, 7])

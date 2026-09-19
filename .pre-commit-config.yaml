@@ -29,27 +29,18 @@ repos:
     hooks:
           - id: absolufy-imports
 
-  # Format the code aggressively using black
-  - repo: https://github.com/psf/black
-    rev: 24.10.0
+  # Use Ruff for Black-compatible formatting, Flake8 linting and isort
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.0
     hooks:
-            - id: black
-              args: [--line-length=120]
-
-  # Lint the code using flake8
-  - repo: https://github.com/pycqa/flake8
-    rev: 7.1.1
-    hooks:
-          - id: flake8
-            args: [
-                    '--max-line-length', '120',  # we can write dicts however we want
-                    '--extend-ignore', 'E203,B028', # flake8 disagrees with black, so this should be ignored.
-                    '--'
-            ]
-            additional_dependencies:
-                    - flake8-comprehensions
-                    - flake8-bugbear
+          - id: ruff-format
+          - id: ruff-check
+            name: Lint the code using Ruff
             files: ^(geoutils|tests)
+          - id: ruff-check
+            name: Sort imports using Ruff
+            args: [--fix, --select=I]
+
   # Lint the code using mypy
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.19.1
@@ -71,14 +62,7 @@ repos:
             additional_dependencies: [tokenize-rt, numpy==2.0.*]
             files: ^(geoutils|tests)
 
-  # Sort imports using isort
-  - repo: https://github.com/PyCQA/isort
-    rev: 7.0.0
-    hooks:
-            - id: isort
-              args: [ "--profile", "black" ]
-
-  # Automatically upgrade syntax to a minimum version
+  # Keep the Python 3.7 syntax upgrade target without constraining Ruff's parser
   - repo: https://github.com/asottile/pyupgrade
     rev: v3.21.2
     hooks:

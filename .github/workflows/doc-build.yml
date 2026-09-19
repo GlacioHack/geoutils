@@ -16,8 +16,11 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
       - name: Install project with documentation dependencies
-        run: python -m pip install -e .[doc,opt] -vv
+        run: uv pip install --system -e ".[doc,opt]"
       - name: Sphinx build
         run: |
           cd doc
