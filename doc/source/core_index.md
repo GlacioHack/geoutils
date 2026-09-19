@@ -8,6 +8,7 @@ Prefer to learn by running examples? Explore our example galleries on {ref}`exam
 
 core_composition
 core_match_ref
+core_downsampling
 core_py_ops
 core_array_funcs
 core_parsing

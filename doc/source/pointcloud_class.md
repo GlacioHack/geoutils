@@ -77,6 +77,9 @@ pc = geoutils.PointCloud(filename_dem, data_column="Z")
 pc
 ```
 
+See {ref}`core-downsampling` to reduce point cloud density when opening or plotting, including how GeoUtils selects
+deterministic point samples.
+
 ## Create from arrays or tuples
 
 A {class}`~geoutils.PointCloud` is created from three 1D arrays, from a Nx3 or 3xN array, or from an iterable of 3-tuples by calling the class

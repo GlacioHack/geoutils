@@ -97,6 +97,9 @@ rast = gu.Raster(filename_rast)
 rast
 ```
 
+See {ref}`core-downsampling` to reduce raster resolution when opening or plotting, including how GeoUtils handles
+stored file overviews through GDAL.
+
 Detailed information on the **raster** is printed using {func}`~geoutils.Raster.info`, along with basic statistics using `stats=True`:
 
 ```{code-cell} ipython3

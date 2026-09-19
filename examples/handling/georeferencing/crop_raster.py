@@ -25,7 +25,7 @@ print(vect.bounds)
 # %%
 # Let's plot the raster and vector.
 rast.plot(cmap="Purples")
-vect.plot(ref_crs=rast, fc="none", ec="k", lw=2)
+vect.plot(ref=rast, fc="none", ec="k", lw=2)
 
 # %%
 # **First option:** using the vector as a reference to match, we reproject the raster. We simply have to pass the :class:`~geoutils.Vector`
@@ -41,7 +41,7 @@ rast = rast.crop(vect)
 #
 
 rast.plot(ax="new", cmap="Purples")
-vect.plot(ref_crs=rast, fc="none", ec="k", lw=2)
+vect.plot(ref=rast, fc="none", ec="k", lw=2)
 
 # %%
 # **Second option:** we can pass other arguments to :func:`~geoutils.Raster.crop`, including another :class:`~geoutils.Raster` or a
@@ -50,4 +50,4 @@ vect.plot(ref_crs=rast, fc="none", ec="k", lw=2)
 rast = rast.crop((rast.bounds.left + 1000, rast.bounds.bottom, rast.bounds.right, rast.bounds.top - 500))
 
 rast.plot(ax="new", cmap="Purples")
-vect.plot(ref_crs=rast, fc="none", ec="k", lw=2)
+vect.plot(ref=rast, fc="none", ec="k", lw=2)
