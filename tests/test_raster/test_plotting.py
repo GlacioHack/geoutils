@@ -1,4 +1,4 @@
-"""Test raster plotting for eager and chunked inputs."""
+"""Test raster plotting."""
 
 from __future__ import annotations
 
@@ -16,7 +16,11 @@ from geoutils import examples
 
 
 class TestPlot:
-    """Test module for raster plot appearance, display limits, CRS matching, and validation."""
+    """
+    Test module for raster plot appearance, display limits, CRS matching, and validation.
+
+    Checks for Dask/MP are done further below in TestPlotChunked.
+    """
 
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
     landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
@@ -35,7 +39,7 @@ class TestPlot:
         fig.axes[0].set_axis_off()
         fig.axes[1].set_axis_off()
 
-        # Compare the rendered heights of the main plot and colorbar
+        # Height of the main plot and colorbar should be equal
         plot_height = fig.axes[0].get_tightbbox().height
         colorbar_height = fig.axes[1].get_tightbbox().height
         plt.close(fig)
@@ -45,11 +49,11 @@ class TestPlot:
     def test_plot__native_single_band(self) -> None:
         """Checks that disabling the pixel limit plots every source value at the source extent."""
 
-        # Open one band without loading it and request the complete native grid
+        # Open one band without loading it and request complete grid (max_pixels = None)
         raster = gu.Raster(self.landsat_b4_path)
         raster.plot(max_pixels=None)
 
-        # Check the image values, orientation, and projected extent
+        # Check the image values, orientation, and projected extent match that of the full raster
         image = plt.gca().get_images()[0]
         assert np.array_equal(image.get_array(), np.flip(raster.get_nanarray(), axis=0), equal_nan=True)
         assert image.origin == "lower"
@@ -84,9 +88,9 @@ class TestPlot:
         plt.close()
 
     def test_plot__axes_limits_and_save(self) -> None:
-        """Checks that plot options, returned axes, and direct figure saving remain available."""
+        """Checks that plot options, returned axes, and direct figure saving work properly."""
 
-        # Plot with explicit color limits and a named colorbar
+        # Plot with user input for color limits and colorbar
         raster = gu.Raster(self.landsat_b4_path)
         ax = plt.subplot(111)
         returned_ax, colorbar_ax = raster.plot(
@@ -101,7 +105,7 @@ class TestPlot:
         assert colorbar_ax is not None
         plt.close()
 
-        # Save through the existing convenience argument
+        # Check save through the existing convenience argument
         with tempfile.TemporaryDirectory() as directory:
             filename = os.path.join(directory, "test.png")
             raster.plot(savefig_fname=filename)
@@ -109,7 +113,7 @@ class TestPlot:
         plt.close()
 
     def test_plot__pixel_budget(self) -> None:
-        """Checks that an explicit pixel budget reduces only the temporary display grid."""
+        """Checks that a max number of pixels reduces the temporary display grid."""
 
         # Create a rectangular raster large enough to require reduction
         values = np.arange(200 * 100, dtype=np.float32).reshape(100, 200)
@@ -124,8 +128,38 @@ class TestPlot:
         assert np.array_equal(raster.data, values)
         plt.close()
 
+    def test_plot__automatic_pixel_budget_and_interpolation_config(self) -> None:
+        """Checks that automatic downsampling follows display size and Matplotlib's interpolation configuration."""
+
+        # Create a raster much larger than the rendered axes and configure a global interpolation method
+        values = np.arange(1_000 * 2_000, dtype=np.float32).reshape(1_000, 2_000)
+        raster = gu.Raster.from_array(values, transform=Affine(1, 0, 0, 0, -1, 1_000), crs=32632)
+        fig, ax = plt.subplots(figsize=(4, 3), dpi=100)
+        axes_bounds = ax.get_window_extent()
+        axes_pixels = (axes_bounds.width, axes_bounds.height)
+
+        # Plot with the automatic default so vector outputs embed only a display-sized raster
+        with plt.rc_context({"image.interpolation": "nearest"}):
+            raster.plot(ax=ax, add_cbar=False)
+        image = ax.get_images()[0]
+
+        assert image.get_array().shape[1] <= axes_pixels[0]
+        assert image.get_array().shape[0] <= axes_pixels[1]
+        assert image.get_interpolation() == "nearest"
+        plt.close(fig)
+
+    def test_plot__aspect(self) -> None:
+        """Checks that a user input for aspect overrides the default "equal"."""
+
+        # Plot a rectangular raster while allowing Matplotlib to fill the available axes
+        raster = gu.Raster.from_array(np.ones((5, 10)), Affine(1, 0, 0, 0, -1, 5), 32632)
+        raster.plot(aspect="auto", add_cbar=False)
+
+        assert plt.gca().get_aspect() == "auto"
+        plt.close()
+
     def test_plot__match_reference_crs(self) -> None:
-        """Checks that a reference changes only the temporary display CRS."""
+        """Checks a match reference input is used properly for CRS and bounds."""
 
         # Create a geographic raster and a projected raster to use as the CRS reference
         source = gu.Raster.from_array(
@@ -135,17 +169,20 @@ class TestPlot:
         original_bounds = source.bounds
 
         # Reproject only the bounded display raster
-        source.plot(ref_crs=reference, max_pixels=100, add_cbar=False)
-        extent = plt.gca().get_images()[0].get_extent()
+        source.plot(ref=reference, max_pixels=100, add_cbar=False)
+        ax = plt.gca()
+        extent = ax.get_images()[0].get_extent()
         assert source.crs.to_epsg() == 4326
         assert source.bounds == original_bounds
         assert extent != [original_bounds.left, original_bounds.right, original_bounds.bottom, original_bounds.top]
+        assert ax.get_xlim() == pytest.approx((reference.bounds.left, reference.bounds.right))
+        assert ax.get_ylim() == pytest.approx((reference.bounds.bottom, reference.bounds.top))
         plt.close()
 
     def test_plot__accessor(self) -> None:
         """Checks that RasterAccessor exposes the shared plotting implementation."""
 
-        # Build an eager DataArray-backed raster and plot a reduced grid through .rst
+        # Build a DataArray raster and plot a reduced grid through .rst
         values = np.arange(100, dtype=np.float32).reshape(10, 10)
         data_array = gu.RasterAccessor.from_array(values, Affine(1, 0, 0, 0, -1, 10), 32632)
         data_array.rst.plot(max_pixels=25, add_cbar=False)
@@ -180,9 +217,9 @@ class TestPlot:
         plt.close()
 
     def test_plot__errors(self) -> None:
-        """Checks that invalid bands, axes, limits, and pixel budgets raise clear errors."""
+        """Checks that we raise clear errors for invalid bands, axes, limits, and max pixels."""
 
-        # Open single-band and RGB rasters for band validation
+        # Open single band and RGB rasters for band validation
         raster = gu.Raster(self.landsat_b4_path)
         rgb = gu.Raster(self.landsat_rgb_path)
 
@@ -210,12 +247,12 @@ class TestPlot:
 
 
 class TestPlotChunked:
-    """Test module for lazy raster plotting, bounded computation, and eager result equivalence."""
+    """Test module for lazy raster plotting: checks the out-of-memory computation, and equality with eager."""
 
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
 
     def test_plot__loading_laziness(self) -> None:
-        """Checks that plotting computes a bounded image without loading the source DataArray."""
+        """Checks that plotting computes a downsampled image without loading the source."""
 
         # Open the same raster with spatial chunks and as an eager Rioxarray backend
         lazy = gu.open_raster(self.aster_dem_path, chunks={"x": 100, "y": 100})
@@ -237,7 +274,7 @@ class TestPlotChunked:
         plt.close()
 
     def test_plot__match_reference_loading_laziness(self) -> None:
-        """Checks that CRS matching and resampling preserve a chunked source's lazy state."""
+        """Checks that performing CRS matching and resampling preserve input laziness."""
 
         # Open a source in chunks and retain its original georeferencing
         source = gu.open_raster(self.aster_dem_path, chunks={"x": 80, "y": 120})
@@ -245,7 +282,7 @@ class TestPlotChunked:
         original_shape = source.rio.shape
 
         # Reproject only the display grid to a geographic CRS
-        source.rst.plot(ref_crs=4326, max_pixels=2_000, add_cbar=False)
+        source.rst.plot(ref=4326, max_pixels=2_000, add_cbar=False)
         plotted = plt.gca().get_images()[0].get_array()
 
         assert not source._in_memory

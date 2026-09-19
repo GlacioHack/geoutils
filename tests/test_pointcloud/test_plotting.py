@@ -10,7 +10,6 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
-from geopandas.testing import assert_geodataframe_equal
 
 import geoutils as gu
 
@@ -77,8 +76,34 @@ class TestPlot:
         assert ax.get_ylim()[1] >= pointcloud.bounds.top
         plt.close()
 
+    def test_plot__geographic_colorbar_placement(self) -> None:
+        """Checks that a plot in geographic CRS keeps its colorbar properly positioned/sized."""
+
+        # Create a high-latitude that strongly adjusts geographic map aspect
+        longitudes = np.linspace(15.2, 16.3, 100)
+        latitudes = np.linspace(77.95, 78.18, 100)
+        dataframe = gpd.GeoDataFrame(
+            {"value": np.arange(100)},
+            geometry=gpd.points_from_xy(longitudes, latitudes),
+            crs=4326,
+        )
+        pointcloud = gu.PointCloud(dataframe, data_column="value")
+
+        # Draw the figure before comparing the final map and colorbar positions
+        ax, colorbar_ax = pointcloud.plot(return_axes=True)
+        assert colorbar_ax is not None
+        ax.figure.canvas.draw()
+        map_position = ax.get_position()
+        colorbar_position = colorbar_ax.get_position()
+        gap = colorbar_position.x0 - map_position.x1
+
+        # Check that position/shape is correct
+        assert 0 <= gap < map_position.width / 2
+        assert colorbar_position.height == pytest.approx(map_position.height)
+        plt.close(ax.figure)
+
     def test_plot__match_reference_crs(self) -> None:
-        """Checks that reference matching reprojects only the temporary point sample."""
+        """Checks that reference matching reprojects the point sample CRS and crops to bounds."""
 
         # Create points in geographic coordinates and a point cloud that supplies the reference CRS
         pointcloud = gu.PointCloud(_point_grid(3), data_column="value")
@@ -86,12 +111,16 @@ class TestPlot:
         original = pointcloud.ds.geometry.copy()
 
         # Plot every point in Web Mercator coordinates
-        pointcloud.plot(ref_crs=reference, max_points=None, add_cbar=False)
-        offsets = np.asarray(plt.gca().collections[0].get_offsets())
+        pointcloud.plot(ref=reference, max_points=None, add_cbar=False)
+        ax = plt.gca()
+        offsets = np.asarray(ax.collections[0].get_offsets())
 
+        # Check input and plot are in the expected CRS and bounds
         assert pointcloud.crs.to_epsg() == 4326
         assert pointcloud.ds.geometry.equals(original)
         assert offsets[:, 0].max() > 100_000
+        assert ax.get_xlim() == pytest.approx((reference.bounds.left, reference.bounds.right))
+        assert ax.get_ylim() == pytest.approx((reference.bounds.bottom, reference.bounds.top))
         plt.close()
 
     def test_plot__accessor(self) -> None:
@@ -144,57 +173,3 @@ class TestPlotChunked:
         np.testing.assert_array_equal(lazy_offsets, eager_offsets)
         np.testing.assert_array_equal(lazy_values, eager_values)
         plt.close()
-
-
-class TestOpenDownsample:
-    """Test module for eager, lazy, and file-backed point cloud opening downsampling."""
-
-    def test_pointcloud__downsample(self) -> None:
-        """Checks that PointCloud opening keeps the requested deterministic fraction of loaded rows."""
-
-        # Downsample a loaded dataframe by a factor of four
-        dataframe = _point_grid()
-        pointcloud = gu.PointCloud(dataframe, data_column="value", downsample=4)
-        expected = gu.PointCloud(dataframe, data_column="value").subsample(25, random_state=0)
-
-        assert pointcloud.point_count == 25
-        assert_geodataframe_equal(pointcloud.ds.reset_index(drop=True), expected.ds.reset_index(drop=True))
-
-    def test_pointcloud__downsample_lazy_file(self, tmp_path: pathlib.Path) -> None:
-        """Checks that a file-backed PointCloud reports and loads its reduced row count."""
-
-        # Keep the file unopened while exposing the eventual sample size from metadata
-        filename = tmp_path / "points.gpkg"
-        _point_grid().to_file(filename, index=False)
-        pointcloud = gu.PointCloud(filename, data_column="value", downsample=4)
-        assert not pointcloud.is_loaded
-        assert pointcloud.point_count == 25
-
-        # Loading applies the deterministic sample exactly once
-        pointcloud.load()
-        assert pointcloud.is_loaded
-        assert pointcloud.point_count == 25
-
-    def test_open_pointcloud__downsample_chunked(self, tmp_path: pathlib.Path) -> None:
-        """Checks that chunked opening returns the same deterministic sample as eager opening and stays lazy."""
-
-        # Open the same file eagerly and in uneven Dask partitions
-        filename = tmp_path / "points.gpkg"
-        _point_grid().to_file(filename, index=False)
-        eager = gu.open_pointcloud(str(filename), data_column="value", downsample=4)
-        lazy = gu.open_pointcloud(str(filename), data_column="value", chunks=17, downsample=4)
-
-        # Dask keeps only the selected rows in its graph and matches the eager top-k sample
-        assert lazy.pc._is_dask
-        assert lazy.pc.point_count == 25
-        assert_geodataframe_equal(
-            lazy.compute().reset_index(drop=True),
-            eager.reset_index(drop=True),
-        )
-
-    @pytest.mark.parametrize("downsample", [0, -1, np.inf, "wrong"])
-    def test_open_pointcloud__error_downsample(self, downsample: object) -> None:
-        """Checks that invalid opening downsampling factors raise clear errors."""
-
-        with pytest.raises((TypeError, ValueError), match="downsample must be"):
-            gu.PointCloud(_point_grid(2), data_column="value", downsample=downsample)  # type: ignore[arg-type]

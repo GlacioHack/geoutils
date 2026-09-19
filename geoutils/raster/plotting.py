@@ -30,6 +30,7 @@ from rasterio.enums import Resampling
 from geoutils._dispatch import get_geo_attr, has_geo_attr, is_dask_array
 from geoutils._misc import import_optional
 from geoutils.raster.referencing import _default_nodata
+from geoutils.vector.plotting import _get_reference_bounds
 
 if TYPE_CHECKING:
     import matplotlib
@@ -53,20 +54,20 @@ def _create_axes(ax: matplotlib.axes.Axes | Literal["new"] | None) -> matplotlib
     raise ValueError("ax must be a matplotlib.axes.Axes instance, 'new' or None.")
 
 
-def _resolve_target_crs(source: RasterBase, ref_crs: Any) -> CRS | None:
-    """Resolve the display CRS from an explicit CRS or georeferenced reference object."""
+def _resolve_target_crs(source: RasterBase, ref: Any) -> CRS | None:
+    """Resolve the display CRS from another CRS or georeferenced reference object."""
 
-    if ref_crs is None:
+    if ref is None:
         if source.crs is None:
             return None
         return CRS.from_user_input(source.crs)
-    if has_geo_attr(ref_crs, "crs"):
-        return CRS.from_user_input(get_geo_attr(ref_crs, "crs"))
-    return CRS.from_user_input(ref_crs)
+    if has_geo_attr(ref, "crs"):
+        return CRS.from_user_input(get_geo_attr(ref, "crs"))
+    return CRS.from_user_input(ref)
 
 
 def _default_grid_size(source: RasterBase, target_crs: CRS | None) -> tuple[int, int]:
-    """Return the native-sized grid width and height in the display CRS."""
+    """Compute the raster default grid size (width and height) in the display CRS."""
 
     if target_crs is None:
         return source.width, source.height
@@ -91,7 +92,7 @@ def _display_grid_size(
     max_pixels: Literal["auto"] | int | None,
     ax: matplotlib.axes.Axes,
 ) -> tuple[int, int]:
-    """Limit a raster grid to the axes dimensions or an explicit total pixel count."""
+    """Limit a raster grid to the axes sizes or an explicit total pixel count."""
 
     if max_pixels is None:
         return width, height
@@ -107,7 +108,6 @@ def _display_grid_size(
     target_width = max(1, int(np.floor(width * scale)))
     target_height = max(1, int(np.floor(height * scale)))
 
-    # Keep rounding from exceeding an explicit total budget
     if isinstance(max_pixels, int):
         while target_width * target_height > max_pixels:
             if target_width >= target_height and target_width > 1:
@@ -123,18 +123,22 @@ def _prepare_display_raster(
     source: RasterBase,
     ax: matplotlib.axes.Axes,
     max_pixels: Literal["auto"] | int | None,
-    ref_crs: Any,
+    ref: Any,
     resampling: Resampling | str | None,
 ) -> RasterBase:
     """
-    Reproject a raster to the requested display CRS and pixel budget.
+    Reproject a raster to the requested display CRS and max pixels.
 
-    _resolve_target_crs() selects the plot CRS, _default_grid_size() derives the equivalent native grid, and
-    _display_grid_size() limits that grid to the rendered axes. The existing reproject() implementation then keeps
-    Dask-backed inputs lazy until the small display array is requested.
+    Internal behaviour is the following:
+    - _resolve_target_crs() selects the plot CRS,
+    - _default_grid_size() derives the size of the raster in the display CRS, and
+    - _display_grid_size() computes the size the raster needs to be to match the display of the Matplotlib figure.
+
+    The existing reproject() implementation then performs out-of-memory downsampling to the
+    small display array.
     """
 
-    target_crs = _resolve_target_crs(source, ref_crs)
+    target_crs = _resolve_target_crs(source, ref)
     native_width, native_height = _default_grid_size(source, target_crs)
     target_width, target_height = _display_grid_size(native_width, native_height, max_pixels, ax)
 
@@ -154,7 +158,7 @@ def _prepare_display_raster(
     display_resampling = Resampling.nearest if source.is_mask and resampling is None else resampling
     reprojected = source.reproject(
         crs=target_crs,
-        grid_size=(target_width, target_height),
+        grid_size=(target_height, target_width),
         nodata=display_nodata,
         resampling=display_resampling,
         dtype=display_dtype,
@@ -168,6 +172,7 @@ def _prepare_display_raster(
 def _plot_raster(
     source: RasterBase,
     bands: int | tuple[int, ...] | None = None,
+    ref: Any = None,
     cmap: matplotlib.colors.Colormap | str | None = None,
     vmin: float | int | None = None,
     vmax: float | int | None = None,
@@ -176,7 +181,6 @@ def _plot_raster(
     cbar_title: str | None = None,
     add_cbar: bool = True,
     ax: matplotlib.axes.Axes | Literal["new"] | None = None,
-    ref_crs: Any = None,
     max_pixels: Literal["auto"] | int | None = "auto",
     resampling: Resampling | str | None = None,
     return_axes: bool = False,
@@ -184,10 +188,13 @@ def _plot_raster(
     **kwargs: Any,
 ) -> None | tuple[matplotlib.axes.Axes, matplotlib.axes.Axes | None]:
     """
-    Prepare a bounded raster array and draw it with Matplotlib.
+    Prepare an optionally downsampled raster array and draw it with Matplotlib.
 
-    _create_axes() establishes the rendering dimensions before _prepare_display_raster() reprojects to that bounded
-    grid. The selected display bands are then computed, arranged for single-band or RGB(A) display, and passed to
+    Internally, we do:
+    - _create_axes() to determine the rendering dimensions,
+    - then _prepare_display_raster() reprojects to that grid.
+
+    The selected bands are then aranged (single-band or RGB(A)), and passed to
     Matplotlib together with the projected extent and optional colorbar.
     """
 
@@ -195,10 +202,10 @@ def _plot_raster(
     import matplotlib.pyplot as plt
     from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-    # Create the axes before calculating their display pixel budget
+    # Create the axes before calculating their display "max pixel size"
     ax0 = _create_axes(ax)
 
-    # Check the requested bands before performing any reprojection work
+    # Check the input bands before performing any reprojection work
     if bands is None or isinstance(bands, tuple):
         if bands is None:
             bands = tuple(range(1, source.count + 1))
@@ -216,7 +223,7 @@ def _plot_raster(
         raise ValueError("Index must be int, tuple or None")
 
     # Reproject only to the resolution that can be displayed
-    display = _prepare_display_raster(source, ax0, max_pixels, ref_crs, resampling)
+    display = _prepare_display_raster(source, ax0, max_pixels, ref, resampling)
     data = display.data if display.count == 1 else display.data[np.array(bands) - 1, :, :]
     if is_dask_array(data):
         data = cast(Any, data).compute()
@@ -254,25 +261,27 @@ def _plot_raster(
     except (TypeError, ValueError):
         raise ValueError("vmin or vmax cannot be converted to float") from None
 
-    # Draw the display array in projected coordinates
-    if "interpolation" not in kwargs:
-        kwargs["interpolation"] = None
+    # Draw the display array in projected coordinates and keep square data units unless explicitly overridden
+    kwargs.setdefault("aspect", "equal")
     extent = [display.bounds.left, display.bounds.right, display.bounds.bottom, display.bounds.top]
     ax0.imshow(
         np.flip(data, axis=0),
         extent=extent,
         origin="lower",
-        aspect="equal",
         cmap=cmap,
         vmin=vmin,
         vmax=vmax,
         alpha=alpha,
         **kwargs,
     )
+    reference_bounds = _get_reference_bounds(ref)
+    if reference_bounds is not None:
+        ax0.set_xlim(reference_bounds.left, reference_bounds.right)
+        ax0.set_ylim(reference_bounds.bottom, reference_bounds.top)
     if title is not None:
         ax0.set_title(title)
 
-    # Add a colorbar beside single-band plots
+    # Add a colorbar (only beside single band plots)
     cax = None
     if add_cbar:
         divider = make_axes_locatable(ax0)

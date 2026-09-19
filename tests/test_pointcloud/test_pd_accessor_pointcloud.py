@@ -68,6 +68,25 @@ class TestPointCloudAccessor:
         assert_geodataframe_equal(source.compute(), expected)
         assert source.expr is graph and not source.pc.is_loaded
 
+    def test_open_pointcloud__downsample_loading_laziness(self, tmp_path: Path) -> None:
+        """Checks that chunked opening keeps the sample lazy and exactly matches eager opening."""
+
+        # Open the same file eagerly and in Dask partitions
+        # (with chunk size not multiple of downsampling factor to check potential edge effects)
+        filename = tmp_path / "points.gpkg"
+        _point_grid().to_file(filename, index=False)
+        eager = gu.open_pointcloud(str(filename), data_column="value", downsample=4)
+        lazy = gu.open_pointcloud(str(filename), data_column="value", chunks=17, downsample=4)
+
+        # Check source is lazy, and result is exactly the same with eager
+        assert lazy.pc._is_dask
+        assert lazy.pc.point_count == 25
+        assert_geodataframe_equal(
+            lazy.compute().reset_index(drop=True),
+            eager.reset_index(drop=True),
+        )
+
+
     def test_accessor(self) -> None:
         """Expose point-cloud metadata, values and conversion through the accessor."""
 

@@ -47,7 +47,7 @@ from geoutils._typing import (
     NDArrayNum,
     Number,
 )
-from geoutils.raster.base import RasterBase, RasterType
+from geoutils.raster.base import RasterBase, RasterType, _validate_downsample
 from geoutils.raster.referencing import (
     _cast_nodata,
     _cast_pixel_interpretation,
@@ -57,6 +57,7 @@ from geoutils.raster.satimg import (
     decode_sensor_metadata,
     parse_and_convert_metadata_from_filename,
 )
+from geoutils.raster.transformation import _open_downsampled_raster
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -185,9 +186,11 @@ def _load_rio(
     * window : to load a cropped version
     * resampling : to set the resampling algorithm
     """
+    # Use the complete dataset unless a window is passed or derived from a transform
+    window = kwargs.pop("window", None)
+
     # If out_shape is passed, no need to account for transform and shape
     if kwargs.get("out_shape") is not None:
-        window = None
         # If multi-band raster, the out_shape needs to contain the count
         if out_count is not None and out_count > 1:
             kwargs["out_shape"] = (out_count, *kwargs["out_shape"])
@@ -357,7 +360,10 @@ class Raster(RasterBase):
         :param load_data: Whether to load the array during instantiation. Default is False.
         :param parse_sensor_metadata: Whether to parse sensor metadata from filename and similarly-named metadata files.
         :param silent: Whether to parse metadata silently or with console output.
-        :param downsample: Downsample the array once loaded by a round factor. Default is no downsampling.
+        :param downsample: Downsampling factor (e.g., 2 selects one out of two pixels for every row/column). Rows or
+            columns that do not fill a complete interval are omitted. Default 1 keeps the native resolution. See
+            `Rasterio's overview documentation <https://rasterio.readthedocs.io/en/stable/topics/overviews.html>`_
+            for how stored overviews can make reduced reads faster.
         :param force_nodata: Force nodata value to be used (overwrites the metadata). Default reads from metadata.
         """
 
@@ -403,6 +409,8 @@ class Raster(RasterBase):
 
         # Image is a file on disk.
         elif isinstance(filename_or_dataset, (str, pathlib.Path, rio.io.DatasetReader, rio.io.MemoryFile)):
+            downsample = _validate_downsample(downsample)
+
             # ExitStack is used instead of "with rio.open(filename_or_dataset) as ds:".
             # This is because we might not actually want to open it like that, so this is equivalent
             # to the pseudocode:
@@ -452,37 +460,50 @@ class Raster(RasterBase):
             else:
                 count = len(bands)
 
-            # Downsampled image size
-            if not isinstance(downsample, (int, float)):
-                raise TypeError("downsample must be of type int or float.")
-            if downsample < 1:
-                raise ValueError("downsample must be >=1.")
-
+            # Compute the complete output intervals that fit inside the source raster
             if downsample == 1:
                 out_shape = (self.height, self.width)
             else:
-                down_width = int(np.ceil(self.width / downsample))
-                down_height = int(np.ceil(self.height / downsample))
+                down_width = max(1, int(np.floor(self.width / downsample)))
+                down_height = max(1, int(np.floor(self.height / downsample)))
                 out_shape = (down_height, down_width)
                 res = tuple(np.asarray(self.res) * downsample)
                 self.transform = rio.transform.from_origin(self.bounds.left, self.bounds.top, res[0], res[1])
                 self._downsample = downsample
+                self._out_window = rio.windows.Window(
+                    0,
+                    0,
+                    min(ds.width, down_width * downsample),
+                    min(ds.height, down_height * downsample),
+                )
 
             # This will record the downsampled out_shape is data is only loaded later on by .load()
             self._out_shape = out_shape
             self._out_count = count
 
             if load_data:
-                # Mypy doesn't like the out_shape for some reason. I can't figure out why! (erikmannerfelt, 14/01/2022)
-                # Don't need to pass shape and transform, because out_shape overrides it
-                self.data = _load_rio(
-                    ds,
-                    indexes=bands,
-                    masked=self._masked,
-                    convert_to_mask=is_mask,
-                    out_shape=out_shape,
-                    out_count=count,
-                )  # type: ignore
+                if downsample > 1:
+                    # Read a suitable overview through the exact grid requested by the downsampling factor
+                    with _open_downsampled_raster(ds, downsample) as downsampled:
+                        self.data = _load_rio(
+                            downsampled,
+                            indexes=bands,
+                            masked=self._masked,
+                            convert_to_mask=is_mask,
+                        )
+                else:
+                    # Mypy doesn't like the out_shape for some reason. I can't figure out why!
+                    # (erikmannerfelt, 14/01/2022)
+                    # Don't need to pass shape and transform, because out_shape overrides it
+                    self.data = _load_rio(
+                        ds,
+                        indexes=bands,
+                        masked=self._masked,
+                        convert_to_mask=is_mask,
+                        out_shape=out_shape,
+                        out_count=count,
+                        window=self._out_window,
+                    )  # type: ignore
 
             # Probably don't want to use set_nodata that can update array, setting self._nodata is sufficient
             # Set nodata only if data is loaded
@@ -835,19 +856,31 @@ class Raster(RasterBase):
             if self._out_shape is not None:
                 out_count = len(valid_bands)
 
-        # If a downsampled out_shape was defined during instantiation
-        with rio.open(self.name) as dataset:
-            mask = _load_rio(
-                dataset,
-                only_mask=True,
-                indexes=list(valid_bands),
-                masked=self._masked,
-                transform=self.transform,
-                shape=self.shape,
-                out_shape=self._out_shape,
-                out_count=out_count,
-                **kwargs,
-            )
+        # Read a suitable overview for a reduced grid, or use the native dataset without downsampling
+        read_kwargs = kwargs.copy()
+        with ExitStack() as stack:
+            source = stack.enter_context(rio.open(self.name))
+            if self._downsample > 1:
+                dataset = stack.enter_context(_open_downsampled_raster(source, self._downsample))
+                mask = _load_rio(
+                    dataset,
+                    only_mask=True,
+                    indexes=list(valid_bands),
+                    masked=self._masked,
+                    **read_kwargs,
+                )
+            else:
+                mask = _load_rio(
+                    source,
+                    only_mask=True,
+                    indexes=list(valid_bands),
+                    masked=self._masked,
+                    transform=self.transform,
+                    shape=self.shape,
+                    out_shape=self._out_shape,
+                    out_count=out_count,
+                    **read_kwargs,
+                )
 
         # Rasterio says the mask should be returned in 2D for a single band but it seems not
         mask = mask.squeeze()
@@ -890,19 +923,31 @@ class Raster(RasterBase):
         # Save which bands are loaded
         self._bands_loaded = valid_bands
 
-        # If a downsampled out_shape was defined during instantiation
-        with rio.open(self.name) as dataset:
-            self.data = _load_rio(
-                dataset,
-                indexes=list(valid_bands),
-                masked=self._masked,
-                convert_to_mask=self._is_mask,
-                transform=self.transform,
-                shape=self.shape,
-                out_shape=self._out_shape,
-                out_count=self._out_count,
-                **kwargs,
-            )
+        # Read a suitable overview for a reduced grid, or use the native dataset without downsampling
+        read_kwargs = kwargs.copy()
+        with ExitStack() as stack:
+            source = stack.enter_context(rio.open(self.name))
+            if self._downsample > 1:
+                dataset = stack.enter_context(_open_downsampled_raster(source, self._downsample))
+                self.data = _load_rio(
+                    dataset,
+                    indexes=list(valid_bands),
+                    masked=self._masked,
+                    convert_to_mask=self._is_mask,
+                    **read_kwargs,
+                )
+            else:
+                self.data = _load_rio(
+                    source,
+                    indexes=list(valid_bands),
+                    masked=self._masked,
+                    convert_to_mask=self._is_mask,
+                    transform=self.transform,
+                    shape=self.shape,
+                    out_shape=self._out_shape,
+                    out_count=self._out_count,
+                    **read_kwargs,
+                )
 
         # Probably don't want to use set_nodata() that updates the array
         # Set nodata value with the loaded array
@@ -1602,6 +1647,7 @@ class Raster(RasterBase):
             "_name",
             "_driver",
             "_out_shape",
+            "_out_window",
             "_out_count",
             "_obj",
         ]

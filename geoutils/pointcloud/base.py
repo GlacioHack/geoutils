@@ -233,7 +233,7 @@ class PointCloudBase(VectorBase):
     def plot(  # type: ignore[override]
         self,
         column: str | None = None,
-        ref_crs: RasterLike | VectorLike | CRS | str | int | None = None,
+        ref: RasterLike | VectorLike | CRS | str | int | None = None,
         cmap: matplotlib.colors.Colormap | str | None = None,
         vmin: float | int | None = None,
         vmax: float | int | None = None,
@@ -257,7 +257,8 @@ class PointCloudBase(VectorBase):
         Use ``max_points`` to set the subsampled point count manually.
 
         :param column: Column to plot. Defaults to the main point cloud data column.
-        :param ref_crs: CRS or georeferenced object whose CRS the temporary point sample should match.
+        :param ref: Reference geospatial object or CRS to match. A reference object also sets the plotted axis
+            limits to its bounds.
         :param cmap: Colormap to use. Defaults to Matplotlib's configured image colormap.
         :param vmin: Colorbar minimum value.
         :param vmax: Colorbar maximum value.
@@ -268,7 +269,7 @@ class PointCloudBase(VectorBase):
         :param return_axes: Whether to return the plot and colorbar axes.
         :param savefig_fname: Optional path at which to save the current figure.
         :param max_points: The default ``"auto"`` limits the sample to the smaller of the Matplotlib axes pixel area
-            and 100,000 points, as set by the figure size and DPI. An integer sets an explicit point limit, and None
+            and 1,000,000 points, as set by the figure size and DPI. An integer sets an explicit point limit, and None
             plots every point.
         :param random_state: Random generator or seed used for deterministic point selection.
         :returns: None, or the plot axes and optional colorbar axes when ``return_axes=True``.
@@ -279,7 +280,7 @@ class PointCloudBase(VectorBase):
         return _plot_pointcloud(
             self,
             column=column,
-            ref_crs=ref_crs,
+            ref=ref,
             cmap=cmap,
             vmin=vmin,
             vmax=vmax,

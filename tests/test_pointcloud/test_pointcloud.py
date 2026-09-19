@@ -8,6 +8,7 @@ import re
 import tempfile
 import warnings
 from importlib.util import find_spec
+from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
@@ -19,6 +20,17 @@ from shapely import Polygon
 import geoutils as gu
 from geoutils import PointCloud
 from geoutils._typing import NDArrayNum
+
+def _point_grid(size: int = 10) -> gpd.GeoDataFrame:
+    """Create a square point grid with one unique value per row."""
+
+    x = np.tile(np.arange(size), size)
+    y = np.repeat(np.arange(size), size)
+    return gpd.GeoDataFrame(
+        {"value": np.arange(size * size)},
+        geometry=gpd.points_from_xy(x, y),
+        crs=4326,
+    )
 
 
 class TestPointCloud:
@@ -103,6 +115,40 @@ class TestPointCloud:
         # Accessing point values triggers the first complete data load
         assert np.array_equal(pc.data, self.gdf1["b1"].values)
         assert pc.is_loaded
+
+    def test_init__downsample(self) -> None:
+        """Checks that a point cloud opening respects input downsampling."""
+
+        # Downsample a loaded dataframe by a factor of four
+        dataframe = _point_grid()
+        pointcloud = gu.PointCloud(dataframe, data_column="value", downsample=4)
+        expected = gu.PointCloud(dataframe, data_column="value").subsample(25, random_state=0)
+
+        # Exact equality check
+        assert pointcloud.point_count == 25
+        assert_geodataframe_equal(pointcloud.ds.reset_index(drop=True), expected.ds.reset_index(drop=True))
+
+    def test_init__downsample_lazy_file(self, tmp_path: Path) -> None:
+        """Checks that a file-backed point cloud loads its reduced row count."""
+
+        # Request downsampling and check file stays unloaded
+        filename = tmp_path / "points.gpkg"
+        _point_grid().to_file(filename, index=False)
+        pointcloud = gu.PointCloud(filename, data_column="value", downsample=4)
+        assert not pointcloud.is_loaded
+        assert pointcloud.point_count == 25
+
+        # Loading later applies the subsampling
+        pointcloud.load()
+        assert pointcloud.is_loaded
+        assert pointcloud.point_count == 25
+
+    @pytest.mark.parametrize("downsample", [0, -1, np.inf, "wrong"])
+    def test_open_pointcloud__error_downsample(self, downsample: object) -> None:
+        """Checks errors for downsampling user input."""
+
+        with pytest.raises((TypeError, ValueError), match="downsample must be"):
+            gu.PointCloud(_point_grid(2), data_column="value", downsample=downsample)  # type: ignore[arg-type]
 
     def test_point_count__unknown_file_metadata_stays_unloaded(self, tmp_path: pathlib.Path) -> None:
         """Checks that an unknown cached point count is read without loading point data."""

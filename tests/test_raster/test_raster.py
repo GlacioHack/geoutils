@@ -929,6 +929,47 @@ class TestRaster:
         with pytest.raises(ValueError, match="downsample must be >=1."):
             gu.Raster(example, downsample=0)  # type: ignore
 
+    @pytest.mark.parametrize("load_data", [False, True])
+    def test_init__downsample_regular_interval(self, tmp_path: pathlib.Path, load_data: bool) -> None:
+        """Checks that file opening downsampling keeps a constant interval."""
+
+        # Write input on dimensions not divisible by 6
+        values = np.arange(5_000, dtype=np.int32).reshape(50, 100)
+        source = gu.Raster.from_array(values, transform=rio.transform.from_origin(0, 50, 1, 1), crs=4326)
+        filename = tmp_path / "gradient.tif"
+        source.to_file(filename)
+
+        # Open with downsampling of 6
+        downsampled = gu.Raster(filename, downsample=6, load_data=load_data)
+        result = downsampled.data.data
+
+        # Check size is as expected, and values match the constant intervals
+        assert downsampled.shape == (8, 16)
+        assert np.all(np.diff(result, axis=0) == 600)
+        assert np.all(np.diff(result, axis=1) == 6)
+
+    @pytest.mark.parametrize("load_data", [False, True])
+    def test_init__downsample_uses_overview(self, tmp_path: pathlib.Path, load_data: bool) -> None:
+        """Checks that downsampling reads an overview when it can."""
+
+        # Write input for full array, then open with downsampling (without overview)
+        values = np.arange(5_000, dtype=np.int32).reshape(50, 100)
+        filename = tmp_path / "gradient.tif"
+        gu.Raster.from_array(values, rio.transform.from_origin(0, 50, 1, 1), 4326).to_file(filename)
+        without_overview = gu.Raster(filename, downsample=6, load_data=load_data).data.data.copy()
+
+        # Add overview for factors of 2 and 4, factor 4 should be the closest suitable overview
+        with rio.open(filename, "r+") as dataset:
+            dataset.build_overviews([2, 4], rio.enums.Resampling.nearest)
+
+        # Check that downsampling the new file uses the overview (slightly changes the sampled values)
+        # without changing the size/transform of the requested grid
+        downsampled = gu.Raster(filename, downsample=6, load_data=load_data)
+        result = downsampled.data.data
+        assert downsampled.shape == (8, 16)
+        assert downsampled.transform == rio.transform.from_origin(0, 50, 6, 6)
+        assert not np.array_equal(result, without_overview)
+
     def test_add_sub(self) -> None:
         """
         Test addition, subtraction and negation on a Raster object.

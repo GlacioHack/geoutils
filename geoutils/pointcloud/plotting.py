@@ -30,8 +30,12 @@ from geoutils._dispatch import (
     has_geo_attr,
     is_dask_dataframe,
 )
-from geoutils._misc import import_optional
 from geoutils.projtools import _get_bounds_projected
+from geoutils.vector.plotting import (
+    _create_axes,
+    _get_reference_bounds,
+    _plot_geodataframe,
+)
 
 if TYPE_CHECKING:
     import matplotlib
@@ -40,22 +44,6 @@ if TYPE_CHECKING:
 
 
 _AUTO_MAX_POINTS = 100_000
-
-
-def _create_axes(ax: matplotlib.axes.Axes | Literal["new"] | None) -> matplotlib.axes.Axes:
-    """Return the requested Matplotlib axes, creating them when needed."""
-
-    matplotlib = import_optional("matplotlib")
-    import matplotlib.pyplot as plt
-
-    if ax is None:
-        return plt.gca()
-    if isinstance(ax, str) and ax.lower() == "new":
-        _, new_axes = plt.subplots()
-        return new_axes
-    if isinstance(ax, matplotlib.axes.Axes):
-        return ax
-    raise ValueError("ax must be a matplotlib.axes.Axes instance, 'new' or None.")
 
 
 def _display_point_count(
@@ -87,14 +75,17 @@ def _prepare_display_pointcloud(
     ax: matplotlib.axes.Axes,
     max_points: Literal["auto"] | int | None,
     random_state: int | np.random.Generator | None,
-    ref_crs: Any,
-) -> tuple[PointCloudBase, Any]:
+    ref: Any,
+) -> tuple[PointCloudBase, Any, bool]:
     """
-    Select a bounded point sample and reproject it for plotting.
+    Select a point subsample and reproject it for plotting.
 
-    _display_point_count() translates the axes size to a point limit, subsample() selects the same rows for eager and
-    chunked inputs, and reproject() changes only the temporary sample. The returned bounds cover the complete source
-    so sampling does not crop sparse edge points from the axes.
+    Internal behaviour:
+    - _display_point_count() translates the axes size to a point limit,
+    - subsample() selects the same rows for eager and chunked inputs, and
+    - reproject() changes only the CRS of the subsample, if necessary.
+
+    The returned bounds are the one from the full source before subsampling to avoid over-cropping.
     """
 
     point_limit = _display_point_count(max_points, ax)
@@ -108,27 +99,34 @@ def _prepare_display_pointcloud(
 
     source_crs = None if source.crs is None else CRS.from_user_input(source.crs)
     target_crs = source_crs
-    if ref_crs is not None:
+    reference_bounds = None
+    match_reference_extent = False
+    if ref is not None:
         if source_crs is None:
             raise ValueError("A point cloud without a CRS cannot be plotted in a reference CRS.")
-        if has_geo_attr(ref_crs, "crs"):
-            target_crs = CRS.from_user_input(get_geo_attr(ref_crs, "crs"))
-            reprojected = display.reproject(ref=ref_crs)
+        if has_geo_attr(ref, "crs"):
+            target_crs = CRS.from_user_input(get_geo_attr(ref, "crs"))
+            reprojected = display.reproject(ref=ref)
+            reference_bounds = _get_reference_bounds(ref)
+            match_reference_extent = reference_bounds is not None
         else:
-            target_crs = CRS.from_user_input(ref_crs)
+            target_crs = CRS.from_user_input(ref)
             reprojected = display.reproject(crs=target_crs)
         display = _get_pointcloud_interface(reprojected)
 
-    display_bounds = source.bounds
-    if source_crs != target_crs:
+    if reference_bounds is not None:
+        display_bounds = reference_bounds
+    elif source_crs != target_crs:
         display_bounds = _get_bounds_projected(source.bounds, source.crs, target_crs)
-    return display, display_bounds
+    else:
+        display_bounds = source.bounds
+    return display, display_bounds, match_reference_extent
 
 
 def _plot_pointcloud(
     source: PointCloudBase,
     column: str | None = None,
-    ref_crs: Any = None,
+    ref: Any = None,
     cmap: matplotlib.colors.Colormap | str | None = None,
     vmin: float | int | None = None,
     vmax: float | int | None = None,
@@ -143,69 +141,54 @@ def _plot_pointcloud(
     **kwargs: Any,
 ) -> None | tuple[matplotlib.axes.Axes, matplotlib.axes.Axes | None]:
     """
-    Prepare a bounded point sample and draw it with GeoPandas and Matplotlib.
+    Prepare an optionally downsampled raster array and draw it with GeoPandas/Matplotlib.
 
     _create_axes() establishes the rendering dimensions before _prepare_display_pointcloud() selects and reprojects
     the temporary point rows. Only that sample is computed for GeoPandas plotting, while the full source bounds keep
     the axes extent representative of every input point.
     """
 
-    matplotlib = import_optional("matplotlib")
     import matplotlib.pyplot as plt
-    from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-    # Create axes before translating their size to an automatic point limit
+    # Create axes, then we estimate the number of points displayed from their size
     ax0 = _create_axes(ax)
-    display, display_bounds = _prepare_display_pointcloud(source, ax0, max_points, random_state, ref_crs)
+    display, display_bounds, match_reference_extent = _prepare_display_pointcloud(
+        source, ax0, max_points, random_state, ref
+    )
     dataframe = display.ds.compute() if is_dask_dataframe(display.ds) else display.ds
 
     if column is None:
         column = source.data_column
 
-    # Keep the existing colorbar controls used by PointCloud.plot()
-    legend = bool(add_cbar)
-    if "legend" in kwargs:
-        legend = kwargs.pop("legend")
-    if "legend_kwds" in kwargs and legend:
-        legend_kwds = kwargs.pop("legend_kwds")
-        if cbar_title is not None:
-            legend_kwds.update({"label": cbar_title})
-    elif cbar_title is not None:
-        legend_kwds = {"label": cbar_title}
-    else:
-        legend_kwds = None
-
-    # Add the separate GeoUtils colorbar when requested
-    cax = None
-    if add_cbar or cbar_title:
-        divider = make_axes_locatable(ax0)
-        cax = divider.append_axes("right", size="5%", pad="2%")
-        norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
-        cbar = matplotlib.colorbar.ColorbarBase(cax, cmap=cmap, norm=norm)
-        cbar.solids.set_alpha(alpha)
-
-    # Plot the selected points and retain the complete source extent
-    dataframe.plot(
+    # We plot after GeoPandas sets the map aspect so geographic colorbars remain next to the data axes
+    cax = _plot_geodataframe(
+        dataframe=dataframe,
         ax=ax0,
-        cax=cax,
         column=column,
         cmap=cmap,
         vmin=vmin,
         vmax=vmax,
         alpha=alpha,
-        legend=legend,
-        legend_kwds=legend_kwds,
+        cbar_title=cbar_title,
+        add_cbar=add_cbar,
         **kwargs,
     )
-    ax0.update_datalim(
-        np.array(
-            [
-                [display_bounds.left, display_bounds.bottom],
-                [display_bounds.right, display_bounds.top],
-            ]
+
+    # Use source bounds by default (for downsampled points), or use the complete
+    # reference extent when one was passed as input
+    if match_reference_extent:
+        ax0.set_xlim(display_bounds.left, display_bounds.right)
+        ax0.set_ylim(display_bounds.bottom, display_bounds.top)
+    else:
+        ax0.update_datalim(
+            np.array(
+                [
+                    [display_bounds.left, display_bounds.bottom],
+                    [display_bounds.right, display_bounds.top],
+                ]
+            )
         )
-    )
-    ax0.autoscale_view()
+        ax0.autoscale_view()
     plt.sca(ax0)
 
     if savefig_fname:
