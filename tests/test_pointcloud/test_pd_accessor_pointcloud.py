@@ -20,6 +20,18 @@ import geoutils.vector.pd_accessor as vector_pd_accessor
 from geoutils.multiproc import MultiprocConfig
 
 
+def _point_grid(size: int = 10) -> gpd.GeoDataFrame:
+    """Create a square point grid with one unique value per row."""
+
+    x = np.tile(np.arange(size), size)
+    y = np.repeat(np.arange(size), size)
+    return gpd.GeoDataFrame(
+        {"value": np.arange(size * size)},
+        geometry=gpd.points_from_xy(x, y),
+        crs=4326,
+    )
+
+
 class TestPointCloudAccessor:
     """Check that the Pandas ``pc`` accessor exposes PointCloud behavior and lazy Dask support."""
 
@@ -85,7 +97,6 @@ class TestPointCloudAccessor:
             lazy.compute().reset_index(drop=True),
             eager.reset_index(drop=True),
         )
-
 
     def test_accessor(self) -> None:
         """Expose point-cloud metadata, values and conversion through the accessor."""

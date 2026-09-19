@@ -194,7 +194,7 @@ def _plot_raster(
     - _create_axes() to determine the rendering dimensions,
     - then _prepare_display_raster() reprojects to that grid.
 
-    The selected bands are then aranged (single-band or RGB(A)), and passed to
+    The selected bands are then arranged (single-band or RGB(A)), and passed to
     Matplotlib together with the projected extent and optional colorbar.
     """
 

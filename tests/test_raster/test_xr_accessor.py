@@ -112,7 +112,6 @@ class TestAccessor:
         np.testing.assert_array_equal(computed.values, eager.values)
         assert not lazy._in_memory
 
-
     @pytest.mark.parametrize("path_raster", [landsat_b4_path, aster_dem_path])
     def test_copy(self, path_raster: str) -> None:
 

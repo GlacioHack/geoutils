@@ -21,6 +21,7 @@ import geoutils as gu
 from geoutils import PointCloud
 from geoutils._typing import NDArrayNum
 
+
 def _point_grid(size: int = 10) -> gpd.GeoDataFrame:
     """Create a square point grid with one unique value per row."""
 
