@@ -245,7 +245,7 @@ class TestPlot:
         with pytest.raises(ImportError, match="Optional dependency 'matplotlib' required"):
             raster.plot()
 
-
+@pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
 class TestPlotChunked:
     """Test module for lazy raster plotting: checks the out-of-memory computation, and equality with eager."""
 

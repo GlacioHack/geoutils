@@ -83,6 +83,8 @@ class TestPointCloudAccessor:
     def test_open_pointcloud__downsample_loading_laziness(self, tmp_path: Path) -> None:
         """Checks that chunked opening keeps the sample lazy and exactly matches eager opening."""
 
+        pytest.importorskip("dask_geopandas")
+
         # Open the same file eagerly and in Dask partitions
         # (with chunk size not multiple of downsampling factor to check potential edge effects)
         filename = tmp_path / "points.gpkg"
