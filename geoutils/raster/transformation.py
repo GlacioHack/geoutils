@@ -64,7 +64,6 @@ try:
     import dask.array as da
     from dask import delayed
 except ImportError:
-
     da = None
 
     def delayed(*args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -903,7 +902,6 @@ def _crop(
     tfm = rio.transform.from_origin(new_xmin, new_ymax, *source_raster.res)
 
     if source_raster._is_xr:
-
         (rowmin, rowmax), (colmin, colmax) = final_window.toranges()
         assert source_raster._obj is not None
         crop_img = source_raster._obj.isel(y=slice(rowmin, rowmax), x=slice(colmin, colmax))
@@ -914,7 +912,6 @@ def _crop(
         crop_img = source_raster.data[..., rowmin:rowmax, colmin:colmax]
 
     else:
-
         assert source_raster._disk_shape is not None  # This should not be the case, sanity check to make mypy happy
 
         # If data was not loaded, and self's transform was updated (e.g. due to downsampling) need to

@@ -56,7 +56,6 @@ try:
     from dask import delayed
     from dask.utils import cached_cumsum
 except ImportError:
-
     da = None
 
     def delayed(*args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -161,7 +160,6 @@ def _get_indices_block_per_subsample(indices_1d: NDArrayNum, nb_valids_per_block
     relative_index_per_block = [[] for _ in nb_valids_per_block]
     k = 0  # K is the block number
     for i in indices_1d:
-
         # Move to the next block K where current 1D subsample index is, if not in this one
         while i >= valids_cumsum[k]:
             k += 1
@@ -650,7 +648,6 @@ def _subsample_numpy(
 
     # STRATEGY 1: "sequential", we use a random order for the index of valid values
     if strategy == "sequential":
-
         rng = np.random.default_rng(random_state)
         # Choose random indexes among all valids
         chosen = rng.choice(valids, subsample_size, replace=False)
@@ -1259,7 +1256,6 @@ def _dask_subsample(
 
     # 2C/ Select bounded "topk" candidates from every block
     elif strategy == "topk":
-
         # Convert random_state to an integer seed for deterministic key generation
         seed = _resolve_topk_seed(random_state)
 
@@ -2119,7 +2115,6 @@ def _multiproc_subsample(
 
     # 2C/ Select bounded "topk" candidates from every tile
     elif strategy == "topk":
-
         # Convert random_state to an integer seed used in deterministic keys
         seed = _resolve_topk_seed(random_state)
 

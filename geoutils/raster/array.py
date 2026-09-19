@@ -151,7 +151,7 @@ def get_array_and_mask(
     if check_shape:
         if array.ndim > 2 and array.shape[0] > 1:
             raise ValueError(
-                f"Invalid array shape given: {array.shape}." "Expected 2D array or 3D array where arr.shape[0] == 1"
+                f"Invalid array shape given: {array.shape}.Expected 2D array or 3D array where arr.shape[0] == 1"
             )
 
     # If an occupied mask exists and a view was requested, trigger a warning.

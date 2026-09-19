@@ -570,7 +570,6 @@ class TestClassVsAccessorConsistency:
 
         # For a raster-type output (reprojection, rasterize, create_mask, proximity, etc...)
         if isinstance(output_raster, Raster):
-
             # 1/ For Dask object: both inputs and outputs should be unloaded + lazy, and compute
             # Input
             assert not ds._in_memory
@@ -601,7 +600,6 @@ class TestClassVsAccessorConsistency:
 
         # For an array-type output (interpolation, subsampling, reduction, ...)
         elif isinstance(output_raster, np.ndarray):
-
             # 1/ For Dask object: both inputs and outputs should be unloaded + lazy, and compute
             # Input
             assert not ds._in_memory

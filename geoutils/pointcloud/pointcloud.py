@@ -236,7 +236,6 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         # For filename, rely on parent Vector class or LAS file reader
         else:
             if isinstance(filename_or_dataset, (str, pathlib.Path)) and _is_laspy_supported(filename_or_dataset):
-
                 self._is_las = True
                 # No need to pass a data column for LAS/LAZ file, as Z is the logical default
                 if data_column is None:
@@ -259,14 +258,13 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
                 if not self.is_loaded:
                     if self._geometry_type is not None and "Point" not in self._geometry_type:
                         raise ValueError(
-                            "This vector file contains non-point geometries, "
-                            "cannot be instantiated as a point cloud."
+                            "This vector file contains non-point geometries, cannot be instantiated as a point cloud."
                         )
                     self.__nongeo_columns = pd.Index([c for c in Vector.columns.fget(self) if c != "geometry"])
                     self._nb_points = self._feature_count if self._feature_count is not None else -1
                 elif not all(p == "Point" for p in self.ds.geom_type):
                     raise ValueError(
-                        "This vector file contains non-point geometries, " "cannot be instantiated as a point cloud."
+                        "This vector file contains non-point geometries, cannot be instantiated as a point cloud."
                     )
 
         # Set data column name based on user input
@@ -576,7 +574,6 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
 
         # If the universal function takes two inputs (Note: no ufunc exists that has three inputs or more)
         else:
-
             # Check the casting between Point cloud and array inputs, and return error messages if not consistent
 
             # Raise errors if necessary
@@ -1030,7 +1027,9 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
     def __and__(self: PointCloud, other: PointCloud | NDArrayBool) -> PointCloud:
         """Bitwise and between masks, or a mask and an array."""
         other_data = _cast_numeric_array_pointcloud(
-            self, other, operation_name="an arithmetic operation"  # type: ignore
+            self,
+            other,
+            operation_name="an arithmetic operation",  # type: ignore
         )
 
         return self.copy(self.data & other_data)  # type: ignore
@@ -1044,7 +1043,9 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         """Bitwise or between masks, or a mask and an array."""
 
         other_data = _cast_numeric_array_pointcloud(
-            self, other, operation_name="an arithmetic operation"  # type: ignore
+            self,
+            other,
+            operation_name="an arithmetic operation",  # type: ignore
         )
 
         return self.copy(self.data | other_data)  # type: ignore
@@ -1058,7 +1059,9 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         """Bitwise xor between masks, or a mask and an array."""
 
         other_data = _cast_numeric_array_pointcloud(
-            self, other, operation_name="an arithmetic operation"  # type: ignore
+            self,
+            other,
+            operation_name="an arithmetic operation",  # type: ignore
         )
 
         return self.copy(self.data ^ other_data)  # type: ignore

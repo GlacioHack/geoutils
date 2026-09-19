@@ -60,7 +60,6 @@ def _proximity_from_vector_or_raster(
     # 1/ First, if there is a vector input, we rasterize the geometry type
     # (works with .boundary that is a LineString (.exterior exists, but is a LinearRing)
     if vector is not None:
-
         # Only when using centroid... Maybe we should leave this operation to the user anyway?
         warnings.filterwarnings("ignore", message="Geometry is in a geographic CRS.*")
 

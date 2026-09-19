@@ -54,7 +54,6 @@ def run_gdal_proximity(
 
 
 class TestDistance:
-
     landsat_b4_path = gu.examples.get_path_test("everest_landsat_b4")
     landsat_b4_crop_path = gu.examples.get_path_test("everest_landsat_b4_cropped")
     everest_outlines_path = gu.examples.get_path_test("everest_rgi_outlines")

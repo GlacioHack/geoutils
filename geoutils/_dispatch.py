@@ -116,7 +116,7 @@ def get_geo_attr(obj: Any, attr_name: str, accessors: Sequence[str] = ("rst", "v
 
     # Fallback
     raise AttributeError(
-        f"Attribute '{attr_name}' not found on object {type(obj)} " f"or its potential accessors {accessors}."
+        f"Attribute '{attr_name}' not found on object {type(obj)} or its potential accessors {accessors}."
     )
 
 
@@ -187,7 +187,7 @@ def _check_crs(crs: Any) -> pyproj.CRS:
 
 
 def _check_bounds(
-    bbox: rio.coords.BoundingBox | tuple[Number, Number, Number, Number] | pd.DataFrame | dict[str, float]
+    bbox: rio.coords.BoundingBox | tuple[Number, Number, Number, Number] | pd.DataFrame | dict[str, float],
 ) -> tuple[Number, Number, Number, Number]:
     """Helper function to check bounds value when provided as a sequence or bounding box object."""
 
@@ -214,7 +214,7 @@ def _check_bounds(
         for k, v in bbox.items():
             if not isinstance(v, (int, float)):
                 raise InvalidBoundsError(
-                    f"Bounding box dictionary value for {k!r} must be numeric, got" f" {type(v).__name__}."
+                    f"Bounding box dictionary value for {k!r} must be numeric, got {type(v).__name__}."
                 )
         xmin, ymin, xmax, ymax = bbox["left"], bbox["bottom"], bbox["right"], bbox["top"]
 
@@ -268,7 +268,7 @@ def _check_resolution(res: Number | tuple[Number, Number]) -> tuple[Number, Numb
         # Should be a sequence of two
         if len(res) != 2:
             raise InvalidResolutionError(
-                f"Resolution must be a number or a sequence of two numbers, " f"got a sequence of length {len(res)}."
+                f"Resolution must be a number or a sequence of two numbers, got a sequence of length {len(res)}."
             )
 
         # Should be numeric values
@@ -284,7 +284,7 @@ def _check_resolution(res: Number | tuple[Number, Number]) -> tuple[Number, Numb
         # Should be strictly positive
         if xres <= 0 or yres <= 0:
             raise InvalidResolutionError(
-                f"Resolution values must be strictly positive, " f"got (xres={xres}, yres={yres})."
+                f"Resolution values must be strictly positive, got (xres={xres}, yres={yres})."
             )
 
         return float(xres), float(yres)
@@ -368,7 +368,7 @@ def _check_coords(coords: tuple[NDArrayNum, NDArrayNum]) -> tuple[tuple[NDArrayN
     dy = np.diff(y)
 
     if not (np.allclose(dx, dx[0]) and np.allclose(dy, dy[0])):
-        raise InvalidGridError("Grid coordinates must be regular " "(equally spaced independently along x and y).")
+        raise InvalidGridError("Grid coordinates must be regular (equally spaced independently along x and y).")
 
     return (x, y), (dx[0], dy[0])
 
@@ -392,8 +392,11 @@ def _check_match_points(
     # If points implements "bounds" and "crs"
     if has_geo_attr(points, "geometry") and has_geo_attr(points, "crs"):
         crs = get_geo_attr(points, "crs")
+        point_geometry = points.geometry  # type: ignore[union-attr]
         pts = reproject_points(
-            (points.geometry.x.values, points.geometry.y.values), in_crs=crs, out_crs=src.crs  # type: ignore
+            (point_geometry.x.values, point_geometry.y.values),
+            in_crs=crs,
+            out_crs=src.crs,
         )
         input_scalar = False
 
@@ -407,7 +410,7 @@ def _check_match_points(
         # Needs to be a sequence of length 2
         if not isinstance(points, Sequence) or len(points) != 2:
             raise InvalidPointsError(
-                f"Expected a sequence of two array-like objects (x, y), " f"got object of type {type(points).__name__}."
+                f"Expected a sequence of two array-like objects (x, y), got object of type {type(points).__name__}."
             )
 
         # Get each member of the sequence of 2
@@ -435,8 +438,7 @@ def _check_match_points(
 
         if x_arr.shape[0] != y_arr.shape[0]:
             raise InvalidPointsError(
-                f"Point coordinates must have the same length, got lengths of {x_arr.shape[0]}"
-                f" and {y_arr.shape[0]}."
+                f"Point coordinates must have the same length, got lengths of {x_arr.shape[0]} and {y_arr.shape[0]}."
             )
 
         pts = x_arr, y_arr
@@ -572,7 +574,6 @@ def _grid_from_src(
             & ((res is None) | (res == src.res))
             & ((bounds is None) | (bounds == src.bounds))
         ):
-
             return src.shape, src.transform
 
     # If there is no input grid (i.e. no resampling involved), just build output grid directly from user inputs
@@ -700,7 +701,6 @@ def _check_match_grid(
     # Case 1: If reference is passed
     ################################
     if ref is not None:
-
         if crs is not None:
             raise InvalidGridError("Either 'ref' or 'crs' must be provided, not both.")
 
@@ -799,7 +799,6 @@ def _check_match_grid(
     # Case 2: No reference is passed, only manual arguments (fallbacks on source)
     #############################################################################
     else:
-
         # Get output CRS, fallback to source
         if crs is not None:
             dst_crs = _check_crs(crs)
@@ -810,7 +809,6 @@ def _check_match_grid(
         if (res is not None or shape is not None or hasattr(src, "res")) and (
             bounds is not None or hasattr(src, "bounds")
         ):
-
             # If both res and shape passed, raise error
             if res is not None and shape is not None:
                 raise InvalidGridError(
@@ -827,7 +825,6 @@ def _check_match_grid(
             # If coords exists, other arguments were insufficient to define a full grid (or would have failed above)
             # So we trigger fallback, but coords takes priority over fallback, so we skip if it exists
             if coords is None:
-
                 # If user-input was passed
                 if res is not None and bounds is not None:
                     logging.debug("Match grid input: using bounds and resolution to derive grid.")
@@ -848,7 +845,6 @@ def _check_match_grid(
 
         # If coordinates are defined
         if coords is not None:
-
             # Get redundant arguments (that could never define a full grid based on checks above)
             redundant = {
                 "res": res is not None,

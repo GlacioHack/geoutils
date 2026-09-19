@@ -696,7 +696,7 @@ def make_chunked_subsample_diagram() -> tuple[plt.Figure, np.ndarray]:
     ax_top.text(
         NCOLS / 2,
         0.97,
-        f"User input: subsample = {USER_SUBSAMPLE:g} " f"({USER_SUBSAMPLE * 100:g}% of valid values)",
+        f"User input: subsample = {USER_SUBSAMPLE:g} ({USER_SUBSAMPLE * 100:g}% of valid values)",
         transform=ax_top.get_xaxis_transform(),
         ha="center",
         va="bottom",
@@ -845,7 +845,7 @@ def make_chunked_subsample_diagram() -> tuple[plt.Figure, np.ndarray]:
     ax_br.text(
         0.5,
         -0.02,
-        f"A random draw of N = {k} flattened\nvalid indexes is applied,\n" "fast selection but depends on chunking",
+        f"A random draw of N = {k} flattened\nvalid indexes is applied,\nfast selection but depends on chunking",
         transform=ax_br.transAxes,
         ha="center",
         va="top",

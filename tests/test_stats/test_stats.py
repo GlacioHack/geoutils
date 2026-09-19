@@ -413,7 +413,6 @@ class TestStats:
             stats_masked = pointcloud.stats("all")
         assert len(stats_masked) == len(_STATS_ALIAS_GEN)
         for name in _STATS_ALIAS_CALLABLE.values():
-
             assert np.isnan(stats_masked.get(name))
         assert stats_masked.get("Valid count") == 0
         assert stats_masked.get("Total count") == 0

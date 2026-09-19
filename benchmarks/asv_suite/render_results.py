@@ -896,7 +896,7 @@ def _group_operation_rows(rows: list[tuple[Comparison, str]], *, column_count: i
         rendered_rows += len(selected)
         bodies.append(
             f'<tbody><tr class="operation-group"><th colspan="{column_count}" scope="rowgroup">{group}</th></tr>'
-            f'{"".join(selected)}</tbody>'
+            f"{''.join(selected)}</tbody>"
         )
     if rendered_rows != len(rows):
         raise ValueError("Every benchmark operation must belong to one input/output group")

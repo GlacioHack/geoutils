@@ -24,7 +24,6 @@ DO_PLOT = False
 
 
 class TestPointCloud:
-
     # 1/ Synthetic 2D points with main column and no auxiliary column
     rng = np.random.default_rng(42)
     arr_points = rng.integers(low=1, high=1000, size=(100, 3)) + rng.normal(0, 0.15, size=(100, 3))
@@ -1462,9 +1461,7 @@ class TestArrayInterface:
         # assert np.ma.allequal(outputs_ma[0], outputs_pc[0].data) and np.ma.allequal(
         #             outputs_ma[1], outputs_pc[1].data)
 
-    @pytest.mark.parametrize(
-        "np_func_name", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout + handled_functions_2in
-    )  # type: ignore
+    @pytest.mark.parametrize("np_func_name", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout + handled_functions_2in)  # type: ignore
     def test_raise_errors_2nin(self, np_func_name: str) -> None:
         """Check that proper errors are raised when input pointcloud/array don't match (only 2-input functions)."""
 
@@ -1480,7 +1477,6 @@ class TestArrayInterface:
         # Strange errors happening only for these 4 functions...
         # See issue #457
         if np_func_name not in ["allclose", "isclose", "array_equal", "array_equiv"]:
-
             # Point clouds with different CRS or shape
             # Different shape
             georef_twopc_message = (

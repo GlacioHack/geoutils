@@ -68,7 +68,6 @@ def _regular_pointcloud_to_raster(
 
     # Get transform and shape from input
     if grid_coords is not None:
-
         # Input checks
         if (
             not isinstance(grid_coords, tuple)
@@ -94,7 +93,6 @@ def _regular_pointcloud_to_raster(
         out_shape = (len(grid_coords[1]), len(grid_coords[0]))
 
     elif transform is not None and shape is not None:
-
         out_transform = transform
         out_shape = shape
 

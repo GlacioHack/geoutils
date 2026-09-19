@@ -204,8 +204,7 @@ def open_pointcloud(
     metadata = _load_laspy_metadata(filename)
     if data_column not in metadata.columns:
         raise ValueError(
-            f"Data column {data_column} not found among columns. Available columns are: "
-            f"{', '.join(metadata.columns)}."
+            f"Data column {data_column} not found among columns. Available columns are: {', '.join(metadata.columns)}."
         )
     columns_to_load = _resolve_las_columns(
         columns=columns,

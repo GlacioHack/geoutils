@@ -7,9 +7,8 @@ import numpy as np
 import rasterio as rio
 from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
-from matplotlib.patches import ConnectionPatch, FancyArrowPatch
+from matplotlib.patches import ConnectionPatch, FancyArrowPatch, Rectangle
 from matplotlib.patches import Polygon as MplPolygon
-from matplotlib.patches import Rectangle
 from shapely.geometry import Polygon, box
 
 from geoutils.interface.rasterization import _rasterio_rasterize_burn
@@ -205,7 +204,6 @@ def draw_polygon_ids(
 ) -> None:
     """Draw polygon IDs at their centroid."""
     for i, poly in enumerate(polygons):
-
         is_candidate = True if candidate_mask is None else candidate_mask[i]
 
         cx, cy = poly.centroid.coords[0]

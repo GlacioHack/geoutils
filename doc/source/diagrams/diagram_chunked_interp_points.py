@@ -660,7 +660,7 @@ def make_chunked_interp_points_diagram() -> tuple[plt.Figure, np.ndarray]:
     ax_br.text(
         0.5,
         -0.05,
-        f"Loop on expanded raster chunks to interpolate\n" f"(overlap size depends on resampling method)",
+        f"Loop on expanded raster chunks to interpolate\n(overlap size depends on resampling method)",
         transform=ax_br.transAxes,
         ha="center",
         va="top",

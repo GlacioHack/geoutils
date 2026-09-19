@@ -628,7 +628,6 @@ def _chunked_label_block_per_value(
     next_id = 1  # Label counter within block
 
     for v in uniq:
-
         # Select mask pixels of this value
         sel = m & (vQ == v)
         if not sel.any():
@@ -1259,7 +1258,9 @@ def _chunked_polygonize_block_labels(
 
     # Map label -> value using dict; dict is typically fine (uniq_labs count ~= polygons)
     out_dtype = np.asarray(values).dtype
-    lab2val = {int(l): _canon_scalar(rep_vals[i], atol=float_tol, out_dtype=out_dtype) for i, l in enumerate(uniq_labs)}
+    lab2val = {
+        int(label): _canon_scalar(rep_vals[i], atol=float_tol, out_dtype=out_dtype) for i, label in enumerate(uniq_labs)
+    }
 
     # 2/ Polygonize label raster and attach values via lookup.
     feats: list[dict[str, Any]] = []
@@ -2017,7 +2018,6 @@ def _chunked_polygonize_core(
 
     # 3) Stitch polygons
     if prepared.strategy == "label_union":
-
         # Global ids already attached; just dissolve
         out = gdf.dissolve(by=prepared.id_column, as_index=False, aggfunc="first")
         return out.reset_index(drop=True)
