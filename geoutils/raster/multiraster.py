@@ -107,7 +107,7 @@ def load_multiple_rasters(
             new_bounds = align_bounds(ref_rst.transform, intersection)
             new_bounds = {"left": new_bounds[0], "bottom": new_bounds[1], "right": new_bounds[2], "top": new_bounds[3]}
         else:
-            new_bounds = ref_rst.bounds
+            new_bounds = ref_rst.bbox
 
         # Reproject all rasters
         for index, rst in enumerate(output_rst):
@@ -171,7 +171,7 @@ def stack_rasters(
 
     # Set output bounds
     if use_ref_bounds:
-        dst_bounds = reference_raster.bounds
+        dst_bounds = reference_raster.bbox
     else:
         dst_bounds = merge_bounds(
             [raster.get_bounds_projected(out_crs=reference_raster.crs) for raster in rasters],
@@ -330,7 +330,7 @@ def merge_rasters(
     merged_raster = reference_raster.from_array(
         data=np.reshape(merged_data, (len(merged_data),) + merged_data[0].shape),
         transform=rio.transform.from_bounds(
-            *raster_stack.bounds, width=merged_data[0].shape[1], height=merged_data[0].shape[0]
+            *raster_stack.bbox, width=merged_data[0].shape[1], height=merged_data[0].shape[0]
         ),
         crs=reference_raster.crs,
         nodata=nodata,

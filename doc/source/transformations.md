@@ -69,8 +69,8 @@ vect_reproj = vect.reproject(rast)
 # Reproject raster to smaller bounds and different X/Y resolution
 rast_reproj = rast.reproject(
     res=(rast.res[0] * 2, rast.res[1] / 2),
-    bounds={"left": rast.bounds.left, "bottom": rast.bounds.bottom,
-            "right": rast.bounds.left + 10000, "top": rast.bounds.bottom + 10000},
+    bounds={"left": rast.bbox.left, "bottom": rast.bbox.bottom,
+            "right": rast.bbox.left + 10000, "top": rast.bbox.bottom + 10000},
     resampling="cubic")
 ```
 
@@ -223,14 +223,14 @@ be set to that of any reference raster (defaults to the extent that contains exa
 :  code_prompt_hide: "Show the code for creating multiple raster pieces"
 
 # Get 4 cropped bits from initial rasters
-rast1 = rast.crop((rast.bounds.left + 1000, rast.bounds.bottom + 1000,
-                   rast.bounds.left + 3000, rast.bounds.bottom + 3000))
-rast2 = rast.crop((rast.bounds.left + 3000, rast.bounds.bottom + 1000,
-                   rast.bounds.left + 5000, rast.bounds.bottom + 3000))
-rast3 = rast.crop((rast.bounds.left + 1000, rast.bounds.bottom + 3000,
-                   rast.bounds.left + 3000, rast.bounds.bottom + 5000))
-rast4 = rast.crop((rast.bounds.left + 3000, rast.bounds.bottom + 3000,
-                   rast.bounds.left + 5000, rast.bounds.bottom + 5000))
+rast1 = rast.crop((rast.bbox.left + 1000, rast.bbox.bottom + 1000,
+                   rast.bbox.left + 3000, rast.bbox.bottom + 3000))
+rast2 = rast.crop((rast.bbox.left + 3000, rast.bbox.bottom + 1000,
+                   rast.bbox.left + 5000, rast.bbox.bottom + 3000))
+rast3 = rast.crop((rast.bbox.left + 1000, rast.bbox.bottom + 3000,
+                   rast.bbox.left + 3000, rast.bbox.bottom + 5000))
+rast4 = rast.crop((rast.bbox.left + 3000, rast.bbox.bottom + 3000,
+                   rast.bbox.left + 5000, rast.bbox.bottom + 5000))
 # Reproject some in other CRS, with other resolution
 #rast3 = rast3.reproject(crs=4326, res=rast.res[0] * 3)
 #rast4 = rast4.reproject(crs=32610, res=rast.res[0] / 3)

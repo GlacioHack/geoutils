@@ -9,6 +9,7 @@ from importlib.util import find_spec
 import geopandas as gpd
 import numpy as np
 import pytest
+import rasterio as rio
 import xarray as xr
 from geopandas.testing import assert_geodataframe_equal
 from pyproj import CRS
@@ -52,6 +53,18 @@ class TestVectorAccessor:
         assert_geodataframe_equal(reprojected.compute(), expected)
         assert not ds.vct.is_loaded
         assert not reprojected.vct.is_loaded
+
+    def test_bbox__dask_geopandas(self) -> None:
+        """Checks that a lazy vector reads its bounding box without replacing its Dask collection."""
+
+        # Open the same features through lazy and eager GeoPandas representations
+        pytest.importorskip("dask_geopandas")
+        lazy = gu.open_vector(self.aster_outlines_path, chunks=1)
+        eager = gu.open_vector(self.aster_outlines_path)
+
+        # Compute the total bounding box while keeping the accessor backed by Dask
+        assert lazy.vct.bbox == rio.coords.BoundingBox(*eager.total_bounds)
+        assert not lazy.vct.is_loaded
 
     def test_translate_vector__dask_geopandas(self) -> None:
         """Translate vector partitions lazily and match the eager accessor result."""

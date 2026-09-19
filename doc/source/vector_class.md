@@ -29,7 +29,7 @@ In short, {class}`~geoutils.Vector` is a "convenience" composition class built o
 directly on the {class}`~geopandas.GeoDataFrame`. Dataframe functionalities from Pandas can be called from its {attr}`~geoutils.Vector.ds`.
 
 ```{caution}
-The {attr}`~geoutils.Vector.bounds` attribute of a {class}`~geoutils.Vector` corresponds to the {attr}`~geopandas.GeoDataFrame.total_bounds` attribute of a
+The {attr}`~geoutils.Vector.bbox` attribute of a {class}`~geoutils.Vector` corresponds to the {attr}`~geopandas.GeoDataFrame.total_bounds` attribute of a
 {class}`~geopandas.GeoDataFrame` converted to a {class}`rasterio.coords.BoundingBox`, for consistency between rasters and vectors.
 
 The equivalent of {attr}`geopandas.GeoDataFrame.bounds` (i.e., a per-feature bounds) for {class}`Vectors<geoutils.Vector>` is {attr}`~geoutils.Vector.geom_bounds`.
@@ -152,7 +152,7 @@ Calling {func}`geoutils.Vector.to_crs` is also possible, but mirrors GeoPandas' 
 
 ## Crop
 
-Cropping a {class}`~geoutils.Vector` is done through the {func}`~geoutils.Vector.crop` function, which enforces new {attr}`~geoutils.Vector.bounds`.
+Cropping a {class}`~geoutils.Vector` is done through the {func}`~geoutils.Vector.crop` function, which enforces new {attr}`~geoutils.Vector.bbox`.
 
 
 ```{important}

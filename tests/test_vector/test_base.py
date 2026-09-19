@@ -81,6 +81,24 @@ class TestClassVsAccessorConsistency:
     # Methods tested separately because their output contains class/accessor specific filenames
     methods_exceptions = ["info"]
 
+    def test_geo_interface__features_and_bbox(self) -> None:
+        """Checks that a vector exposes its geometries, columns and total bounding box."""
+
+        # Create matching class and accessor representations of the same three polygon features
+        vector = Vector(self.ds)
+        ds = self.ds.copy()
+        expected_bbox = rio.coords.BoundingBox(left=0, bottom=0, right=7, top=7)
+        expected_interface = ds.__geo_interface__
+
+        # Check the common name and compatibility alias for the total bounding box
+        assert vector.bbox == expected_bbox
+        assert vector.bounds == expected_bbox
+        assert ds.vct.bbox == expected_bbox
+        assert ds.vct.bounds == expected_bbox
+
+        # Check that the interface preserves every geometry and the integer feature column
+        assert vector.__geo_interface__ == expected_interface
+
     @pytest.mark.parametrize("prop", properties)
     def test_properties__equality(self, prop: str) -> None:
         """

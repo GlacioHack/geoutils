@@ -33,7 +33,7 @@ from geoutils._dispatch import (
 from geoutils.projtools import _get_bounds_projected
 from geoutils.vector.plotting import (
     _create_axes,
-    _get_reference_bounds,
+    _get_reference_bbox,
     _plot_geodataframe,
 )
 
@@ -85,7 +85,7 @@ def _prepare_display_pointcloud(
     - subsample() selects the same rows for eager and chunked inputs, and
     - reproject() changes only the CRS of the subsample, if necessary.
 
-    The returned bounds are the one from the full source before subsampling to avoid over-cropping.
+    The returned bounding box is the one from the full source before subsampling to avoid over-cropping.
     """
 
     point_limit = _display_point_count(max_points, ax)
@@ -99,7 +99,7 @@ def _prepare_display_pointcloud(
 
     source_crs = None if source.crs is None else CRS.from_user_input(source.crs)
     target_crs = source_crs
-    reference_bounds = None
+    reference_bbox = None
     match_reference_extent = False
     if ref is not None:
         if source_crs is None:
@@ -107,20 +107,20 @@ def _prepare_display_pointcloud(
         if has_geo_attr(ref, "crs"):
             target_crs = CRS.from_user_input(get_geo_attr(ref, "crs"))
             reprojected = display.reproject(ref=ref)
-            reference_bounds = _get_reference_bounds(ref)
-            match_reference_extent = reference_bounds is not None
+            reference_bbox = _get_reference_bbox(ref)
+            match_reference_extent = reference_bbox is not None
         else:
             target_crs = CRS.from_user_input(ref)
             reprojected = display.reproject(crs=target_crs)
         display = _get_pointcloud_interface(reprojected)
 
-    if reference_bounds is not None:
-        display_bounds = reference_bounds
+    if reference_bbox is not None:
+        display_bbox = reference_bbox
     elif source_crs != target_crs:
-        display_bounds = _get_bounds_projected(source.bounds, source.crs, target_crs)
+        display_bbox = _get_bounds_projected(source.bbox, source.crs, target_crs)
     else:
-        display_bounds = source.bounds
-    return display, display_bounds, match_reference_extent
+        display_bbox = source.bbox
+    return display, display_bbox, match_reference_extent
 
 
 def _plot_pointcloud(
@@ -144,15 +144,15 @@ def _plot_pointcloud(
     Prepare an optionally downsampled raster array and draw it with GeoPandas/Matplotlib.
 
     _create_axes() establishes the rendering dimensions before _prepare_display_pointcloud() selects and reprojects
-    the temporary point rows. Only that sample is computed for GeoPandas plotting, while the full source bounds keep
-    the axes extent representative of every input point.
+    the temporary point rows. Only that sample is computed for GeoPandas plotting, while the full source bounding box
+    keeps the axes extent representative of every input point.
     """
 
     import matplotlib.pyplot as plt
 
     # Create axes, then we estimate the number of points displayed from their size
     ax0 = _create_axes(ax)
-    display, display_bounds, match_reference_extent = _prepare_display_pointcloud(
+    display, display_bbox, match_reference_extent = _prepare_display_pointcloud(
         source, ax0, max_points, random_state, ref
     )
     dataframe = display.ds.compute() if is_dask_dataframe(display.ds) else display.ds
@@ -174,17 +174,17 @@ def _plot_pointcloud(
         **kwargs,
     )
 
-    # Use source bounds by default (for downsampled points), or use the complete
+    # Use the source bounding box by default (for downsampled points), or use the complete
     # reference extent when one was passed as input
     if match_reference_extent:
-        ax0.set_xlim(display_bounds.left, display_bounds.right)
-        ax0.set_ylim(display_bounds.bottom, display_bounds.top)
+        ax0.set_xlim(display_bbox.left, display_bbox.right)
+        ax0.set_ylim(display_bbox.bottom, display_bbox.top)
     else:
         ax0.update_datalim(
             np.array(
                 [
-                    [display_bounds.left, display_bounds.bottom],
-                    [display_bounds.right, display_bounds.top],
+                    [display_bbox.left, display_bbox.bottom],
+                    [display_bbox.right, display_bbox.top],
                 ]
             )
         )

@@ -80,7 +80,7 @@ from geoutils.projtools import (
     merge_bounds,
 )
 from geoutils.raster.referencing import (
-    _bounds,
+    _bbox,
     _coords,
     _default_nodata,
     _ij2xy,
@@ -650,9 +650,15 @@ class RasterBase(ABC):
         return _res(self.transform)
 
     @property
+    def bbox(self) -> rio.coords.BoundingBox:
+        """Bounding box of the raster."""
+        return _bbox(transform=self.transform, shape=self.shape)
+
+    @property
     def bounds(self) -> rio.coords.BoundingBox:
-        """Bounding coordinates of the raster."""
-        return _bounds(transform=self.transform, shape=self.shape)
+        """Bounding box of the raster, provided as an alias of bbox."""
+
+        return self.bbox
 
     @property
     def footprint(self) -> Vector:
@@ -749,8 +755,8 @@ class RasterBase(ABC):
             f"Nodata value:         {self.nodata}",
             f"Pixel interpretation: {self.area_or_point}",
             "Pixel size:           {}, {}".format(*self.res),
-            f"Upper left corner:    {self.bounds.left}, {self.bounds.top}",
-            f"Lower right corner:   {self.bounds.right}, {self.bounds.bottom}",
+            f"Upper left corner:    {self.bbox.left}, {self.bbox.top}",
+            f"Lower right corner:   {self.bbox.right}, {self.bbox.bottom}",
         ]
 
         if stats:
@@ -1233,7 +1239,7 @@ class RasterBase(ABC):
         densify_points = min(max(self.width, self.height), densify_points)
 
         # Calculate new bounds
-        new_bounds = _get_bounds_projected(self.bounds, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points)
+        new_bounds = _get_bounds_projected(self.bbox, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points)
 
         return new_bounds
 
@@ -1253,7 +1259,7 @@ class RasterBase(ABC):
         from geoutils.vector import Vector
 
         footprint = _get_footprint_projected(
-            bounds=self.bounds, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points
+            bounds=self.bbox, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points
         )
         if self._is_xr:
             return footprint  # type: ignore[return-value]
@@ -1303,7 +1309,7 @@ class RasterBase(ABC):
         )
 
         # Calculate intersection of bounding boxes
-        intersection = merge_bounds([self.bounds, raster_bounds_sameproj], merging_algorithm="intersection")
+        intersection = merge_bounds([self.bbox, raster_bounds_sameproj], merging_algorithm="intersection")
 
         # Check that intersection is not void (changed to NaN instead of empty tuple end 2022)
         if intersection == () or all(math.isnan(i) for i in intersection):

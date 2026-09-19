@@ -238,8 +238,8 @@ class VectorBase(ABC):
             + str_ds
             + "\n  crs="
             + self.crs.__str__()
-            + "\n  bounds="
-            + self.bounds.__str__()
+            + "\n  bbox="
+            + self.bbox.__str__()
             + ")"
         )
 
@@ -256,8 +256,8 @@ class VectorBase(ABC):
             + str_ds
             + "\n  <b>crs=</b>"
             + self.crs.__str__()
-            + "\n  <b>bounds=</b>"
-            + self.bounds.__repr__()
+            + "\n  <b>bbox=</b>"
+            + self.bbox.__repr__()
             + ")</span></pre>"
         )
 
@@ -316,15 +316,15 @@ class VectorBase(ABC):
 
         from geoutils.vector.plotting import (
             _create_axes,
-            _get_reference_bounds,
+            _get_reference_bbox,
             _plot_geodataframe,
         )
 
-        reference_bounds = None
+        reference_bbox = None
         if has_geo_attr(ref, "crs"):
             crs = get_geo_attr(ref, "crs")
             vect_reproj = self.reproject(crs=crs)
-            reference_bounds = _get_reference_bounds(ref)
+            reference_bbox = _get_reference_bbox(ref)
         elif isinstance(ref, (CRS, str, int)):
             vect_reproj = self.reproject(crs=ref)
         else:
@@ -345,9 +345,9 @@ class VectorBase(ABC):
             add_cbar=add_cbar,
             **kwargs,
         )
-        if reference_bounds is not None:
-            ax0.set_xlim(reference_bounds.left, reference_bounds.right)
-            ax0.set_ylim(reference_bounds.bottom, reference_bounds.top)
+        if reference_bbox is not None:
+            ax0.set_xlim(reference_bbox.left, reference_bbox.right)
+            ax0.set_ylim(reference_bbox.bottom, reference_bbox.top)
         plt.sca(ax0)
 
         if savefig_fname:
@@ -364,10 +364,21 @@ class VectorBase(ABC):
         return self.ds.total_bounds
 
     @property
-    def bounds(self) -> rio.coords.BoundingBox:
+    def bbox(self) -> rio.coords.BoundingBox:
         """Total bounding box of the vector."""
 
-        return rio.coords.BoundingBox(*self.ds.total_bounds)
+        # Reduce lazy partitions to four coordinates without replacing the Dask collection
+        dataframe = self.ds
+        total_bounds = dataframe.total_bounds
+        if is_dask_dataframe(dataframe):
+            total_bounds = total_bounds.compute()
+        return rio.coords.BoundingBox(*total_bounds)
+
+    @property
+    def bounds(self) -> rio.coords.BoundingBox:
+        """Total bounding box of the vector, provided as an alias of bbox."""
+
+        return self.bbox
 
     @property
     def footprint(self) -> Any:
@@ -690,7 +701,7 @@ class VectorBase(ABC):
             out_crs = get_geo_attr(raster_or_vector, "crs")
 
         df = _get_footprint_projected(
-            get_geo_attr(raster_or_vector, "bounds"),
+            get_geo_attr(raster_or_vector, "bbox"),
             in_crs=get_geo_attr(raster_or_vector, "crs"),
             out_crs=out_crs,
             densify_points=densify_points,
@@ -724,10 +735,10 @@ class VectorBase(ABC):
         from geoutils.raster.raster import Raster, _default_nodata
 
         if raster is None:
-            if self.bounds is None:
+            if self.bbox is None:
                 raise ValueError("To automatically rasterize on the vector, bounds need to be defined.")
 
-            left, bottom, right, top = self.bounds
+            left, bottom, right, top = self.bbox
             transform = rio.transform.from_bounds(left, bottom, right, top, size[0], size[1])
             raster = Raster.from_array(data=np.zeros((1000, 1000)), transform=transform, crs=self.crs)
 
@@ -760,7 +771,7 @@ class VectorBase(ABC):
     def get_bounds_projected(self, out_crs: CRS, densify_points: int = 5000) -> rio.coords.BoundingBox:
         """Get vector bounds projected in a specified CRS."""
 
-        return _get_bounds_projected(self.bounds, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points)
+        return _get_bounds_projected(self.bbox, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points)
 
     def get_footprint_projected(
         self: VectorBaseType, out_crs: CRS, densify_points: int = 5000
@@ -768,7 +779,7 @@ class VectorBase(ABC):
         """Get vector footprint projected in a specified CRS."""
 
         new_ds = _get_footprint_projected(
-            bounds=self.bounds, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points
+            bounds=self.bbox, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points
         )
         return self._override_gdf_output(new_ds)
 

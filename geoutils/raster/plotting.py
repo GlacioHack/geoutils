@@ -30,7 +30,7 @@ from rasterio.enums import Resampling
 from geoutils._dispatch import get_geo_attr, has_geo_attr, is_dask_array
 from geoutils._misc import import_optional
 from geoutils.raster.referencing import _default_nodata
-from geoutils.vector.plotting import _get_reference_bounds
+from geoutils.vector.plotting import _get_reference_bbox
 
 if TYPE_CHECKING:
     import matplotlib
@@ -81,7 +81,7 @@ def _default_grid_size(source: RasterBase, target_crs: CRS | None) -> tuple[int,
         target_crs,
         source.width,
         source.height,
-        *source.bounds,
+        *source.bbox,
     )
     return width, height
 
@@ -263,7 +263,7 @@ def _plot_raster(
 
     # Draw the display array in projected coordinates and keep square data units unless explicitly overridden
     kwargs.setdefault("aspect", "equal")
-    extent = [display.bounds.left, display.bounds.right, display.bounds.bottom, display.bounds.top]
+    extent = [display.bbox.left, display.bbox.right, display.bbox.bottom, display.bbox.top]
     ax0.imshow(
         np.flip(data, axis=0),
         extent=extent,
@@ -274,10 +274,10 @@ def _plot_raster(
         alpha=alpha,
         **kwargs,
     )
-    reference_bounds = _get_reference_bounds(ref)
-    if reference_bounds is not None:
-        ax0.set_xlim(reference_bounds.left, reference_bounds.right)
-        ax0.set_ylim(reference_bounds.bottom, reference_bounds.top)
+    reference_bbox = _get_reference_bbox(ref)
+    if reference_bbox is not None:
+        ax0.set_xlim(reference_bbox.left, reference_bbox.right)
+        ax0.set_ylim(reference_bbox.bottom, reference_bbox.top)
     if title is not None:
         ax0.set_title(title)
 

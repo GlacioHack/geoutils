@@ -935,7 +935,7 @@ def _crop(
 
     # Finding the intersection of requested bounds and original bounds, cropped to image shape
     ref_win = rio.windows.from_bounds(xmin, ymin, xmax, ymax, transform=source_raster.transform)
-    self_win = rio.windows.from_bounds(*source_raster.bounds, transform=source_raster.transform).crop(
+    self_win = rio.windows.from_bounds(*source_raster.bbox, transform=source_raster.transform).crop(
         *source_raster.shape
     )
     final_window = ref_win.intersection(self_win).round_lengths().round_offsets()
@@ -962,7 +962,7 @@ def _crop(
         ref_win_disk = rio.windows.from_bounds(
             new_xmin, new_ymin, new_xmax, new_ymax, transform=source_raster._disk_transform
         )
-        self_win_disk = rio.windows.from_bounds(*source_raster.bounds, transform=source_raster._disk_transform).crop(
+        self_win_disk = rio.windows.from_bounds(*source_raster.bbox, transform=source_raster._disk_transform).crop(
             *source_raster._disk_shape[1:]
         )
         final_window_disk = ref_win_disk.intersection(self_win_disk).round_lengths().round_offsets()
