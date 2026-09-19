@@ -95,8 +95,7 @@ class PdalRunner:
         completed = subprocess.run(self.comparison.command, capture_output=True, text=True, check=False)
         if completed.returncode != 0:
             raise RuntimeError(
-                f"PDAL command failed with status {completed.returncode}: "
-                f"{self.comparison.command}\n{completed.stderr}"
+                f"PDAL command failed with status {completed.returncode}: {self.comparison.command}\n{completed.stderr}"
             )
 
         # Reading one value ensures command completion includes a usable result

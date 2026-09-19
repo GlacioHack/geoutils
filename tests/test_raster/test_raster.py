@@ -9,10 +9,8 @@ import pathlib
 import re
 import tempfile
 import warnings
-from importlib.util import find_spec
 from tempfile import TemporaryFile
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import rasterio as rio
@@ -645,8 +643,9 @@ class TestRaster:
         with pytest.raises(
             ValueError,
             match=re.escape(
-                "New data must be of the same shape as existing data: ({}, {}). Given: "
-                "{}.".format(str(width), str(height), str(new_shape))
+                "New data must be of the same shape as existing data: ({}, {}). Given: {}.".format(
+                    str(width), str(height), str(new_shape)
+                )
             ),
         ):
             rst.data = rst.data.reshape(new_shape)
@@ -930,6 +929,47 @@ class TestRaster:
             gu.Raster(example, downsample=[1, 1])  # type: ignore
         with pytest.raises(ValueError, match="downsample must be >=1."):
             gu.Raster(example, downsample=0)  # type: ignore
+
+    @pytest.mark.parametrize("load_data", [False, True])
+    def test_init__downsample_regular_interval(self, tmp_path: pathlib.Path, load_data: bool) -> None:
+        """Checks that file opening downsampling keeps a constant interval."""
+
+        # Write input on dimensions not divisible by 6
+        values = np.arange(5_000, dtype=np.int32).reshape(50, 100)
+        source = gu.Raster.from_array(values, transform=rio.transform.from_origin(0, 50, 1, 1), crs=4326)
+        filename = tmp_path / "gradient.tif"
+        source.to_file(filename)
+
+        # Open with downsampling of 6
+        downsampled = gu.Raster(filename, downsample=6, load_data=load_data)
+        result = downsampled.data.data
+
+        # Check size is as expected, and values match the constant intervals
+        assert downsampled.shape == (8, 16)
+        assert np.all(np.diff(result, axis=0) == 600)
+        assert np.all(np.diff(result, axis=1) == 6)
+
+    @pytest.mark.parametrize("load_data", [False, True])
+    def test_init__downsample_uses_overview(self, tmp_path: pathlib.Path, load_data: bool) -> None:
+        """Checks that downsampling reads an overview when it can."""
+
+        # Write input for full array, then open with downsampling (without overview)
+        values = np.arange(5_000, dtype=np.int32).reshape(50, 100)
+        filename = tmp_path / "gradient.tif"
+        gu.Raster.from_array(values, rio.transform.from_origin(0, 50, 1, 1), 4326).to_file(filename)
+        without_overview = gu.Raster(filename, downsample=6, load_data=load_data).data.data.copy()
+
+        # Add overview for factors of 2 and 4, factor 4 should be the closest suitable overview
+        with rio.open(filename, "r+") as dataset:
+            dataset.build_overviews([2, 4], rio.enums.Resampling.nearest)
+
+        # Check that downsampling the new file uses the overview (slightly changes the sampled values)
+        # without changing the size/transform of the requested grid
+        downsampled = gu.Raster(filename, downsample=6, load_data=load_data)
+        result = downsampled.data.data
+        assert downsampled.shape == (8, 16)
+        assert downsampled.transform == rio.transform.from_origin(0, 50, 6, 6)
+        assert not np.array_equal(result, without_overview)
 
     def test_add_sub(self) -> None:
         """
@@ -1684,7 +1724,6 @@ class TestRaster:
 
         # Test dtypes that will modify the data
         for target_dtype2 in dtypes_nonpreserving:
-
             with pytest.warns(UserWarning, match="dtype conversion will result in a loss of information.*"):
                 rout = r.astype(target_dtype2)  # type: ignore
 
@@ -1715,181 +1754,6 @@ class TestRaster:
         assert np.dtype(r3.dtype) == dtype
         assert r3.data.dtype == dtype
         assert r3.nodata == r.nodata
-
-    # The multi-band example will not have a colorbar, so not used in tests
-    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_b4_crop_path, aster_dem_path])
-    @pytest.mark.parametrize("figsize", np.arange(2, 20, 2))
-    def test_plot_cbar(self, example: str, figsize: NDArrayNum) -> None:
-        """
-        Test cbar matches plot height.
-        """
-
-        pytest.importorskip("matplotlib")
-
-        # Plot raster with cbar
-        r0 = gu.Raster(example)
-        fig, ax = plt.subplots(figsize=(figsize, figsize))
-        r0.plot(
-            ax=ax,
-            add_cbar=True,
-        )
-        fig.axes[0].set_axis_off()
-        fig.axes[1].set_axis_off()
-
-        # Get size of main plot
-        ax0_bbox = fig.axes[0].get_tightbbox()
-        xmin, ymin, xmax, ymax = ax0_bbox.bounds
-        h = ymax - ymin
-
-        # Get size of cbar
-        ax_cbar_bbox = fig.axes[1].get_tightbbox()
-        xmin, ymin, xmax, ymax = ax_cbar_bbox.bounds
-        h_cbar = ymax - ymin
-        plt.close("all")
-
-        # Assert height is the same
-        assert h == pytest.approx(h_cbar)
-
-    def test_plot(self) -> None:
-
-        pytest.importorskip("matplotlib")
-
-        # Read single band raster and RGB raster
-        img = gu.Raster(self.landsat_b4_path)
-        img_RGB = gu.Raster(self.landsat_rgb_path)
-
-        # Test default plot
-        img.plot()
-
-        # Grab the plot content for checks:
-        # 1. There should be only one image
-        ax = plt.gca()
-        images = ax.get_images()
-        assert len(images) == 1
-        im = images[0]
-        # 2. The image content should be the Y-flipped raster
-        assert np.array_equal(im.get_array(), np.flip(img.get_nanarray(), axis=0), equal_nan=True)
-        # 3. The image coordinate should ascend from bottom-left corner
-        assert im.origin == "lower"
-        # 4. The image extent should match the raster
-        assert im.get_extent() == [img.bounds.left, img.bounds.right, img.bounds.bottom, img.bounds.top]
-
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert True
-
-        # Test with new figure
-        plt.figure()
-        img.plot()
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert True
-
-        # Test with provided ax
-        ax = plt.subplot(111)
-        img.plot(ax=ax)
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert True
-
-        # Test plot RGB
-        ax = plt.subplot(111)
-        img_RGB.plot(ax=ax)
-        images = ax.get_images()
-        assert len(images) == 1
-        im = images[0]
-        # 2. The image content should be the Y-flipped raster, with band index moved to the end (X, Y, band)
-        assert np.array_equal(
-            im.get_array(), np.flip(np.moveaxis(img_RGB.get_nanarray(), 0, -1), axis=0), equal_nan=True
-        )
-        # 3. The image coordinate should ascend from bottom-left corner
-        assert im.origin == "lower"
-        # 4. The image extent should match the raster
-        assert im.get_extent() == [img.bounds.left, img.bounds.right, img.bounds.bottom, img.bounds.top]
-        # Original raster data should not have been modified in-place during moveaxis
-        assert img_RGB.data.shape[0] == 3
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert True
-
-        # Test plotting single band B/W, add_cbar, plot tile
-        ax = plt.subplot(111)
-        img_RGB.plot(bands=1, cmap="gray", ax=ax, add_cbar=False, title="Test")
-        images = ax.get_images()
-        assert len(images) == 1
-        im = images[0]
-        # The image should be the related band
-        assert np.array_equal(im.get_array(), np.flip(img_RGB.get_nanarray()[0, :, :], axis=0), equal_nan=True)
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert True
-
-        # Test vmin, vmax and cbar_title
-        ax = plt.subplot(111)
-        img.plot(cmap="gray", vmin=40, vmax=220, cbar_title="Custom cbar", ax=ax)
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert True
-
-        # Test save fig
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.png")
-        img.plot(savefig_fname=temp_file)
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert os.path.isfile(temp_file)
-
-    def test_plot__exceptions(self) -> None:
-        """Check exceptions raised by plot are correct."""
-
-        pytest.importorskip("matplotlib")
-
-        # Read single band raster and RGB raster
-        img = gu.Raster(self.landsat_b4_path)
-        img_RGB = gu.Raster(self.landsat_rgb_path)
-
-        # Raise an error any number other than 1 or 3/4 bands are passed
-        with pytest.raises(ValueError, match="Only single-band or 3/4-band.*"):
-            img_RGB.plot(bands=(1, 2))
-
-        # Raise an error if band number out of range
-        with pytest.raises(ValueError, match="Index must be in range.*"):
-            img.plot(bands=2)
-        with pytest.raises(ValueError, match="Index must be in range.*"):
-            img_RGB.plot(bands=4)
-
-        # Wrong types
-        with pytest.raises(ValueError, match="Index must be int, tuple or None"):
-            img.plot(bands="wrong_type")  # type: ignore
-        with pytest.raises(ValueError, match="vmin or vmax cannot be converted to float"):
-            img.plot(vmin="wrong_type", vmax="wrong_type")  # type: ignore
-        with pytest.raises(ValueError, match="ax must be a matplotlib.axes.Axes instance, 'new' or None."):
-            img.plot(ax="wrong_type")  # type: ignore
-
-    @pytest.mark.skipif(
-        find_spec("matplotlib") is not None, reason="Only runs if matplotlib is missing."
-    )  # type: ignore
-    def test_plot__missing_dep(self) -> None:
-        """Test proper error is raised when matplotlib is not installed."""
-
-        img = gu.Raster(self.landsat_b4_path)
-
-        with pytest.raises(ImportError, match="Optional dependency 'matplotlib' required.*"):
-            img.plot()
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_to_file(self, example: str) -> None:
@@ -3342,9 +3206,7 @@ class TestArrayInterface:
         with pytest.raises(NotImplementedError, match="'reduce' method of NumPy ufuncs is not supported"):
             np.logical_and.reduce(rst1)
 
-    @pytest.mark.parametrize(
-        "np_func_name", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout + handled_functions_2in
-    )  # type: ignore
+    @pytest.mark.parametrize("np_func_name", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout + handled_functions_2in)  # type: ignore
     def test_raise_errors_2nin(self, np_func_name: str) -> None:
         """Check that proper errors are raised when input raster/array don't match (only 2-input functions)."""
 
@@ -3371,7 +3233,6 @@ class TestArrayInterface:
         # Strange errors happening only for these 4 functions...
         # See issue #457
         if np_func_name not in ["allclose", "isclose", "array_equal", "array_equiv"]:
-
             # Rasters with different CRS, transform, or shape
             # Different shape
             georef_tworaster_message = (

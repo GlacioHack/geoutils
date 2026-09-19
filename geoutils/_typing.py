@@ -27,7 +27,6 @@ import numpy as np
 
 # Only for Python >= 3.9
 if sys.version_info.minor >= 9:
-
     from numpy.typing import (  # this syntax works starting on Python 3.9
         ArrayLike,
         DTypeLike,
@@ -50,7 +49,6 @@ if sys.version_info.minor >= 9:
 
 # For backward compatibility before Python 3.9
 else:
-
     # Mypy has issues with the builtin Number type (https://github.com/python/mypy/issues/3186)
     Number = Union[int, float, np.integer, np.floating]  # type: ignore
 

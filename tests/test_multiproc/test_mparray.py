@@ -83,7 +83,6 @@ def _custom_func_bands(raster: Raster, n_bands: int) -> Raster:
 
 
 class TestTiling:
-
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
 
     @pytest.mark.parametrize("overlap", [0, 5])

@@ -198,9 +198,7 @@ def _assert_vectors_equal_ordered(g1: gpd.GeoDataFrame, g2: gpd.GeoDataFrame, ex
     if not all(eq):
         i = next(i for i, ok in enumerate(eq) if not ok)
         a, b = g1.geometry.values[i], g2.geometry.values[i]
-        raise AssertionError(
-            "Geometry mismatch at index " f"{i}\n" f"{_geom_debug(a, b)}\n" f"a.wkt={a.wkt}\n\nb.wkt={b.wkt}\n"
-        )
+        raise AssertionError(f"Geometry mismatch at index {i}\n{_geom_debug(a, b)}\na.wkt={a.wkt}\n\nb.wkt={b.wkt}\n")
 
 
 def assert_vectors_equal(

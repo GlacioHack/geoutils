@@ -644,7 +644,6 @@ def _create_mask_pointcloud(
         # Extract resulting boolean array
         return contained.values
     else:
-
         # Runtime import to avoid circularity issues
         from geoutils.pointcloud import PointCloud
 

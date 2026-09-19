@@ -21,7 +21,6 @@ DO_PLOT = False
 
 
 class TestSatImg:
-
     landsat_b4 = examples.get_path_test("everest_landsat_b4")
     aster_dem = examples.get_path_test("exploradores_aster_dem")
 

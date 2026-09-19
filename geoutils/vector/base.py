@@ -38,7 +38,7 @@ from geoutils._dispatch import (
     has_geo_attr,
     is_dask_dataframe,
 )
-from geoutils._misc import deprecate, import_optional
+from geoutils._misc import deprecate
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.rasterization import _create_mask, _rasterize
@@ -294,7 +294,7 @@ class VectorBase(ABC):
 
     def plot(
         self,
-        ref_crs: RasterLike | VectorLike | CRS | int | None = None,
+        ref: RasterLike | VectorLike | CRS | str | int | None = None,
         cmap: matplotlib.colors.Colormap | str | None = None,
         vmin: float | int | None = None,
         vmax: float | int | None = None,
@@ -305,73 +305,49 @@ class VectorBase(ABC):
         return_axes: bool = False,
         savefig_fname: str | None = None,
         **kwargs: Any,
-    ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
+    ) -> None | tuple[matplotlib.axes.Axes, matplotlib.axes.Axes | None]:
         r"""
         Plot the vector.
 
         This method is a wrapper to geopandas.GeoDataFrame.plot. Any \*\*kwargs are passed to it.
         """
 
-        matplotlib = import_optional("matplotlib")
         import matplotlib.pyplot as plt
-        from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-        if has_geo_attr(ref_crs, "crs"):
-            crs = get_geo_attr(ref_crs, "crs")
+        from geoutils.vector.plotting import (
+            _create_axes,
+            _get_reference_bbox,
+            _plot_geodataframe,
+        )
+
+        reference_bbox = None
+        if has_geo_attr(ref, "crs"):
+            crs = get_geo_attr(ref, "crs")
             vect_reproj = self.reproject(crs=crs)
-        elif isinstance(ref_crs, (CRS, int)):
-            vect_reproj = self.reproject(crs=ref_crs)
+            reference_bbox = _get_reference_bbox(ref)
+        elif isinstance(ref, (CRS, str, int)):
+            vect_reproj = self.reproject(crs=ref)
         else:
             vect_reproj = self
 
-        if ax is None:
-            ax0 = plt.gca()
-        elif isinstance(ax, str) and ax.lower() == "new":
-            _, ax0 = plt.subplots()
-        elif isinstance(ax, matplotlib.axes.Axes):
-            ax0 = ax
-        else:
-            raise ValueError("ax must be a matplotlib.axes.Axes instance, 'new' or None.")
-
-        if "column" in kwargs.keys() and add_cbar:
-            add_cbar = True
-        else:
-            add_cbar = False
-
-        legend = bool(add_cbar)
-        if "legend" in list(kwargs.keys()):
-            legend = kwargs.pop("legend")
-
-        if "legend_kwds" in list(kwargs.keys()) and legend:
-            legend_kwds = kwargs.pop("legend_kwds")
-            if cbar_title is not None:
-                legend_kwds.update({"label": cbar_title})
-        elif cbar_title is not None:
-            legend_kwds = {"label": cbar_title}
-        else:
-            legend_kwds = None
-
-        if add_cbar or cbar_title:
-            divider = make_axes_locatable(ax0)
-            cax = divider.append_axes("right", size="5%", pad="2%")
-            norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
-            cbar = matplotlib.colorbar.ColorbarBase(cax, cmap=cmap, norm=norm)
-            cbar.solids.set_alpha(alpha)
-        else:
-            cax = None
-
+        ax0 = _create_axes(ax)
+        column = kwargs.pop("column", None)
         plot_ds = _as_geodataframe(vect_reproj)
-        plot_ds.plot(
+        cax = _plot_geodataframe(
+            dataframe=plot_ds,
             ax=ax0,
-            cax=cax,
+            column=column,
             cmap=cmap,
             vmin=vmin,
             vmax=vmax,
             alpha=alpha,
-            legend=legend,
-            legend_kwds=legend_kwds,
+            cbar_title=cbar_title,
+            add_cbar=add_cbar,
             **kwargs,
         )
+        if reference_bbox is not None:
+            ax0.set_xlim(reference_bbox.left, reference_bbox.right)
+            ax0.set_ylim(reference_bbox.bottom, reference_bbox.top)
         plt.sca(ax0)
 
         if savefig_fname:

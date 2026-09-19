@@ -8,7 +8,6 @@ from geoutils import examples
 
 
 class TestReferencing:
-
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
     landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")

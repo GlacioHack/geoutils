@@ -89,9 +89,9 @@ def _bounds_from_tuple(bounds: BoundingBox | Sequence[float]) -> BoundingBox:
 
     left, bottom, right, top = (float(value) for value in bounds)
     if left > right:
-        raise ValueError("Bounds left coordinate must be smaller than or equal to right " "coordinate.")
+        raise ValueError("Bounds left coordinate must be smaller than or equal to right coordinate.")
     if bottom > top:
-        raise ValueError("Bounds bottom coordinate must be smaller than or equal to top " "coordinate.")
+        raise ValueError("Bounds bottom coordinate must be smaller than or equal to top coordinate.")
     return BoundingBox(left=left, bottom=bottom, right=right, top=top)
 
 
@@ -611,7 +611,7 @@ def _build_laspy_header(
     for column in _extra_las_columns(pc=pc, data_column=data_column, header=header):
         dtype = pc[column].dtype
         if not np.issubdtype(dtype, np.number) and not np.issubdtype(dtype, np.bool_):
-            raise TypeError(f"LAS extra dimension '{column}' must have a numeric or " "boolean dtype.")
+            raise TypeError(f"LAS extra dimension '{column}' must have a numeric or boolean dtype.")
         header.add_extra_dim(laspy.ExtraBytesParams(name=column, type=dtype))
 
     return header

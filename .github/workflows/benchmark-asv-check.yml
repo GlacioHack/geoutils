@@ -47,6 +47,10 @@ jobs:
           channel-priority: strict
           activate-environment: geoutils-dev
 
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
+
       - name: Get month for resetting cache
         run: echo "cache_date=$(/bin/date -u '+%Y%m')" >> "$GITHUB_ENV"
 
@@ -68,7 +72,7 @@ jobs:
           mamba env update -n geoutils-dev -f environment-ci-py3.12.yml
 
       - name: Install GeoUtils and benchmark dependencies
-        run: pip install -e .[benchmark]
+        run: uv pip install -e ".[benchmark]"
 
       # `asv check` imports every benchmark and reports invalid definitions
       - name: Check ASV benchmarks

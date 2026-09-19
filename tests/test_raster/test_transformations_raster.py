@@ -29,7 +29,6 @@ DO_PLOT = False
 
 
 class TestRasterTransformations:
-
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
     landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
     landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
@@ -212,8 +211,7 @@ class TestRasterTransformations:
         r_crop_unloaded = r.crop(bbox2)
         r.load()
         r_crop_loaded = r.crop(bbox2)
-        # TODO: the following condition should be met once issue #447 is solved
-        # assert r_crop_unloaded.raster_equal(r_crop_loaded)
+        assert r_crop_unloaded.raster_equal(r_crop_loaded)
         assert r_crop_unloaded.shape == r_crop_loaded.shape
         assert r_crop_unloaded.transform == r_crop_loaded.transform
 
@@ -225,8 +223,7 @@ class TestRasterTransformations:
         r_crop_unloaded = r.crop(bbox2)
         r.load()
         r_crop_loaded = r.crop(bbox2)
-        # TODO: the following condition should be met once issue #447 is solved
-        # assert r_crop_unloaded.raster_equal(r_crop_loaded)
+        assert r_crop_unloaded.raster_equal(r_crop_loaded)
         assert r_crop_unloaded.shape == r_crop_loaded.shape
         assert r_crop_unloaded.transform == r_crop_loaded.transform
 
@@ -621,7 +618,9 @@ class TestRasterTransformations:
         r2 = r.copy()
         r2.set_area_or_point("Point", shift_area_or_point=False)
 
-        with (pytest.warns(UserWarning, match="One raster has a pixel"),):
+        with (
+            pytest.warns(UserWarning, match="One raster has a pixel"),
+        ):
             r.reproject(r2)
 
         # Check that reprojecting preserves interpretation

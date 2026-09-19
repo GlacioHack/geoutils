@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import os
 import warnings
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
 import affine
@@ -32,6 +34,7 @@ import rasterio as rio
 from packaging.version import Version
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
+from rasterio.vrt import WarpedVRT
 from shapely.geometry import box
 from shapely.strtree import STRtree
 
@@ -64,7 +67,6 @@ try:
     import dask.array as da
     from dask import delayed
 except ImportError:
-
     da = None
 
     def delayed(*args: Any, **kwargs: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -76,6 +78,46 @@ except ImportError:
             return func
 
         return decorator
+
+
+def _overview_level_for_downsample(source: rio.io.DatasetReader, downsample: float) -> int | None:
+    """Return the closest suitable stored overview level for a downsampling factor."""
+
+    # Match GDAL's nearest-neighbor overview selection by allowing up to 20% oversampling
+    overview_level = None
+    for level, overview_factor in enumerate(source.overviews(1)):
+        if overview_factor > downsample * 1.2:
+            break
+        overview_level = level
+    return overview_level
+
+
+@contextmanager
+def _open_downsampled_raster(source: rio.io.DatasetReader, downsample: float) -> Iterator[WarpedVRT]:
+    """Open a reduced grid, using the closest suitable stored overview when one is available."""
+
+    # Define the requested grid from the native raster rather than from the selected overview
+    width = max(1, int(np.floor(source.width / downsample)))
+    height = max(1, int(np.floor(source.height / downsample)))
+    transform = source.transform * affine.Affine.scale(downsample)
+
+    # Keep the selected overview open while the virtual raster resamples it to the requested grid
+    with ExitStack() as stack:
+        read_source = source
+        overview_level = _overview_level_for_downsample(source, downsample)
+        if overview_level is not None:
+            read_source = stack.enter_context(rio.open(source.name, overview_level=overview_level))
+        vrt = stack.enter_context(
+            WarpedVRT(
+                read_source,
+                crs=source.crs,
+                transform=transform,
+                width=width,
+                height=height,
+                resampling=Resampling.nearest,
+            )
+        )
+        yield vrt
 
 
 ##############
@@ -903,7 +945,6 @@ def _crop(
     tfm = rio.transform.from_origin(new_xmin, new_ymax, *source_raster.res)
 
     if source_raster._is_xr:
-
         (rowmin, rowmax), (colmin, colmax) = final_window.toranges()
         assert source_raster._obj is not None
         crop_img = source_raster._obj.isel(y=slice(rowmin, rowmax), x=slice(colmin, colmax))
@@ -914,7 +955,6 @@ def _crop(
         crop_img = source_raster.data[..., rowmin:rowmax, colmin:colmax]
 
     else:
-
         assert source_raster._disk_shape is not None  # This should not be the case, sanity check to make mypy happy
 
         # If data was not loaded, and self's transform was updated (e.g. due to downsampling) need to
@@ -932,17 +972,22 @@ def _crop(
             final_window_disk, ((source_raster._downsample, source_raster._downsample),)
         )
 
-        # Load data for "on_disk" window but out_shape matching in-memory transform -> enforce downsampling
-        # AD (24/04/24): Note that the same issue as #447 occurs here when final_window_disk extends beyond
-        # self's bounds. Using option `boundless=True` solves the issue but causes other tests to fail
-        # This should be fixed with #447 and previous line would be obsolete.
-        with rio.open(source_raster.name) as raster:
-            crop_img = raster.read(
-                indexes=source_raster._bands,
-                masked=source_raster._masked,
-                window=final_window_disk,
-                out_shape=(final_window.height, final_window.width),
-            )
+        with ExitStack() as stack:
+            source = stack.enter_context(rio.open(source_raster.name))
+            if source_raster._downsample > 1:
+                raster = stack.enter_context(_open_downsampled_raster(source, source_raster._downsample))
+                crop_img = raster.read(
+                    indexes=source_raster._bands,
+                    masked=source_raster._masked,
+                    window=final_window,
+                )
+            else:
+                crop_img = source.read(
+                    indexes=source_raster._bands,
+                    masked=source_raster._masked,
+                    window=final_window_disk,
+                    out_shape=(final_window.height, final_window.width),
+                )
 
         # Squeeze first axis for single-band
         if crop_img.ndim == 3 and crop_img.shape[0] == 1:
