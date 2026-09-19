@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Iterator
 from importlib.util import find_spec
 
 import matplotlib.pyplot as plt
@@ -13,6 +14,18 @@ from affine import Affine
 
 import geoutils as gu
 from geoutils import examples
+
+
+@pytest.fixture(autouse=True)
+def close_matplotlib_figures() -> Iterator[None]:
+    """Close every Matplotlib figure before and after each raster plotting test."""
+
+    # Start from empty global plotting state even when another test module left a figure open
+    plt.close("all")
+    yield
+
+    # Keep figures created by this test from affecting later tests
+    plt.close("all")
 
 
 class TestPlot:
@@ -51,10 +64,10 @@ class TestPlot:
 
         # Open one band without loading it and request complete grid (max_pixels = None)
         raster = gu.Raster(self.landsat_b4_path)
-        raster.plot(max_pixels=None)
+        ax, _ = raster.plot(ax="new", max_pixels=None, return_axes=True)
 
         # Check the image values, orientation, and projected extent match that of the full raster
-        image = plt.gca().get_images()[0]
+        image = ax.get_images()[0]
         assert np.array_equal(image.get_array(), np.flip(raster.get_nanarray(), axis=0), equal_nan=True)
         assert image.origin == "lower"
         assert image.get_extent() == [
@@ -70,8 +83,8 @@ class TestPlot:
 
         # Plot every RGB band without reducing the source grid
         raster = gu.Raster(self.landsat_rgb_path)
-        _, colorbar_axes = raster.plot(max_pixels=None, return_axes=True)
-        image = plt.gca().get_images()[0]
+        ax, colorbar_axes = raster.plot(ax="new", max_pixels=None, return_axes=True)
+        image = ax.get_images()[0]
 
         # RGB values move the band dimension last and do not create a colorbar
         expected_rgb = np.flip(np.moveaxis(raster.get_nanarray(), 0, -1), axis=0)
@@ -244,6 +257,7 @@ class TestPlot:
         raster = gu.Raster(self.landsat_b4_path)
         with pytest.raises(ImportError, match="Optional dependency 'matplotlib' required"):
             raster.plot()
+
 
 @pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
 class TestPlotChunked:

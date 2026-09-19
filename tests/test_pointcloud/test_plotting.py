@@ -146,6 +146,7 @@ class TestPlot:
             pointcloud.plot(max_points=0)
         plt.close("all")
 
+
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask_geopandas is installed.")
 class TestPlotChunked:
     """Test module for lazy point plotting, bounded row loading, and eager result equivalence."""
