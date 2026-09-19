@@ -29,9 +29,6 @@ class TestAccessor:
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
 
-    def test_open_raster(self) -> None:
-        pass
-
     @pytest.mark.parametrize("shape", [(1, 3), (3, 1), (1, 1)])
     @pytest.mark.parametrize("bands", [1, 2])
     def test_open_raster__single_row_or_column(self, tmp_path: Path, shape: tuple[int, int], bands: int) -> None:
@@ -50,6 +47,70 @@ class TestAccessor:
         assert result.rst.shape == shape
         assert result.rst.transform == transform
         np.testing.assert_array_equal(result.data, expected)
+
+    def test_open_raster__downsample(self, tmp_path: Path) -> None:
+        """Checks that downsampling uses a suitable overview while keeping the requested output grid."""
+
+        # Write input for full array, then open with downsampling (without overview)
+        values = np.arange(5_000, dtype=np.int32).reshape(50, 100)
+        path = tmp_path / "gradient.tif"
+        gu.Raster.from_array(values, from_origin(0, 50, 1, 1), 4326).to_file(path)
+        without_overview = open_raster(str(path), downsample=6).values.copy()
+
+        # Add overview for factors of 2 and 4, factor 4 should be the closest suitable overview
+        with rio.open(path, "r+") as dataset:
+            dataset.build_overviews([2, 4], rio.enums.Resampling.nearest)
+
+        # Check that downsampling the new file uses the overview (slightly changes the sampled values)
+        # without changing the size/transform of the requested grid
+        result = open_raster(str(path), downsample=6)
+        assert not result._in_memory
+        output = result.values
+        expected = gu.Raster(path, downsample=6).data.data
+
+        assert result.rst.shape == (8, 16)
+        assert result.rst.transform == from_origin(0, 50, 6, 6)
+        np.testing.assert_array_equal(output, expected)
+        assert not np.array_equal(output, without_overview)
+
+    def test_open_raster__overview_level(self, tmp_path: Path) -> None:
+        """Checks that overview selection is distinct from downsampling."""
+
+        # Store two overview levels (the level 0 represents the factor-2 grid)
+        values = np.arange(16 * 16, dtype=np.int16).reshape(16, 16)
+        path = tmp_path / "overviews.tif"
+        gu.Raster.from_array(values, from_origin(0, 16, 1, 1), 4326).to_file(path)
+        with rio.open(path, "r+") as dataset:
+            dataset.build_overviews([2, 4], rio.enums.Resampling.nearest)
+
+        # Check error is raised when combining exact overview selection with downsampling
+        overview = open_raster(str(path), overview_level=0)
+        assert overview.rst.shape == (8, 8)
+        assert overview.rst.transform == from_origin(0, 16, 2, 2)
+        with pytest.raises(ValueError, match="downsample and overview_level cannot be used together"):
+            open_raster(str(path), downsample=3, overview_level=0)
+
+    def test_open_raster__downsample_loading_laziness(self, tmp_path: Path) -> None:
+        """Checks that chunked downsampling stays lazy and exactly matches eager opening."""
+
+        pytest.importorskip("dask.array")
+
+        # Write input on dimensions not divisible by 6
+        values = np.arange(5_000, dtype=np.int32).reshape(50, 100)
+        path = tmp_path / "gradient.tif"
+        gu.Raster.from_array(values, from_origin(0, 50, 1, 1), 4326).to_file(path)
+
+        # Open with downsampling of 6
+        eager = open_raster(str(path), downsample=6)
+        lazy = open_raster(str(path), downsample=6, chunks={"y": 3, "x": 7})
+        assert not eager._in_memory
+        assert not lazy._in_memory
+        assert lazy.chunks == ((3, 3, 2), (7, 7, 2))
+
+        # Check result leaves source lazy and matches exactly with eager resampling
+        computed = lazy.compute()
+        np.testing.assert_array_equal(computed.values, eager.values)
+        assert not lazy._in_memory
 
     @pytest.mark.parametrize("path_raster", [landsat_b4_path, aster_dem_path])
     def test_copy(self, path_raster: str) -> None:
