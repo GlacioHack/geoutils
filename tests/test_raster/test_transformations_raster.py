@@ -211,8 +211,7 @@ class TestRasterTransformations:
         r_crop_unloaded = r.crop(bbox2)
         r.load()
         r_crop_loaded = r.crop(bbox2)
-        # TODO: the following condition should be met once issue #447 is solved
-        # assert r_crop_unloaded.raster_equal(r_crop_loaded)
+        assert r_crop_unloaded.raster_equal(r_crop_loaded)
         assert r_crop_unloaded.shape == r_crop_loaded.shape
         assert r_crop_unloaded.transform == r_crop_loaded.transform
 
@@ -224,8 +223,7 @@ class TestRasterTransformations:
         r_crop_unloaded = r.crop(bbox2)
         r.load()
         r_crop_loaded = r.crop(bbox2)
-        # TODO: the following condition should be met once issue #447 is solved
-        # assert r_crop_unloaded.raster_equal(r_crop_loaded)
+        assert r_crop_unloaded.raster_equal(r_crop_loaded)
         assert r_crop_unloaded.shape == r_crop_loaded.shape
         assert r_crop_unloaded.transform == r_crop_loaded.transform
 

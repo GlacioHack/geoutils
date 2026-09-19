@@ -22,7 +22,6 @@ from __future__ import annotations
 import os.path
 import pathlib
 from typing import (
-    TYPE_CHECKING,
     Any,
     Callable,
     Literal,
@@ -40,16 +39,10 @@ from rasterio.coords import BoundingBox
 from shapely.geometry.base import BaseGeometry
 
 from geoutils import profiler
-from geoutils._dispatch import (
-    get_geo_attr,
-    has_geo_attr,
-    is_dask_array,
-    is_dask_dataframe,
-)
-from geoutils._misc import import_optional
+from geoutils._dispatch import is_dask_array, is_dask_dataframe
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.multiproc import MultiprocConfig
-from geoutils.pointcloud.base import PointCloudBase
+from geoutils.pointcloud.base import PointCloudBase, _validate_downsample
 from geoutils.pointcloud.las import (
     _is_laspy_supported,
     _load_laspy_data,
@@ -58,12 +51,7 @@ from geoutils.pointcloud.las import (
     _point_partition_size,
     _write_laspy,
 )
-from geoutils.vector.vector import Vector, VectorLike
-
-if TYPE_CHECKING:
-    import matplotlib
-
-    from geoutils.raster.base import RasterLike
+from geoutils.vector.vector import Vector
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 PointCloudType = TypeVar("PointCloudType", bound="PointCloud")
@@ -206,6 +194,7 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         self,
         filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry,
         data_column: str | None = None,
+        downsample: Number = 1,
     ):
         """
         Instantiate a point cloud from either a data column name and a vector (filename, GeoPandas dataframe or series,
@@ -213,6 +202,8 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
 
         :param filename_or_dataset: Path to vector file, or GeoPandas dataframe or series, or Shapely geometry.
         :param data_column: Name of main data column defining the point cloud (not required for LAS/LAZ formats).
+        :param downsample: Factor by which to reduce the number of points when data are loaded. For example, 2 keeps
+            up to ``ceil(N / 2)`` points selected by a deterministic random sample. The default 1 keeps all points.
         """
 
         self._ds: gpd.GeoDataFrame | None = None
@@ -227,11 +218,18 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         self._nb_points: int
         self.__nongeo_columns: pd.Index
         self._is_las = False
+        self._downsample = _validate_downsample(downsample)
+        self._downsample_applied = False
 
         # If PointCloud is passed, simply point back to PointCloud
         if isinstance(filename_or_dataset, PointCloud):
             for key in filename_or_dataset.__dict__:
                 setattr(self, key, filename_or_dataset.__dict__[key])
+            if downsample != 1:
+                self._downsample = _validate_downsample(downsample)
+                self._downsample_applied = False
+                if self.is_loaded:
+                    self._apply_downsample()
             return
         # For filename, rely on parent Vector class or LAS file reader
         else:
@@ -269,6 +267,8 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
 
         # Set data column name based on user input
         self.set_data_column(new_data_column=data_column)
+        if self.is_loaded:
+            self._apply_downsample()
 
     ##############################################
     # OVERRIDDEN VECTOR METHODS TO SUPPORT LOADING
@@ -364,6 +364,7 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
                     "This vector file contains non-point geometries, cannot be instantiated as a point cloud."
                 )
             self.set_data_column(new_data_column=self._data_column)
+            self._apply_downsample()
             return
 
         if columns == "all":
@@ -379,11 +380,29 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
             ds = _load_laspy_data_partitions(
                 filename=self.name,
                 columns=columns_to_load,
-                point_count=self.point_count,
+                point_count=self._nb_points,
                 partition_size=_point_partition_size(mp_config),
                 mp_config=mp_config,
             )
         self._ds = ds
+        self._apply_downsample()
+
+    def _apply_downsample(self) -> None:
+        """Apply the opening downsampling factor once to the loaded point rows."""
+
+        if self._downsample_applied or self._downsample == 1:
+            return
+
+        # Match Raster opening behavior by preserving at least one row and rounding the target size upward
+        source_count = len(self.ds)
+        target_count = max(1, int(np.ceil(source_count / self._downsample)))
+        if target_count < source_count:
+            request: int | float = target_count if target_count > 1 else 1 / source_count
+            sampled = self.subsample(request, random_state=0)
+            source_name = self._name
+            self.ds = sampled.ds
+            self._name = source_name
+        self._downsample_applied = True
 
     @overload
     def astype(
@@ -660,136 +679,6 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         # Else, return outputs directly
         else:
             return outputs
-
-    def plot(  # type: ignore
-        self,
-        column: str | None = None,
-        ref_crs: RasterLike | VectorLike | CRS | int | None = None,
-        cmap: matplotlib.colors.Colormap | str | None = None,
-        vmin: float | int | None = None,
-        vmax: float | int | None = None,
-        alpha: float | int | None = None,
-        cbar_title: str | None = None,
-        add_cbar: bool = True,
-        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
-        return_axes: bool = False,
-        savefig_fname: str | None = None,
-        **kwargs: Any,
-    ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
-        """
-        Plot the point cloud.
-
-        This method is a wrapper to geopandas.GeoDataFrame.plot. Any kwargs which
-        you give this method will be passed to it.
-
-        :param column: Column to plot. Default is the data column of the point cloud.
-        :param ref_crs: Coordinate reference system to match when plotting.
-        :param cmap: Colormap to use. Default is plt.rcParams['image.cmap'].
-        :param vmin: Colorbar minimum value. Default is data min.
-        :param vmax: Colorbar maximum value. Default is data max.
-        :param alpha: Transparency of raster and colorbar.
-        :param cbar_title: Colorbar label. Default is None.
-        :param add_cbar: Set to True to display a colorbar. Default is True if a "column" argument is passed.
-        :param ax: A figure ax to be used for plotting. If None, will plot on current axes. If "new",
-            will create a new axis.
-        :param return_axes: Whether to return axes.
-        :param savefig_fname: Path to quick save the output figure (previously created if an ax is give, new if not)
-            with a default DPI, no transparency and no metadata. Use `plt.savefig()` to specify other save
-            parameters or after other customizations. Warning: `plt.close()` or `plt.show()` still needs to be called
-            to close the figure.
-
-        :returns: None, or (ax, caxes) if return_axes is True
-        """
-
-        matplotlib = import_optional("matplotlib")
-        import matplotlib.pyplot as plt
-        from mpl_toolkits.axes_grid1 import make_axes_locatable
-
-        # Ensure that the vector is in the same crs as a reference
-        if has_geo_attr(ref_crs, "crs"):
-            crs = get_geo_attr(ref_crs, "crs")
-            vect_reproj = self.reproject(ref=crs)
-        elif isinstance(ref_crs, (CRS, int)):
-            vect_reproj = self.reproject(crs=ref_crs)
-        else:
-            vect_reproj = self
-
-        if column is None:
-            column = self.data_column
-
-        # Create axes, or get current ones by default (like in matplotlib)
-        if ax is None:
-            ax0 = plt.gca()
-        elif isinstance(ax, str) and ax.lower() == "new":
-            _, ax0 = plt.subplots()
-        elif isinstance(ax, matplotlib.axes.Axes):
-            ax0 = ax
-        else:
-            raise ValueError("ax must be a matplotlib.axes.Axes instance, 'new' or None.")
-
-        # Set add_cbar depending on column argument
-        if add_cbar:
-            add_cbar = True
-        else:
-            add_cbar = False
-
-        # Update with this function's arguments
-        if add_cbar:
-            legend = True
-        else:
-            legend = False
-
-        if "legend" in list(kwargs.keys()):
-            legend = kwargs.pop("legend")
-
-        # Get colormap arguments that might have been passed in the keyword args
-        if "legend_kwds" in list(kwargs.keys()) and legend:
-            legend_kwds = kwargs.pop("legend_kwds")
-            if cbar_title is not None:
-                legend_kwds.update({"label": cbar_title})  # Pad updates depending on figsize during plot,
-        else:
-            if cbar_title is not None:
-                legend_kwds = {"label": cbar_title}
-            else:
-                legend_kwds = None
-
-        # Add colorbar
-        if add_cbar or cbar_title:
-            divider = make_axes_locatable(ax0)
-            cax = divider.append_axes("right", size="5%", pad="2%")
-            norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
-            cbar = matplotlib.colorbar.ColorbarBase(
-                cax, cmap=cmap, norm=norm
-            )  # , orientation="horizontal", ticklocation="top")
-            cbar.solids.set_alpha(alpha)
-        else:
-            cax = None
-            cbar = None
-
-        # Plot
-        vect_reproj.ds.plot(
-            ax=ax0,
-            cax=cax,
-            column=column,
-            cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
-            alpha=alpha,
-            legend=legend,
-            legend_kwds=legend_kwds,
-            **kwargs,
-        )
-        plt.sca(ax0)
-
-        # if savefig_fname filled, save the plot
-        if savefig_fname:
-            plt.savefig(savefig_fname)
-
-        # If returning axes
-        if return_axes:
-            return ax0, cax
-        else:
-            return None
 
     def __add__(self: PointCloud, other: PointCloud | NDArrayNum | Number) -> PointCloud:
         """

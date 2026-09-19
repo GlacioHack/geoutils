@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import os
+import pathlib
 import re
 import tempfile
 import warnings
 from importlib.util import find_spec
+from pathlib import Path
 
 import geopandas as gpd
-import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from geopandas.testing import assert_geodataframe_equal
@@ -20,7 +21,17 @@ import geoutils as gu
 from geoutils import PointCloud
 from geoutils._typing import NDArrayNum
 
-DO_PLOT = False
+
+def _point_grid(size: int = 10) -> gpd.GeoDataFrame:
+    """Create a square point grid with one unique value per row."""
+
+    x = np.tile(np.arange(size), size)
+    y = np.repeat(np.arange(size), size)
+    return gpd.GeoDataFrame(
+        {"value": np.arange(size * size)},
+        geometry=gpd.points_from_xy(x, y),
+        crs=4326,
+    )
 
 
 class TestPointCloud:
@@ -104,6 +115,53 @@ class TestPointCloud:
         # Accessing point values triggers the first complete data load
         assert np.array_equal(pc.data, self.gdf1["b1"].values)
         assert pc.is_loaded
+
+    def test_init__downsample(self) -> None:
+        """Checks that a point cloud opening respects input downsampling."""
+
+        # Downsample a loaded dataframe by a factor of four
+        dataframe = _point_grid()
+        pointcloud = gu.PointCloud(dataframe, data_column="value", downsample=4)
+        expected = gu.PointCloud(dataframe, data_column="value").subsample(25, random_state=0)
+
+        # Exact equality check
+        assert pointcloud.point_count == 25
+        assert_geodataframe_equal(pointcloud.ds.reset_index(drop=True), expected.ds.reset_index(drop=True))
+
+    def test_init__downsample_lazy_file(self, tmp_path: Path) -> None:
+        """Checks that a file-backed point cloud loads its reduced row count."""
+
+        # Request downsampling and check file stays unloaded
+        filename = tmp_path / "points.gpkg"
+        _point_grid().to_file(filename, index=False)
+        pointcloud = gu.PointCloud(filename, data_column="value", downsample=4)
+        assert not pointcloud.is_loaded
+        assert pointcloud.point_count == 25
+
+        # Loading later applies the subsampling
+        pointcloud.load()
+        assert pointcloud.is_loaded
+        assert pointcloud.point_count == 25
+
+    @pytest.mark.parametrize("downsample", [0, -1, np.inf, "wrong"])
+    def test_open_pointcloud__error_downsample(self, downsample: object) -> None:
+        """Checks errors for downsampling user input."""
+
+        with pytest.raises((TypeError, ValueError), match="downsample must be"):
+            gu.PointCloud(_point_grid(2), data_column="value", downsample=downsample)  # type: ignore[arg-type]
+
+    def test_point_count__unknown_file_metadata_stays_unloaded(self, tmp_path: pathlib.Path) -> None:
+        """Checks that an unknown cached point count is read without loading point data."""
+
+        # Write a point file and simulate a driver that did not provide a cheap feature count during construction
+        filename = tmp_path / "points.gpkg"
+        self.gdf1.to_file(filename)
+        pointcloud = PointCloud(filename, data_column="b1")
+        pointcloud._nb_points = -1
+
+        # Force the driver to count features while keeping geometries and columns on disk
+        assert pointcloud.point_count == len(self.gdf1)
+        assert not pointcloud.is_loaded
 
     def test_has_z__unloaded_3d_file(self) -> None:
         """Checks that _has_z detects 3D file metadata without loading point geometries."""
@@ -1043,62 +1101,6 @@ class TestArithmetic:
 
         assert isinstance(pc, gu.PointCloud)
         assert np.median(pc) == 26.0
-
-    def test_plot(self) -> None:
-        """Test the pointcloud plot."""
-
-        # Create a dummy array of unique values and the associated coordinates
-        array = np.arange(25, dtype=int)
-        coords_x = [i for _ in range(5) for i in range(5)]
-        coords_y = [i for i in range(5) for _ in range(5)]
-
-        # Create the corresponding pointcloud
-        pc = gu.PointCloud.from_xyz(x=coords_x, y=coords_y, z=array, crs=4326)
-
-        # Test default plot
-        pc.plot()
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert True
-
-        # Test with new figure
-        plt.figure()
-        pc.plot()
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert True
-
-        # Test with provided ax
-        ax = plt.subplot(111)
-        pc.plot(ax=ax)
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert True
-
-        # Test vmin, vmax and cbar_title
-        ax = plt.subplot(111)
-        pc.plot(cmap="gray", vmin=0, vmax=20, cbar_title="Custom cbar", ax=ax)
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert True
-
-        # Test save fig
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.png")
-        pc.plot(savefig_fname=temp_file)
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert os.path.isfile(temp_file)
 
 
 class TestArrayInterface:

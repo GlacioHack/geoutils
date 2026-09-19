@@ -26,9 +26,8 @@ from __future__ import annotations
 import copy
 import pathlib
 import warnings
-from collections import abc
 from contextlib import ExitStack
-from typing import IO, TYPE_CHECKING, Any, Callable, overload
+from typing import IO, Any, Callable, overload
 
 import numpy as np
 import rasterio as rio
@@ -40,7 +39,7 @@ from packaging.version import Version
 from rasterio.crs import CRS
 
 from geoutils import profiler
-from geoutils._misc import deprecate, import_optional
+from geoutils._misc import deprecate
 from geoutils._typing import (
     DTypeLike,
     MArrayNum,
@@ -48,7 +47,7 @@ from geoutils._typing import (
     NDArrayNum,
     Number,
 )
-from geoutils.raster.base import RasterBase, RasterType
+from geoutils.raster.base import RasterBase, RasterType, _validate_downsample
 from geoutils.raster.referencing import (
     _cast_nodata,
     _cast_pixel_interpretation,
@@ -58,15 +57,13 @@ from geoutils.raster.satimg import (
     decode_sensor_metadata,
     parse_and_convert_metadata_from_filename,
 )
+from geoutils.raster.transformation import _open_downsampled_raster
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
     from typing import Literal
 except ImportError:
     from typing_extensions import Literal  # type: ignore
-
-if TYPE_CHECKING:
-    import matplotlib
 
 # List of NumPy "array" functions that are handled.
 # Note: all universal function are supported: https://numpy.org/doc/stable/reference/ufuncs.html
@@ -189,9 +186,11 @@ def _load_rio(
     * window : to load a cropped version
     * resampling : to set the resampling algorithm
     """
+    # Use the complete dataset unless a window is passed or derived from a transform
+    window = kwargs.pop("window", None)
+
     # If out_shape is passed, no need to account for transform and shape
     if kwargs.get("out_shape") is not None:
-        window = None
         # If multi-band raster, the out_shape needs to contain the count
         if out_count is not None and out_count > 1:
             kwargs["out_shape"] = (out_count, *kwargs["out_shape"])
@@ -359,7 +358,10 @@ class Raster(RasterBase):
         :param load_data: Whether to load the array during instantiation. Default is False.
         :param parse_sensor_metadata: Whether to parse sensor metadata from filename and similarly-named metadata files.
         :param silent: Whether to parse metadata silently or with console output.
-        :param downsample: Downsample the array once loaded by a round factor. Default is no downsampling.
+        :param downsample: Downsampling factor (e.g., 2 selects one out of two pixels for every row/column). Rows or
+            columns that do not fill a complete interval are omitted. Default 1 keeps the native resolution. See
+            `Rasterio's overview documentation <https://rasterio.readthedocs.io/en/stable/topics/overviews.html>`_
+            for how stored overviews can make reduced reads faster.
         :param force_nodata: Force nodata value to be used (overwrites the metadata). Default reads from metadata.
         """
 
@@ -404,6 +406,8 @@ class Raster(RasterBase):
 
         # Image is a file on disk.
         elif isinstance(filename_or_dataset, (str, pathlib.Path, rio.io.DatasetReader, rio.io.MemoryFile)):
+            downsample = _validate_downsample(downsample)
+
             # ExitStack is used instead of "with rio.open(filename_or_dataset) as ds:".
             # This is because we might not actually want to open it like that, so this is equivalent
             # to the pseudocode:
@@ -453,37 +457,50 @@ class Raster(RasterBase):
             else:
                 count = len(bands)
 
-            # Downsampled image size
-            if not isinstance(downsample, (int, float)):
-                raise TypeError("downsample must be of type int or float.")
-            if downsample < 1:
-                raise ValueError("downsample must be >=1.")
-
+            # Compute the complete output intervals that fit inside the source raster
             if downsample == 1:
                 out_shape = (self.height, self.width)
             else:
-                down_width = int(np.ceil(self.width / downsample))
-                down_height = int(np.ceil(self.height / downsample))
+                down_width = max(1, int(np.floor(self.width / downsample)))
+                down_height = max(1, int(np.floor(self.height / downsample)))
                 out_shape = (down_height, down_width)
                 res = tuple(np.asarray(self.res) * downsample)
                 self.transform = rio.transform.from_origin(self.bounds.left, self.bounds.top, res[0], res[1])
                 self._downsample = downsample
+                self._out_window = rio.windows.Window(
+                    0,
+                    0,
+                    min(ds.width, down_width * downsample),
+                    min(ds.height, down_height * downsample),
+                )
 
             # This will record the downsampled out_shape is data is only loaded later on by .load()
             self._out_shape = out_shape
             self._out_count = count
 
             if load_data:
-                # Mypy doesn't like the out_shape for some reason. I can't figure out why! (erikmannerfelt, 14/01/2022)
-                # Don't need to pass shape and transform, because out_shape overrides it
-                self.data = _load_rio(
-                    ds,
-                    indexes=bands,
-                    masked=self._masked,
-                    convert_to_mask=is_mask,
-                    out_shape=out_shape,
-                    out_count=count,
-                )  # type: ignore
+                if downsample > 1:
+                    # Read a suitable overview through the exact grid requested by the downsampling factor
+                    with _open_downsampled_raster(ds, downsample) as downsampled:
+                        self.data = _load_rio(
+                            downsampled,
+                            indexes=bands,
+                            masked=self._masked,
+                            convert_to_mask=is_mask,
+                        )
+                else:
+                    # Mypy doesn't like the out_shape for some reason. I can't figure out why!
+                    # (erikmannerfelt, 14/01/2022)
+                    # Don't need to pass shape and transform, because out_shape overrides it
+                    self.data = _load_rio(
+                        ds,
+                        indexes=bands,
+                        masked=self._masked,
+                        convert_to_mask=is_mask,
+                        out_shape=out_shape,
+                        out_count=count,
+                        window=self._out_window,
+                    )  # type: ignore
 
             # Probably don't want to use set_nodata that can update array, setting self._nodata is sufficient
             # Set nodata only if data is loaded
@@ -835,19 +852,31 @@ class Raster(RasterBase):
             if self._out_shape is not None:
                 out_count = len(valid_bands)
 
-        # If a downsampled out_shape was defined during instantiation
-        with rio.open(self.name) as dataset:
-            mask = _load_rio(
-                dataset,
-                only_mask=True,
-                indexes=list(valid_bands),
-                masked=self._masked,
-                transform=self.transform,
-                shape=self.shape,
-                out_shape=self._out_shape,
-                out_count=out_count,
-                **kwargs,
-            )
+        # Read a suitable overview for a reduced grid, or use the native dataset without downsampling
+        read_kwargs = kwargs.copy()
+        with ExitStack() as stack:
+            source = stack.enter_context(rio.open(self.name))
+            if self._downsample > 1:
+                dataset = stack.enter_context(_open_downsampled_raster(source, self._downsample))
+                mask = _load_rio(
+                    dataset,
+                    only_mask=True,
+                    indexes=list(valid_bands),
+                    masked=self._masked,
+                    **read_kwargs,
+                )
+            else:
+                mask = _load_rio(
+                    source,
+                    only_mask=True,
+                    indexes=list(valid_bands),
+                    masked=self._masked,
+                    transform=self.transform,
+                    shape=self.shape,
+                    out_shape=self._out_shape,
+                    out_count=out_count,
+                    **read_kwargs,
+                )
 
         # Rasterio says the mask should be returned in 2D for a single band but it seems not
         mask = mask.squeeze()
@@ -890,19 +919,31 @@ class Raster(RasterBase):
         # Save which bands are loaded
         self._bands_loaded = valid_bands
 
-        # If a downsampled out_shape was defined during instantiation
-        with rio.open(self.name) as dataset:
-            self.data = _load_rio(
-                dataset,
-                indexes=list(valid_bands),
-                masked=self._masked,
-                convert_to_mask=self._is_mask,
-                transform=self.transform,
-                shape=self.shape,
-                out_shape=self._out_shape,
-                out_count=self._out_count,
-                **kwargs,
-            )
+        # Read a suitable overview for a reduced grid, or use the native dataset without downsampling
+        read_kwargs = kwargs.copy()
+        with ExitStack() as stack:
+            source = stack.enter_context(rio.open(self.name))
+            if self._downsample > 1:
+                dataset = stack.enter_context(_open_downsampled_raster(source, self._downsample))
+                self.data = _load_rio(
+                    dataset,
+                    indexes=list(valid_bands),
+                    masked=self._masked,
+                    convert_to_mask=self._is_mask,
+                    **read_kwargs,
+                )
+            else:
+                self.data = _load_rio(
+                    source,
+                    indexes=list(valid_bands),
+                    masked=self._masked,
+                    convert_to_mask=self._is_mask,
+                    transform=self.transform,
+                    shape=self.shape,
+                    out_shape=self._out_shape,
+                    out_count=self._out_count,
+                    **read_kwargs,
+                )
 
         # Probably don't want to use set_nodata() that updates the array
         # Set nodata value with the loaded array
@@ -1608,6 +1649,7 @@ class Raster(RasterBase):
             "_name",
             "_driver",
             "_out_shape",
+            "_out_window",
             "_out_count",
             "_obj",
         ]
@@ -2053,203 +2095,6 @@ class Raster(RasterBase):
             ds.name = name
 
         return ds
-
-    @overload
-    def plot(
-        self,
-        bands: int | tuple[int, ...] | None = None,
-        cmap: matplotlib.colors.Colormap | str | None = None,
-        vmin: float | int | None = None,
-        vmax: float | int | None = None,
-        alpha: float | int | None = None,
-        title: str | None = None,
-        cbar_title: str | None = None,
-        add_cbar: bool = True,
-        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
-        *,
-        return_axes: Literal[False] = False,
-        savefig_fname: str | None = None,
-        **kwargs: Any,
-    ) -> None: ...
-
-    @overload
-    def plot(
-        self,
-        bands: int | tuple[int, ...] | None = None,
-        cmap: matplotlib.colors.Colormap | str | None = None,
-        vmin: float | int | None = None,
-        vmax: float | int | None = None,
-        alpha: float | int | None = None,
-        title: str | None = None,
-        cbar_title: str | None = None,
-        add_cbar: bool = True,
-        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
-        *,
-        return_axes: Literal[True],
-        savefig_fname: str | None = None,
-        **kwargs: Any,
-    ) -> tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]: ...
-
-    def plot(
-        self,
-        bands: int | tuple[int, ...] | None = None,
-        cmap: matplotlib.colors.Colormap | str | None = None,
-        vmin: float | int | None = None,
-        vmax: float | int | None = None,
-        alpha: float | int | None = None,
-        title: str | None = None,
-        cbar_title: str | None = None,
-        add_cbar: bool = True,
-        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
-        return_axes: bool = False,
-        savefig_fname: str | None = None,
-        **kwargs: Any,
-    ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
-        r"""
-        Plot the raster, with axes in projection of image.
-
-        This method is a wrapper to matplotlib.imshow with modifications to work on raster (flip Y-axis, lower origin,
-        equal scale). Any \*\*kwargs which you give this method will be passed to matplotlib.imshow.
-        If the raster is passed with 3(4) bands, it is plotted as RGB(Alpha).
-
-        :param bands: Bands to plot, counting from 1 to self.count (default is all bands).
-        :param cmap: Colormap to use. Default is plt.rcParams['image.cmap'].
-        :param vmin: Minimum value for colorbar. Default is data min.
-        :param vmax: Maximum value for colorbar. Default is data max.
-        :param alpha: Transparency of raster and colorbar. Default is None.
-        :param title: Title of the plot. Default is None.
-        :param cbar_title: Colorbar label title. Default is None.
-        :param add_cbar: Set to True to display a colorbar. Default is True.
-        :param ax: A figure ax to be used for plotting. If None, will plot on current axes.
-            If "new", will create a new axis.
-        :param return_axes: Whether to return axes.
-        :param savefig_fname: Path to quick save the output figure (previously created if an ax is give, new if not)
-            with a default DPI, no transparency and no metadata. Use `plt.savefig()` to specify other save
-            parameters or after other customizations. Warning: `plt.close()` or `plt.show()` still needs to be called
-            to close the figure.
-
-        :returns: None, or (ax, caxes) if return_axes is True.
-        """
-
-        matplotlib = import_optional("matplotlib")
-        import matplotlib.pyplot as plt
-        from mpl_toolkits.axes_grid1 import make_axes_locatable
-
-        # If data is not loaded, need to load it
-        if not self.is_loaded:
-            self.load()
-
-        # Set matplotlib interpolation to None by default, to avoid spreading gaps in plots
-        if "interpolation" not in kwargs.keys():
-            kwargs.update({"interpolation": None})
-
-        # Check if specific band selected, or take all
-        # if self.count=3 (4) => plotted as RGB(A)
-        if bands is None or isinstance(bands, tuple):
-            # Use all if None was specified
-            if bands is None:
-                bands = tuple(range(1, self.count + 1))
-            # Check the number of bands is 1, 3 or 4
-            if len(bands) not in [1, 3, 4]:
-                raise ValueError(
-                    f"Only single-band or 3/4-band (RGB-A) plotting is supported. "
-                    f"Found {len(bands)} bands. Use the `bands` argument to specify bands."
-                )
-            if len(bands) == 1:
-                bands = bands[0]
-        elif isinstance(bands, int):
-            if bands > self.count:
-                raise ValueError(f"Index must be in range 1-{self.count:d}")
-            pass
-        else:
-            raise ValueError("Index must be int, tuple or None")
-
-        # Get data
-        if self.count == 1:
-            data = self.data
-        else:
-            data = self.data[np.array(bands) - 1, :, :]
-
-        # If multiple bands (RGB), cbar does not make sense
-        if isinstance(bands, abc.Sequence):
-            if len(bands) > 1:
-                add_cbar = False
-            # Re-order axes for RGB plotting
-            data = np.moveaxis(data, 0, -1)  # type: ignore
-
-        # Create colorbar
-        # Use rcParam default
-        if cmap is None:
-            cmap = plt.get_cmap(plt.rcParams["image.cmap"])
-        elif isinstance(cmap, str):
-            cmap = plt.get_cmap(cmap)
-        elif isinstance(cmap, matplotlib.colors.Colormap):
-            pass
-
-        # Set colorbar min/max values (needed for ScalarMappable)
-        if vmin is None:
-            vmin = float(np.nanmin(data))
-
-        if vmax is None:
-            vmax = float(np.nanmax(data))
-
-        # Make sure they are numbers, to avoid mpl error
-        try:
-            vmin = float(vmin)
-            vmax = float(vmax)
-        except ValueError:
-            raise ValueError("vmin or vmax cannot be converted to float")
-
-        # Create axes
-        if ax is None:
-            ax0 = plt.gca()
-        elif isinstance(ax, str) and ax.lower() == "new":
-            _, ax0 = plt.subplots()
-        elif isinstance(ax, matplotlib.axes.Axes):
-            ax0 = ax
-        else:
-            raise ValueError("ax must be a matplotlib.axes.Axes instance, 'new' or None.")
-
-        # Use data array directly, as rshow on self.ds will re-load data
-        extent = [self.bounds.left, self.bounds.right, self.bounds.bottom, self.bounds.top]
-        ax0.imshow(
-            np.flip(data, axis=0),
-            extent=extent,
-            origin="lower",  # So that the array is not upside-down
-            aspect="equal",
-            cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
-            alpha=alpha,
-            **kwargs,
-        )
-        if title is not None:
-            ax0.set_title(title)
-
-        # Add colorbar
-        if add_cbar:
-            divider = make_axes_locatable(ax0)
-            cax = divider.append_axes("right", size="5%", pad="2%")
-            norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
-            cbar = matplotlib.colorbar.ColorbarBase(cax, cmap=cmap, norm=norm)
-            cbar.solids.set_alpha(alpha)
-
-            if cbar_title is not None:
-                cbar.set_label(cbar_title)
-        else:
-            cbar = None
-
-        plt.sca(ax0)
-        plt.tight_layout()
-
-        # if savefig_fname filled, save the plot
-        if savefig_fname:
-            plt.savefig(savefig_fname)
-
-        # If returning axes
-        if return_axes:
-            return ax0, cax
-        return None
 
     def split_bands(self: RasterType, bands: list[int] | int | None = None, deep: bool = True) -> list[RasterType]:
         """

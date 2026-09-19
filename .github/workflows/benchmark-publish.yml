@@ -42,8 +42,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
+
       - name: Install ASV and the comparison renderer
-        run: python -m pip install -e .[benchmark]
+        run: uv pip install --system -e ".[benchmark]"
 
       - name: Restore the saved ASV measurements
         run: |

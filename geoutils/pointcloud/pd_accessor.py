@@ -26,6 +26,7 @@ import warnings
 from typing import Any, Literal
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 import pyogrio
 import rasterio as rio
@@ -33,7 +34,8 @@ from pyproj import CRS
 
 from geoutils._dispatch import is_dask_dataframe, is_dask_geodataframe
 from geoutils._misc import import_optional
-from geoutils.pointcloud.base import PointCloudBase
+from geoutils._typing import Number
+from geoutils.pointcloud.base import PointCloudBase, _validate_downsample
 from geoutils.pointcloud.dataframe import (
     _build_pointcloud_output,
     _get_dataframe_attrs,
@@ -147,11 +149,34 @@ def _set_pointcloud_attrs_from_file(ds: Any, filename: str, data_column: str | N
     )
 
 
+def _downsample_open_pointcloud(pointcloud: Any, downsample: float) -> Any:
+    """Apply an opening downsampling factor while keeping a lazy dataframe result lazy."""
+
+    if downsample == 1:
+        return pointcloud
+
+    # Convert the factor to the count convention shared by eager and Dask point subsampling
+    source = pointcloud.pc
+    source_count = source.point_count
+    if source_count == 0:
+        return pointcloud
+    target_count = max(1, int(np.ceil(source_count / downsample)))
+    request: int | float = target_count if target_count > 1 else 1 / source_count
+    sampled = source.subsample(request, random_state=0)
+
+    # Preserve the complete source extent while recording the exact deterministic sample size
+    attrs = _get_dataframe_attrs(sampled)
+    attrs.update({"bounds": source.bounds, "point_count": target_count})
+    _set_dataframe_attrs(sampled, attrs)
+    return sampled
+
+
 def open_pointcloud(
     filename: str,
     data_column: str | None = None,
     columns: Literal["all", "main"] | list[str] = "main",
     chunks: int | None = None,
+    downsample: Number = 1,
 ) -> gpd.GeoDataFrame | Any:
     """
     Open a point cloud as a GeoDataFrame or a lazy Dask-GeoPandas GeoDataFrame if ``chunks`` is passed.
@@ -165,6 +190,8 @@ def open_pointcloud(
     :param columns: LAS dimensions to read. ``main`` reads the data column, ``all`` reads every dimension, and a list
         selects specific dimensions. Ignored for other vector formats.
     :param chunks: Number of points or features per Dask partition. If None, load eagerly into one GeoDataFrame.
+    :param downsample: Factor by which to reduce the number of points. For example, 2 keeps up to ``ceil(N / 2)``
+        points selected by a deterministic random sample. The default 1 keeps all points.
     :returns: An eager GeoDataFrame, or a lazy Dask-GeoPandas GeoDataFrame when ``chunks`` is passed.
     """
 
@@ -172,6 +199,7 @@ def open_pointcloud(
 
     if chunks is not None and chunks <= 0:
         raise ValueError("Argument 'chunks' must be a strictly positive integer.")
+    downsample = _validate_downsample(downsample)
 
     # LAS needs its own slice reader while regular vector formats use GeoPandas
     is_las = _is_laspy_supported(filename)
@@ -179,7 +207,7 @@ def open_pointcloud(
     if not is_las:
         if chunks is None:
             # Preserve the established eager PointCloud loading and validation path
-            pc = PointCloud(filename, data_column=data_column)
+            pc = PointCloud(filename, data_column=data_column, downsample=downsample)
             pc.ds.attrs["data_column"] = pc.data_column
             return pc.ds
 
@@ -188,13 +216,14 @@ def open_pointcloud(
         dgdf = dgpd.read_file(filename, chunksize=chunks)
         _set_pointcloud_attrs_from_file(dgdf, filename=filename, data_column=data_column)
         # Use the common output builder to add point metadata and the Dask ``.pc`` and ``.vct`` properties
-        return _build_pointcloud_output(
+        pointcloud = _build_pointcloud_output(
             dgdf,
             data_column=data_column,
             as_dataframe=True,
             attrs=_get_dataframe_attrs(dgdf),
             preserve_locations=True,
         )
+        return _downsample_open_pointcloud(pointcloud, downsample)
 
     # Native LAS Z values are the default point-cloud data
     if data_column is None:
@@ -214,7 +243,7 @@ def open_pointcloud(
 
     if chunks is None:
         # The eager path loads all requested LAS dimensions into one GeoDataFrame
-        pc = PointCloud(filename, data_column=data_column)
+        pc = PointCloud(filename, data_column=data_column, downsample=downsample)
         pc.load(columns=columns, mp_config=None)
         pc.ds.attrs["data_column"] = pc.data_column
         return pc.ds
@@ -258,13 +287,14 @@ def open_pointcloud(
         },
     )
     # Use the common output builder to add point metadata and the Dask ``.pc`` and ``.vct`` properties
-    return _build_pointcloud_output(
+    pointcloud = _build_pointcloud_output(
         ddf,
         data_column=data_column,
         as_dataframe=True,
         attrs=_get_dataframe_attrs(ddf),
         preserve_locations=True,
     )
+    return _downsample_open_pointcloud(pointcloud, downsample)
 
 
 @pd.api.extensions.register_dataframe_accessor("pc")
