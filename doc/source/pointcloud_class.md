@@ -47,7 +47,7 @@ point geometries.
 Additionally, new attributes such as {attr}`~geoutils.PointCloud.point_count` and new methods specific to point clouds are detailed further below.
 
 Generic vector attributes and methods are inherited through the {class}`~geoutils.Vector` object, such as
-{attr}`~geoutils.Vector.bounds`, {attr}`~geoutils.Vector.crs`, {func}`~geoutils.Vector.reproject` and
+{attr}`~geoutils.Vector.bbox`, {attr}`~geoutils.Vector.crs`, {func}`~geoutils.Vector.reproject` and
 {func}`~geoutils.Vector.crop`.
 
 ```{tip}
@@ -102,7 +102,7 @@ neighbors remain nodata.
 
 ```{code-cell} ipython3
 # Grid the point cloud on a 100x100 grid on its extent
-coords = (np.linspace(pc.bounds.left, pc.bounds.right, 100), np.linspace(pc.bounds.bottom, pc.bounds.top, 100))
+coords = (np.linspace(pc.bbox.left, pc.bbox.right, 100), np.linspace(pc.bbox.bottom, pc.bbox.top, 100))
 rst = pc.grid(grid_coords=coords, resampling="idw", dist_nodata_pixel=3)
 ```
 

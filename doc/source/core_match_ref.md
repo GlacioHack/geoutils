@@ -22,10 +22,10 @@ operation.
 
 The rules of using match-reference with {class}`Rasters<geoutils.Raster>` or {class}`Vectors<geoutils.Vector>` are always the same:
 
- - If the **reference** passed is a {class}`~geoutils.Vector`, it can enforce a matching of its {attr}`~geoutils.Vector.bounds` and/or of its {attr}`~geoutils.Vector.crs` (its only two
+ - If the **reference** passed is a {class}`~geoutils.Vector`, it can enforce a matching of its {attr}`~geoutils.Vector.bbox` and/or of its {attr}`~geoutils.Vector.crs` (its only two
    georeferencing attributes),
  - If the **reference** is a {class}`~geoutils.Raster`, it can also enforce a matching of any aspect of its {attr}`~geoutils.Raster.transform` (i.e, its
-   {attr}`~geoutils.Raster.res`, {attr}`~geoutils.Raster.bounds` or {attr}`~geoutils.Raster.shape`) and/or of its {attr}`~geoutils.Raster.crs`.
+   {attr}`~geoutils.Raster.res`, {attr}`~geoutils.Raster.bbox` or {attr}`~geoutils.Raster.shape`) and/or of its {attr}`~geoutils.Raster.crs`.
 
 Which of these attributes are eventually used to enforce the matching **depends entirely on the nature of the operation**, which are listed below.
 
@@ -43,14 +43,14 @@ or {class}`~geoutils.Vector`:
      - Enforced on {class}`~geoutils.Vector`
    * - {func}`~geoutils.Raster.reproject`
      - {attr}`~geoutils.Raster.transform` and {attr}`~geoutils.Raster.crs`
-     - {attr}`~geoutils.Vector.bounds`<sup>1</sup> and {attr}`~geoutils.Vector.crs`
+     - {attr}`~geoutils.Vector.bbox`<sup>1</sup> and {attr}`~geoutils.Vector.crs`
    * - {func}`~geoutils.Raster.crop`
-     - {attr}`~geoutils.Vector.bounds`
-     - {attr}`~geoutils.Raster.bounds`
+     - {attr}`~geoutils.Vector.bbox`
+     - {attr}`~geoutils.Raster.bbox`
 
 ```
 
-<sup>1</sup>Because a {class}`~geoutils.Vector` only possesses the {attr}`~geoutils.Vector.bounds` attribute of a {class}`~geoutils.Raster`'s {attr}`~geoutils.Raster.transform`.
+<sup>1</sup>Because a {class}`~geoutils.Vector` only possesses the {attr}`~geoutils.Vector.bbox` attribute of a {class}`~geoutils.Raster`'s {attr}`~geoutils.Raster.transform`.
 
 
 ## Other operations supporting match-reference

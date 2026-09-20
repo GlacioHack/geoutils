@@ -48,20 +48,23 @@ def _create_axes(ax: matplotlib.axes.Axes | Literal["new"] | None) -> matplotlib
     raise ValueError("ax must be a matplotlib.axes.Axes instance, 'new' or None.")
 
 
-def _get_reference_bounds(reference: Any) -> rio.coords.BoundingBox | None:
-    """Return the total bounds of a georeferenced plotting reference."""
+def _get_reference_bbox(reference: Any) -> rio.coords.BoundingBox | None:
+    """Return the total bounding box of a georeferenced plotting reference."""
 
-    if reference is None or not has_geo_attr(reference, "bounds"):
+    if reference is None:
         return None
     if isinstance(reference, (gpd.GeoDataFrame, gpd.GeoSeries)):
-        bounds = reference.total_bounds
+        bbox = reference.total_bounds
     else:
-        bounds = get_geo_attr(reference, "bounds")
-    if is_dask_dataframe(bounds):
-        bounds = bounds.compute()
-    if isinstance(bounds, pd.DataFrame):
-        bounds = (bounds.minx.min(), bounds.miny.min(), bounds.maxx.max(), bounds.maxy.max())
-    return rio.coords.BoundingBox(*bounds)
+        if not (has_geo_attr(reference, "bbox") or has_geo_attr(reference, "bounds")):
+            return None
+        bbox_attr = "bbox" if has_geo_attr(reference, "bbox") else "bounds"
+        bbox = get_geo_attr(reference, bbox_attr)
+    if is_dask_dataframe(bbox):
+        bbox = bbox.compute()
+    if isinstance(bbox, pd.DataFrame):
+        bbox = (bbox.minx.min(), bbox.miny.min(), bbox.maxx.max(), bbox.maxy.max())
+    return rio.coords.BoundingBox(*bbox)
 
 
 def _plot_geodataframe(

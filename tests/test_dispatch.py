@@ -2,6 +2,7 @@
 Test the dispatch functions used for checking and normalizing inputs.
 """
 
+from types import SimpleNamespace
 from typing import Any
 
 import geopandas as gpd
@@ -405,6 +406,10 @@ class TestDispatchLevelOne:
             # Vector-like objects
             (vect, (0, 0, 1, 1)),
             (vect_gdf, (0, 0, 1, 1)),
+            # Third-party object using the common bbox name without a bounds alias
+            (SimpleNamespace(bbox=(2, 3, 4, 5), crs=pyproj.CRS.from_epsg(4326)), (2, 3, 4, 5)),
+            # Third-party object retaining the previous bounds name
+            (SimpleNamespace(bounds=(3, 4, 5, 6), crs=pyproj.CRS.from_epsg(4326)), (3, 4, 5, 6)),
         ],
     )
     def test_check_match_bbox__valid(self, bbox_input: Any, expected: Any) -> None:
@@ -520,6 +525,8 @@ class TestDispatchLevelOne:
             ("rast", "vect", 1, None, None, None),
             # Reference vector + shape
             ("rast", "vect", None, (3, 3), None, None),
+            # Reference object exposing only bbox and CRS + resolution
+            ("rast", "bbox", 1, None, None, None),
             # 2/ Second category: Source fallback (= first column matters)
             # Source fallback for bounds (raster or vector) + resolution
             ("rast", None, 1, None, None, None),
@@ -541,6 +548,8 @@ class TestDispatchLevelOne:
             ref_input = rast
         elif ref == "vect":
             ref_input = vect
+        elif ref == "bbox":
+            ref_input = SimpleNamespace(bbox=(0, 0, 1, 1), crs=pyproj.CRS.from_epsg(4326))
 
         if src == "rast":
             src_input = rast
@@ -555,6 +564,8 @@ class TestDispatchLevelOne:
         assert out_crs == src_input.crs
         assert isinstance(out_shape, tuple) and len(out_shape) == 2
         assert isinstance(out_transform, rio.Affine)
+        if ref == "bbox":
+            assert rio.transform.array_bounds(*out_shape, out_transform) == pytest.approx((0, 0, 1, 1))
 
     @pytest.mark.parametrize(
         "kwargs, error_match, warn",

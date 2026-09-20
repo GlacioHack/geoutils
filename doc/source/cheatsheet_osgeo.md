@@ -39,7 +39,7 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
 * - Bounding box
   - `gdalinfo`/`ogrinfo`
   - `gdal raster/vector bbox`
-  - {attr}`~geoutils.Raster.bounds`
+  - {attr}`~geoutils.Raster.bbox`
 
 * - Info summary
   - `gdalinfo`/`ogrinfo`

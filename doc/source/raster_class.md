@@ -53,7 +53,7 @@ A **raster** has **four main attributes**:
 A **raster** also contains many derivative attributes, with naming generally consistent with that of [GDAL's recently overhauled CLI](https://gdal.org/en/stable/programs/index.html) or Rasterio.
 
 A first category includes georeferencing attributes directly derived from {attr}`~geoutils.Raster.transform`, namely: {attr}`~geoutils.Raster.shape`,
-{attr}`~geoutils.Raster.height`, {attr}`~geoutils.Raster.width`, {attr}`~geoutils.Raster.res`, {attr}`~geoutils.Raster.bounds`.
+{attr}`~geoutils.Raster.height`, {attr}`~geoutils.Raster.width`, {attr}`~geoutils.Raster.res`, {attr}`~geoutils.Raster.bbox`.
 
 A second category concerns the attributes derived from the raster array shape and type: {attr}`~geoutils.Raster.count`, {attr}`~geoutils.Raster.bands` and
 {attr}`~geoutils.Raster.dtype`. The two former refer to the number of bands loaded in a **raster**, and the band indexes.
@@ -232,7 +232,7 @@ As with all geospatial handling methods, the {func}`~geoutils.Raster.reproject` 
 {class}`~geoutils.Vector` as a reference to match. In that case, no other argument is necessary.
 
 A **raster** reference will enforce to match its {attr}`~geoutils.Raster.transform` and {class}`~geoutils.Raster.crs`.
-A {class}`~geoutils.Vector` reference will enforce to match its {attr}`~geoutils.Vector.bounds` and {class}`~geoutils.Vector.crs`.
+A {class}`~geoutils.Vector` reference will enforce to match its {attr}`~geoutils.Vector.bbox` and {class}`~geoutils.Vector.crs`.
 
 See {ref}`core-match-ref` for more details.
 ```
@@ -243,7 +243,7 @@ attributes. For more details, see the {ref}`specific section and function descri
 ```{code-cell} ipython3
 # Original bounds and resolution
 print(rast.res)
-print(rast.bounds)
+print(rast.bbox)
 ```
 
 ```{code-cell} ipython3
@@ -340,8 +340,12 @@ the geometry keep their values and cells outside it become nodata. Set `all_touc
 by the geometry instead of selecting cells by their centers.
 
 ```{code-cell} ipython3
-# Mask cells outside a vector geometry
-rast_clip = rast.clip(vect)
+from shapely.geometry import Polygon
+
+# Mask cells outside a triangular geometry spanning the raster
+left, bottom, right, top = rast.bbox
+triangle = Polygon([(left, bottom), (right, bottom), (left, top)])
+rast_clip = rast.clip(triangle)
 ```
 
 ## Polygonize

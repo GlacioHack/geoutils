@@ -467,21 +467,24 @@ def _check_match_bbox(
 ) -> tuple[Number, Number, Number, Number]:
     """Function for checking and normalizing input of match feature on bounds consistently.
 
-    :param src: Source object (raster, vector, point cloud) that has a .bounds attribute.
+    :param src: Source object (raster, vector, point cloud) that has a bbox attribute.
     :param bbox: Bounding box object (tuple or bounding box or raster, vector, point cloud).
 
     :return: Tuple of bounding box (xmin, ymin, xmax, ymax).
     """
 
-    # If bbox implements "bounds" and "crs"
-    if has_geo_attr(bbox, "bounds") and has_geo_attr(bbox, "crs"):
-        bounds = _check_bounds(get_geo_attr(bbox, "bounds"))
+    # Prefer the common bbox name while accepting bounds from third-party geospatial objects
+    has_bbox = has_geo_attr(bbox, "bbox")
+    has_bounds = has_geo_attr(bbox, "bounds")
+    if (has_bbox or has_bounds) and has_geo_attr(bbox, "crs"):
+        bbox_attr = "bbox" if has_bbox else "bounds"
+        bounds = _check_bounds(get_geo_attr(bbox, bbox_attr))
         crs = _check_crs(get_geo_attr(bbox, "crs"))
         xmin, ymin, xmax, ymax = _get_bounds_projected(bounds=bounds, in_crs=crs, out_crs=src.crs)
 
         logging.debug(
             f"Match bbox input: using reference object of type {type(src).__name__!r} "
-            f"that implements 'bounds' and 'crs'."
+            f"that implements '{bbox_attr}' and 'crs'."
         )
 
         # If input has an area_or_point attribute, raise warning if inconsistent with source
@@ -499,7 +502,7 @@ def _check_match_bbox(
         raise InvalidBoundsError(
             f"Cannot interpret bounding box input from object of type {type(bbox).__name__!r}. "
             "Expected a sequence (xmin, ymin, xmax, ymax), a rasterio BoundingBox, "
-            "or a geospatial object implementing 'bounds' and 'crs' such as a raster, vector or point cloud."
+            "or a geospatial object implementing 'bbox' and 'crs' such as a raster, vector or point cloud."
         )
 
     return xmin, ymin, xmax, ymax
@@ -630,6 +633,10 @@ def _grid_from_src(
     else:
         bounds = None
 
+    # Prefer bbox for GeoUtils objects while accepting bounds from third-party objects
+    src_bbox_attr = "bbox" if has_geo_attr(src, "bbox") else "bounds"
+    src_bbox = _check_bounds(get_geo_attr(src, src_bbox_attr))
+
     # First, for a raster source, if all are the same, return exactly source transform and size
     # (to avoid approximation errors from calculations below)
     if hasattr(src, "transform") and isinstance(src.transform, rio.Affine):
@@ -637,14 +644,14 @@ def _grid_from_src(
             (dst_crs == src.crs)
             & ((shape is None) | (shape == src.shape))
             & ((res is None) | (res == src.res))
-            & ((bounds is None) | (bounds == src.bounds))
+            & ((bounds is None) | (bounds == src_bbox))
         ):
             return src.shape, src.transform
 
     # If there is no input grid (i.e. no resampling involved), just build output grid directly from user inputs
     if not hasattr(src, "res"):
         if bounds is None:
-            bounds = _get_bounds_projected(_check_bounds(src.bounds), in_crs=src.crs, out_crs=dst_crs)
+            bounds = _get_bounds_projected(src_bbox, in_crs=src.crs, out_crs=dst_crs)
         if res is not None:
             return _grid_from_bounds_res(bounds, res)
         elif shape is not None:
@@ -668,10 +675,10 @@ def _grid_from_src(
         dst_crs,
         src_width,
         src_height,
-        left=src.bounds.left,
-        right=src.bounds.right,
-        top=src.bounds.top,
-        bottom=src.bounds.bottom,
+        left=src_bbox[0],
+        right=src_bbox[2],
+        top=src_bbox[3],
+        bottom=src_bbox[1],
         resolution=res,  # Only defined if shape is None
         dst_width=width,  # Only defined if res is None
         dst_height=height,  # Only defined if res is None
@@ -809,26 +816,27 @@ def _check_match_grid(
                 _cast_pixel_interpretation(src.area_or_point, get_geo_attr(ref, "area_or_point"))
 
         # If reference only defines a partial grid (vector or point cloud-like)
-        elif has_geo_attr(ref, "bounds") and has_geo_attr(ref, "crs"):
-            dst_bounds = _check_bounds(get_geo_attr(ref, "bounds"))
+        elif (has_geo_attr(ref, "bbox") or has_geo_attr(ref, "bounds")) and has_geo_attr(ref, "crs"):
+            bbox_attr = "bbox" if has_geo_attr(ref, "bbox") else "bounds"
+            dst_bounds = _check_bounds(get_geo_attr(ref, bbox_attr))
             dst_crs = _check_crs(get_geo_attr(ref, "crs"))
 
             logging.debug(
                 f"Match grid input: using reference object of type {type(src).__name__!r} "
-                f"that implements only 'bounds' and 'crs' (vector-like)."
+                f"that implements only '{bbox_attr}' and 'crs' (vector-like)."
             )
 
             if res is not None and shape is not None:
                 raise InvalidGridError(
                     f"Both 'res' and 'shape' were passed to define the grid resolution alongside object of type"
-                    f" {type(ref).__name__!r} defining bounds and CRS. Only provide one of 'res' or 'shape'."
+                    f" {type(ref).__name__!r} defining a bbox and CRS. Only provide one of 'res' or 'shape'."
                 )
             if res is None and shape is None:
                 # If no resolution was defined but source has one (= it is a raster), fallback on source
                 if not hasattr(src, "res"):
                     raise InvalidGridError(
                         f"Reference input from object of type {type(ref).__name__!r} only contains "
-                        f"bounds and CRS, and thus requires a provided resolution 'res' or grid shape 'shape' to "
+                        f"a bbox and CRS, and thus requires a provided resolution 'res' or grid shape 'shape' to "
                         f"define a complete grid, but none was passed and source object of type"
                         f" {type(src).__name__!r} (fallback) has none."
                     )
@@ -850,14 +858,14 @@ def _check_match_grid(
             # Resolution and shape: after the above, one or the other must not be None
             # (Note: Both are already defined in target CRS, so no need for projected calculations)
             if res is not None:
-                dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src, bounds=bounds, res=res)
+                dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src, bounds=dst_bounds, res=res)
             elif shape is not None:
-                dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src, bounds=bounds, shape=shape)
+                dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src, bounds=dst_bounds, shape=shape)
 
         else:
             raise InvalidGridError(
                 f"Cannot interpret reference grid from object of type {type(ref).__name__!r}. The reference grid "
-                f"should implement either 'transform', 'shape' and 'crs' (raster-like), or 'bounds' and "
+                f"should implement either 'transform', 'shape' and 'crs' (raster-like), or 'bbox' and "
                 f"'crs' (vector-like) through its object or accessors. If not, provide these arguments separately."
             )
 
@@ -872,7 +880,7 @@ def _check_match_grid(
 
         # If (res or shape) and bounds are defined, from user or on source fallback
         if (res is not None or shape is not None or hasattr(src, "res")) and (
-            bounds is not None or hasattr(src, "bounds")
+            bounds is not None or has_geo_attr(src, "bbox") or has_geo_attr(src, "bounds")
         ):
             # If both res and shape passed, raise error
             if res is not None and shape is not None:
