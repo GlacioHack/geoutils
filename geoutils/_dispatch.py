@@ -506,17 +506,17 @@ def _check_match_bbox(
 
 
 def _clip_geometry(mask: Any, target_crs: rio.crs.CRS | pyproj.CRS | None) -> BaseGeometry:
-    """Return an input clipping geometry normalized and in the target coordinate reference system."""
+    """Return an input clipping geometry normalized and in the target CRS."""
 
     if isinstance(mask, BaseGeometry):
         return mask
 
-    # Interpret a coordinate sequence as a rectangular clipping geometry
+    # Extent as a clipping geometry
     if isinstance(mask, Sequence) and not isinstance(mask, (str, bytes)):
         xmin, ymin, xmax, ymax = _check_bounds(mask)
         return box(xmin, ymin, xmax, ymax)
 
-    # Read geometries directly or through the vector and point cloud accessors
+    # Direct geometries
     if isinstance(mask, gpd.GeoSeries):
         dataframe = gpd.GeoDataFrame(geometry=mask)
     elif isinstance(mask, gpd.GeoDataFrame):
@@ -526,7 +526,7 @@ def _clip_geometry(mask: Any, target_crs: rio.crs.CRS | pyproj.CRS | None) -> Ba
         if interface is not None:
             dataframe = interface.ds
         else:
-            # Use the rectangular footprint of a raster-like mask
+            # Footprint as a mask
             raster_interface = get_geo_interface(mask, "footprint", accessors=("rst",))
             if raster_interface is None:
                 raise TypeError(
@@ -535,7 +535,7 @@ def _clip_geometry(mask: Any, target_crs: rio.crs.CRS | pyproj.CRS | None) -> Ba
                 )
             return _clip_geometry(raster_interface.footprint, target_crs=target_crs)
 
-    # Combine the mask once so every eager or lazy source block receives the same geometry
+    # Combine mask once so every eager or lazy source block receives the same geometry
     if is_dask_dataframe(dataframe):
         dataframe = dataframe.compute()
     if (

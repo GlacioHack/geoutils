@@ -321,10 +321,24 @@ class VectorBase(ABC):
             _create_axes,
             _get_reference_bounds,
             _plot_geodataframe,
-            _resolve_plot_reference,
         )
 
-        ref = _resolve_plot_reference(ref, kwargs)
+        # REMOVE AFTER DEPRECATION: Delete this block when ref_crs compatibility is removed
+        if "ref_crs" in kwargs:
+            if ref is not None:
+                raise TypeError("plot() received both 'ref' and deprecated 'ref_crs'; use only 'ref'.")
+            deprecated_ref = kwargs.pop("ref_crs")
+            warnings.warn(
+                "Argument 'ref_crs' is deprecated; use 'ref' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            # Preserve the old behavior, which matched only the CRS and did not use reference bounds
+            if deprecated_ref is not None:
+                if has_geo_attr(deprecated_ref, "crs"):
+                    deprecated_ref = get_geo_attr(deprecated_ref, "crs")
+                ref = CRS.from_user_input(deprecated_ref)
+
         reference_bounds = None
         if has_geo_attr(ref, "crs"):
             crs = get_geo_attr(ref, "crs")

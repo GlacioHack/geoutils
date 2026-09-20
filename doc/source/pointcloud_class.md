@@ -78,24 +78,6 @@ pc = geoutils.PointCloud(filename_dem, data_column="Z")
 pc
 ```
 
-## Crop and clip
-
-{func}`~geoutils.PointCloud.crop` selects points inside a rectangular extent without changing their coordinates or
-values. File-backed point clouds can efficiently defer the spatial read until point data are requested.
-{func}`~geoutils.PointCloud.clip` accepts an exact geometry and removes every point outside it. Dask-backed accessors
-clip their existing partitions lazily. Pass a {class}`~geoutils.multiproc.MultiprocConfig` with an integer point chunk
-size to clip in worker processes and write an unloaded GeoPackage, LAS or LAZ result.
-
-```{code-cell} ipython3
-from shapely.geometry import Point
-
-# Select a mask's extent, or use its curved geometry exactly
-center = ((pc.bounds.left + pc.bounds.right) / 2, (pc.bounds.bottom + pc.bounds.top) / 2)
-mask = Point(center).buffer((pc.bounds.right - pc.bounds.left) / 4)
-pc_crop = pc.crop(mask.bounds)
-pc_clip = pc.clip(mask)
-```
-
 ## Create from arrays or tuples
 
 A {class}`~geoutils.PointCloud` is created from three 1D arrays, from a Nx3 or 3xN array, or from an iterable of 3-tuples by calling the class

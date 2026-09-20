@@ -89,7 +89,7 @@ from geoutils.raster.referencing import (
     _xy2ij,
 )
 from geoutils.raster.testing import _array_equal_or_close
-from geoutils.raster.transformation import _clip, _crop, _crop_window, _reproject, _translate
+from geoutils.raster.transformation import _clip, _crop, _reproject, _translate
 from geoutils.sampling.subsampling import _subsample, _subsample_raster
 from geoutils.stats.stats import stats as _stats
 from geoutils.stats.stats import variogram as _variogram
@@ -105,6 +105,7 @@ if TYPE_CHECKING:
 
     from geoutils.interface.gridding import GriddingMethod
     from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
+    from geoutils.raster.raster import Raster
     from geoutils.stats.variography import Variogram
     from geoutils.vector.base import VectorLike
     from geoutils.vector.vector import Vector, VectorType
@@ -1360,29 +1361,6 @@ class RasterBase(ABC):
         else:
             return nanarray
 
-    def _crop_deferred(
-        self: RasterType,
-        bbox: Any,
-        distance_unit: Literal["georeferenced", "pixel"],
-    ) -> RasterType:
-        """Return an unloaded raster whose future read is limited to the selected window."""
-
-        final_window, new_transform = _crop_window(self, bbox=bbox, distance_unit=distance_unit)
-        source_window = self._out_window or rio.windows.Window(0, 0, self.width, self.height)
-
-        # Compose the new selection with any opening downsampling or earlier deferred crop
-        output = self.copy(deep=False)
-        output._out_window = rio.windows.Window(
-            col_off=source_window.col_off + final_window.col_off,
-            row_off=source_window.row_off + final_window.row_off,
-            width=final_window.width,
-            height=final_window.height,
-        )
-        output._out_shape = (int(final_window.height), int(final_window.width))
-        output._out_count = output.count
-        output._set_transform(new_transform)
-        return output
-
     @profiler.profile("geoutils.raster.base.crop", memprof=True)
     def crop(
         self: RasterType,
@@ -1406,7 +1384,8 @@ class RasterBase(ABC):
 
         # Store only the read window when the source values still live on disk
         if not self._is_xr and not self.is_loaded:
-            output = self._crop_deferred(bbox=bbox, distance_unit="georeferenced")
+            raster = cast("Raster", self)
+            output = cast(RasterType, raster._crop_deferred(bbox=bbox, distance_unit="georeferenced"))
             if inplace:
                 warnings.warn(
                     message="Argument 'inplace' is deprecated, and will be removed in future releases. "
@@ -1481,7 +1460,8 @@ class RasterBase(ABC):
         """
         # Store only read window when raster is not loaded yet
         if not self._is_xr and not self.is_loaded:
-            output = self._crop_deferred(bbox=bbox, distance_unit="pixel")
+            raster = cast("Raster", self)
+            output = cast(RasterType, raster._crop_deferred(bbox=bbox, distance_unit="pixel"))
             if inplace:
                 warnings.warn(
                     message="Argument 'inplace' is deprecated, and will be removed in future releases. "

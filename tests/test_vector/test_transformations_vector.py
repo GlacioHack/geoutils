@@ -214,11 +214,11 @@ class TestTransformationChunked:
     """Test module for vector transformations run with Dask or multiprocessing."""
 
     def test_clip__chunked_backends_equal(self, tmp_path: Any) -> None:
-        """Checks that Dask and multiprocessing clip() give the same result as an in-memory call."""
+        """Checks that clip with Dask and multiprocessing gives the same result as in-memory."""
 
         dgpd = pytest.importorskip("dask_geopandas")
 
-        # Write five polygons so one group has no result and the final group has one row
+        # Write five polygons with one outside and one that will be cut
         source = gpd.GeoDataFrame(
             {"row_id": np.arange(5, dtype=np.int32), "value": np.linspace(0, 1, 5)},
             geometry=[
@@ -234,7 +234,7 @@ class TestTransformationChunked:
         source.to_file(filename, index=False)
         geometry = Polygon([(0, 0), (6, 0), (0, 6)])
 
-        # Clip the same file in memory, with Dask and with two worker processes
+        # Clip the same file in memory and with Dask + MP
         expected = source.clip(geometry).sort_values("row_id").reset_index(drop=True)
         lazy = gu.open_vector(filename, chunks=2)
         multiproc = gu.Vector(filename)
@@ -243,7 +243,7 @@ class TestTransformationChunked:
             config = MultiprocConfig(chunks=2, outfile=str(tmp_path / "vector_clipped.gpkg"), cluster=cluster)
             multiproc_result = multiproc.clip(geometry, mp_config=config)
 
-        # Check that the Dask and file results have the expected types and remain unloaded
+        # Check that the Dask and MP outputs have expected types and remain unloaded
         assert isinstance(lazy_result, dgpd.GeoDataFrame)
         assert not lazy.vct.is_loaded and not lazy_result.vct.is_loaded
         assert isinstance(multiproc_result, gu.Vector)
@@ -251,7 +251,7 @@ class TestTransformationChunked:
         with pytest.raises(ValueError, match="cannot be combined with a Dask vector"):
             lazy.vct.clip(geometry, mp_config=config)
 
-        # Read the results and compare every clipped geometry and value in the original order
+        # Read results and check exact equality of clipped geometry in original order with in-memory
         computed_lazy = lazy_result.compute().sort_values("row_id").reset_index(drop=True)
         computed_multiproc = multiproc_result.ds.sort_values("row_id").reset_index(drop=True)
         assert_geodataframe_equal(computed_lazy, expected, check_dtype=False)

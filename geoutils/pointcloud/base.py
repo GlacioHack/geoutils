@@ -40,7 +40,7 @@ import pyogrio
 from pyproj import CRS
 
 from geoutils import profiler
-from geoutils._dispatch import _get_reproject_crs, get_geo_attr, is_dask_dataframe
+from geoutils._dispatch import _get_reproject_crs, get_geo_attr, has_geo_attr, is_dask_dataframe
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface._nodata import NodataPropagation
@@ -278,9 +278,23 @@ class PointCloudBase(VectorBase):
         """
 
         from geoutils.pointcloud.plotting import _plot_pointcloud
-        from geoutils.vector.plotting import _resolve_plot_reference
 
-        ref = _resolve_plot_reference(ref, kwargs)
+        # REMOVE AFTER DEPRECATION: Delete this block when ref_crs compatibility is removed
+        if "ref_crs" in kwargs:
+            if ref is not None:
+                raise TypeError("plot() received both 'ref' and deprecated 'ref_crs'; use only 'ref'.")
+            deprecated_ref = kwargs.pop("ref_crs")
+            warnings.warn(
+                "Argument 'ref_crs' is deprecated; use 'ref' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            # Preserve the old behavior, which matched only the CRS and did not use reference bounds
+            if deprecated_ref is not None:
+                if has_geo_attr(deprecated_ref, "crs"):
+                    deprecated_ref = get_geo_attr(deprecated_ref, "crs")
+                ref = CRS.from_user_input(deprecated_ref)
+
         return _plot_pointcloud(
             self,
             column=column,

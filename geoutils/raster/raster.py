@@ -57,7 +57,7 @@ from geoutils.raster.satimg import (
     decode_sensor_metadata,
     parse_and_convert_metadata_from_filename,
 )
-from geoutils.raster.transformation import _open_downsampled_raster
+from geoutils.raster.transformation import _crop_window, _open_downsampled_raster
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -815,6 +815,29 @@ class Raster(RasterBase):
         # Otherwise check data type
         else:
             return np.dtype(self.dtype) == np.bool_
+
+    def _crop_deferred(
+        self: RasterType,
+        bbox: Any,
+        distance_unit: Literal["georeferenced", "pixel"],
+    ) -> RasterType:
+        """Return an unloaded raster whose future read is limited to the selected window."""
+
+        final_window, new_transform = _crop_window(self, bbox=bbox, distance_unit=distance_unit)
+        source_window = self._out_window or rio.windows.Window(0, 0, self.width, self.height)
+
+        # Compose the new selection with any opening downsampling or earlier deferred crop
+        output = self.copy(deep=False)
+        output._out_window = rio.windows.Window(
+            col_off=source_window.col_off + final_window.col_off,
+            row_off=source_window.row_off + final_window.row_off,
+            width=final_window.width,
+            height=final_window.height,
+        )
+        output._out_shape = (int(final_window.height), int(final_window.width))
+        output._out_count = output.count
+        output._set_transform(new_transform)
+        return output
 
     def _load_only_mask(self, bands: int | list[int] | None = None, **kwargs: Any) -> NDArrayBool:
         """

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Generic, Literal, TypeVar, cast
 
 import geopandas as gpd
 import numpy as np
@@ -44,7 +44,8 @@ from geoutils.multiproc.mparray import MultiprocConfig
 from geoutils.raster.referencing import _cast_nodata
 
 if TYPE_CHECKING:
-    from geoutils.raster.base import Raster, RasterBase, RasterType
+    from geoutils.raster.base import RasterBase, RasterType
+    from geoutils.raster.raster import Raster
     from geoutils.vector.vector import Vector
 
 try:
@@ -2208,16 +2209,17 @@ def _polygonize(
     # For Multiprocessing
     if mp_backend:
         assert mp_config is not None
+        raster = cast("Raster", source_raster)
         # Temporary switch bands
-        orig_bands = source_raster.bands
-        source_raster._bands = (band,)
+        orig_bands = raster.bands
+        raster._bands = (band,)
         gdf = _multiproc_polygonize(
-            source_raster=source_raster,
+            source_raster=raster,
             prepared=prepared,
             mp_config=mp_config,
         )
         # Rewrite original bands
-        source_raster._bands = orig_bands
+        raster._bands = orig_bands
     # For Dask
     else:
         if source_raster.data.ndim != 2:

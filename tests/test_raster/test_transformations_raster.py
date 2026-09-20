@@ -266,8 +266,8 @@ class TestTransformation:
         assert cropped.raster_equal(expected, strict_masked=True)
         assert not source.is_loaded
 
-    def test_clip__exact_geometry_mask(self) -> None:
-        """Checks that clip() keeps the raster grid and masks cells outside the given shape."""
+    def test_clip(self) -> None:
+        """Checks that clip() is masking cells outside the given geometry."""
 
         # Create a 4 x 4 raster and a triangle polygon vector crossing its cell grid
         values = np.arange(16, dtype=np.int16).reshape(4, 4)
@@ -275,12 +275,13 @@ class TestTransformation:
         raster = gu.Raster.from_array(values, transform=transform, crs=32610, nodata=-9999)
         triangle = Polygon([(0, 0), (4, 0), (0, 4)])
 
-        # Clip to the triangle without changing the raster grid or values inside it
+        # Clip to geometry
         clipped = raster.clip(triangle)
         expected_inside = rio.features.geometry_mask(
             [triangle], out_shape=raster.shape, transform=raster.transform, invert=True
         )
 
+        # Check expected inside/outside geometries
         assert clipped.shape == raster.shape
         assert clipped.transform == raster.transform
         np.testing.assert_array_equal(np.ma.getmaskarray(clipped.data), ~expected_inside)
@@ -872,12 +873,12 @@ class TestMaskGeotransformations:
 class TestTransformationChunked:
     """Test module for raster transformations run with Dask or multiprocessing."""
 
-    def test_clip__chunked_backends(self, tmp_path: Any) -> None:
-        """Checks that Dask and multiprocessing clip() give the same result as an in-memory call."""
+    def test_clip__chunked_backends_equal(self, tmp_path: Any) -> None:
+        """Checks that clip with Dask and multiprocessing give the same result as in-memory."""
 
         import dask.array as da
 
-        # Write three bands in 2 x 3 blocks, with one missing cell inside the triangle (to check nodata behaviour)
+        # Write three bands in 2 x 3 blocks, with one cell outside the geometry
         values = np.arange(3 * 7 * 8, dtype=np.float32).reshape(3, 7, 8)
         existing_mask = np.zeros(values.shape, dtype=bool)
         existing_mask[:, 5, 1] = True
@@ -888,7 +889,7 @@ class TestTransformationChunked:
         source.to_file(path)
         geometry = Polygon([(0, 0), (8, 0), (0, 7)])
 
-        # Clip the same file in memory, with Dask and with Multiprocessing
+        # Clip the same file in memory, with Dask + MP
         expected = source.clip(geometry)
         dask_source = open_raster(path, chunks={"band": 1, "y": 2, "x": 3})
         raster_source = gu.Raster(path)
@@ -897,7 +898,7 @@ class TestTransformationChunked:
             mp_config = MultiprocConfig(chunks=(2, 3), outfile=str(tmp_path / "clip_multiproc.tif"), cluster=cluster)
             multiproc_result = raster_source.clip(geometry, mp_config=mp_config)
 
-        # Check that the Dask result keeps its blocks and the file results remain unloaded
+        # Check Dask laziness and loading behaviour
         assert isinstance(dask_result.data, da.Array)
         assert dask_result.chunks == dask_source.chunks
         assert not raster_source.is_loaded

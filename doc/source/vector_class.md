@@ -164,13 +164,11 @@ See {ref}`core-match-ref` for more details.
 ```
 
 The {func}`~geoutils.Vector.crop` function can also be passed a {class}`list` or {class}`tuple` of bounds (`xmin`,
-`ymin`, `xmax`, `ymax`). File-backed vectors defer this selection until their data are requested.
+`ymin`, `xmax`, `ymax`). Unloaded vectors defer this selection until their data are requested.
 
 By default, crop returns a new {class}`~geoutils.Vector` containing every unchanged geometry that intersects the
 extent. Pass `mode="within"` to keep only geometries fully contained by it. Use {func}`~geoutils.Vector.clip` to cut
-intersecting geometries exactly at a mask boundary. Dask-backed accessors clip their existing partitions lazily.
-Pass a {class}`~geoutils.multiproc.MultiprocConfig` with an integer feature chunk size to clip a file-backed vector
-in worker processes and write an unloaded GeoPackage result.
+intersecting geometries exactly at a mask boundary.
 
 ```{code-cell} ipython3
 # Select fully contained features, or cut geometries to the same extent
