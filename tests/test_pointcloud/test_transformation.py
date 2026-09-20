@@ -90,7 +90,7 @@ class TestTransformationChunked:
 
         dgpd = pytest.importorskip("dask_geopandas")
 
-        # Write eleven 3D points so the final group contains fewer than four points
+        # Write 3D points with a final group of less than a chunk of 4 (selected further below) to test edge cases
         filename = tmp_path / "points_to_clip.gpkg"
         self.clip_points.to_file(filename, index=False)
 
@@ -137,7 +137,7 @@ class TestTransformationChunked:
         geometry = Polygon([(left, bottom), (middle, bottom), (middle, top), (left, top)])
         assert not eager.is_loaded
 
-        # Build one clipping task per 100-point LAS partition without running any Dask task
+        # Build one clipping task per LAS partition (100 points) without running any Dask task
         lazy = gu.open_pointcloud(filename, chunks=100)
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(args[0])):
