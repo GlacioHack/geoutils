@@ -310,6 +310,7 @@ class TestClassVsAccessorConsistency:
         # 2/ This second list of methods will load the input Raster (access .data)
         # 2.1. Not in-place
         ("copy", {"new_array": "placeholder"}),  # Copy with new array does load! Will create array of right size below.
+        ("clip", {"mask": "random"}),
         ("info", {"stats": True, "verbose": False}),  # Info with stats loads
         ("plot", {"max_pixels": 1_000, "add_cbar": False}),
         ("reproject", {"crs": CRS.from_epsg(4326)}),
@@ -397,12 +398,25 @@ class TestClassVsAccessorConsistency:
                 raster.bounds.bottom + 411,
             )
             args.update({"bbox": bbox})
+        elif method == "clip":
+            mask = (
+                raster.bounds.left + 100,
+                raster.bounds.bottom + 200,
+                raster.bounds.left + 320,
+                raster.bounds.bottom + 411,
+            )
+            args.update({"mask": mask})
         elif method in ["raster_equal", "raster_allclose", "georeferenced_grid_equal", "intersection"]:
             args.update({"other": ds.copy(deep=False)})
         elif method == "cosample":
             args.update({"other": raster})
         elif method == "copy" and "new_array" in args:
             args.update({"new_array": np.ones(ds.shape)})
+
+        # Load both inputs because clip() needs their raster values
+        if method == "clip":
+            raster.load()
+            ds.load()
 
         # Apply method for each class
         output_raster = getattr(raster, method)(**args)
@@ -443,9 +457,7 @@ class TestClassVsAccessorConsistency:
                 noload=self.methods_output_noload,
                 noload_allowed_args=self.methods_output_noload_allowed_args,
             )
-            # TODO: Raster class does not load input, but does load output for "crop/icrop"
-            if method not in ["crop", "icrop"]:
-                assert output_raster.is_loaded is should_output_be_loaded
+            assert output_raster.is_loaded is should_output_be_loaded
             assert output_ds._in_memory is should_output_be_loaded
 
         # Finally, assert exact equality of outputs

@@ -103,6 +103,7 @@ class TestClassVsAccessorConsistency:
         ("vector_equal", {"other": "self"}),
         ("vector_allclose", {"other": "self"}),
         ("crop", {"bbox": (-1, -1, 3, 3)}),
+        ("clip", {"mask": (-1, -1, 3, 3)}),
         ("reproject", {"crs": CRS.from_epsg(4326)}),
         ("translate", {"xoff": 1, "yoff": 2}),
         (
@@ -223,7 +224,7 @@ class TestClassVsAccessorConsistency:
     def test_shared_methods_are_owned_by_base(self) -> None:
         """Check that GeoUtils operations shared with the accessor are not redefined on Vector."""
 
-        shared_methods = {"vector_equal", "vector_allclose", "crop", "reproject", "rasterize", "proximity"}
+        shared_methods = {"vector_equal", "vector_allclose", "crop", "clip", "reproject", "rasterize", "proximity"}
         assert shared_methods <= set(VectorBase.__dict__)
         assert shared_methods.isdisjoint(Vector.__dict__)
 

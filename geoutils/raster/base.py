@@ -89,7 +89,7 @@ from geoutils.raster.referencing import (
     _xy2ij,
 )
 from geoutils.raster.testing import _array_equal_or_close
-from geoutils.raster.transformation import _crop, _reproject, _translate
+from geoutils.raster.transformation import _clip, _crop, _crop_window, _reproject, _translate
 from geoutils.sampling.subsampling import _subsample, _subsample_raster
 from geoutils.stats.stats import stats as _stats
 from geoutils.stats.stats import variogram as _variogram
@@ -1360,6 +1360,29 @@ class RasterBase(ABC):
         else:
             return nanarray
 
+    def _crop_deferred(
+        self: RasterType,
+        bbox: Any,
+        distance_unit: Literal["georeferenced", "pixel"],
+    ) -> RasterType:
+        """Return an unloaded raster whose future read is limited to the selected window."""
+
+        final_window, new_transform = _crop_window(self, bbox=bbox, distance_unit=distance_unit)
+        source_window = self._out_window or rio.windows.Window(0, 0, self.width, self.height)
+
+        # Compose the new selection with any opening downsampling or earlier deferred crop
+        output = self.copy(deep=False)
+        output._out_window = rio.windows.Window(
+            col_off=source_window.col_off + final_window.col_off,
+            row_off=source_window.row_off + final_window.row_off,
+            width=final_window.width,
+            height=final_window.height,
+        )
+        output._out_shape = (int(final_window.height), int(final_window.width))
+        output._out_count = output.count
+        output._set_transform(new_transform)
+        return output
+
     @profiler.profile("geoutils.raster.base.crop", memprof=True)
     def crop(
         self: RasterType,
@@ -1380,6 +1403,19 @@ class RasterBase(ABC):
         :param inplace: (DEPRECATED. Use rast = rast.crop() instead) Whether to crop in-place or not.
         :returns: A new cropped raster.
         """
+
+        # Store only the read window when the source values still live on disk
+        if not self._is_xr and not self.is_loaded:
+            output = self._crop_deferred(bbox=bbox, distance_unit="georeferenced")
+            if inplace:
+                warnings.warn(
+                    message="Argument 'inplace' is deprecated, and will be removed in future releases. "
+                    "Use 'rast = rast.crop()' instead.",
+                    category=DeprecationWarning,
+                )
+                self.__dict__.update(output.__dict__)
+                return None
+            return output
 
         cropped_arr, new_transform = _crop(source_raster=self, bbox=bbox)
 
@@ -1405,6 +1441,30 @@ class RasterBase(ABC):
             return cast(RasterType, cropped_arr)
         return self.from_array(cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point)
 
+    def clip(
+        self: RasterType,
+        mask: Any,
+        all_touched: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> RasterType:
+        """
+        Mask raster cells outside an exact clipping geometry.
+
+        The raster grid and extent stay unchanged. Cells inside the geometry keep their values, while cells outside
+        become masked values for Raster objects and NaN values for Xarray objects.
+
+        :param mask: Clipping geometry, vector, point cloud, raster or bounding box. Georeferenced masks are
+            reprojected to this raster's CRS.
+        :param all_touched: Whether to keep every cell touched by the geometry. By default, keep cells whose center is
+            inside the geometry, following Rasterio rasterization behavior.
+        :param mp_config: Multiprocessing configuration.
+
+        :returns: Raster with cells outside the clipping geometry as NaN or masked.
+        """
+
+        output = _clip(self, mask=mask, all_touched=all_touched, mp_config=mp_config)
+        return self._cast_raster_output(output)
+
     @profiler.profile("geoutils.raster.base.icrop", memprof=True)
     def icrop(
         self: RasterType,
@@ -1419,6 +1479,19 @@ class RasterBase(ABC):
 
         :returns: Cropped raster.
         """
+        # Store only read window when raster is not loaded yet
+        if not self._is_xr and not self.is_loaded:
+            output = self._crop_deferred(bbox=bbox, distance_unit="pixel")
+            if inplace:
+                warnings.warn(
+                    message="Argument 'inplace' is deprecated, and will be removed in future releases. "
+                    "Use 'rast = rast.icrop()' instead.",
+                    category=DeprecationWarning,
+                )
+                self.__dict__.update(output.__dict__)
+                return None
+            return output
+
         cropped_arr, new_transform = _crop(source_raster=self, bbox=bbox, distance_unit="pixel")
 
         # Keep in-place for a bit with deprecation warning

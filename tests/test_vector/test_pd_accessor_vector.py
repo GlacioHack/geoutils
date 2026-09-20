@@ -113,16 +113,15 @@ class TestVectorAccessor:
         assert not ds.vct.is_loaded
 
     @pytest.mark.parametrize(
-        ("method", "clip"),
-        [("copy", False), ("crop", False), ("crop", True)],
-        ids=["copy", "crop", "crop-and-clip"],
+        "method",
+        ["copy", "crop", "clip"],
     )
-    def test_copy_crop_vector__dask_geopandas(self, method: str, clip: bool) -> None:
-        """Keep copied and cropped vector partitions lazy and equal to eager GeoPandas."""
+    def test_copy_crop_clip__dask_geopandas(self, method: str) -> None:
+        """Checks that Dask copy(), crop() and clip() stay lazy and match the in-memory result."""
 
         dgpd = pytest.importorskip("dask_geopandas")
 
-        # Use the middle half of the source extent so cropping has visible work to perform
+        # Use the middle half of the source bounds so crop() and clip() remove some geometries
         expected_source = gu.open_vector(self.aster_outlines_path)
         left, bottom, right, top = expected_source.total_bounds
         bbox = (
@@ -131,7 +130,12 @@ class TestVectorAccessor:
             right - (right - left) / 4,
             top - (top - bottom) / 4,
         )
-        kwargs = {"bbox": bbox, "clip": clip} if method == "crop" else {}
+        if method == "crop":
+            kwargs = {"bbox": bbox}
+        elif method == "clip":
+            kwargs = {"mask": bbox}
+        else:
+            kwargs = {}
 
         # Apply the same operation to eager and lazy accessors
         ds = gu.open_vector(self.aster_outlines_path, chunks=1)

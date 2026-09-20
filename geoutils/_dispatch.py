@@ -25,10 +25,13 @@ import warnings
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pyproj
 import rasterio as rio
+from shapely.geometry import box
+from shapely.geometry.base import BaseGeometry
 
 from geoutils._typing import NDArrayNum, Number
 from geoutils.exceptions import (
@@ -500,6 +503,68 @@ def _check_match_bbox(
         )
 
     return xmin, ymin, xmax, ymax
+
+
+def _clip_geometry(mask: Any, target_crs: rio.crs.CRS | pyproj.CRS | None) -> BaseGeometry:
+    """Return an input clipping geometry normalized and in the target coordinate reference system."""
+
+    if isinstance(mask, BaseGeometry):
+        return mask
+
+    # Interpret a coordinate sequence as a rectangular clipping geometry
+    if isinstance(mask, Sequence) and not isinstance(mask, (str, bytes)):
+        xmin, ymin, xmax, ymax = _check_bounds(mask)
+        return box(xmin, ymin, xmax, ymax)
+
+    # Read geometries directly or through the vector and point cloud accessors
+    if isinstance(mask, gpd.GeoSeries):
+        dataframe = gpd.GeoDataFrame(geometry=mask)
+    elif isinstance(mask, gpd.GeoDataFrame):
+        dataframe = mask
+    else:
+        interface = get_geo_interface(mask, "ds", accessors=("vct", "pc"))
+        if interface is not None:
+            dataframe = interface.ds
+        else:
+            # Use the rectangular footprint of a raster-like mask
+            raster_interface = get_geo_interface(mask, "footprint", accessors=("rst",))
+            if raster_interface is None:
+                raise TypeError(
+                    "Clipping geometry must be a vector, point cloud, raster, Shapely geometry, "
+                    "GeoPandas object or bounding box."
+                )
+            return _clip_geometry(raster_interface.footprint, target_crs=target_crs)
+
+    # Combine the mask once so every eager or lazy source block receives the same geometry
+    if is_dask_dataframe(dataframe):
+        dataframe = dataframe.compute()
+    if (
+        dataframe.crs is not None
+        and target_crs is not None
+        and pyproj.CRS.from_user_input(dataframe.crs) != pyproj.CRS.from_user_input(target_crs)
+    ):
+        dataframe = dataframe.to_crs(target_crs)
+    return dataframe.geometry.union_all()
+
+
+def _get_reproject_crs(
+    ref: RasterLike | VectorLike | None = None,
+    crs: rio.crs.CRS | pyproj.CRS | str | int | None = None,
+) -> rio.crs.CRS:
+    """Resolve a target CRS from exactly one reference object or explicit CRS."""
+
+    # Require one way of defining the target CRS
+    if (ref is not None and crs is not None) or (ref is None and crs is None):
+        raise ValueError("Either of `ref` or `crs` must be set. Not both.")
+
+    # Read the CRS from a geospatial reference when one is provided
+    if ref is not None:
+        if has_geo_attr(ref, "crs"):
+            return get_geo_attr(ref, "crs")
+        raise TypeError("Match-reference input must have a 'crs' attribute, such as a raster or vector.")
+
+    # Normalize an explicit CRS through Rasterio, matching the existing transformation interfaces
+    return rio.crs.CRS.from_user_input(crs)
 
 
 def _grid_from_bounds_res(

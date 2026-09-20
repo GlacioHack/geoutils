@@ -13,11 +13,13 @@ import pytest
 import rasterio as rio
 from packaging.version import Version
 from pyproj import CRS
+from shapely.geometry import Polygon
 
 import geoutils as gu
 from geoutils import examples, open_raster
 from geoutils.exceptions import InvalidGridError
 from geoutils.multiproc import MultiprocConfig
+from geoutils.multiproc.cluster import MpCluster
 from geoutils.projtools import _get_bounds_projected
 from geoutils.raster.raster import _default_nodata
 from geoutils.raster.transformation import (
@@ -28,7 +30,7 @@ from geoutils.sampling.subsampling import _subsample_numpy
 DO_PLOT = False
 
 
-class TestRasterTransformations:
+class TestTransformation:
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
     landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
     landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
@@ -243,6 +245,46 @@ class TestRasterTransformations:
         assert r_crop.area_or_point == "Area"
         r2_crop = r2.crop(bbox)
         assert r2_crop.area_or_point == "Point"
+
+    def test_crop__deferred(self) -> None:
+        """Checks that crop() does not read raster values until they are needed."""
+
+        # Open one unloaded raster and one loaded raster for comparison
+        source = gu.Raster(self.landsat_b4_path)
+        eager_source = gu.Raster(self.landsat_b4_path, load_data=True)
+        left, bottom, right, top = source.bounds
+        first_bbox = (left + 2 * source.res[0], bottom, right, top - 2 * source.res[1])
+        second_bbox = (left + 4 * source.res[0], bottom, right - 3 * source.res[0], top - 4 * source.res[1])
+
+        # Apply two crops without reading the source or result
+        cropped = source.crop(first_bbox).crop(second_bbox)
+        assert not source.is_loaded
+        assert not cropped.is_loaded
+
+        # Compare the result with the same crops on loaded data
+        expected = eager_source.crop(first_bbox).crop(second_bbox)
+        assert cropped.raster_equal(expected, strict_masked=True)
+        assert not source.is_loaded
+
+    def test_clip__exact_geometry_mask(self) -> None:
+        """Checks that clip() keeps the raster grid and masks cells outside the given shape."""
+
+        # Create a 4 x 4 raster and a triangle polygon vector crossing its cell grid
+        values = np.arange(16, dtype=np.int16).reshape(4, 4)
+        transform = rio.transform.from_origin(0, 4, 1, 1)
+        raster = gu.Raster.from_array(values, transform=transform, crs=32610, nodata=-9999)
+        triangle = Polygon([(0, 0), (4, 0), (0, 4)])
+
+        # Clip to the triangle without changing the raster grid or values inside it
+        clipped = raster.clip(triangle)
+        expected_inside = rio.features.geometry_mask(
+            [triangle], out_shape=raster.shape, transform=raster.transform, invert=True
+        )
+
+        assert clipped.shape == raster.shape
+        assert clipped.transform == raster.transform
+        np.testing.assert_array_equal(np.ma.getmaskarray(clipped.data), ~expected_inside)
+        np.testing.assert_array_equal(clipped.data.data[expected_inside], values[expected_inside])
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_translate(self, example: str) -> None:
@@ -755,6 +797,7 @@ class TestMaskGeotransformations:
 
         # Match the full-load path and verify logical values and nodata pixels independently
         assert not unloaded.is_loaded
+        assert not output.is_loaded
         assert output.is_mask
         assert output.data.dtype == bool
         assert output.raster_equal(expected, strict_masked=True)
@@ -826,8 +869,71 @@ class TestMaskGeotransformations:
 
 
 @pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
-class TestReprojectChunked:
-    """Compare Dask and multiprocessing reprojection with the eager raster implementation."""
+class TestTransformationChunked:
+    """Test module for raster transformations run with Dask or multiprocessing."""
+
+    def test_clip__chunked_backends(self, tmp_path: Any) -> None:
+        """Checks that Dask and multiprocessing clip() give the same result as an in-memory call."""
+
+        import dask.array as da
+
+        # Write three bands in 2 x 3 blocks, with one missing cell inside the triangle (to check nodata behaviour)
+        values = np.arange(3 * 7 * 8, dtype=np.float32).reshape(3, 7, 8)
+        existing_mask = np.zeros(values.shape, dtype=bool)
+        existing_mask[:, 5, 1] = True
+        masked_values = np.ma.masked_array(values, mask=existing_mask)
+        transform = rio.transform.from_origin(0, 7, 1, 1)
+        path = tmp_path / "clip_source.tif"
+        source = gu.Raster.from_array(masked_values, transform=transform, crs=32610, nodata=-9999)
+        source.to_file(path)
+        geometry = Polygon([(0, 0), (8, 0), (0, 7)])
+
+        # Clip the same file in memory, with Dask and with Multiprocessing
+        expected = source.clip(geometry)
+        dask_source = open_raster(path, chunks={"band": 1, "y": 2, "x": 3})
+        raster_source = gu.Raster(path)
+        dask_result = dask_source.rst.clip(geometry)
+        with MpCluster({"nb_workers": 2}) as cluster:
+            mp_config = MultiprocConfig(chunks=(2, 3), outfile=str(tmp_path / "clip_multiproc.tif"), cluster=cluster)
+            multiproc_result = raster_source.clip(geometry, mp_config=mp_config)
+
+        # Check that the Dask result keeps its blocks and the file results remain unloaded
+        assert isinstance(dask_result.data, da.Array)
+        assert dask_result.chunks == dask_source.chunks
+        assert not raster_source.is_loaded
+        assert not multiproc_result.is_loaded
+        with pytest.raises(ValueError, match="Cannot use Multiprocessing and Dask simultaneously"):
+            dask_source.rst.clip(geometry, mp_config=mp_config)
+
+        # Read all results and check they exactly match
+        expected_values = expected.get_nanarray()
+        np.testing.assert_allclose(dask_result.compute().data, expected_values, equal_nan=True)
+        np.testing.assert_allclose(multiproc_result.get_nanarray(), expected_values, equal_nan=True)
+        assert multiproc_result.transform == expected.transform
+        assert multiproc_result.crs == expected.crs
+
+    def test_clip__multiproc_default_nodata(self, tmp_path: Any) -> None:
+        """Checks that multiprocessing clip() adds a nodata value when the source has none."""
+
+        # Write a raster without nodata so clipping creates the first missing cells
+        values = np.arange(30, dtype=np.float32).reshape(5, 6)
+        transform = rio.transform.from_origin(0, 5, 1, 1)
+        path = tmp_path / "clip_without_nodata.tif"
+        gu.Raster.from_array(values, transform=transform, crs=32610).to_file(path)
+        source = gu.Raster(path)
+        geometry = Polygon([(0, 0), (6, 0), (0, 5)])
+
+        # Verify the warning about the new nodata value
+        config = MultiprocConfig(chunks=(2, 3), outfile=str(tmp_path / "clip_with_default_nodata.tif"))
+        with pytest.warns(UserWarning, match="multiprocessing clip.*will use the default"):
+            result = source.clip(geometry, mp_config=config)
+
+        # Compare result with in memory clipping
+        expected = gu.Raster(path, load_data=True).clip(geometry)
+        assert not source.is_loaded
+        assert not result.is_loaded
+        assert result.nodata == _default_nodata(values.dtype)
+        np.testing.assert_allclose(result.get_nanarray(), expected.get_nanarray(), equal_nan=True)
 
     @pytest.mark.parametrize("load_source", [False, True])
     def test_reproject__multiprocessing_logical_mask(self, tmp_path: Any, load_source: bool) -> None:

@@ -104,6 +104,26 @@ class TestLasPyIO:
             assert set(np.round(bounded.geometry.x.values, 6)) == {0.0, 1.0}
             assert set(np.round(bounded.geometry.y.values, 6)) == {0.0, 1.0}
 
+    def test_crop__deferred_las(self) -> None:
+        """Checks that crop() does not read LAS points until they are needed."""
+
+        # Write six points on a regular grid with known coordinates and values
+        pointcloud = gu.PointCloud(self.gdf, data_column="z")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = self._write_source(pointcloud, temp_dir)
+            unloaded = gu.PointCloud(source)
+
+            # Select four points without reading the source or result
+            cropped = unloaded.crop((-0.1, -0.1, 1.1, 1.1))
+            assert not unloaded.is_loaded
+            assert not cropped.is_loaded
+
+            # Read the result and compare it with the four expected points
+            assert np.allclose(cropped.geometry.x.values, self.x[[0, 1, 3, 4]])
+            assert np.allclose(cropped.geometry.y.values, self.y[[0, 1, 3, 4]])
+            assert np.allclose(cropped.data, self.z[[0, 1, 3, 4]])
+            assert not unloaded.is_loaded
+
     def test_load_laspy_bounds__copc_errors_are_not_hidden(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Propagate indexed-reader failures when the LAS header identifies a COPC file."""
 

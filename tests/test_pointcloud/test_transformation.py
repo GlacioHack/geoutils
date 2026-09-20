@@ -1,8 +1,7 @@
-"""Tests for point cloud reprojection across eager, Dask and multiprocessing backends."""
+"""Tests for point cloud transformations."""
 
 from __future__ import annotations
 
-from importlib.util import find_spec
 from pathlib import Path
 
 import geopandas as gpd
@@ -11,21 +10,147 @@ import pandas as pd
 import pytest
 from geopandas.testing import assert_geodataframe_equal
 from pyproj import CRS
+from shapely.geometry import Polygon
 
 import geoutils as gu
 from geoutils.multiproc import MultiprocConfig
 from geoutils.multiproc.cluster import MpCluster
 
 
-@pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
-class TestReprojectChunked:
-    """
-    Test module for reproject() for point clouds.
+class TestTransformation:
+    """Test module for cropping and clipping point clouds."""
 
-    - Eager, Dask and Multiproc outputs have the same coordinates and attributes, with file results not loaded.
-    - LAS, LAZ and GeoPackage outputs keep the values that those file formats can store exactly.
-    - Empty inputs, in-place calls and invalid output choices are checked separately.
-    """
+    def test_crop_and_clip__different_point_selection(self) -> None:
+        """Checks that crop() uses a bounding box and clip() uses the given shape."""
+
+        # Create two points inside the triangle's bounding box, with one point outside the triangle
+        points = gpd.GeoDataFrame(
+            {"value": [1.0, 2.0]},
+            geometry=gpd.points_from_xy([0.25, 1.75], [0.25, 1.75]),
+            crs=32610,
+        )
+        pointcloud = gu.PointCloud(points, data_column="value")
+        triangle = Polygon([(0, 0), (2, 0), (0, 2)])
+
+        # Compare the points selected by the bounding box and the triangle
+        cropped = pointcloud.crop(triangle.bounds)
+        clipped = pointcloud.clip(triangle)
+        assert cropped.point_count == 2
+        assert clipped.point_count == 1
+        assert clipped["value"].iloc[0] == 1.0
+
+        # Check that the old crop option warns and gives the same PointCloud result
+        with pytest.warns(DeprecationWarning, match="Argument 'clip' is deprecated"):
+            deprecated = pointcloud.crop((0, 0, 1, 1), clip=True)
+        assert isinstance(deprecated, gu.PointCloud)
+        assert deprecated.point_count == 1
+        assert deprecated["value"].iloc[0] == 1.0
+
+    def test_crop__deferred_file_read(self, tmp_path: Path) -> None:
+        """Checks that crop() does not read points from a file until they are needed."""
+
+        # Write four points with two on each side of the crop boundary
+        points = gpd.GeoDataFrame(
+            {"value": [1.0, 2.0, 3.0, 4.0]},
+            geometry=gpd.points_from_xy([0.0, 1.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0]),
+            crs=32610,
+        )
+        path = tmp_path / "points.gpkg"
+        points.to_file(path)
+        pointcloud = gu.PointCloud(path, data_column="value")
+
+        # Select the two points on the left and keep both objects unloaded
+        cropped = pointcloud.crop((-0.5, -0.5, 0.5, 1.5))
+        assert not pointcloud.is_loaded
+        assert not cropped.is_loaded
+
+        # Read the result and compare it with the known points on the left
+        expected = gu.PointCloud(points.iloc[[0, 2]].reset_index(drop=True), data_column="value")
+        assert cropped.pointcloud_equal(expected)
+        assert not pointcloud.is_loaded
+
+
+class TestTransformationChunked:
+    """Test module for point cloud transformations run with Dask or multiprocessing."""
+
+    clip_positions = np.arange(11)
+    clip_points = gpd.GeoDataFrame(
+        {
+            "intensity": (100 + clip_positions).astype(np.int32),
+            "quality": clip_positions / 16,
+            "row_id": clip_positions.astype(np.int32),
+        },
+        geometry=gpd.points_from_xy(clip_positions, (3 * clip_positions) % 8, 20 + clip_positions / 8),
+        crs=32610,
+    )
+    clip_geometry = Polygon([(0, 0), (10, 0), (0, 10)])
+
+    def test_clip__chunked_backends_equal(self, tmp_path: Path) -> None:
+        """Checks that Dask and multiprocessing clip() select the same points as an in-memory call."""
+
+        dgpd = pytest.importorskip("dask_geopandas")
+
+        # Write eleven 3D points so the final group contains fewer than four points
+        filename = tmp_path / "points_to_clip.gpkg"
+        self.clip_points.to_file(filename, index=False)
+
+        # Clip the same points in memory, with Dask and with two worker processes
+        expected = gu.PointCloud(self.clip_points, data_column="intensity").clip(self.clip_geometry).ds
+        expected = expected.sort_values("row_id").reset_index(drop=True)
+        lazy = gu.open_pointcloud(str(filename), data_column="intensity", chunks=4)
+        multiproc = gu.PointCloud(filename, data_column="intensity")
+        lazy_result = lazy.pc.clip(self.clip_geometry)
+        with MpCluster({"nb_workers": 2}) as cluster:
+            config = MultiprocConfig(chunks=4, outfile=str(tmp_path / "points_clipped.gpkg"), cluster=cluster)
+            multiproc_result = multiproc.clip(self.clip_geometry, mp_config=config)
+
+        # Check that Dask and file results have the expected types and remain unloaded
+        assert isinstance(lazy_result, dgpd.GeoDataFrame)
+        assert not lazy.pc.is_loaded and not lazy_result.pc.is_loaded
+        assert isinstance(multiproc_result, gu.PointCloud)
+        assert not multiproc.is_loaded and not multiproc_result.is_loaded
+        assert multiproc_result.data_column == "intensity"
+        assert multiproc_result.point_count == len(expected)
+        with pytest.raises(ValueError, match="cannot be combined with a Dask point cloud"):
+            lazy.pc.clip(self.clip_geometry, mp_config=config)
+
+        # Read the results and compare every selected point and value
+        computed_lazy = lazy_result.compute().sort_values("row_id").reset_index(drop=True)
+        computed_multiproc = multiproc_result.ds.sort_values("row_id").reset_index(drop=True)
+        assert_geodataframe_equal(computed_lazy, expected, check_dtype=False)
+        assert_geodataframe_equal(computed_multiproc, expected, check_dtype=False)
+        assert not multiproc.is_loaded
+        assert not lazy.pc.is_loaded and not lazy_result.pc.is_loaded
+
+    def test_clip__multiprocessing_las_output(self, tmp_path: Path) -> None:
+        """Checks that multiprocessing clip() writes the selected points and values to a LAS file."""
+
+        laspy = pytest.importorskip("laspy")
+
+        # Write the 3D points to a file that can be read in groups
+        filename = tmp_path / "points_to_las.gpkg"
+        self.clip_points.to_file(filename, index=False)
+        source = gu.PointCloud(filename, data_column="intensity")
+        expected = self.clip_points.clip(self.clip_geometry).sort_values("row_id")
+
+        # Clip groups of four points and write the result to one LAS file
+        outfile = tmp_path / "points_clipped.las"
+        config = MultiprocConfig(chunks=4, outfile=str(outfile))
+        result = source.clip(self.clip_geometry, mp_config=config)
+        assert not source.is_loaded and not result.is_loaded
+        assert result.point_count == len(expected)
+        assert result.data_column == "intensity"
+
+        # Compare the stored coordinates and point values with the expected result
+        records = laspy.read(outfile)
+        order = np.argsort(records.row_id)
+        tolerance = records.header.scales / 2 + 1e-8
+        np.testing.assert_allclose(np.asarray(records.x)[order], expected.geometry.x, rtol=0, atol=tolerance[0])
+        np.testing.assert_allclose(np.asarray(records.y)[order], expected.geometry.y, rtol=0, atol=tolerance[1])
+        np.testing.assert_allclose(np.asarray(records.z)[order], expected.geometry.z, rtol=0, atol=tolerance[2])
+        np.testing.assert_array_equal(np.asarray(records.intensity)[order], expected["intensity"])
+        np.testing.assert_array_equal(np.asarray(records.quality)[order], expected["quality"])
+        np.testing.assert_array_equal(np.asarray(records.row_id)[order], expected["row_id"])
 
     # Use different height and intensity values, so the test catches intensity being written to LAS Z by mistake
     positions = np.arange(11)
@@ -49,7 +174,7 @@ class TestReprojectChunked:
         File-backed inputs keep their original loaded/unloaded state, and the new file output stays unloaded.
         """
 
-        import dask_geopandas as dgpd
+        dgpd = pytest.importorskip("dask_geopandas")
 
         # 1/ Prepare eager, accessor, Dask and multiprocessing inputs from the same 11 points
         # Chunks of 4 or 6 both leave a shorter final chunk, which helps catch dropped/duplicated rows at the joins
@@ -296,8 +421,8 @@ class TestReprojectChunked:
 class TestReprojectErrors:
     """Test module for validation errors raised by eager, Dask, and multiprocessing reprojection."""
 
-    points = TestReprojectChunked.points
-    heights = TestReprojectChunked.heights
+    points = TestTransformationChunked.points
+    heights = TestTransformationChunked.heights
 
     def test_reproject__error_inplace_with_chunked_execution(self, tmp_path: Path) -> None:
         """Checks that multiprocessing rejects inplace before writing, while eager reprojection updates the object."""

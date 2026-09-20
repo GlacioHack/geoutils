@@ -19,17 +19,41 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING, Any, Literal
 
 import geopandas as gpd
 import pandas as pd
 import rasterio as rio
+from pyproj import CRS
 
 from geoutils._dispatch import get_geo_attr, has_geo_attr, is_dask_dataframe
 from geoutils._misc import import_optional
 
 if TYPE_CHECKING:
     import matplotlib
+
+
+def _resolve_plot_reference(ref: Any, kwargs: dict[str, Any]) -> Any:
+    """Convert the deprecated ref_crs argument to a CRS-only plotting reference."""
+
+    if "ref_crs" not in kwargs:
+        return ref
+    if ref is not None:
+        raise TypeError("plot() received both 'ref' and deprecated 'ref_crs'; use only 'ref'.")
+
+    # Preserve the old behavior, which matched only the CRS and did not adopt reference bounds
+    deprecated_ref = kwargs.pop("ref_crs")
+    warnings.warn(
+        "Argument 'ref_crs' is deprecated; use 'ref' instead.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+    if deprecated_ref is None:
+        return None
+    if has_geo_attr(deprecated_ref, "crs"):
+        deprecated_ref = get_geo_attr(deprecated_ref, "crs")
+    return CRS.from_user_input(deprecated_ref)
 
 
 def _create_axes(ax: matplotlib.axes.Axes | Literal["new"] | None) -> matplotlib.axes.Axes:

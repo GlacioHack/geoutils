@@ -15,20 +15,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Reproject point clouds in independent row partitions with file outputs."""
+"""Transformations for point clouds."""
 
 from __future__ import annotations
 
 import pathlib
 import tempfile
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pyogrio
 from pyproj import CRS
+from shapely.geometry.base import BaseGeometry
 
+from geoutils._dispatch import _clip_geometry
 from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
 from geoutils.pointcloud.las import (
@@ -36,6 +38,7 @@ from geoutils.pointcloud.las import (
     _build_laspy_header,
     _is_laspy_supported,
     _load_laspy_data_slice,
+    _load_laspy_metadata,
     _point_partition_size,
 )
 from geoutils.pointcloud.writing import (
@@ -44,6 +47,7 @@ from geoutils.pointcloud.writing import (
     _stage_pointcloud_partition,
     _write_pointcloud_partitions,
 )
+from geoutils.vector.transformation import _apply_crop_filters, _clip_geodataframe
 
 if TYPE_CHECKING:
     from geoutils.multiproc import MultiprocConfig
@@ -99,6 +103,57 @@ def _reproject_pointcloud_partition(
 
     # Preserve all dataframe dtypes until the final format is selected
     return _stage_pointcloud_partition(projected, filename), bounds
+
+
+def _clip_pointcloud_partition(
+    source: gpd.GeoDataFrame | pathlib.Path,
+    columns: list[str],
+    start: int,
+    count: int,
+    crop_filters: list[tuple[tuple[float, float, float, float], Literal["intersects", "within"]]],
+    geometry: BaseGeometry,
+    keep_geom_type: bool,
+    sort: bool,
+    filename: pathlib.Path,
+    las_output: bool,
+) -> tuple[pathlib.Path, NDArrayNum | None]:
+    """Read and clip one point row partition, saving its dataframe and LAS coordinate bounds."""
+
+    # Read independent row ranges so unloaded LAS, LAZ and GeoPackage sources stay outside the parent process
+    if isinstance(source, pathlib.Path):
+        if _is_laspy_supported(source):
+            dataframe = _load_laspy_data_slice(source, columns=columns, start=start, count=count)
+        else:
+            dataframe = pyogrio.read_dataframe(source, skip_features=start, max_features=count)
+        dataframe = _apply_crop_filters(dataframe, crop_filters)
+    else:
+        dataframe = source
+    clipped = _clip_geodataframe(
+        dataframe,
+        geometry=geometry,
+        keep_geom_type=keep_geom_type,
+        sort=sort,
+    )
+
+    # Use actual elevations for LAS and return bounds so its shared coordinate encoding needs no second scan
+    bounds = None
+    if las_output and len(clipped) > 0:
+        if clipped.geometry.has_z.all():
+            elevation = clipped.geometry.z.to_numpy()
+            if "Z" in clipped.columns:
+                if not np.array_equal(clipped["Z"].to_numpy(), elevation):
+                    raise ValueError("LAS output cannot store different values in geometry Z and column 'Z'.")
+                clipped = clipped.drop(columns="Z")
+        elif "Z" in clipped.columns:
+            elevation = clipped["Z"].to_numpy()
+        else:
+            raise ValueError("LAS output requires 3D point geometry or a native elevation column named 'Z'.")
+        coordinates = np.column_stack((clipped.geometry.x, clipped.geometry.y, elevation))
+        if not np.isfinite(coordinates).all():
+            raise ValueError("LAS output requires finite X, Y and Z coordinates.")
+        bounds = np.stack((coordinates.min(axis=0), coordinates.max(axis=0)))
+
+    return _stage_pointcloud_partition(clipped, filename), bounds
 
 
 ############################################
@@ -196,6 +251,8 @@ def _reproject_pointcloud(source: PointCloudBase, crs: CRS, mp_config: Multiproc
     # Plan slices from source metadata without loading an unopened point cloud
     source_filename = pathlib.Path(source.name) if not source._is_pd and source.name is not None else None
     if not source.is_loaded:
+        if getattr(source, "_downsample", 1) != 1:
+            raise ValueError("Load a downsampled point cloud before using multiprocessing clip() to preserve its rows.")
         if source_filename is None or (
             not _is_laspy_supported(source_filename) and pyogrio.read_info(source_filename)["driver"] != "GPKG"
         ):
@@ -248,4 +305,114 @@ def _reproject_pointcloud(source: PointCloudBase, crs: CRS, mp_config: Multiproc
             geometry_type="Point Z" if source._has_z else "Point",
             las_header=las_header,
             las_elevation_column=elevation_column,
+        )
+
+
+######################################
+# 4/ MULTIPROCESSING CLIPPING
+######################################
+
+
+def _clip_pointcloud(
+    source: PointCloudBase,
+    mask: Any,
+    keep_geom_type: bool,
+    sort: bool,
+    mp_config: MultiprocConfig,
+) -> PointCloud:
+    """
+    Clip independent point row partitions and return an unloaded point cloud at the configured output path.
+
+    _clip_pointcloud_partition() reads and clips each source range, then stages exact dataframes and optional LAS
+    bounds. _write_pointcloud_partitions() appends those results in source order without collecting all rows.
+    """
+
+    # Validate configuration before inspecting point records or creating output files
+    chunks = _point_partition_size(mp_config)
+    if chunks <= 0:
+        raise ValueError("Argument ``chunks`` must be a strictly positive integer.")
+    if source._is_dask:
+        raise ValueError("Argument ``mp_config`` cannot be combined with a Dask point cloud.")
+    output_filename, driver = _resolve_pointcloud_output(
+        mp_config.outfile,
+        mp_config.driver,
+        supported_drivers=("GPKG", "LAS", "LAZ"),
+        operation_name="point cloud clipping",
+    )
+
+    # Normalize the clipping geometry once before workers filter source partitions in the point cloud CRS
+    target_crs = None if source.crs is None else CRS.from_user_input(source.crs)
+    geometry = _clip_geometry(mask, target_crs=target_crs)
+
+    # Plan slices from source metadata without loading an unopened point cloud
+    source_filename = pathlib.Path(source.name) if not source._is_pd and source.name is not None else None
+    if not source.is_loaded:
+        if source_filename is None or (
+            not _is_laspy_supported(source_filename) and pyogrio.read_info(source_filename)["driver"] != "GPKG"
+        ):
+            raise ValueError("Unloaded point cloud clipping supports LAS, LAZ and GPKG sources.")
+        dataframe = None
+    else:
+        dataframe = _as_geodataframe(source.ds, crs=source.crs)
+        if driver == "GPKG":
+            _check_gpkg_attributes(dataframe)
+    columns = list(source._nongeo_columns)
+    if dataframe is not None:
+        point_count = len(dataframe)
+    elif source_filename is not None and _is_laspy_supported(source_filename):
+        point_count = _load_laspy_metadata(source_filename).point_count
+    else:
+        assert source_filename is not None
+        point_count = int(pyogrio.read_info(source_filename, force_feature_count=True)["features"])
+        if point_count < 0:
+            raise RuntimeError("Could not determine the number of points from the file metadata.")
+    crop_filters = list(getattr(source, "_crop_filters", []))
+
+    # Complete all source reads in temporary files before replacing any existing destination
+    output_filename.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".geoutils-clip-", dir=output_filename.parent) as directory:
+        temporary_directory = pathlib.Path(directory)
+        futures = []
+        for index, start in enumerate(range(0, max(point_count, 1), chunks)):
+            count = min(chunks, point_count - start)
+            partition_source = source_filename if dataframe is None else dataframe.iloc[start : start + count]
+            futures.append(
+                mp_config.cluster.submit(
+                    _clip_pointcloud_partition,
+                    partition_source,
+                    columns,
+                    start,
+                    count,
+                    crop_filters,
+                    geometry,
+                    keep_geom_type,
+                    sort,
+                    temporary_directory / f"clipped_{index}.pkl",
+                    driver != "GPKG",
+                )
+            )
+        clipped_parts = mp_config.cluster.gather(futures)
+
+        # Reuse the original LAS schema when possible; otherwise derive one encoding from worker bounds
+        las_header = None
+        elevation_column = None
+        partition_filenames = [filename for filename, _ in clipped_parts]
+        if driver != "GPKG":
+            first = pd.read_pickle(partition_filenames[0])
+            elevation_column = "Z" if "Z" in first.columns else None
+            if dataframe is None and source_filename is not None and _is_laspy_supported(source_filename):
+                laspy = import_optional("laspy")
+                with laspy.open(source_filename) as reader:
+                    las_header = reader.header.copy()
+
+        # Write each saved partition in source order and return file metadata without loading output rows
+        return _write_pointcloud_partitions(
+            output_filename,
+            partition_filenames,
+            driver=driver,
+            data_column=source.data_column,
+            geometry_type="Point Z" if source._has_z else "Point",
+            las_header=las_header,
+            las_elevation_column=elevation_column,
+            las_bounds=[bounds for _, bounds in clipped_parts],
         )

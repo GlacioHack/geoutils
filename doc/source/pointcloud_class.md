@@ -47,7 +47,8 @@ point geometries.
 Additionally, new attributes such as {attr}`~geoutils.PointCloud.point_count` and new methods specific to point clouds are detailed further below.
 
 Generic vector attributes and methods are inherited through the {class}`~geoutils.Vector` object, such as
-{attr}`~geoutils.Vector.bounds`, {attr}`~geoutils.Vector.crs`, {func}`~xdem.Vector.reproject` and {func}`~xdem.Vector.crop`.
+{attr}`~geoutils.Vector.bounds`, {attr}`~geoutils.Vector.crs`, {func}`~geoutils.Vector.reproject` and
+{func}`~geoutils.Vector.crop`.
 
 ```{tip}
 The complete list of {class}`~geoutils.Vector` attributes and methods can be found in [the Vector section of the API](https://geoutils.readthedocs.io/en/stable/api.html#vector).
@@ -75,6 +76,24 @@ import numpy as np
 filename_dem = geoutils.examples.get_path("coromandel_lidar")
 pc = geoutils.PointCloud(filename_dem, data_column="Z")
 pc
+```
+
+## Crop and clip
+
+{func}`~geoutils.PointCloud.crop` selects points inside a rectangular extent without changing their coordinates or
+values. File-backed point clouds can efficiently defer the spatial read until point data are requested.
+{func}`~geoutils.PointCloud.clip` accepts an exact geometry and removes every point outside it. Dask-backed accessors
+clip their existing partitions lazily. Pass a {class}`~geoutils.multiproc.MultiprocConfig` with an integer point chunk
+size to clip in worker processes and write an unloaded GeoPackage, LAS or LAZ result.
+
+```{code-cell} ipython3
+from shapely.geometry import Point
+
+# Select a mask's extent, or use its curved geometry exactly
+center = ((pc.bounds.left + pc.bounds.right) / 2, (pc.bounds.bottom + pc.bounds.top) / 2)
+mask = Point(center).buffer((pc.bounds.right - pc.bounds.left) / 4)
+pc_crop = pc.crop(mask.bounds)
+pc_clip = pc.clip(mask)
 ```
 
 ## Create from arrays or tuples

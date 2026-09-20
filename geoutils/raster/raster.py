@@ -467,15 +467,10 @@ class Raster(RasterBase):
                 res = tuple(np.asarray(self.res) * downsample)
                 self.transform = rio.transform.from_origin(self.bounds.left, self.bounds.top, res[0], res[1])
                 self._downsample = downsample
-                self._out_window = rio.windows.Window(
-                    0,
-                    0,
-                    min(ds.width, down_width * downsample),
-                    min(ds.height, down_height * downsample),
-                )
 
             # This will record the downsampled out_shape is data is only loaded later on by .load()
             self._out_shape = out_shape
+            self._out_window = rio.windows.Window(0, 0, out_shape[1], out_shape[0])
             self._out_count = count
 
             if load_data:
@@ -863,6 +858,9 @@ class Raster(RasterBase):
                     only_mask=True,
                     indexes=list(valid_bands),
                     masked=self._masked,
+                    window=self._out_window,
+                    out_shape=self._out_shape,
+                    out_count=out_count,
                     **read_kwargs,
                 )
             else:
@@ -871,8 +869,7 @@ class Raster(RasterBase):
                     only_mask=True,
                     indexes=list(valid_bands),
                     masked=self._masked,
-                    transform=self.transform,
-                    shape=self.shape,
+                    window=self._out_window,
                     out_shape=self._out_shape,
                     out_count=out_count,
                     **read_kwargs,
@@ -930,6 +927,9 @@ class Raster(RasterBase):
                     indexes=list(valid_bands),
                     masked=self._masked,
                     convert_to_mask=self._is_mask,
+                    window=self._out_window,
+                    out_shape=self._out_shape,
+                    out_count=self._out_count,
                     **read_kwargs,
                 )
             else:
@@ -938,8 +938,7 @@ class Raster(RasterBase):
                     indexes=list(valid_bands),
                     masked=self._masked,
                     convert_to_mask=self._is_mask,
-                    transform=self.transform,
-                    shape=self.shape,
+                    window=self._out_window,
                     out_shape=self._out_shape,
                     out_count=self._out_count,
                     **read_kwargs,

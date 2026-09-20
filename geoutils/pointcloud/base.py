@@ -40,7 +40,7 @@ import pyogrio
 from pyproj import CRS
 
 from geoutils import profiler
-from geoutils._dispatch import get_geo_attr, is_dask_dataframe
+from geoutils._dispatch import _get_reproject_crs, get_geo_attr, is_dask_dataframe
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface._nodata import NodataPropagation
@@ -59,7 +59,6 @@ from geoutils.sampling.subsampling import _subsample_pointcloud
 from geoutils.stats.stats import stats as _stats
 from geoutils.stats.stats import variogram as _variogram
 from geoutils.vector.base import VectorBase
-from geoutils.vector.transformation import _get_reproject_crs
 
 if TYPE_CHECKING:
     import matplotlib
@@ -214,6 +213,9 @@ class PointCloudBase(VectorBase):
         """Number of points in the point cloud."""
 
         if not self._is_pd and not self.is_loaded:
+            # Deferred crop filters require reading selected coordinates before their exact count is known
+            if len(getattr(self, "_crop_filters", [])) > 0:
+                return len(self.ds)
             count = getattr(self, "_nb_points", -1)
             if count < 0:
                 # Ask the file driver to count its features without loading their geometries or columns
@@ -276,7 +278,9 @@ class PointCloudBase(VectorBase):
         """
 
         from geoutils.pointcloud.plotting import _plot_pointcloud
+        from geoutils.vector.plotting import _resolve_plot_reference
 
+        ref = _resolve_plot_reference(ref, kwargs)
         return _plot_pointcloud(
             self,
             column=column,
@@ -1013,6 +1017,53 @@ class PointCloudBase(VectorBase):
             mask=mask,
             **pair_sampling_kwargs,
         )
+
+    def clip(
+        self: PointCloudBaseType,
+        mask: Any,
+        keep_geom_type: bool = False,
+        sort: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> PointCloudBaseType | gpd.GeoDataFrame:
+        """
+        Remove points outside an exact clipping geometry.
+
+        :param mask: Clipping geometry, vector, point cloud, raster or bounding box. Georeferenced masks are
+            reprojected to this point cloud's CRS.
+        :param keep_geom_type: Whether to remove intersections with a different geometry type than the input.
+        :param sort: Whether to sort clipped points by their original index within each partition.
+        :param mp_config: Worker configuration with an integer number of points per chunk. The output format is
+            inferred from ``outfile`` or selected by ``driver`` (``GPKG``, ``LAS`` or ``LAZ``), defaulting to
+            GeoPackage. Cannot be combined with a Dask input.
+        :returns: Clipped PointCloud or GeoDataFrame matching the input interface. Multiprocessing PointCloud
+            results are unloaded; dataframe accessor results are eager.
+        """
+
+        # Keep the shared vector implementation for eager and lazy dataframe transformations
+        if mp_config is None:
+            return super().clip(mask=mask, keep_geom_type=keep_geom_type, sort=sort)
+        if self._is_dask:
+            raise ValueError("Argument ``mp_config`` cannot be combined with a Dask point cloud.")
+
+        # Let workers filter independent source ranges and build one ordered file output
+        from geoutils.pointcloud.transformation import _clip_pointcloud
+
+        clipped = _clip_pointcloud(
+            self,
+            mask=mask,
+            keep_geom_type=keep_geom_type,
+            sort=sort,
+            mp_config=mp_config,
+        )
+        if self._is_pd:
+            clipped.load(columns="all")
+            return _build_pointcloud_output(
+                clipped.ds,
+                data_column=clipped.data_column,
+                as_dataframe=True,
+                attrs=_get_dataframe_attrs(self.ds),
+            )
+        return cast(PointCloudBaseType, clipped)
 
     @overload
     def reproject(

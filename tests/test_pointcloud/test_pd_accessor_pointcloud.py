@@ -234,11 +234,12 @@ class TestPointCloudAccessor:
         [
             ("copy", {}),
             ("crop", {"bbox": (0, 0, 500, 500)}),
+            ("clip", {"mask": (0, 0, 500, 500)}),
             ("translate", {"xoff": 1, "yoff": 2}),
         ],
     )
     def test_geometric_methods__dask_geopandas(self, method: str, kwargs: dict[str, object]) -> None:
-        """Checks that lazy copies have the same location metadata while cropping and translation recalculate it."""
+        """Checks that copy() keeps bounds and point count while crop(), clip() and translate() update them."""
 
         dgpd = pytest.importorskip("dask_geopandas")
         from dask.callbacks import Callback
@@ -275,7 +276,7 @@ class TestPointCloudAccessor:
         assert output.pc.point_count == len(expected)
         assert ds.pc.point_count == source_count
         assert ds.pc.bounds == source_bounds
-        assert_geodataframe_equal(output.compute(), expected)
+        assert_geodataframe_equal(output.compute().sort_index(), expected.sort_index())
         assert not ds.pc.is_loaded
         assert not output.pc.is_loaded
 
