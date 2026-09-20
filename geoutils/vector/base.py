@@ -20,9 +20,10 @@
 
 from __future__ import annotations
 
+import copy
 import warnings
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, Union, overload
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, Union, cast, overload
 
 import geopandas as gpd
 import numpy as np
@@ -34,6 +35,7 @@ from shapely.geometry.base import BaseGeometry
 
 from geoutils import profiler
 from geoutils._dispatch import (
+    _check_match_bbox,
     get_geo_attr,
     has_geo_attr,
     is_dask_dataframe,
@@ -50,7 +52,7 @@ from geoutils.projtools import (
 )
 from geoutils.vector.geometric import _buffer_metric, _buffer_without_overlap
 from geoutils.vector.testing import _vector_allclose, _vector_equal
-from geoutils.vector.transformation import _crop, _reproject
+from geoutils.vector.transformation import _clip, _crop, _reproject
 
 if TYPE_CHECKING:
     import matplotlib
@@ -60,6 +62,7 @@ if TYPE_CHECKING:
 
 
 VectorBaseType = TypeVar("VectorBaseType", bound="VectorBase")
+_UNSET = object()
 # Accept Vector subclasses and accessors, as well as GeoDataFrames
 VectorLike = Union["VectorBase", gpd.GeoDataFrame]
 
@@ -320,6 +323,22 @@ class VectorBase(ABC):
             _plot_geodataframe,
         )
 
+        # REMOVE AFTER DEPRECATION: Delete this block when ref_crs compatibility is removed
+        if "ref_crs" in kwargs:
+            if ref is not None:
+                raise TypeError("plot() received both 'ref' and deprecated 'ref_crs'; use only 'ref'.")
+            deprecated_ref = kwargs.pop("ref_crs")
+            warnings.warn(
+                "Argument 'ref_crs' is deprecated; use 'ref' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            # Preserve the old behavior, which matched only the CRS and did not use reference bounds
+            if deprecated_ref is not None:
+                if has_geo_attr(deprecated_ref, "crs"):
+                    deprecated_ref = get_geo_attr(deprecated_ref, "crs")
+                ref = CRS.from_user_input(deprecated_ref)
+
         reference_bbox = None
         if has_geo_attr(ref, "crs"):
             crs = get_geo_attr(ref, "crs")
@@ -396,61 +415,157 @@ class VectorBase(ABC):
     def crop(
         self: VectorBaseType,
         bbox: RasterLike | VectorLike | tuple[float, float, float, float],
-        clip: bool,
+        mode: Literal["intersects", "within"] = "intersects",
         *,
         inplace: Literal[False] = False,
         crop_geom: Any = None,
+        **kwargs: Any,
     ) -> VectorBaseType | gpd.GeoDataFrame: ...
 
     @overload
     def crop(
         self: VectorBaseType,
         bbox: RasterLike | VectorLike | tuple[float, float, float, float],
-        clip: bool,
+        mode: Literal["intersects", "within"] = "intersects",
         *,
         inplace: Literal[True],
         crop_geom: Any = None,
+        **kwargs: Any,
     ) -> None: ...
 
     @overload
     def crop(
         self: VectorBaseType,
         bbox: RasterLike | VectorLike | tuple[float, float, float, float],
-        clip: bool,
+        mode: Literal["intersects", "within"] = "intersects",
         *,
         inplace: bool = False,
         crop_geom: Any = None,
+        **kwargs: Any,
     ) -> VectorBaseType | gpd.GeoDataFrame | None: ...
 
     @profiler.profile("geoutils.vector.base.crop", memprof=True)
     def crop(
         self: VectorBaseType,
         bbox: RasterLike | VectorLike | tuple[float, float, float, float] = None,
-        clip: bool = False,
+        mode: Literal["intersects", "within"] = "intersects",
         *,
         inplace: bool = False,
         crop_geom: Any = None,
+        **kwargs: Any,
     ) -> VectorBaseType | gpd.GeoDataFrame | None:
         """
-        Crop the vector to given extent.
+        Crop vector to a bounding box, without modifying geometric features.
+
+        Equivalent to selecting geometries intersecting or contained within a bounding box.
+        To cut each feature with another geometry or bounding box, use ``clip()``.
 
         **Match-reference:** a reference raster or vector can be passed to match bounds during cropping.
+
+        :param bbox: Bounding box or georeferenced reference object defining the selected extent.
+        :param mode: ``"intersects"`` keeps every geometry touching the extent. ``"within"`` keeps only geometries
+            entirely inside it.
+        :param inplace: Whether to replace this vector's selected rows. Dask-backed vectors cannot be changed in place.
+        :param crop_geom: Deprecated alias of ``bbox``.
+        :param kwargs: Deprecated ``clip`` argument. Use clip() for exact clipping.
+        :returns: A vector or dataframe containing unchanged selected geometries, or None when ``inplace=True``.
         """
+
+        deprecated_clip = kwargs.pop("clip", _UNSET)
+        if len(kwargs) > 0:
+            unexpected = next(iter(kwargs))
+            raise TypeError(f"crop() got an unexpected keyword argument {unexpected!r}")
+        if deprecated_clip is not _UNSET:
+            warnings.warn(
+                "Argument 'clip' is deprecated; use crop() without it or call clip() separately.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         if crop_geom is not None:
             warnings.warn(DeprecationWarning("Argument 'crop_geom' is deprecated, use 'bbox' instead."))
             bbox = crop_geom
         if bbox is None:
             raise ValueError("Argument 'bbox' must be passed.")
-        if inplace and is_dask_dataframe(self.ds):
+        if mode not in ("intersects", "within"):
+            raise ValueError("Argument 'mode' must be either 'intersects' or 'within'.")
+        if inplace and self._is_pd and is_dask_dataframe(self.ds):
             raise ValueError("Dask-backed vectors cannot be modified in place; use the returned dataframe instead.")
 
-        new_ds = _crop(self, bbox=bbox, clip=clip)
+        # Preserve crop(..., clip=True) by clipping to the normalized rectangular crop extent
+        if deprecated_clip is not _UNSET and deprecated_clip:
+            normalized_bbox = tuple(float(value) for value in _check_match_bbox(self, bbox))
+            new_ds = _clip(self, mask=normalized_bbox, keep_geom_type=False, sort=False)
+            if inplace:
+                self.ds = new_ds
+                return None
+            return self._override_gdf_output(new_ds)
+
+        # Store file filters without reading any feature geometry or attribute values
+        if not self._is_pd and not self.is_loaded and self.name is not None:
+            normalized_bbox = tuple(float(value) for value in _check_match_bbox(self, bbox))
+            output = copy.copy(self)
+            output._crop_filters = list(getattr(self, "_crop_filters", [])) + [(normalized_bbox, mode)]
+            output._bounds = None
+            output._feature_count = None
+            if hasattr(output, "_nb_points"):
+                output._nb_points = -1
+
+            if inplace:
+                self.__dict__.update(output.__dict__)
+                return None
+            return output
+
+        new_ds = _crop(self, bbox=bbox, mode=mode)
 
         if inplace:
             self.ds = new_ds
             return None
         return self._override_gdf_output(new_ds)
+
+    def clip(
+        self: VectorBaseType,
+        mask: Any,
+        keep_geom_type: bool = False,
+        sort: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> VectorBaseType | gpd.GeoDataFrame:
+        """
+        Clip geometries exactly to a mask.
+
+        Vector geometries are intersected with the mask. Point cloud rows outside the mask are removed. Unlike
+        crop(), this operation can change geometry data and therefore reads an unloaded source.
+
+        :param mask: Clipping geometry, vector, point cloud, raster or bounding box. Georeferenced masks are
+            reprojected to this object's CRS.
+        :param keep_geom_type: Whether to remove intersections with a different geometry type than the input.
+        :param sort: Whether to sort clipped geometries by their original index.
+        :param mp_config: Worker configuration with an integer number of features per chunk. Multiprocessing writes
+            an unloaded GeoPackage result and cannot be combined with a Dask input.
+        :returns: A vector, point cloud or dataframe clipped to the mask.
+        """
+
+        if mp_config is not None:
+            if self._is_pd and is_dask_dataframe(self.ds):
+                raise ValueError("Argument ``mp_config`` cannot be combined with a Dask vector.")
+
+            # Keep file-backed vectors unloaded while workers clip independent source row ranges
+            from geoutils.vector.transformation import _clip_vector_multiproc
+
+            clipped_vector = _clip_vector_multiproc(
+                self,
+                mask=mask,
+                keep_geom_type=keep_geom_type,
+                sort=sort,
+                mp_config=mp_config,
+            )
+            if self._is_pd:
+                clipped_vector.load()
+                return clipped_vector.ds
+            return cast(VectorBaseType, clipped_vector)
+
+        clipped = _clip(self, mask=mask, keep_geom_type=keep_geom_type, sort=sort)
+        return self._override_gdf_output(clipped)
 
     @overload
     def reproject(

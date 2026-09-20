@@ -116,6 +116,7 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
 
     ~raster.base.RasterBase.crop
     ~raster.base.RasterBase.icrop
+    ~raster.base.RasterBase.clip
     ~raster.base.RasterBase.reproject
     ~raster.base.RasterBase.polygonize
     ~raster.base.RasterBase.proximity
@@ -267,6 +268,7 @@ The equivalent of {attr}`geopandas.GeoDataFrame.bounds` (i.e., a per-feature bou
     :toctree: gen_modules/
 
     Vector.crop
+    Vector.clip
     Vector.reproject
     Vector.rasterize
     Vector.proximity
@@ -389,7 +391,6 @@ This first category of attributes and methods return a geometric output converte
     Vector.sjoin
     Vector.sjoin_nearest
     Vector.overlay
-    Vector.clip
     Vector.snap
     Vector.to_crs
     Vector.set_crs
@@ -572,6 +573,7 @@ documentation](https://shapely.readthedocs.io/en/stable/properties.html).
     :toctree: gen_modules/
 
     PointCloud.crop
+    PointCloud.clip
     PointCloud.reproject
     PointCloud.translate
 ```

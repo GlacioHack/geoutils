@@ -18,6 +18,7 @@ from geopandas.testing import assert_geodataframe_equal
 from pandas.testing import assert_frame_equal
 from pyproj import CRS
 from pyproj.crs import CompoundCRS
+from shapely.geometry import Polygon
 
 import geoutils as gu
 from geoutils import PointCloud, Raster
@@ -134,6 +135,7 @@ class TestClassVsAccessorConsistency:
     methods_and_kwargs = [
         ("set_data_column", {"new_data_column": "b2"}),
         ("copy", {}),
+        ("clip", {"mask": Polygon([(-0.1, -0.1), (0.5, -0.1), (0.5, 1.1), (-0.1, 1.1)])}),
         ("reproject", {"crs": 4326}),
         ("to_xyz", {}),
         ("to_array", {}),
@@ -365,6 +367,7 @@ class TestClassVsAccessorConsistency:
         ("method", "kwargs"),
         [
             ("crop", {"bbox": (-1, -1, 0.5, 2)}),
+            ("clip", {"mask": (-1, -1, 0.5, 2)}),
             ("reproject", {"crs": 4326}),
             ("translate", {"xoff": 1, "yoff": 2}),
         ],

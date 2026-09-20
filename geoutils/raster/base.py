@@ -89,7 +89,7 @@ from geoutils.raster.referencing import (
     _xy2ij,
 )
 from geoutils.raster.testing import _array_equal_or_close
-from geoutils.raster.transformation import _crop, _reproject, _translate
+from geoutils.raster.transformation import _clip, _crop, _reproject, _translate
 from geoutils.sampling.subsampling import _subsample, _subsample_raster
 from geoutils.stats.stats import stats as _stats
 from geoutils.stats.stats import variogram as _variogram
@@ -105,6 +105,7 @@ if TYPE_CHECKING:
 
     from geoutils.interface.gridding import GriddingMethod
     from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
+    from geoutils.raster.raster import Raster
     from geoutils.stats.variography import Variogram
     from geoutils.vector.base import VectorLike
     from geoutils.vector.vector import Vector, VectorType
@@ -1387,6 +1388,20 @@ class RasterBase(ABC):
         :returns: A new cropped raster.
         """
 
+        # Store only the read window when the source values still live on disk
+        if not self._is_xr and not self.is_loaded:
+            raster = cast("Raster", self)
+            output = cast(RasterType, raster._crop_deferred(bbox=bbox, distance_unit="georeferenced"))
+            if inplace:
+                warnings.warn(
+                    message="Argument 'inplace' is deprecated, and will be removed in future releases. "
+                    "Use 'rast = rast.crop()' instead.",
+                    category=DeprecationWarning,
+                )
+                self.__dict__.update(output.__dict__)
+                return None
+            return output
+
         cropped_arr, new_transform = _crop(source_raster=self, bbox=bbox)
 
         # Keep in-place for a bit with deprecation warning
@@ -1411,6 +1426,30 @@ class RasterBase(ABC):
             return cast(RasterType, cropped_arr)
         return self.from_array(cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point)
 
+    def clip(
+        self: RasterType,
+        mask: Any,
+        all_touched: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> RasterType:
+        """
+        Mask raster cells outside an exact clipping geometry.
+
+        The raster grid and extent stay unchanged. Cells inside the geometry keep their values, while cells outside
+        become masked values for Raster objects and NaN values for Xarray objects.
+
+        :param mask: Clipping geometry, vector, point cloud, raster or bounding box. Georeferenced masks are
+            reprojected to this raster's CRS.
+        :param all_touched: Whether to keep every cell touched by the geometry. By default, keep cells whose center is
+            inside the geometry, following Rasterio rasterization behavior.
+        :param mp_config: Multiprocessing configuration.
+
+        :returns: Raster with cells outside the clipping geometry as NaN or masked.
+        """
+
+        output = _clip(self, mask=mask, all_touched=all_touched, mp_config=mp_config)
+        return self._cast_raster_output(output)
+
     @profiler.profile("geoutils.raster.base.icrop", memprof=True)
     def icrop(
         self: RasterType,
@@ -1425,6 +1464,20 @@ class RasterBase(ABC):
 
         :returns: Cropped raster.
         """
+        # Store only read window when raster is not loaded yet
+        if not self._is_xr and not self.is_loaded:
+            raster = cast("Raster", self)
+            output = cast(RasterType, raster._crop_deferred(bbox=bbox, distance_unit="pixel"))
+            if inplace:
+                warnings.warn(
+                    message="Argument 'inplace' is deprecated, and will be removed in future releases. "
+                    "Use 'rast = rast.icrop()' instead.",
+                    category=DeprecationWarning,
+                )
+                self.__dict__.update(output.__dict__)
+                return None
+            return output
+
         cropped_arr, new_transform = _crop(source_raster=self, bbox=bbox, distance_unit="pixel")
 
         # Keep in-place for a bit with deprecation warning

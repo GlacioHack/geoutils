@@ -303,9 +303,10 @@ Resampling methods are listed in **[the dedicated section of Rasterio's API](htt
 
 [//]: # (```)
 
-## Crop
+## Crop and clip
 
-Cropping a **raster** is done through the {func}`~geoutils.Raster.crop` function, which enforces new {attr}`~geoutils.Raster.bbox`.
+Cropping a **raster** is done through the {func}`~geoutils.Raster.crop` function, which selects the rows and columns
+within new {attr}`~geoutils.Raster.bbox` without modifying their values.
 Additionally, you can use the {func}`~geoutils.Raster.icrop` method to crop the raster using pixel coordinates instead of geographic bounds.
 Both cropping methods can be used before loading the raster's data into memory. This optimization can prevent loading unnecessary parts of the data, which is particularly useful when working with large rasters.
 
@@ -332,6 +333,19 @@ print(rast_crop.bounds)
 # Crop raster using pixel coordinates
 rast_icrop = rast.icrop(bbox=(2, 2, 6, 6))
 print(rast_icrop.bounds)
+```
+
+Use {func}`~geoutils.Raster.clip` to apply an exact geometry while keeping the raster grid and extent. Cells inside
+the geometry keep their values and cells outside it become nodata. Set `all_touched=True` to keep every cell touched
+by the geometry instead of selecting cells by their centers.
+
+```{code-cell} ipython3
+from shapely.geometry import Polygon
+
+# Mask cells outside a triangular geometry spanning the raster
+left, bottom, right, top = rast.bbox
+triangle = Polygon([(left, bottom), (right, bottom), (left, top)])
+rast_clip = rast.clip(triangle)
 ```
 
 ## Polygonize

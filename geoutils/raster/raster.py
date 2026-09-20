@@ -57,7 +57,7 @@ from geoutils.raster.satimg import (
     decode_sensor_metadata,
     parse_and_convert_metadata_from_filename,
 )
-from geoutils.raster.transformation import _open_downsampled_raster
+from geoutils.raster.transformation import _crop_window, _open_downsampled_raster
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -467,15 +467,10 @@ class Raster(RasterBase):
                 res = tuple(np.asarray(self.res) * downsample)
                 self.transform = rio.transform.from_origin(self.bbox.left, self.bbox.top, res[0], res[1])
                 self._downsample = downsample
-                self._out_window = rio.windows.Window(
-                    0,
-                    0,
-                    min(ds.width, down_width * downsample),
-                    min(ds.height, down_height * downsample),
-                )
 
             # This will record the downsampled out_shape is data is only loaded later on by .load()
             self._out_shape = out_shape
+            self._out_window = rio.windows.Window(0, 0, out_shape[1], out_shape[0])
             self._out_count = count
 
             if load_data:
@@ -833,6 +828,29 @@ class Raster(RasterBase):
         else:
             return np.dtype(self.dtype) == np.bool_
 
+    def _crop_deferred(
+        self: RasterType,
+        bbox: Any,
+        distance_unit: Literal["georeferenced", "pixel"],
+    ) -> RasterType:
+        """Return an unloaded raster whose future read is limited to the selected window."""
+
+        final_window, new_transform = _crop_window(self, bbox=bbox, distance_unit=distance_unit)
+        source_window = self._out_window or rio.windows.Window(0, 0, self.width, self.height)
+
+        # Compose the new selection with any opening downsampling or earlier deferred crop
+        output = self.copy(deep=False)
+        output._out_window = rio.windows.Window(
+            col_off=source_window.col_off + final_window.col_off,
+            row_off=source_window.row_off + final_window.row_off,
+            width=final_window.width,
+            height=final_window.height,
+        )
+        output._out_shape = (int(final_window.height), int(final_window.width))
+        output._out_count = output.count
+        output._set_transform(new_transform)
+        return output
+
     def _load_only_mask(self, bands: int | list[int] | None = None, **kwargs: Any) -> NDArrayBool:
         """
         Load only the raster mask from disk and return as independent array (not stored in any class attributes).
@@ -875,6 +893,9 @@ class Raster(RasterBase):
                     only_mask=True,
                     indexes=list(valid_bands),
                     masked=self._masked,
+                    window=self._out_window,
+                    out_shape=self._out_shape,
+                    out_count=out_count,
                     **read_kwargs,
                 )
             else:
@@ -883,8 +904,7 @@ class Raster(RasterBase):
                     only_mask=True,
                     indexes=list(valid_bands),
                     masked=self._masked,
-                    transform=self.transform,
-                    shape=self.shape,
+                    window=self._out_window,
                     out_shape=self._out_shape,
                     out_count=out_count,
                     **read_kwargs,
@@ -942,6 +962,9 @@ class Raster(RasterBase):
                     indexes=list(valid_bands),
                     masked=self._masked,
                     convert_to_mask=self._is_mask,
+                    window=self._out_window,
+                    out_shape=self._out_shape,
+                    out_count=self._out_count,
                     **read_kwargs,
                 )
             else:
@@ -950,8 +973,7 @@ class Raster(RasterBase):
                     indexes=list(valid_bands),
                     masked=self._masked,
                     convert_to_mask=self._is_mask,
-                    transform=self.transform,
-                    shape=self.shape,
+                    window=self._out_window,
                     out_shape=self._out_shape,
                     out_count=self._out_count,
                     **read_kwargs,

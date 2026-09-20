@@ -72,3 +72,24 @@ class TestPlot:
         assert offsets[0, 0] > 100_000
         assert vector.crs.to_epsg() == 4326
         plt.close()
+
+    def test_plot__deprecated_ref_crs(self) -> None:
+        """Checks that the old ref_crs argument warns and uses only the reference CRS."""
+
+        dataframe = gpd.GeoDataFrame(geometry=gpd.points_from_xy([1], [1]), crs=4326)
+        vector = gu.Vector(dataframe)
+        reference = gu.Raster.from_array(np.ones((2, 2)), Affine(1, 0, 0, 0, -1, 2), 3857)
+
+        # Check that ref_crs changes the CRS without using the reference bounds
+        with pytest.warns(DeprecationWarning, match="Argument 'ref_crs' is deprecated"):
+            vector.plot(ref_crs=reference, add_cbar=False)
+        ax = plt.gca()
+        offsets = np.asarray(ax.collections[0].get_offsets())
+
+        assert offsets[0, 0] > 100_000
+        assert ax.get_xlim()[0] > reference.bounds.right
+        plt.close()
+
+        # Reject calls that pass both the old and new arguments
+        with pytest.raises(TypeError, match="received both 'ref' and deprecated 'ref_crs'"):
+            vector.plot(ref=3857, ref_crs=reference, add_cbar=False)

@@ -60,7 +60,13 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
   - Rasterio / PyProj
 
 * - {meth}`~geoutils.Raster.crop()`
-  - Crop to bounds, either intersecting (untouched) allowing efficient I/O, or clipped (data modified).
+  - Crop to a bounding box without changing values or geometries (deferred I/O). Vectors are kept either by
+    intersection or containment.
+  - ✅
+  - Rasterio / GeoPandas
+
+* - {meth}`~geoutils.Raster.clip()`
+  - Clip to an exact geometry: mask cells for rasters, remove data for points, and cut geometries for vectors.
   - ✅
   - Rasterio / GeoPandas
 

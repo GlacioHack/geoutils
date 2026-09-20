@@ -124,6 +124,23 @@ class TestPlot:
         assert ax.get_ylim() == pytest.approx((reference.bounds.bottom, reference.bounds.top))
         plt.close()
 
+    def test_plot__deprecated_ref_crs(self) -> None:
+        """Checks that the old ref_crs argument warns and uses only the reference CRS."""
+
+        # Create a reference in Web Mercator that covers less area than the source
+        pointcloud = gu.PointCloud(_point_grid(3), data_column="value")
+        reference = gu.PointCloud(_point_grid(2).to_crs(3857), data_column="value")
+
+        # Check that ref_crs changes the CRS without limiting the plotted area
+        with pytest.warns(DeprecationWarning, match="Argument 'ref_crs' is deprecated"):
+            pointcloud.plot(ref_crs=reference, max_points=None, add_cbar=False)
+        ax = plt.gca()
+        offsets = np.asarray(ax.collections[0].get_offsets())
+
+        assert offsets[:, 0].max() > reference.bounds.right
+        assert ax.get_xlim()[1] > reference.bounds.right
+        plt.close()
+
     def test_plot__accessor(self) -> None:
         """Checks that the Pandas point cloud accessor exposes the shared plotting implementation."""
 

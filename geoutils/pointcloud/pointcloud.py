@@ -46,11 +46,13 @@ from geoutils.pointcloud.base import PointCloudBase, _validate_downsample
 from geoutils.pointcloud.las import (
     _is_laspy_supported,
     _load_laspy_data,
+    _load_laspy_data_bounds,
     _load_laspy_data_partitions,
     _load_laspy_metadata,
     _point_partition_size,
     _write_laspy,
 )
+from geoutils.vector.transformation import _apply_crop_filters, _crop_read_bbox
 from geoutils.vector.vector import Vector
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
@@ -214,6 +216,7 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         self._columns: pd.Index | None = None
         self._feature_count: int | None = None
         self._geometry_type: str | None = None
+        self._crop_filters: list[tuple[tuple[float, float, float, float], Literal["intersects", "within"]]] = []
         self._data: NDArrayNum
         self._nb_points: int
         self.__nongeo_columns: pd.Index
@@ -376,7 +379,17 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         else:
             columns_to_load = columns
 
-        if mp_config is None:
+        # Use bounded LAS/COPC reading when crop() stored a deferred spatial selection
+        read_bbox = _crop_read_bbox(self._crop_filters)
+        if read_bbox is not None:
+            ds = _load_laspy_data_bounds(
+                filename=self.name,
+                columns=columns_to_load,
+                bounds=read_bbox,
+                data_column=self.data_column,
+            )
+            ds = _apply_crop_filters(ds, self._crop_filters)
+        elif mp_config is None:
             ds = _load_laspy_data(filename=self.name, columns=columns_to_load, data_column=self.data_column)
         else:
             ds = _load_laspy_data_partitions(
@@ -387,6 +400,7 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
                 mp_config=mp_config,
             )
         self._ds = ds
+        self._crop_filters = []
         self._apply_downsample()
 
     def _apply_downsample(self) -> None:

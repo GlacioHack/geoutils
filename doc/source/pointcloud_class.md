@@ -47,7 +47,8 @@ point geometries.
 Additionally, new attributes such as {attr}`~geoutils.PointCloud.point_count` and new methods specific to point clouds are detailed further below.
 
 Generic vector attributes and methods are inherited through the {class}`~geoutils.Vector` object, such as
-{attr}`~geoutils.Vector.bbox`, {attr}`~geoutils.Vector.crs`, {func}`~xdem.Vector.reproject` and {func}`~xdem.Vector.crop`.
+{attr}`~geoutils.Vector.bbox`, {attr}`~geoutils.Vector.crs`, {func}`~geoutils.Vector.reproject` and
+{func}`~geoutils.Vector.crop`.
 
 ```{tip}
 The complete list of {class}`~geoutils.Vector` attributes and methods can be found in [the Vector section of the API](https://geoutils.readthedocs.io/en/stable/api.html#vector).

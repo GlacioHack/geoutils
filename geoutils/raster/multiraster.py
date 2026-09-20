@@ -116,9 +116,9 @@ def load_multiple_rasters(
                 out_rst.load()
             output_rst[index] = out_rst
 
-    # if no crop or reproject option, simply load the rasters
-    if (not crop) & (not reproject):
-        for rst in output_rst:
+    # Load any output that remains deferred after metadata-only opening or cropping
+    for rst in output_rst:
+        if not rst.is_loaded:
             rst.load()
 
     return output_rst

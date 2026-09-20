@@ -29,7 +29,6 @@ from typing import (
     Iterable,
     Literal,
     TypeVar,
-    cast,
     overload,
 )
 
@@ -40,7 +39,7 @@ import pyogrio
 from pyproj import CRS
 
 from geoutils import profiler
-from geoutils._dispatch import get_geo_attr, is_dask_dataframe
+from geoutils._dispatch import get_geo_attr, has_geo_attr, is_dask_dataframe
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface._nodata import NodataPropagation
@@ -59,7 +58,6 @@ from geoutils.sampling.subsampling import _subsample_pointcloud
 from geoutils.stats.stats import stats as _stats
 from geoutils.stats.stats import variogram as _variogram
 from geoutils.vector.base import VectorBase
-from geoutils.vector.transformation import _get_reproject_crs
 
 if TYPE_CHECKING:
     import matplotlib
@@ -214,6 +212,9 @@ class PointCloudBase(VectorBase):
         """Number of points in the point cloud."""
 
         if not self._is_pd and not self.is_loaded:
+            # Deferred crop filters require reading selected coordinates before their exact count is known
+            if len(getattr(self, "_crop_filters", [])) > 0:
+                return len(self.ds)
             count = getattr(self, "_nb_points", -1)
             if count < 0:
                 # Ask the file driver to count its features without loading their geometries or columns
@@ -276,6 +277,22 @@ class PointCloudBase(VectorBase):
         """
 
         from geoutils.pointcloud.plotting import _plot_pointcloud
+
+        # REMOVE AFTER DEPRECATION: Delete this block when ref_crs compatibility is removed
+        if "ref_crs" in kwargs:
+            if ref is not None:
+                raise TypeError("plot() received both 'ref' and deprecated 'ref_crs'; use only 'ref'.")
+            deprecated_ref = kwargs.pop("ref_crs")
+            warnings.warn(
+                "Argument 'ref_crs' is deprecated; use 'ref' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            # Preserve the old behavior, which matched only the CRS and did not use reference bounds
+            if deprecated_ref is not None:
+                if has_geo_attr(deprecated_ref, "crs"):
+                    deprecated_ref = get_geo_attr(deprecated_ref, "crs")
+                ref = CRS.from_user_input(deprecated_ref)
 
         return _plot_pointcloud(
             self,
@@ -1014,6 +1031,37 @@ class PointCloudBase(VectorBase):
             **pair_sampling_kwargs,
         )
 
+    def clip(
+        self: PointCloudBaseType,
+        mask: Any,
+        keep_geom_type: bool = False,
+        sort: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> PointCloudBaseType | gpd.GeoDataFrame:
+        """
+        Remove points outside an exact clipping geometry.
+
+        :param mask: Clipping geometry, vector, point cloud, raster or bounding box. Georeferenced masks are
+            reprojected to this point cloud's CRS.
+        :param keep_geom_type: Whether to remove intersections with a different geometry type than the input.
+        :param sort: Whether to sort clipped points by their original index within each partition.
+        :param mp_config: Worker configuration with an integer number of points per chunk. The output format is
+            inferred from ``outfile`` or selected by ``driver`` (``GPKG``, ``LAS`` or ``LAZ``), defaulting to
+            GeoPackage. Cannot be combined with a Dask input.
+        :returns: Clipped PointCloud or GeoDataFrame matching the input interface. Dask GeoDataFrame results stay
+            lazy, and multiprocessing PointCloud results are unloaded.
+        """
+
+        from geoutils.pointcloud.transformation import _clip_pointcloud
+
+        return _clip_pointcloud(
+            self,
+            mask=mask,
+            keep_geom_type=keep_geom_type,
+            sort=sort,
+            mp_config=mp_config,
+        )
+
     @overload
     def reproject(
         self: PointCloudBaseType,
@@ -1069,32 +1117,18 @@ class PointCloudBase(VectorBase):
             inferred from ``outfile`` or selected by ``driver`` (``GPKG``, ``LAS`` or ``LAZ``), defaulting to
             GeoPackage. Cannot be combined with Dask input.
         :returns: Reprojected PointCloud or GeoDataFrame matching the input interface, or None when in place.
-            Multiprocessing PointCloud results are unloaded; dataframe accessor results are eager.
+            Dask GeoDataFrame results stay lazy, and multiprocessing PointCloud results are unloaded.
         """
 
-        # Keep the shared vector implementation for eager and lazy dataframe transformations
-        if mp_config is None:
-            return super().reproject(ref=ref, crs=crs, inplace=inplace)
-        if self._is_dask:
-            raise ValueError("Argument ``mp_config`` cannot be combined with a Dask point cloud.")
-        if inplace:
-            raise ValueError("Argument ``inplace`` is not supported with ``mp_config``; use the returned point cloud.")
-
-        # Resolve the target without reading point data, then let workers build the output file
         from geoutils.pointcloud.transformation import _reproject_pointcloud
 
-        target_crs = _get_reproject_crs(ref=ref, crs=crs)
-        projected = _reproject_pointcloud(self, crs=target_crs, mp_config=mp_config)
-        if self._is_pd:
-            # Read every output attribute and use native LAS Z when the file represents heights as a column
-            projected.load(columns="all")
-            return _build_pointcloud_output(
-                projected.ds,
-                data_column=projected.data_column,
-                as_dataframe=True,
-                attrs=_get_dataframe_attrs(self.ds),
-            )
-        return cast(PointCloudBaseType, projected)
+        return _reproject_pointcloud(
+            self,
+            ref=ref,
+            crs=crs,
+            inplace=inplace,
+            mp_config=mp_config,
+        )
 
     @profiler.profile("geoutils.pointcloud.base.grid", memprof=True)
     def grid(

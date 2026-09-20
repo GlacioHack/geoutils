@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
+import geopandas as gpd
 import numpy as np
 import pytest
 from geopandas.testing import assert_geodataframe_equal, assert_geoseries_equal
+from shapely.geometry import Polygon, box
 
 import geoutils as gu
 from geoutils.exceptions import InvalidBoundsError
+from geoutils.multiproc import MultiprocConfig
+from geoutils.multiproc.cluster import MpCluster
 
 
-class TestTransformations:
+class TestTransformation:
     landsat_b4_path = gu.examples.get_path_test("everest_landsat_b4")
     landsat_b4_crop_path = gu.examples.get_path_test("everest_landsat_b4_cropped")
     everest_outlines_path = gu.examples.get_path_test("everest_rgi_outlines")
@@ -62,6 +67,8 @@ class TestTransformations:
 
     @pytest.mark.parametrize("data", test_data)
     def test_crop(self, data: list[str]) -> None:
+        """Checks that crop() keeps unchanged geometries that intersect a bounding box."""
+
         # Load data
         raster_path, outlines_path = data
         rst = gu.Raster(raster_path)
@@ -108,6 +115,85 @@ class TestTransformations:
         with pytest.raises(InvalidBoundsError, match="Cannot interpret bounding box input.*"):
             outlines.crop(1, inplace=True)  # type: ignore
 
+    def test_crop__mode(self) -> None:
+        """Checks that crop() can keep intersecting or fully contained geometries."""
+
+        # Create one polygon inside the box, one crossing its edge and one outside it
+        bbox = (0, 0, 3, 3)
+        source = gpd.GeoDataFrame(
+            {"name": ["inside", "crossing", "outside"]},
+            geometry=[box(1, 1, 2, 2), box(-1, 1, 1, 2), box(5, 5, 6, 6)],
+            crs=32610,
+        )
+        vector = gu.Vector(source)
+
+        # Check that the default mode keeps both polygons that touch the box
+        intersecting = vector.crop(bbox)
+        assert list(intersecting["name"]) == ["inside", "crossing"]
+        assert_geodataframe_equal(intersecting.ds, source.iloc[:2])
+
+        # Check that the within mode keeps only the polygon inside the box
+        contained = vector.crop(bbox, mode="within")
+        assert list(contained["name"]) == ["inside"]
+        assert_geodataframe_equal(contained.ds, source.iloc[[0]])
+
+        # Reject an unknown selection mode
+        with pytest.raises(ValueError, match="must be either 'intersects' or 'within'"):
+            vector.crop(bbox, mode="overlaps")  # type: ignore[arg-type]
+
+    def test_crop__deferred(self, tmp_path: Any) -> None:
+        """Checks that crop() does not read geometries from a file until they are needed."""
+
+        # Write one polygon inside the box, one crossing its edge and one outside it
+        source = gpd.GeoDataFrame(
+            {"name": ["inside", "crossing", "outside"]},
+            geometry=[box(1, 1, 2, 2), box(-1, 1, 1, 2), box(5, 5, 6, 6)],
+            crs=32610,
+        )
+        path = tmp_path / "polygons.gpkg"
+        source.to_file(path)
+        vector = gu.Vector(path)
+
+        # Select the polygon inside the box and keep both objects unloaded
+        cropped = vector.crop((0, 0, 3, 3), mode="within")
+        assert not vector.is_loaded
+        assert not cropped.is_loaded
+
+        # Read the result and compare it with the same crop in memory
+        expected = gu.Vector(source).crop((0, 0, 3, 3), mode="within")
+        assert cropped.vector_equal(expected)
+        assert not vector.is_loaded
+
+    def test_clip(self) -> None:
+        """Checks that clip() cuts polygons at the edge of the given shape."""
+
+        # Create a polygon crossing the clip boundary and another polygon outside it
+        source = gpd.GeoDataFrame(
+            {"name": ["crossing", "outside"]},
+            geometry=[box(-1, 1, 2, 2), box(5, 5, 6, 6)],
+            crs=32610,
+        )
+        clipping_geometry = box(0, 0, 1, 3)
+
+        # Compare the clipped polygon with GeoPandas and check its new bounds
+        clipped = gu.Vector(source).clip(clipping_geometry)
+        expected = source.clip(clipping_geometry)
+        assert_geodataframe_equal(clipped.ds, expected)
+        assert tuple(clipped.bounds) == (0, 1, 1, 2)
+
+        # Check that the old crop option warns and keeps its previous behavior
+        with pytest.warns(DeprecationWarning, match="Argument 'clip' is deprecated"):
+            deprecated_clipped = gu.Vector(source).crop(clipping_geometry.bounds, clip=True)
+        assert_geodataframe_equal(deprecated_clipped.ds, expected)
+        with pytest.warns(DeprecationWarning, match="Argument 'clip' is deprecated"):
+            deprecated_cropped = gu.Vector(source).crop(clipping_geometry.bounds, clip=False)
+        assert_geodataframe_equal(deprecated_cropped.ds, gu.Vector(source).crop(clipping_geometry.bounds).ds)
+        inplace = gu.Vector(source)
+        with pytest.warns(DeprecationWarning, match="Argument 'clip' is deprecated"):
+            output = inplace.crop(clipping_geometry.bounds, clip=True, inplace=True)
+        assert output is None
+        assert_geodataframe_equal(inplace.ds, expected)
+
     def test_translate(self) -> None:
 
         vector = gu.Vector(self.everest_outlines_path)
@@ -122,3 +208,53 @@ class TestTransformations:
         output = vector2.translate(xoff=2.5, yoff=5.7, inplace=True)
         assert output is None
         assert_geoseries_equal(vector2.geometry, vector_shifted.geometry)
+
+
+class TestTransformationChunked:
+    """Test module for vector transformations run with Dask or multiprocessing."""
+
+    def test_clip__chunked_backends_equal(self, tmp_path: Any) -> None:
+        """Checks that clip with Dask and multiprocessing gives the same result as in-memory."""
+
+        dgpd = pytest.importorskip("dask_geopandas")
+
+        # Write five polygons with one outside and one that will be cut
+        source = gpd.GeoDataFrame(
+            {"row_id": np.arange(5, dtype=np.int32), "value": np.linspace(0, 1, 5)},
+            geometry=[
+                box(7, 7, 8, 8),
+                box(-4, 1, -2, 2),
+                box(-1, 0, 1, 2),
+                box(1, 0, 3, 2),
+                box(3, 0, 5, 2),
+            ],
+            crs=32610,
+        )
+        filename = tmp_path / "vector_source.gpkg"
+        source.to_file(filename, index=False)
+        geometry = Polygon([(0, 0), (6, 0), (0, 6)])
+
+        # Clip the same file in memory and with Dask + MP
+        expected = source.clip(geometry).sort_values("row_id").reset_index(drop=True)
+        lazy = gu.open_vector(filename, chunks=2)
+        multiproc = gu.Vector(filename)
+        lazy_result = lazy.vct.clip(geometry)
+        with MpCluster({"nb_workers": 2}) as cluster:
+            config = MultiprocConfig(chunks=2, outfile=str(tmp_path / "vector_clipped.gpkg"), cluster=cluster)
+            multiproc_result = multiproc.clip(geometry, mp_config=config)
+
+        # Check that the Dask and MP outputs have expected types and remain unloaded
+        assert isinstance(lazy_result, dgpd.GeoDataFrame)
+        assert not lazy.vct.is_loaded and not lazy_result.vct.is_loaded
+        assert isinstance(multiproc_result, gu.Vector)
+        assert not multiproc.is_loaded and not multiproc_result.is_loaded
+        with pytest.raises(ValueError, match="cannot be combined with a Dask vector"):
+            lazy.vct.clip(geometry, mp_config=config)
+
+        # Read results and check exact equality of clipped geometry in original order with in-memory
+        computed_lazy = lazy_result.compute().sort_values("row_id").reset_index(drop=True)
+        computed_multiproc = multiproc_result.ds.sort_values("row_id").reset_index(drop=True)
+        assert_geodataframe_equal(computed_lazy, expected, check_dtype=False)
+        assert_geodataframe_equal(computed_multiproc, expected, check_dtype=False)
+        assert not multiproc.is_loaded
+        assert not lazy.vct.is_loaded and not lazy_result.vct.is_loaded

@@ -49,6 +49,7 @@ from geoutils import profiler
 from geoutils._misc import copy_doc
 from geoutils.vector.base import VectorBase
 from geoutils.vector.base import VectorLike as VectorLike  # noqa: F401
+from geoutils.vector.transformation import _apply_crop_filters, _crop_read_bbox
 
 if TYPE_CHECKING:
     from geoutils.raster.base import RasterType
@@ -90,6 +91,7 @@ class Vector(VectorBase):
         self._columns: pd.Index | None = None
         self._feature_count: int | None = None
         self._geometry_type: str | None = None
+        self._crop_filters: list[tuple[tuple[float, float, float, float], Literal["intersects", "within"]]] = []
 
         # If Vector is passed, simply point back to Vector
         if isinstance(filename_or_dataset, Vector):
@@ -184,7 +186,22 @@ class Vector(VectorBase):
         if self.name is None:
             raise AttributeError("Cannot load as name is not set anymore. Did you manually update the name attribute?")
 
-        self.ds = gpd.read_file(self.name, **kwargs)
+        # Build one read box around all deferred crops so the file reader can skip unrelated rows
+        read_kwargs = kwargs.copy()
+        read_bbox = _crop_read_bbox(self._crop_filters)
+        if read_bbox is not None:
+            # Raise error if a user also passed a bbox to load directly
+            if "bbox" in read_kwargs:
+                raise ValueError("Cannot pass a load bbox after crop() has already defined deferred spatial filters.")
+            read_kwargs["bbox"] = read_bbox
+
+        # Read, then apply each crop in order without changing any geometry
+        ds = gpd.read_file(self.name, **read_kwargs)
+        ds = _apply_crop_filters(ds, self._crop_filters)
+
+        # Store the selected rows and clear the filters now that they have been applied
+        self.ds = ds
+        self._crop_filters = []
 
     @property
     def columns(self) -> pd.Index:
@@ -690,10 +707,6 @@ class Vector(VectorBase):
         return self._override_gdf_output(
             self.ds.explode(column=column, ignore_index=ignore_index, index_parts=index_parts, **kwargs)
         )
-
-    @copy_doc(gpd.GeoDataFrame, "Vector")
-    def clip(self: VectorType, mask: Any, keep_geom_type: bool = False, sort: bool = False) -> VectorType:
-        return self._override_gdf_output(self.ds.clip(mask=mask, keep_geom_type=keep_geom_type, sort=sort))
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
     def sjoin(self: VectorType, df: VectorType | gpd.GeoDataFrame, *args: Any, **kwargs: Any) -> VectorType:

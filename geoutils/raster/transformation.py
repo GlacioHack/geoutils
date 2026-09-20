@@ -39,9 +39,9 @@ from shapely.geometry import box
 from shapely.strtree import STRtree
 
 from geoutils._config import config
-from geoutils._dispatch import _check_match_bbox, _check_match_grid
+from geoutils._dispatch import _check_match_bbox, _check_match_grid, _clip_geometry
 from geoutils._misc import import_optional, silence_rasterio_message
-from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum
+from geoutils._typing import DTypeLike, MArrayNum, NDArrayBool, NDArrayNum
 from geoutils.multiproc.chunked import (
     ChunkedGeoGrid,
     GeoGrid,
@@ -51,6 +51,7 @@ from geoutils.multiproc.mparray import (
     MultiprocConfig,
     _split_chunk_size,
     _write_multiproc_result,
+    map_overlap,
 )
 from geoutils.raster.referencing import (
     _default_nodata,
@@ -60,7 +61,7 @@ from geoutils.raster.referencing import (
 if TYPE_CHECKING:
     from geoutils.raster.base import RasterLike, RasterType
     from geoutils.raster.raster import Raster
-    from geoutils.vector.vector import VectorLike
+    from geoutils.vector.vector import Vector, VectorLike
 
 # Dask as optional dependency
 try:
@@ -912,12 +913,12 @@ def _reproject(
 #########
 
 
-def _crop(
+def _crop_window(
     source_raster: RasterType,
     bbox: RasterLike | VectorLike | tuple[float, float, float, float],
     distance_unit: Literal["georeferenced", "pixel"] = "georeferenced",
-) -> tuple[NDArrayNum, affine.Affine]:
-    """Crop raster. See details in Raster.crop()."""
+) -> tuple[rio.windows.Window, affine.Affine]:
+    """Return the aligned source window and transform selected by a bounding box."""
 
     # Check input, raise appropriate errors and warnings
     bbox = _check_match_bbox(source_raster, bbox)
@@ -943,6 +944,17 @@ def _crop(
     # Update bounds and transform accordingly
     new_xmin, new_ymin, new_xmax, new_ymax = rio.windows.bounds(final_window, transform=source_raster.transform)
     tfm = rio.transform.from_origin(new_xmin, new_ymax, *source_raster.res)
+    return final_window, tfm
+
+
+def _crop(
+    source_raster: RasterType,
+    bbox: RasterLike | VectorLike | tuple[float, float, float, float],
+    distance_unit: Literal["georeferenced", "pixel"] = "georeferenced",
+) -> tuple[NDArrayNum, affine.Affine]:
+    """Read or select the raster window requested by crop() or icrop()."""
+
+    final_window, tfm = _crop_window(source_raster=source_raster, bbox=bbox, distance_unit=distance_unit)
 
     if source_raster._is_xr:
         (rowmin, rowmax), (colmin, colmax) = final_window.toranges()
@@ -959,6 +971,7 @@ def _crop(
 
         # If data was not loaded, and self's transform was updated (e.g. due to downsampling) need to
         # get the Window corresponding to on disk data
+        new_xmin, new_ymin, new_xmax, new_ymax = rio.windows.bounds(final_window, transform=source_raster.transform)
         ref_win_disk = rio.windows.from_bounds(
             new_xmin, new_ymin, new_xmax, new_ymax, transform=source_raster._disk_transform
         )
@@ -976,10 +989,19 @@ def _crop(
             source = stack.enter_context(rio.open(source_raster.name))
             if source_raster._downsample > 1:
                 raster = stack.enter_context(_open_downsampled_raster(source, source_raster._downsample))
+                source_window = source_raster._out_window or rio.windows.Window(
+                    0, 0, source_raster.width, source_raster.height
+                )
+                read_window = rio.windows.Window(
+                    source_window.col_off + final_window.col_off,
+                    source_window.row_off + final_window.row_off,
+                    final_window.width,
+                    final_window.height,
+                )
                 crop_img = raster.read(
                     indexes=source_raster._bands,
                     masked=source_raster._masked,
-                    window=final_window,
+                    window=read_window,
                 )
             else:
                 crop_img = source.read(
@@ -998,6 +1020,95 @@ def _crop(
             crop_img = crop_img.astype(bool)
 
     return crop_img, tfm
+
+
+def _apply_clip_geometry(
+    data: NDArrayNum | MArrayNum,
+    inside: NDArrayBool,
+    nodata: int | float | None,
+) -> MArrayNum:
+    """Mask cells outside a clipping geometry."""
+
+    outside = ~inside
+    if data.ndim == 3 and outside.ndim == 2:
+        outside = np.broadcast_to(outside, data.shape)
+    combined_mask = np.logical_or(np.ma.getmaskarray(data), outside)
+    return np.ma.masked_array(np.ma.getdata(data), mask=combined_mask, fill_value=nodata)
+
+
+def _multiproc_clip_block(
+    block: Raster,
+    clipping_vector: Vector,
+    all_touched: bool,
+    output_nodata: int | float | None,
+) -> Raster:
+    """Clip one raster block in an importable multiprocessing worker callback."""
+
+    # Create the mask on this block's exact grid through the shared vector-raster interface
+    inside = clipping_vector.create_mask(ref=block, all_touched=all_touched, as_array=True)
+    clipped = _apply_clip_geometry(block.data, inside=inside, nodata=output_nodata)
+    output = block.copy(new_array=clipped)
+    if output.nodata != output_nodata:
+        output.set_nodata(output_nodata, update_array=False, update_mask=False)
+    return output
+
+
+def _clip(
+    source_raster: RasterType,
+    mask: Any,
+    all_touched: bool = False,
+    mp_config: MultiprocConfig | None = None,
+) -> Any:
+    """
+    Clip raster cells outside a geometry using eager, Dask or multiprocessing execution.
+
+    _clip_geometry() normalizes the mask in the raster CRS. create_mask() then builds the matching eager or Dask
+    mask, while multiprocessing creates the same mask on each block through _multiproc_clip_block().
+    """
+
+    from geoutils.vector.vector import Vector
+
+    dask_backend = da is not None and source_raster._chunks is not None
+    if mp_config is not None and dask_backend:
+        raise ValueError(
+            "Cannot use Multiprocessing and Dask simultaneously. To use Dask, remove mp_config from clip()."
+        )
+
+    # Normalize and reproject the clipping geometry once before dispatching block work
+    target_crs = None if source_raster.crs is None else CRS.from_user_input(source_raster.crs)
+    geometry = _clip_geometry(mask, target_crs=target_crs)
+    clipping_vector = Vector(geometry)
+    if target_crs is not None:
+        clipping_vector.ds = clipping_vector.ds.set_crs(target_crs)
+
+    if mp_config is not None:
+        if source_raster._is_xr:
+            raise ValueError("Multiprocessing clipping requires a Raster input rather than an Xarray accessor.")
+
+        # A file output needs a concrete nodata value to preserve newly clipped cells when it is read again
+        output_nodata = source_raster.nodata
+        if output_nodata is None and not source_raster.is_mask:
+            output_nodata = _default_nodata(source_raster.dtype)
+            warnings.warn(f"No nodata value is defined; multiprocessing clip() will use the default {output_nodata}.")
+        return map_overlap(
+            _multiproc_clip_block,
+            source_raster,
+            mp_config,
+            clipping_vector,
+            all_touched,
+            output_nodata,
+            depth=0,
+        )
+
+    # Match the source grid and let create_mask() choose eager or Dask execution from the reference
+    inside = clipping_vector.create_mask(ref=source_raster, all_touched=all_touched, as_array=True)
+
+    if source_raster._is_xr:
+        assert source_raster._obj is not None
+        return source_raster._obj.where(inside)
+
+    clipped = _apply_clip_geometry(source_raster.data, inside=inside, nodata=source_raster.nodata)
+    return source_raster.copy(new_array=clipped)
 
 
 ##############
