@@ -29,7 +29,6 @@ from typing import (
     Iterable,
     Literal,
     TypeVar,
-    cast,
     overload,
 )
 
@@ -40,7 +39,7 @@ import pyogrio
 from pyproj import CRS
 
 from geoutils import profiler
-from geoutils._dispatch import _get_reproject_crs, get_geo_attr, has_geo_attr, is_dask_dataframe
+from geoutils._dispatch import get_geo_attr, has_geo_attr, is_dask_dataframe
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface._nodata import NodataPropagation
@@ -1049,35 +1048,19 @@ class PointCloudBase(VectorBase):
         :param mp_config: Worker configuration with an integer number of points per chunk. The output format is
             inferred from ``outfile`` or selected by ``driver`` (``GPKG``, ``LAS`` or ``LAZ``), defaulting to
             GeoPackage. Cannot be combined with a Dask input.
-        :returns: Clipped PointCloud or GeoDataFrame matching the input interface. Multiprocessing PointCloud
-            results are unloaded; dataframe accessor results are eager.
+        :returns: Clipped PointCloud or GeoDataFrame matching the input interface. Dask GeoDataFrame results stay
+            lazy, and multiprocessing PointCloud results are unloaded.
         """
 
-        # Keep the shared vector implementation for eager and lazy dataframe transformations
-        if mp_config is None:
-            return super().clip(mask=mask, keep_geom_type=keep_geom_type, sort=sort)
-        if self._is_dask:
-            raise ValueError("Argument ``mp_config`` cannot be combined with a Dask point cloud.")
-
-        # Let workers filter independent source ranges and build one ordered file output
         from geoutils.pointcloud.transformation import _clip_pointcloud
 
-        clipped = _clip_pointcloud(
+        return _clip_pointcloud(
             self,
             mask=mask,
             keep_geom_type=keep_geom_type,
             sort=sort,
             mp_config=mp_config,
         )
-        if self._is_pd:
-            clipped.load(columns="all")
-            return _build_pointcloud_output(
-                clipped.ds,
-                data_column=clipped.data_column,
-                as_dataframe=True,
-                attrs=_get_dataframe_attrs(self.ds),
-            )
-        return cast(PointCloudBaseType, clipped)
 
     @overload
     def reproject(
@@ -1134,32 +1117,18 @@ class PointCloudBase(VectorBase):
             inferred from ``outfile`` or selected by ``driver`` (``GPKG``, ``LAS`` or ``LAZ``), defaulting to
             GeoPackage. Cannot be combined with Dask input.
         :returns: Reprojected PointCloud or GeoDataFrame matching the input interface, or None when in place.
-            Multiprocessing PointCloud results are unloaded; dataframe accessor results are eager.
+            Dask GeoDataFrame results stay lazy, and multiprocessing PointCloud results are unloaded.
         """
 
-        # Keep the shared vector implementation for eager and lazy dataframe transformations
-        if mp_config is None:
-            return super().reproject(ref=ref, crs=crs, inplace=inplace)
-        if self._is_dask:
-            raise ValueError("Argument ``mp_config`` cannot be combined with a Dask point cloud.")
-        if inplace:
-            raise ValueError("Argument ``inplace`` is not supported with ``mp_config``; use the returned point cloud.")
-
-        # Resolve the target without reading point data, then let workers build the output file
         from geoutils.pointcloud.transformation import _reproject_pointcloud
 
-        target_crs = _get_reproject_crs(ref=ref, crs=crs)
-        projected = _reproject_pointcloud(self, crs=target_crs, mp_config=mp_config)
-        if self._is_pd:
-            # Read every output attribute and use native LAS Z when the file represents heights as a column
-            projected.load(columns="all")
-            return _build_pointcloud_output(
-                projected.ds,
-                data_column=projected.data_column,
-                as_dataframe=True,
-                attrs=_get_dataframe_attrs(self.ds),
-            )
-        return cast(PointCloudBaseType, projected)
+        return _reproject_pointcloud(
+            self,
+            ref=ref,
+            crs=crs,
+            inplace=inplace,
+            mp_config=mp_config,
+        )
 
     @profiler.profile("geoutils.pointcloud.base.grid", memprof=True)
     def grid(

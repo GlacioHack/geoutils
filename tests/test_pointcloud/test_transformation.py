@@ -122,6 +122,42 @@ class TestTransformationChunked:
         assert not multiproc.is_loaded
         assert not lazy.pc.is_loaded and not lazy_result.pc.is_loaded
 
+    def test_clip__dask_las_loading_laziness(self) -> None:
+        """Checks that clip() keeps a LAS-backed Dask GeoDataFrame lazy and matches eager point selection."""
+
+        pytest.importorskip("laspy")
+        dgpd = pytest.importorskip("dask_geopandas")
+        from dask.callbacks import Callback
+
+        # Derive a mask from LAS header bounds without reading the point records
+        filename = gu.examples.get_path_test("coromandel_lidar")
+        eager = gu.PointCloud(filename)
+        left, bottom, right, top = eager.bbox
+        middle = left + (right - left) / 2
+        geometry = Polygon([(left, bottom), (middle, bottom), (middle, top), (left, top)])
+        assert not eager.is_loaded
+
+        # Build one clipping task per 100-point LAS partition without running any Dask task
+        lazy = gu.open_pointcloud(filename, chunks=100)
+        tasks = []
+        with Callback(pretask=lambda *args: tasks.append(args[0])):
+            lazy_result = lazy.pc.clip(geometry)
+        assert tasks == []
+        assert isinstance(lazy_result, dgpd.GeoDataFrame)
+        assert lazy_result.npartitions == lazy.npartitions
+        assert lazy_result.pc.data_column == lazy.pc.data_column == "Z"
+        assert not lazy.pc.is_loaded and not lazy_result.pc.is_loaded
+
+        # Compute only the result and compare the same points independently of Dask partition order
+        expected = eager.clip(geometry).ds
+        expected = expected.assign(_x=expected.geometry.x, _y=expected.geometry.y)
+        expected = expected.sort_values(["_x", "_y", "Z"]).drop(columns=["_x", "_y"]).reset_index(drop=True)
+        computed = lazy_result.compute()
+        computed = computed.assign(_x=computed.geometry.x, _y=computed.geometry.y)
+        computed = computed.sort_values(["_x", "_y", "Z"]).drop(columns=["_x", "_y"]).reset_index(drop=True)
+        assert_geodataframe_equal(computed, expected, check_dtype=False)
+        assert not lazy.pc.is_loaded and not lazy_result.pc.is_loaded
+
     def test_clip__multiprocessing_las_output(self, tmp_path: Path) -> None:
         """Checks that multiprocessing clip() writes the selected points and values to a LAS file."""
 
