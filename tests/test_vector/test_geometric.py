@@ -186,7 +186,7 @@ class TestGeometric:
             for j in range(i + 1, len(polys)):
                 assert not polys[i].intersects(polys[j])
 
-        # buffer should yield the same result as create_mask() with buffer, minus the original mask
+        # buffer should yield the same result as create_mask with buffer, minus the original mask
         mask_nonoverlap = buffer.create_mask(res=0.1, bounds=(0, 0, 21, 21))
         with pytest.warns(UserWarning, match="Geometry is in a geographic CRS.*"):
             two_squares_buffer = two_squares.buffer(buffer_size)
@@ -218,7 +218,7 @@ class TestGeometric:
             for j in range(i + 1, len(polys)):
                 assert polys[i].intersection(polys[j]).area == 0
 
-        # buffer should yield the same result as create_mask() with buffer, minus the original mask
+        # buffer should yield the same result as create_mask with buffer, minus the original mask
         mask_nonoverlap = buffer.create_mask(res=0.1, bounds=(0, 0, 21, 21))
         with pytest.warns(UserWarning, match="Geometry is in a geographic CRS.*"):
             two_squares_buffer = two_squares.buffer(buffer_size)

@@ -853,17 +853,17 @@ class TestRaster:
         assert rst.raster_equal(rst_copy, warn_failure_reason=True)
 
     def test_get_nanarray__deprecated_alias(self) -> None:
-        """Checks that get_nanarray() warns and forwards its arguments to to_nanarray()."""
+        """Checks that get_nanarray() warns of deprecation, and forwards to to_nanarray()."""
 
-        # Compute the expected array and invalid-data mask through the canonical method
+        # Compute the expected array and nodata mask
         raster = gu.Raster(self.aster_dem_path)
         expected_array, expected_mask = raster.to_nanarray(floating_dtype="float64", return_mask=True)
 
-        # Call the former name with the same options and require its deprecation warning
+        # Check deprecation warning
         with pytest.warns(DeprecationWarning, match=r"Use to_nanarray\(\) instead"):
             actual_array, actual_mask = raster.get_nanarray(floating_dtype="float64", return_mask=True)
 
-        # Check that the compatibility alias preserves both returned arrays and the requested dtype
+        # Check equality
         assert actual_array.dtype == expected_array.dtype
         assert np.array_equal(actual_array, expected_array, equal_nan=True)
         assert np.array_equal(actual_mask, expected_mask)

@@ -283,14 +283,13 @@ The equivalent of {attr}`geopandas.GeoDataFrame.bounds` (i.e., a per-feature bou
     Vector.plot
 ```
 
-### Create mask
+### Create geometry mask
 
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
 
     Vector.create_mask
-    Vector.geometry_mask
 ```
 
 ### Geometry manipulation
