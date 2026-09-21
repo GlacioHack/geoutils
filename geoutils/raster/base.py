@@ -2098,7 +2098,7 @@ class RasterBase(ABC):
 
     @deprecate(
         Version("0.3.0"),
-        "Raster.to_points() is deprecated in favor of Raster.to_pointcloud() and will be removed in v0.3.",
+        "Use Raster.to_pointcloud() instead.",
     )
     def to_points(self, **kwargs):  # type: ignore
 

@@ -926,7 +926,7 @@ class VectorBase(ABC):
 
     @deprecate(
         removal_version=Version("0.3.0"),
-        details="The function .save() will be soon deprecated, use .to_file() instead.",
+        details="Use .to_file() instead.",
     )
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Write the vector to file."""

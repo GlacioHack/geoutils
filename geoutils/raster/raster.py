@@ -38,6 +38,7 @@ from affine import Affine
 from packaging.version import Version
 from rasterio.crs import CRS
 
+import geoutils as gu
 from geoutils import profiler
 from geoutils._misc import deprecate
 from geoutils._typing import (
@@ -2057,7 +2058,7 @@ class Raster(RasterBase):
 
     @deprecate(
         removal_version=Version("0.3.0"),
-        details="The function .save() will be soon deprecated, use .to_file() instead.",
+        details="Use .to_file() instead.",
     )  # type: ignore
     def save(
         self,
@@ -2173,6 +2174,41 @@ class Raster(RasterBase):
 
         return raster_bands
 
+    def stack(
+        self,
+        rasters: Raster | list[Raster],
+        reference: int | Raster = 0,
+        resampling_method: str | rio.enums.Resampling = None,
+        use_ref_bounds: bool = False,
+    ) -> Raster:
+        """
+        Stack this raster with one or more rasters into a multi-band raster.
+
+        All input rasters are reprojected and resampled to a common grid defined by the reference raster.
+        The reference can be either this raster (reference=0) or another raster (reference>0, defined by its index)
+
+        The output multi-band extent is the union of all raster extents, except if `use_ref_bounds`
+        is used, in which case the reference raster bounds are used. Its number of bands equals the sum of the bands
+        from this raster and all additional rasters.
+
+        Note that all rasters will be loaded once in memory. The data is only loaded for
+        reprojection then deleted to optimize memory usage.
+
+        :param rasters: Raster or list of rasters to be stacked.
+        :param reference: Index of reference raster in the list or separate reference raster.
+            Defaults to this raster.
+        :param resampling_method: Resampling method for reprojection.
+        :param use_ref_bounds: If True, will use reference bounds, otherwise will use maximum bounds of all rasters.
+
+        :returns: The merged raster with same CRS and resolution (and optionally bounds) as the reference.
+        """
+        if isinstance(rasters, Raster):
+            raster_list: list[Raster] = [self, rasters]
+        else:
+            raster_list = [self] + rasters  # type: ignore
+
+        return gu.raster.stack(raster_list, reference, resampling_method, use_ref_bounds)
+
 
 class Mask(Raster):
     """
@@ -2200,9 +2236,7 @@ class Mask(Raster):
     See the API for more details.
     """
 
-    @deprecate(
-        removal_version=Version("0.3.0"), details="The Mask class is deprecated, use Raster(is_mask=True) instead."
-    )  # type: ignore
+    @deprecate(removal_version=Version("0.3.0"), details="Use Raster(is_mask=True) instead.")  # type: ignore
     def __init__(
         self,
         *args: Any,
