@@ -31,7 +31,6 @@ from packaging.version import Version
 from geoutils._misc import deprecate
 from geoutils._typing import NDArrayNum
 from geoutils.projtools import align_bounds, merge_bounds
-from geoutils.raster.array import get_array_and_mask
 from geoutils.raster.raster import Raster, _default_nodata
 
 
@@ -131,7 +130,6 @@ def stack(
     reference: int | Raster = 0,
     resampling_method: str | rio.enums.Resampling = None,
     use_ref_bounds: bool = False,
-    diff: bool = False,
 ) -> Raster:
     """
     Stack a list of rasters on their maximum extent into a multi-band raster.
@@ -143,8 +141,6 @@ def stack(
     The output multi-band raster has an extent that is the union of all raster extents, except if `use_ref_bounds` is
     used, and number of bands equals the sum of the bands from this raster and all additional rasters.
 
-    Use diff=True to return directly the difference to the reference raster.
-
     Note that all rasters will be loaded once in memory. The data is only loaded for
     reprojection then deleted to optimize memory usage.
 
@@ -153,7 +149,6 @@ def stack(
         Defaults to the first raster in the list.
     :param resampling_method: Resampling method for reprojection.
     :param use_ref_bounds: If True, will use reference bounds, otherwise will use maximum bounds of all rasters.
-    :param diff: If True, will return the difference to the reference raster.
 
     :returns: The merged raster with same CRS and resolution (and optionally bounds) as the reference.
     """
@@ -204,19 +199,13 @@ def stack(
             reprojected_raster = reprojected_raster.copy()
             reprojected_raster.set_nodata(nodata)
 
-        # Optionally calculate difference
-        if diff:
-            diff_to_ref = (reference_raster.data - reprojected_raster.data).squeeze()
-            diff_to_ref, _ = get_array_and_mask(diff_to_ref)
-            data.append(diff_to_ref)
+        # img_data, _ = get_array_and_mask(reprojected_raster.data.squeeze())
+        # Use only first band
+        if reprojected_raster.count == 1:
+            data.append(reprojected_raster.data[:])
         else:
-            # img_data, _ = get_array_and_mask(reprojected_raster.data.squeeze())
-            # Use only first band
-            if reprojected_raster.count == 1:
-                data.append(reprojected_raster.data[:])
-            else:
-                for b in range(reprojected_raster.count):
-                    data.append(reprojected_raster.data[b, :])
+            for b in range(reprojected_raster.count):
+                data.append(reprojected_raster.data[b, :])
 
         # Remove unloaded rasters
         if not raster.is_loaded:
@@ -242,17 +231,16 @@ def stack(
 
 
 @deprecate(
-    removal_version=Version("0.3.0"),
-    details="The function gu.raster.stack_rasters() will be soon deprecated, use gu.raster.stack() instead.",
+    removal_version=Version("1.0.0"),
+    details="Use gu.raster.stack() instead.",
 )  # type: ignore
 def stack_rasters(
     rasters: list[Raster],
     reference: int | Raster = 0,
     resampling_method: str | rio.enums.Resampling = None,
     use_ref_bounds: bool = False,
-    diff: bool = False,
 ) -> Raster:
-    return stack(rasters, reference, resampling_method, use_ref_bounds, diff)
+    return stack(rasters, reference, resampling_method, use_ref_bounds)
 
 
 def merge_rasters(

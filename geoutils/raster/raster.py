@@ -1973,7 +1973,7 @@ class Raster(RasterBase):
 
     @deprecate(
         removal_version=Version("0.3.0"),
-        details="The function .save() will be soon deprecated, use .to_file() instead.",
+        details="Use .to_file() instead.",
     )  # type: ignore
     def save(
         self,
@@ -2348,9 +2348,7 @@ class Mask(Raster):
     See the API for more details.
     """
 
-    @deprecate(
-        removal_version=Version("0.3.0"), details="The Mask class is deprecated, use Raster(is_mask=True) instead."
-    )  # type: ignore
+    @deprecate(removal_version=Version("0.3.0"), details="Use Raster(is_mask=True) instead.")  # type: ignore
     def __init__(
         self,
         *args: Any,
