@@ -3338,7 +3338,8 @@ class TestArrayInterface:
         # Get ufunc
         np_func = getattr(np, np_func_name)
 
-        # Check mismatched Raster grids in each georeferencing dimension
+        # Rasters with different CRS, transform, or shape
+        # Different shape
         georef_tworaster_message = (
             "Both rasters must have the same shape, transform and CRS for an arithmetic operation. "
             "For example, use raster1 = raster1.reproject(raster2) to reproject raster1 on the "
@@ -3348,13 +3349,15 @@ class TestArrayInterface:
         with pytest.raises(ValueError, match=re.escape(georef_tworaster_message)):
             np_func(rst, rst_wrong_shape)
 
+        # Different CRS
         with pytest.raises(ValueError, match=re.escape(georef_tworaster_message)):
             np_func(rst, rst_wrong_crs)
 
+        # Different transform
         with pytest.raises(ValueError, match=re.escape(georef_tworaster_message)):
             np_func(rst, rst_wrong_transform)
 
-        # Check mismatched arrays in both argument orders
+        # Array with different shape
         georef_raster_array_message = (
             "The raster and array must have the same shape for an arithmetic operation. "
             "For example, if the array comes from another raster, use raster1 = "
@@ -3362,17 +3365,19 @@ class TestArrayInterface:
             "than raster2. Or, if the array does not come from a raster, define one with raster = "
             "Raster.from_array(array, array_transform, array_crs, array_nodata) then reproject."
         )
+        # Different shape, masked array
+        # Check reflectivity just in case (just here, not later)
         with pytest.raises(ValueError, match=re.escape(georef_raster_array_message)):
             np_func(ma_wrong_shape, rst)
         with pytest.raises(ValueError, match=re.escape(georef_raster_array_message)):
             np_func(rst, ma_wrong_shape)
 
+        # Different shape, normal array with NaNs
         with pytest.raises(ValueError, match=re.escape(georef_raster_array_message)):
             np_func(ma_wrong_shape.filled(np.nan), rst)
         with pytest.raises(ValueError, match=re.escape(georef_raster_array_message)):
             np_func(rst, ma_wrong_shape.filled(np.nan))
 
-        # Check incompatible pixel interpretations
         aop_message = 'One raster has a pixel interpretation "Area" and the other "Point".*'
         with pytest.raises(UserWarning, match=aop_message):
             np_func(rst, rst_wrong_aop)

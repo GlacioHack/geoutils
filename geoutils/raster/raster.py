@@ -1605,7 +1605,7 @@ class Raster(RasterBase):
         target_dtype = np.dtype(dtype)
         dtype_changed = target_dtype != np.dtype(self.dtype)
 
-        # Check for all data types except boolean, which GeoUtils supports in addition to Rasterio types
+        # Check for all data type except boolean, that we support in addition to other types
         if target_dtype != np.bool_:
             # Check that dtype is supported by rasterio
             if not rio.dtypes.check_dtype(target_dtype):
@@ -1661,7 +1661,7 @@ class Raster(RasterBase):
         if not isinstance(mask, (np.ndarray, Raster)):
             raise ValueError("mask must be a numpy array or a raster.")
 
-        # Accessing data loads a file-backed raster before applying the mask
+        # Check that new_data has correct shape
         orig_shape = self.data.shape
 
         # If the mask is a Mask instance, pass the boolean array
@@ -1825,7 +1825,7 @@ class Raster(RasterBase):
 
         # If the universal function takes two inputs (Note: no ufunc exists that has three inputs or more)
         else:
-            # Check the Raster and other input, then keep their original order for non-commutative functions
+            # Check the casting between Raster and array inputs, and return error messages if not consistent
             input_data: tuple[MArrayNum | NDArrayNum | Number, MArrayNum | NDArrayNum | Number]
             if isinstance(inputs[0], Raster):
                 raster = inputs[0]
@@ -1888,12 +1888,14 @@ class Raster(RasterBase):
         cast_required = False
         aop = None  # The None value is never used (aop only used when cast_required = True)
         if func.__name__ in _HANDLED_FUNCTIONS_1NIN:
-            # For median, np.median ignores masks of masked array, so force np.ma.median
+            # We now choose the behaviour of array functions
+            # For median, np.median ignores masks of masked array, so we force np.ma.median
             if func.__name__ in ["median", "nanmedian"]:
                 func = np.ma.median
                 first_arg = args[0].data
 
-            # Percentiles and quantiles have no masked version, so use valid data directly
+            # For percentiles and quantiles, there exist no masked array version, so we compute on the valid data
+            # directly
             elif func.__name__ in ["percentile", "nanpercentile", "quantile", "nanquantile"]:
                 first_arg = args[0].data.compressed()
 
@@ -1904,14 +1906,14 @@ class Raster(RasterBase):
                     warnings.warn("Applying np.gradient to first raster band only.", category=UserWarning)
                     first_arg = args[0].data[0, :, :]
 
-            # Otherwise, run the NumPy function normally because most take masks into account
+            # Otherwise, we run the numpy function normally (most take masks into account)
             else:
                 first_arg = args[0].data
             outputs = func(first_arg, *args[1:], **kwargs)  # type: ignore
 
         # Two input functions require casting
         else:
-            # Check the Raster and other input, then keep their original order for non-commutative functions
+            # Check the casting between Raster and array inputs, and return error messages if not consistent
             if isinstance(args[0], Raster):
                 raster = args[0]
                 other = args[1]
@@ -2021,6 +2023,8 @@ class Raster(RasterBase):
         # Use nodata set by user, otherwise default to self's
         nodata = nodata if nodata is not None else self.nodata
         output_dtype = np.dtype(dtype) if dtype is not None else np.dtype(self.dtype)
+
+        # If the output is a mask, convert to uint8 before saving and force nodata to 255
         if output_dtype == np.bool_:
             output_dtype = np.dtype("uint8")
             nodata = 255
@@ -2042,14 +2046,17 @@ class Raster(RasterBase):
 
         # Make nodata compatible with the requested file type before filling masked values
         nodata = _cast_nodata(output_dtype, cast(int | float | None, nodata))
+
+        # If masked array, save with masked values replaced by nodata
         if isinstance(save_data, np.ma.masked_array):
+            # In this case, nodata=None is not compatible, so revert to default values, only if masked values exist
             if (nodata is None) & (np.count_nonzero(save_data.mask) > 0):
                 nodata = _default_nodata(output_dtype)
                 warnings.warn(f"No nodata set, will use default value of {nodata}", category=UserWarning)
-            save_data = save_data.filled(nodata)
-
-        # Cast the complete output after filling so dtype controls both metadata and stored values
-        save_data = save_data.astype(output_dtype, copy=False)
+            # Convert masked data before filling so nodata is represented in the requested output type
+            save_data = save_data.astype(output_dtype, copy=False).filled(nodata)
+        else:
+            save_data = save_data.astype(output_dtype, copy=False)
 
         # Cast to 3D before saving if single band
         if self.count == 1:

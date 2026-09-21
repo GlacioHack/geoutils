@@ -135,6 +135,12 @@ class TestRasterVectorInterface:
         # Rasterize a unit polygon inside a larger grid and request a NaN background
         with warnings.catch_warnings():
             warnings.simplefilter("error")
+            # Ignore the Affine 3.1 transition warning emitted inside Rasterio
+            warnings.filterwarnings(
+                "ignore",
+                message=r"Use `@` matmul instead of `\*` mul operator for matrix multiplication",
+                category=PendingDeprecationWarning,
+            )
             raster = self.vector.rasterize(res=1, bounds=(9, 9, 13, 13), crs=4326, in_value=1, out_value=np.nan)
 
         # Check that the background is masked with NaN nodata and the polygon value stays valid
