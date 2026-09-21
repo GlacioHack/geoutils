@@ -715,7 +715,7 @@ class VectorBase(ABC):
         mp_config: MultiprocConfig | None = None,
         dask: bool = False,
     ) -> RasterType | PointCloudLike | NDArrayBool:
-        """Create a raster or point cloud mask from the vector features."""
+        """Create a raster or point cloud mask from the vector geometry features."""
 
         # Functional interfaces operate on Vector while outputs follow the caller type
         source_vector = self.to_geoutils() if self._is_pd else self
@@ -742,6 +742,9 @@ class VectorBase(ABC):
         if has_geo_attr(output, "transform") and has_geo_attr(output, "shape"):
             return self._cast_raster_output(output)
         return output
+
+    # Keep the Rasterio-style name as an equivalent public alias
+    geometry_mask = create_mask
 
     @profiler.profile("geoutils.vector.base.rasterize", memprof=True)
     def rasterize(

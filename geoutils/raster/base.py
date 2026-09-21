@@ -1090,11 +1090,11 @@ class RasterBase(ABC):
 
             # Three cases: masked/NaN, NaN/masked or NaN/NaN
             if np.ma.isMaskedArray(self.data):
-                left_data = self.get_nanarray()
+                left_data = self.to_nanarray()
                 right_data = other.data
             elif np.ma.isMaskedArray(other.data):
                 left_data = self.data
-                right_data = other.get_nanarray()
+                right_data = other.to_nanarray()
             else:
                 left_data = self.data
                 right_data = other.data
@@ -1325,16 +1325,16 @@ class RasterBase(ABC):
         return intersection  # type: ignore
 
     @overload
-    def get_nanarray(
+    def to_nanarray(
         self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[False] = False
     ) -> NDArrayNum: ...
 
     @overload
-    def get_nanarray(
+    def to_nanarray(
         self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[True]
     ) -> tuple[NDArrayNum, NDArrayBool]: ...
 
-    def get_nanarray(
+    def to_nanarray(
         self, floating_dtype: DTypeLike = "float32", *, return_mask: bool = False
     ) -> NDArrayNum | tuple[NDArrayNum, NDArrayBool]:
         """
@@ -1366,6 +1366,26 @@ class RasterBase(ABC):
             return nanarray, ~np.isfinite(nanarray)
         else:
             return nanarray
+
+    @overload
+    def get_nanarray(
+        self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[False] = False
+    ) -> NDArrayNum: ...
+
+    @overload
+    def get_nanarray(
+        self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[True]
+    ) -> tuple[NDArrayNum, NDArrayBool]: ...
+
+    @deprecate(details="Use to_nanarray() instead.")
+    def get_nanarray(
+        self, floating_dtype: DTypeLike = "float32", *, return_mask: bool = False
+    ) -> NDArrayNum | tuple[NDArrayNum, NDArrayBool]:
+        """Call to_nanarray() through its deprecated name."""
+
+        if return_mask:
+            return self.to_nanarray(floating_dtype=floating_dtype, return_mask=True)
+        return self.to_nanarray(floating_dtype=floating_dtype, return_mask=False)
 
     @profiler.profile("geoutils.raster.base.crop", memprof=True)
     def crop(

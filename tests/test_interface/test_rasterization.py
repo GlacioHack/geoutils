@@ -129,9 +129,7 @@ class TestRasterVectorInterface:
             vct.rasterize(rst, crs=3857)
 
     def test_create_mask(self) -> None:
-        """
-        Test Vector.create_mask.
-        """
+        """Checks that create_mask() returns the expected raster mask and validates its grid input."""
         # First with given res and bounds -> Should be a 21 x 21 array with 0 everywhere except center pixel
         vector = self.vector.copy()
         out_mask = vector.create_mask(res=1, bounds=(0, 0, 21, 21), as_array=True)
@@ -157,7 +155,7 @@ class TestRasterVectorInterface:
         # Check that no warning is raised when creating a mask with a xres not multiple of vector bounds
         mask = vector.create_mask(res=1.01)
 
-        # Check that by default, create_mask returns a Mask
+        # Check that by default, create_mask() returns a mask raster
         assert isinstance(mask, gu.Raster) and mask.is_mask
 
         # Check that an error is raised if no input is passed
@@ -171,6 +169,22 @@ class TestRasterVectorInterface:
         with pytest.raises(ValueError, match="Input arguments must define a valid raster or point cloud."):
             vector.create_mask("lol")  # type: ignore
 
+    def test_geometry_mask__alias(self) -> None:
+        """Checks that geometry_mask() is a direct alias with the same result as create_mask()."""
+
+        # Check that both public names bind the same implementation on Vector and its GeoPandas accessor
+        assert self.vector.geometry_mask.__func__ is self.vector.create_mask.__func__
+        assert self.vector.ds.vct.geometry_mask.__func__ is self.vector.ds.vct.create_mask.__func__
+
+        # Compute the same Boolean array through the canonical name, class alias and accessor alias
+        expected = self.vector.create_mask(res=1, bounds=(0, 0, 21, 21), as_array=True)
+        actual = self.vector.geometry_mask(res=1, bounds=(0, 0, 21, 21), as_array=True)
+        accessor_actual = self.vector.ds.vct.geometry_mask(res=1, bounds=(0, 0, 21, 21), as_array=True)
+
+        # Check that both aliases return the same mask
+        np.testing.assert_array_equal(actual, expected)
+        np.testing.assert_array_equal(accessor_actual, expected)
+
     @pytest.mark.parametrize("all_touched", [False, True])
     @pytest.mark.parametrize("in_value_mode", ["scalar", "iterable", "none"])
     def test_rasterize_create_mask__chunked_backends_equal(
@@ -180,7 +194,7 @@ class TestRasterVectorInterface:
         in_value_mode: str,
     ) -> None:
         """
-        Test that rasterize and create_mask return exactly the same eager, Dask and Multiprocessing outputs.
+        Checks that rasterize() and create_mask() return the same eager, Dask and multiprocessing outputs.
 
         Dask outputs must remain lazy until computed and Multiprocessing outputs must initially remain file-backed.
         """

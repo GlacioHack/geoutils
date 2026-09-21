@@ -36,7 +36,7 @@ vect_rasterized.plot(ax="new")
 vect_rasterized
 
 # %%
-# **Second option:** we can pass any georeferencing parameter to :func:`~geoutils.Raster.create_mask`. Any unpassed attribute will be deduced from the
+# **Second option:** we can pass any georeferencing parameter to :func:`~geoutils.Vector.create_mask`. Any unpassed attribute will be deduced from the
 # :class:`~geoutils.Vector` itself, except from the :attr:`~geoutils.Raster.shape` to rasterize that will default to 1000 x 1000.
 
 

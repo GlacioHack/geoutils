@@ -907,9 +907,9 @@ class TestTransformationChunked:
             dask_source.rst.clip(geometry, mp_config=mp_config)
 
         # Read all results and check they exactly match
-        expected_values = expected.get_nanarray()
+        expected_values = expected.to_nanarray()
         np.testing.assert_allclose(dask_result.compute().data, expected_values, equal_nan=True)
-        np.testing.assert_allclose(multiproc_result.get_nanarray(), expected_values, equal_nan=True)
+        np.testing.assert_allclose(multiproc_result.to_nanarray(), expected_values, equal_nan=True)
         assert multiproc_result.transform == expected.transform
         assert multiproc_result.crs == expected.crs
 
@@ -934,7 +934,7 @@ class TestTransformationChunked:
         assert not source.is_loaded
         assert not result.is_loaded
         assert result.nodata == _default_nodata(values.dtype)
-        np.testing.assert_allclose(result.get_nanarray(), expected.get_nanarray(), equal_nan=True)
+        np.testing.assert_allclose(result.to_nanarray(), expected.to_nanarray(), equal_nan=True)
 
     @pytest.mark.parametrize("load_source", [False, True])
     def test_reproject__multiprocessing_logical_mask(self, tmp_path: Any, load_source: bool) -> None:
@@ -1002,8 +1002,8 @@ class TestTransformationChunked:
         assert not raster_mp.is_loaded
         assert not ds._in_memory
         assert isinstance(ds.data, da.Array)
-        assert np.allclose(base.get_nanarray(), mp.get_nanarray(), equal_nan=True)
-        assert np.allclose(base.get_nanarray(), dask_r.compute().data, equal_nan=True)
+        assert np.allclose(base.to_nanarray(), mp.to_nanarray(), equal_nan=True)
+        assert np.allclose(base.to_nanarray(), dask_r.compute().data, equal_nan=True)
 
     @pytest.mark.parametrize("path_index", [0, 2])
     @pytest.mark.parametrize("tile_size", [20])

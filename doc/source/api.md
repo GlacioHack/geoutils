@@ -156,7 +156,7 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
     ~raster.base.RasterBase.astype
     ~raster.base.RasterBase.set_mask
     ~raster.base.RasterBase.set_nodata
-    ~raster.base.RasterBase.get_nanarray
+    ~raster.base.RasterBase.to_nanarray
     ~raster.base.RasterBase.get_mask
     ~raster.base.RasterBase.subsample
 ```
@@ -290,6 +290,7 @@ The equivalent of {attr}`geopandas.GeoDataFrame.bounds` (i.e., a per-feature bou
     :toctree: gen_modules/
 
     Vector.create_mask
+    Vector.geometry_mask
 ```
 
 ### Geometry manipulation

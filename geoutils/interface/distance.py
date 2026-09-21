@@ -71,7 +71,7 @@ def _proximity_from_vector_or_raster(
 
     else:
         # Get raster array
-        raster_arr = raster.get_nanarray()
+        raster_arr = raster.to_nanarray()
 
         # If input is a mask, target is implicit, and array needs to be converted to uint8
         if target_values is None and raster.is_mask:

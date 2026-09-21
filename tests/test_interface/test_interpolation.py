@@ -411,7 +411,7 @@ class TestInterpolate:
 
         # Every valid pixel centre is finite and equals its pixel value; the out-of-bounds point stays NaN
         assert np.all(np.isfinite(vals[:-1]))
-        np.testing.assert_allclose(vals[:-1], raster.get_nanarray()[index_i.ravel(), index_j.ravel()])
+        np.testing.assert_allclose(vals[:-1], raster.to_nanarray()[index_i.ravel(), index_j.ravel()])
         assert not np.isfinite(vals[-1])
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
@@ -439,7 +439,7 @@ class TestInterpolate:
         jtest = 10
         x, y = r.ij2xy(itest, jtest)
         val = r.interp_points((x, y), method=method, force_scipy_function="map_coordinates", as_array=True)[0]
-        val_img = r.get_nanarray()[itest, jtest]
+        val_img = r.to_nanarray()[itest, jtest]
         # For a point exactly at a grid coordinate, only nearest and linear will match
         # (cubic modifies values at a grid coordinate)
         if method in ["nearest", "linear"]:
@@ -557,7 +557,7 @@ class TestInterpolate:
         # 1.2/ Check for all NaNs in the raster
 
         # We create the mask of dilated NaNs
-        mask_nan = ~np.isfinite(r.get_nanarray())
+        mask_nan = ~np.isfinite(r.to_nanarray())
         if d != 0:
             mask_nan_dilated = binary_dilation(mask_nan, iterations=d).astype("uint8")
         # (Zero iteration triggers a different behaviour than just "doing nothing" in binary_dilation, we override here)
@@ -603,7 +603,7 @@ class TestInterpolate:
         )
 
         # Then we fill the NaNs in the raster with a placeholder value of the raster mean
-        r_arr = r.get_nanarray()
+        r_arr = r.to_nanarray()
         r_arr[~np.isfinite(r_arr)] = np.nanmean(r_arr)
         r2 = r.copy(new_array=r_arr)
 

@@ -68,7 +68,7 @@ class TestPlot:
 
         # Check the image values, orientation, and projected extent match that of the full raster
         image = ax.get_images()[0]
-        assert np.array_equal(image.get_array(), np.flip(raster.get_nanarray(), axis=0), equal_nan=True)
+        assert np.array_equal(image.get_array(), np.flip(raster.to_nanarray(), axis=0), equal_nan=True)
         assert image.origin == "lower"
         assert image.get_extent() == [
             raster.bounds.left,
@@ -87,7 +87,7 @@ class TestPlot:
         image = ax.get_images()[0]
 
         # RGB values move the band dimension last and do not create a colorbar
-        expected_rgb = np.flip(np.moveaxis(raster.get_nanarray(), 0, -1), axis=0)
+        expected_rgb = np.flip(np.moveaxis(raster.to_nanarray(), 0, -1), axis=0)
         assert np.array_equal(image.get_array(), expected_rgb, equal_nan=True)
         assert colorbar_axes is None
         assert raster.data.shape[0] == 3
@@ -97,7 +97,7 @@ class TestPlot:
         ax = plt.subplot(111)
         raster.plot(bands=1, cmap="gray", ax=ax, add_cbar=False, title="Test", max_pixels=None)
         image = ax.get_images()[0]
-        assert np.array_equal(image.get_array(), np.flip(raster.get_nanarray()[0], axis=0), equal_nan=True)
+        assert np.array_equal(image.get_array(), np.flip(raster.to_nanarray()[0], axis=0), equal_nan=True)
         plt.close()
 
     def test_plot__axes_limits_and_save(self) -> None:

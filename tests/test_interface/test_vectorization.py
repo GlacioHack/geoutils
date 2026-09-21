@@ -488,7 +488,7 @@ class TestPolygonize:
         assert ds.data.chunks is not None
 
         # Prepare target_values
-        nan = raster_base.get_nanarray()
+        nan = raster_base.to_nanarray()
         if target_mode == "scalar":
             target_values = np.unique(nan[~np.isnan(nan)])[0]  # First unique value we find for scalars
         elif target_mode == "range":

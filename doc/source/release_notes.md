@@ -14,6 +14,7 @@ GeoUtils 0.2 adds:
 
 A few changes might be required to adapt from previous versions:
 - Specify `Raster.interp_points(as_array=True)` to mirror the previous behaviour of returning a 1D array of interpolated values, otherwise now returns a point cloud by default.
+- Use `Raster.to_nanarray()` in place of `get_nanarray()`; the former name remains available with a deprecation warning. `Vector.geometry_mask()` is available as an alias of `create_mask()`.
 - The `Mask` class is deprecated in favor of `Raster(is_mask=True)` to declare a boolean-type Raster, but should keep working until 0.3.
 
 ## 0.1.0

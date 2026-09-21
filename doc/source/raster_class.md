@@ -162,11 +162,11 @@ rast.data
 ```
 
 For those less familiar with {class}`MaskedArrays<numpy.ma.MaskedArray>` and the associated functions in NumPy, an unmasked {class}`~numpy.ndarray` filled with
-{class}`~numpy.nan` on masked values can be extracted using {func}`~geoutils.Raster.get_nanarray`.
+{class}`~numpy.nan` on masked values can be extracted using {func}`~geoutils.Raster.to_nanarray`.
 
 ```{code-cell} ipython3
 # Get raster's nan-array
-rast.get_nanarray()
+rast.to_nanarray()
 ```
 
 ```{important}

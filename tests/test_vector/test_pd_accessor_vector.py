@@ -294,7 +294,7 @@ class TestVectorAccessor:
         assert isinstance(proximity, xr.DataArray)
 
     def test_create_mask_points__dask_geopandas(self) -> None:
-        """Create lazy point masks as either Dask-GeoPandas or Dask Array output."""
+        """Checks that create_mask() creates lazy Dask-GeoPandas and Dask array point masks."""
 
         dgpd = pytest.importorskip("dask_geopandas")
         import dask.array as da
