@@ -760,12 +760,42 @@ class VectorBase(ABC):
         bounds: tuple[float, float, float, float] | None = None,
         crs: CRS | int | None = None,
         *,
+        nodata: int | float | None = None,
         chunksizes: tuple[int, int] | None = None,
         mp_config: MultiprocConfig | None = None,
         dask: bool = False,
         **kwargs: Any,
     ) -> RasterType:
-        """Rasterize vector to a raster or mask, with input geometries burned in."""
+        """
+        Rasterize vector to a raster or mask, with input geometries burned in.
+
+        **Match-reference:** a raster can be passed to match its resolution, bounds and CRS when rasterizing the vector.
+
+        Alternatively, the output grid can be defined with res, shape, grid_coords, bounds and crs.
+
+        Burn value is set by user and can be either a single number, or an iterable of same length as self.ds.
+        Default is an index from 1 to len(self.ds).
+
+        :param ref: Reference raster whose grid is matched by the output.
+        :param in_value: Burn values as a scalar, an iterable matching the number of geometries, or None for 1 to N.
+        :param out_value: Background fill value outside the geometries.
+        :param all_touched: Whether to burn every pixel touched by a geometry.
+        :param out_dtype: Output raster data type.
+        :param res: Output spatial resolution as one value or an X/Y pair.
+        :param shape: Output shape as rows and columns.
+        :param grid_coords: Output X and Y coordinates.
+        :param bounds: Output bounds as left, bottom, right and top.
+        :param crs: Output coordinate reference system.
+        :param nodata: Finite nodata value stored with the output. When omitted, a dtype-specific value is used if
+            out_value is non-finite.
+        :param chunksizes: Spatial chunk sizes as rows and columns. Defaults to multiprocessing configuration chunks,
+            reference chunks or 1024 by 1024.
+        :param mp_config: Multiprocessing configuration. Cannot be combined with Dask execution.
+        :param dask: Whether to return a lazy Dask-backed DataArray. A Dask-backed reference also selects this backend.
+        :param kwargs: Deprecated raster, xres and yres aliases.
+
+        :returns: Raster or DataArray containing the burned geometries.
+        """
 
         if "xres" in kwargs.keys() or "yres" in kwargs.keys():
             warnings.warn(
@@ -797,6 +827,7 @@ class VectorBase(ABC):
             grid_coords=grid_coords,
             bounds=bounds,
             crs=crs,
+            nodata=nodata,
             chunksizes=chunksizes,
             mp_config=mp_config,
             dask=dask,

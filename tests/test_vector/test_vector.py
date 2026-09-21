@@ -76,6 +76,24 @@ class TestVector:
         assert_geodataframe_equal(vector.ds, eager)
         assert vector.is_loaded
 
+    def test_init__select_file_layer(self, tmp_path: pathlib.Path) -> None:
+        """Checks that Vector class can select a specific layer, both for lazy metadata and data loading."""
+
+        # Write two layers with distinct values and extents to one GeoPackage
+        filename = tmp_path / "multiple-layers.gpkg"
+        first = gpd.GeoDataFrame({"value": [1]}, geometry=gpd.points_from_xy([0], [0]), crs=4326)
+        second = gpd.GeoDataFrame({"value": [2, 3]}, geometry=gpd.points_from_xy([10, 20], [10, 20]), crs=4326)
+        first.to_file(filename, layer="first")
+        second.to_file(filename, layer="second")
+
+        # Select the second layer while keeping its features unloaded
+        vector = gu.Vector(filename, layer="second")
+        assert not vector.is_loaded
+        np.testing.assert_array_equal(vector.total_bounds, second.total_bounds)
+
+        # Load the selected layer and compare it with the original frame
+        assert_geodataframe_equal(vector.ds, second)
+
     def test_copy(self) -> None:
 
         vector = gu.Vector(self.aster_outlines_path)

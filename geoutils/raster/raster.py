@@ -27,7 +27,7 @@ import copy
 import pathlib
 import warnings
 from contextlib import ExitStack
-from typing import IO, Any, Callable, overload
+from typing import IO, Any, Callable, cast, overload
 
 import numpy as np
 import rasterio as rio
@@ -816,8 +816,11 @@ class Raster(RasterBase):
 
     @property
     def dtype(self) -> DTypeLike:
-        if not self.is_loaded and self._disk_dtype is not None:
-            return self._disk_dtype
+        if not self.is_loaded:
+            if self._out_dtype is not None:
+                return self._out_dtype
+            if self._disk_dtype is not None:
+                return self._disk_dtype
         return self.data.dtype
 
     @property
@@ -954,6 +957,8 @@ class Raster(RasterBase):
 
         # Read a suitable overview for a reduced grid, or use the native dataset without downsampling
         read_kwargs = kwargs.copy()
+        if self._out_dtype is not None and np.dtype(self._out_dtype) != np.bool_:
+            read_kwargs["out_dtype"] = self._out_dtype
         with ExitStack() as stack:
             source = stack.enter_context(rio.open(self.name))
             if self._downsample > 1:
@@ -1597,32 +1602,48 @@ class Raster(RasterBase):
         :returns: Raster with updated dtype (or None if inplace).
         """
 
+        target_dtype = np.dtype(dtype)
+        dtype_changed = target_dtype != np.dtype(self.dtype)
+
         # Check for all data type except boolean, that we support in addition to other types
-        if np.dtype(dtype) != np.bool_:
+        if target_dtype != np.bool_:
             # Check that dtype is supported by rasterio
-            if not rio.dtypes.check_dtype(dtype):
+            if not rio.dtypes.check_dtype(target_dtype):
                 raise TypeError(f"{dtype} is not supported by rasterio")
 
             # Check that data type change will not result in a loss of information
-            if not rio.dtypes.can_cast_dtype(self.data, dtype):
+            if self.is_loaded:
+                preserves_values = rio.dtypes.can_cast_dtype(self.data, target_dtype)
+            else:
+                preserves_values = np.can_cast(self.dtype, target_dtype, casting="safe")
+            if not preserves_values:
                 warnings.warn(
-                    "dtype conversion will result in a loss of information. "
-                    f"{rio.dtypes.get_minimum_dtype(self.data)} is the minimum type to represent the data.",
+                    f"Converting from {self.dtype} to {target_dtype} may alter values because the target dtype "
+                    "cannot safely represent the source values.",
                     category=UserWarning,
                 )
 
-        out_data = self.data.astype(dtype)
+        # Keep file-backed rasters lazy by recording the type Rasterio should use at the next read
+        if not self.is_loaded:
+            output = self if inplace else self.copy()
+            output._out_dtype = target_dtype
+            output._is_mask = target_dtype == np.bool_
+            if convert_nodata and dtype_changed:
+                output._nodata = None if target_dtype == np.bool_ else _default_nodata(target_dtype)
+            return None if inplace else output
+
+        out_data = self.data.astype(target_dtype)
 
         if inplace:
             self._data = out_data  # type: ignore
-            if convert_nodata:
-                self.set_nodata(new_nodata=_default_nodata(dtype))
+            if convert_nodata and dtype_changed:
+                self.set_nodata(new_nodata=None if target_dtype == np.bool_ else _default_nodata(target_dtype))
             return None
         else:
-            if not convert_nodata:
+            if not convert_nodata or not dtype_changed:
                 nodata = self.nodata
             else:
-                nodata = _default_nodata(dtype)
+                nodata = None if target_dtype == np.bool_ else _default_nodata(target_dtype)
             return self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=self.area_or_point)
 
     def set_mask(self, mask: NDArrayBool | Raster) -> None:
@@ -1641,10 +1662,7 @@ class Raster(RasterBase):
             raise ValueError("mask must be a numpy array or a raster.")
 
         # Check that new_data has correct shape
-        if self.is_loaded:
-            orig_shape = self.data.shape
-        else:
-            raise AttributeError("self.data must be loaded first, with e.g. self.load()")
+        orig_shape = self.data.shape
 
         # If the mask is a Mask instance, pass the boolean array
         if isinstance(mask, Raster) and mask.is_mask:
@@ -1679,6 +1697,7 @@ class Raster(RasterBase):
             "_disk_shape",
             "_disk_bands",
             "_disk_dtype",
+            "_out_dtype",
             "_disk_transform",
             "_downsample",
             "_name",
@@ -1761,7 +1780,7 @@ class Raster(RasterBase):
         self,
         ufunc: Callable[[NDArrayNum | tuple[NDArrayNum, NDArrayNum]], NDArrayNum | tuple[NDArrayNum, NDArrayNum]],
         method: str,
-        *inputs: Raster | tuple[Raster, Raster] | tuple[NDArrayNum, Raster] | tuple[Raster, NDArrayNum],
+        *inputs: Raster | NDArrayNum | Number,
         **kwargs: Any,
     ) -> Raster | tuple[Raster, Raster]:
         """
@@ -1807,34 +1826,46 @@ class Raster(RasterBase):
         # If the universal function takes two inputs (Note: no ufunc exists that has three inputs or more)
         else:
             # Check the casting between Raster and array inputs, and return error messages if not consistent
+            input_data: tuple[MArrayNum | NDArrayNum | Number, MArrayNum | NDArrayNum | Number]
             if isinstance(inputs[0], Raster):
                 raster = inputs[0]
                 other = inputs[1]
+                raster_data, other_data, nodata, aop = _cast_numeric_array_raster(
+                    raster,
+                    other,
+                    "an arithmetic operation",
+                )
+                input_data = (raster_data, other_data)
             else:
-                raster = inputs[1]  # type: ignore
+                raster = self
                 other = inputs[0]
-            nodata, aop = _cast_numeric_array_raster(raster, other, "an arithmetic operation")[-2:]  # type: ignore
+                raster_data, other_data, nodata, aop = _cast_numeric_array_raster(
+                    raster,
+                    other,
+                    "an arithmetic operation",
+                )
+                input_data = (other_data, raster_data)
 
             if ufunc.nout == 1:
                 return self.from_array(
-                    data=final_ufunc(inputs[0].data, inputs[1].data, **kwargs),  # type: ignore
+                    data=final_ufunc(*input_data, **kwargs),
                     transform=self.transform,
                     crs=self.crs,
-                    nodata=self.nodata,
+                    nodata=nodata,
                     area_or_point=aop,
                 )
 
             # If the universal function has two outputs (Note: no ufunc exists that has three outputs or more)
             else:
-                output = final_ufunc(inputs[0].data, inputs[1].data, **kwargs)  # type: ignore
+                output = final_ufunc(*input_data, **kwargs)
                 return self.from_array(
                     data=output[0],
                     transform=self.transform,
                     crs=self.crs,
-                    nodata=self.nodata,
+                    nodata=nodata,
                     area_or_point=aop,
                 ), self.from_array(
-                    data=output[1], transform=self.transform, crs=self.crs, nodata=self.nodata, area_or_point=aop
+                    data=output[1], transform=self.transform, crs=self.crs, nodata=nodata, area_or_point=aop
                 )
 
     def __array_function__(
@@ -1850,62 +1881,66 @@ class Raster(RasterBase):
             return NotImplemented
 
         # For subclassing
-        if not all(issubclass(t, self.__class__) for t in types):
+        if not all(issubclass(t, (self.__class__, np.ndarray)) for t in types):
             return NotImplemented
-
-        # We now choose the behaviour of array functions
-        # For median, np.median ignores masks of masked array, so we force np.ma.median
-        if func.__name__ in ["median", "nanmedian"]:
-            func = np.ma.median
-            first_arg = args[0].data
-
-        # For percentiles and quantiles, there exist no masked array version, so we compute on the valid data directly
-        elif func.__name__ in ["percentile", "nanpercentile"]:
-            first_arg = args[0].data.compressed()
-
-        elif func.__name__ in ["quantile", "nanquantile"]:
-            first_arg = args[0].data.compressed()
-
-        elif func.__name__ in ["gradient"]:
-            if self.count == 1:
-                first_arg = args[0].data
-            else:
-                warnings.warn("Applying np.gradient to first raster band only.", category=UserWarning)
-                first_arg = args[0].data[0, :, :]
-
-        # Otherwise, we run the numpy function normally (most take masks into account)
-        else:
-            first_arg = args[0].data
 
         # Separate one and two input functions
         cast_required = False
         aop = None  # The None value is never used (aop only used when cast_required = True)
         if func.__name__ in _HANDLED_FUNCTIONS_1NIN:
+            # We now choose the behaviour of array functions
+            # For median, np.median ignores masks of masked array, so we force np.ma.median
+            if func.__name__ in ["median", "nanmedian"]:
+                func = np.ma.median
+                first_arg = args[0].data
+
+            # For percentiles and quantiles, there exist no masked array version, so we compute on the valid data
+            # directly
+            elif func.__name__ in ["percentile", "nanpercentile", "quantile", "nanquantile"]:
+                first_arg = args[0].data.compressed()
+
+            elif func.__name__ == "gradient":
+                if self.count == 1:
+                    first_arg = args[0].data
+                else:
+                    warnings.warn("Applying np.gradient to first raster band only.", category=UserWarning)
+                    first_arg = args[0].data[0, :, :]
+
+            # Otherwise, we run the numpy function normally (most take masks into account)
+            else:
+                first_arg = args[0].data
             outputs = func(first_arg, *args[1:], **kwargs)  # type: ignore
+
         # Two input functions require casting
         else:
             # Check the casting between Raster and array inputs, and return error messages if not consistent
             if isinstance(args[0], Raster):
                 raster = args[0]
                 other = args[1]
+                raster_data, other_data, nodata, aop = _cast_numeric_array_raster(
+                    raster, other, operation_name="an arithmetic operation"
+                )
+                first_arg, second_arg = raster_data, other_data
             else:
                 raster = args[1]
                 other = args[0]
-            nodata, aop = _cast_numeric_array_raster(raster, other, operation_name="an arithmetic operation")[-2:]
+                raster_data, other_data, nodata, aop = _cast_numeric_array_raster(
+                    raster, other, operation_name="an arithmetic operation"
+                )
+                first_arg, second_arg = other_data, raster_data
             cast_required = True
-            second_arg = args[1].data
             outputs = func(first_arg, second_arg, *args[2:], **kwargs)  # type: ignore
 
         # Below, we recast to Raster if the shape was preserved, otherwise return an array
         # First, if there are several outputs in a tuple which are arrays
         if isinstance(outputs, tuple) and isinstance(outputs[0], np.ndarray):
-            if all(output.shape == args[0].data.shape for output in outputs):
+            if all(output.shape == self.data.shape for output in outputs):
                 # If casting was not necessary, copy all attributes except array
                 # Otherwise update array, nodata and
                 if cast_required:
                     return tuple(
                         self.from_array(
-                            data=output, transform=self.transform, crs=self.crs, nodata=self.nodata, area_or_point=aop
+                            data=output, transform=self.transform, crs=self.crs, nodata=nodata, area_or_point=aop
                         )
                         for output in outputs
                     )
@@ -1915,11 +1950,11 @@ class Raster(RasterBase):
                 return outputs
         # Second, if there is a single output which is an array
         elif isinstance(outputs, np.ndarray):
-            if outputs.shape == args[0].data.shape:
+            if outputs.shape == self.data.shape:
                 # If casting was not necessary, copy all attributes except array
                 if cast_required:
                     return self.from_array(
-                        data=outputs, transform=self.transform, crs=self.crs, nodata=self.nodata, area_or_point=aop
+                        data=outputs, transform=self.transform, crs=self.crs, nodata=nodata, area_or_point=aop
                     )
                 else:
                     return self.copy(new_array=outputs)
@@ -1987,6 +2022,12 @@ class Raster(RasterBase):
 
         # Use nodata set by user, otherwise default to self's
         nodata = nodata if nodata is not None else self.nodata
+        output_dtype = np.dtype(dtype) if dtype is not None else np.dtype(self.dtype)
+
+        # If the output is a mask, convert to uint8 before saving and force nodata to 255
+        if output_dtype == np.bool_:
+            output_dtype = np.dtype("uint8")
+            nodata = 255
 
         # Declare type of save_data to work in all occurrences
         save_data: NDArrayNum
@@ -1996,25 +2037,26 @@ class Raster(RasterBase):
             raise AttributeError("No data loaded, and alternative blank_value not set.")
         elif blank_value is not None:
             if isinstance(blank_value, int) | isinstance(blank_value, float):
-                save_data = np.zeros(self.data.shape)
+                save_data = np.zeros(self.data.shape, dtype=output_dtype)
                 save_data[:] = blank_value
             else:
                 raise ValueError("blank_values must be one of int, float (or None).")
         else:
             save_data = self.data
 
-            # If the raster is a mask, convert to uint8 before saving and force nodata to 255
-            if self.data.dtype == bool:
-                save_data = save_data.astype("uint8")
-                nodata = 255
+        # Make nodata compatible with the requested file type before filling masked values
+        nodata = _cast_nodata(output_dtype, cast(int | float | None, nodata))
 
-            # If masked array, save with masked values replaced by nodata
-            if isinstance(save_data, np.ma.masked_array):
-                # In this case, nodata=None is not compatible, so revert to default values, only if masked values exist
-                if (nodata is None) & (np.count_nonzero(save_data.mask) > 0):
-                    nodata = _default_nodata(save_data.dtype)
-                    warnings.warn(f"No nodata set, will use default value of {nodata}", category=UserWarning)
-                save_data = save_data.filled(nodata)
+        # If masked array, save with masked values replaced by nodata
+        if isinstance(save_data, np.ma.masked_array):
+            # In this case, nodata=None is not compatible, so revert to default values, only if masked values exist
+            if (nodata is None) & (np.count_nonzero(save_data.mask) > 0):
+                nodata = _default_nodata(output_dtype)
+                warnings.warn(f"No nodata set, will use default value of {nodata}", category=UserWarning)
+            # Convert masked data before filling so nodata is represented in the requested output type
+            save_data = save_data.astype(output_dtype, copy=False).filled(nodata)
+        else:
+            save_data = save_data.astype(output_dtype, copy=False)
 
         # Cast to 3D before saving if single band
         if self.count == 1:
