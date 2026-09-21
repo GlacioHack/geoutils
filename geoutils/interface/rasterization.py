@@ -510,8 +510,7 @@ def _rasterize(
     :param grid_coords: Output coordinates.
     :param bounds: Output bounds.
     :param crs: Output CRS.
-    :param nodata: Finite nodata value stored with the output. When omitted, a dtype-specific value is used if
-        out_value is non-finite.
+    :param nodata: Ndata value stored with the output. When omitted, the default dtype compatible value is used.
     :param chunksizes: Chunk size (rows, cols) for Dask/Multiproc (if no reference raster is passed, or not chunked).
     :param mp_config: Multiprocessing config.
     :param dask: If True, return a Dask-backed Raster. A Dask-backed reference raster also selects this backend.
@@ -545,7 +544,7 @@ def _rasterize(
     # Normalize burn once
     burn = _normalize_burn_values(vect_geoms=vect.geometry.values, in_value=in_value)
 
-    # Use a finite nodata value for non-finite backgrounds and keep it compatible with the output type
+    # Define output nodata value
     dtype = np.dtype(_make_dtype(out_value=out_value, burn=burn, out_dtype=out_dtype))
     if nodata is not None and not np.isfinite(nodata):
         raise ValueError("nodata must be finite.")
@@ -572,7 +571,7 @@ def _rasterize(
         if mask_output:
             data = data.view(np.bool_)
 
-        # Mark nodata and non-finite backgrounds before construction so expected missing cells do not raise a warning
+        # Define nodata mask for construction of masked array
         if not mask_output:
             if not np.isfinite(out_value):
                 data = np.ma.masked_invalid(data)
@@ -629,7 +628,7 @@ def _rasterize(
     }
     assert mp_config is not None
 
-    # Replace an in-memory non-finite background with the finite nodata value written to disk
+    # Use nodata value for background value before file writing, if the user chose a NaN background
     file_out_value = nodata if not np.isfinite(out_value) else out_value
     assert file_out_value is not None
     return _multiproc_rasterize(
