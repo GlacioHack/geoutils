@@ -20,106 +20,279 @@
 
 from __future__ import annotations
 
-import warnings
-from typing import TYPE_CHECKING, Literal
+import math
+from typing import TYPE_CHECKING, Any, Literal
 
-import geopandas as gpd
 import numpy as np
 from scipy.ndimage import distance_transform_edt
 
-from geoutils._typing import NDArrayNum
+from geoutils._typing import NDArrayBool, NDArrayNum
+from geoutils.multiproc import MultiprocConfig, map_overlap
+from geoutils.raster.referencing import _default_nodata
 
 if TYPE_CHECKING:
     from geoutils.raster.base import RasterType
+    from geoutils.raster.raster import Raster
     from geoutils.vector.vector import VectorType
+
+try:
+    import dask.array as da
+except Exception:  # Keep Dask optional at import time
+    da = None  # type: ignore
+
+
+##############################
+# 1/ INPUTS AND CONFIGURATION
+##############################
+
+
+def _validate_max_distance(max_distance: float | None) -> float | None:
+    """Validate and normalize the optional max distance."""
+
+    if max_distance is None:
+        return None
+    if isinstance(max_distance, (bool, np.bool_)) or not isinstance(
+        max_distance, (int, float, np.integer, np.floating)
+    ):
+        raise TypeError("max_distance must be of type int or float.")
+
+    max_distance = float(max_distance)
+    if not np.isfinite(max_distance) or max_distance < 0:
+        raise ValueError("max_distance must be non-negative and finite.")
+    return max_distance
+
+
+def _distance_sampling_and_overlap(
+    raster: RasterType,
+    distance_unit: Literal["pixel", "georeferenced"],
+    max_distance: float | None,
+) -> tuple[int | tuple[float | int, float | int], int]:
+    """Return the SciPy sampling and overlap depth for the requested distance unit."""
+
+    # Express distances with the same sampling used by the eager calculation
+    if distance_unit.lower() == "georeferenced":
+        sampling: int | tuple[float | int, float | int] = raster.res
+        smallest_pixel_size = min(abs(float(resolution)) for resolution in raster.res)
+    elif distance_unit.lower() == "pixel":
+        sampling = 1
+        smallest_pixel_size = 1
+    else:
+        raise ValueError('Distance unit must be either "georeferenced" or "pixel".')
+
+    overlap = 0 if max_distance is None else math.ceil(max_distance / smallest_pixel_size)
+    return sampling, overlap
+
+
+def _vector_target_mask(
+    raster: RasterType,
+    vector: VectorType,
+) -> Any:
+    """Rasterize the vector current geometry as distance target cells on the raster grid."""
+
+    # Mask pixels with vector geometry
+    return vector.create_mask(raster, as_array=True)
+
+
+def _raster_target_mask(raster: RasterType, target_values: list[float] | None) -> Any:
+    """Define distance targets from an eager or Dask raster array."""
+
+    # Get the raster array, converting masked values to NaNs while leaving a Dask source lazy
+    raster_array = raster.data
+    if np.ma.isMaskedArray(raster_array):
+        if np.issubdtype(raster_array.dtype, np.integer):
+            raster_array = raster_array.astype(np.float32).filled(np.nan)  # type: ignore[union-attr]
+        else:
+            raster_array = raster_array.filled(np.nan)
+
+    # If input is a mask, target is implicit, and array needs to be converted to uint8
+    if target_values is None and raster.is_mask:
+        target_values = [1]
+        raster_array = raster_array.astype("uint8")
+
+    # Mask target pixels when values are provided
+    if target_values is not None:
+        if len(target_values) == 0:
+            raise ValueError("target_values must contain at least one value.")
+        target_mask = raster_array == target_values[0]
+        for target_value in target_values[1:]:
+            target_mask = np.logical_or(target_mask, raster_array == target_value)
+        return target_mask
+
+    # Otherwise, all non-zero values are considered targets
+    return raster_array.astype(bool)
+
+
+########################
+# 2/ DISTANCE CALCULATION
+########################
+
+
+def _proximity_from_target_mask(
+    target_mask: NDArrayBool,
+    sampling: int | tuple[float | int, float | int],
+    max_distance: float | None,
+) -> NDArrayNum:
+    """Calculate proximity for one complete array or overlapped array block."""
+
+    # If there are no target pixels, pass an array full of nodata
+    if np.count_nonzero(target_mask) == 0:
+        return np.full(target_mask.shape, np.nan, dtype=np.float64)
+
+    # For a multi-band raster, compute the distance matrix separately for each band
+    if target_mask.ndim == 3:
+        proximity = np.stack(
+            [distance_transform_edt(~band_mask, sampling=sampling) for band_mask in target_mask], axis=0
+        )
+    else:
+        proximity = distance_transform_edt(~target_mask, sampling=sampling)
+
+    # Discard values whose nearest target may lie outside a chunk's finite overlap
+    if max_distance is not None:
+        proximity[proximity > max_distance] = np.nan
+    return proximity
+
+
+def _build_proximity_output(raster: RasterType, proximity: Any) -> Any:
+    """Create a raster output with floating nodata and the source georeferencing."""
+
+    return raster.from_array(
+        data=proximity,
+        transform=raster.transform,
+        crs=raster.crs,
+        nodata=_default_nodata(proximity.dtype),
+        area_or_point=raster.area_or_point,
+        tags=dict(raster.tags),
+    )
+
+
+#####################
+# 3/ CHUNKED BACKENDS
+#####################
+
+
+def _dask_proximity(
+    target_mask: Any,
+    sampling: int | tuple[float | int, float | int],
+    max_distance: float,
+    overlap: int,
+) -> Any:
+    """Calculate proximity lazily with overlap on both spatial axes."""
+
+    assert da is not None
+
+    # Wrap in map_overlap with depth based on the max distance
+    depth = (0,) * (target_mask.ndim - 2) + (overlap, overlap)
+    return da.map_overlap(
+        _proximity_from_target_mask,
+        target_mask,
+        depth=depth,
+        boundary="none",
+        dtype=np.float64,
+        sampling=sampling,
+        max_distance=max_distance,
+    )
+
+
+def _multiproc_proximity_block(
+    block: Raster,
+    vector: VectorType | None,
+    target_values: list[float] | None,
+    distance_unit: Literal["pixel", "georeferenced"],
+    max_distance: float,
+) -> Raster:
+    """Calculate proximity on one padded raster block with multiprocessing."""
+
+    # Prepare target cells on the padded block using the same raster or vector path as eager execution
+    sampling, _ = _distance_sampling_and_overlap(block, distance_unit, max_distance)
+    if vector is None:
+        target_mask = _raster_target_mask(block, target_values)
+    else:
+        target_mask = _vector_target_mask(block, vector)
+
+    # Calculate the padded result before map_overlap() crops it to the destination block
+    proximity = _proximity_from_target_mask(target_mask, sampling=sampling, max_distance=max_distance)
+    return _build_proximity_output(block, proximity)
+
+
+####################
+# 4/ BACKEND DISPATCH
+####################
 
 
 def _proximity_from_vector_or_raster(
     raster: RasterType,
     vector: VectorType | None = None,
     target_values: list[float] | None = None,
-    geometry_type: str = "boundary",
-    in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
     distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
-) -> NDArrayNum:
+    max_distance: float | None = None,
+    mp_config: MultiprocConfig | None = None,
+) -> Any:
     """
-    (This function is defined here as mostly raster-based, but used in a class method for both Raster and Vector)
-    Proximity to a Raster's target values if no Vector is provided, otherwise to a Vector's geometry type
-    rasterized on the Raster.
+    Calculate proximity to a Raster's target values if no Vector is provided, otherwise to a Vector's current geometry
+    rasterized on the Raster, with eager, Dask, or multiprocessing execution.
 
-    :param raster: Raster to burn the proximity grid on.
-    :param vector: Vector for which to compute the proximity to geometry,
-        if not provided computed on the Raster target pixels.
-    :param target_values: (Only with a Raster) List of target values to use for the proximity,
-        defaults to all non-zero values.
-    :param geometry_type: (Only with a Vector) Type of geometry to use for the proximity, defaults to 'boundary'.
-    :param in_or_out: (Only with a Vector) Compute proximity only 'in' or 'out'-side the geometry, or 'both'.
-    :param distance_unit: Distance unit, either 'georeferenced' or 'pixel'.
+    This function is defined here as mostly raster-based, but used in a class method for both Raster and Vector.
+
+    Internally, it does the following:
+    _raster_target_mask() or _vector_target_mask() first selects target cells.
+    Eager and Dask execution then call _proximity_from_target_mask() directly, while multiprocessing applies the same
+    steps to padded raster blocks in _multiproc_proximity_block().
+    _build_proximity_output() restores the source grid and metadata for every backend.
+
+    :param raster: Raster grid and optional raster values used to calculate proximity.
+    :param vector: Vector whose current geometry is used as the target instead of raster values.
+    :param target_values: Raster values used as targets. All nonzero values are targets by default.
+    :param distance_unit: Calculate distance in georeferenced or pixel units.
+    :param max_distance: Largest distance to return. Farther cells are set to nodata. Required for chunked execution.
+    :param mp_config: Worker, chunk, and output settings for multiprocessing. Cannot be combined with Dask input.
+
+    :returns: Proximity raster using the input raster grid and the selected execution backend.
     """
 
-    # 1/ First, if there is a vector input, we rasterize the geometry type
-    # (works with .boundary that is a LineString (.exterior exists, but is a LinearRing)
+    # Validate user inputs
+    max_distance = _validate_max_distance(max_distance)
+    sampling, overlap = _distance_sampling_and_overlap(raster, distance_unit, max_distance)
+    dask_backend = da is not None and raster._chunks is not None
+    if mp_config is not None and dask_backend:
+        raise ValueError("Cannot use Multiprocessing and Dask simultaneously. To use Dask, remove mp_config.")
+    if (dask_backend or mp_config is not None) and max_distance is None:
+        raise ValueError("max_distance must be provided for Dask or multiprocessing proximity.")
+
+    # With multiprocessing, rasterize targets and compute distances on padded blocks
+    if mp_config is not None:
+        if raster._is_xr:
+            raise ValueError("Multiprocessing proximity requires a Raster input rather than an Xarray accessor.")
+        assert max_distance is not None
+        return map_overlap(
+            _multiproc_proximity_block,
+            raster,
+            mp_config,
+            vector,
+            target_values,
+            distance_unit,
+            max_distance,
+            depth=overlap,
+        )
+
+    # 1/ First, if there is a vector input, rasterize its current geometry
     if vector is not None:
-        # Only when using centroid... Maybe we should leave this operation to the user anyway?
-        warnings.filterwarnings("ignore", message="Geometry is in a geographic CRS.*")
-
-        # We create a geodataframe with the geometry type
-        vec_cop = vector.copy()
-        vec_cop.ds = gpd.GeoDataFrame(geometry=vector.ds.__getattr__(geometry_type), crs=vector.crs)
-        # We mask the pixels that make up the geometry type
-        mask_boundary = vec_cop.create_mask(raster, as_array=True)
-
+        target_mask = _vector_target_mask(raster, vector)
+    # Otherwise, mask target pixels from the raster values
     else:
-        # Get raster array
-        raster_arr = raster.get_nanarray()
+        target_mask = _raster_target_mask(raster, target_values)
 
-        # If input is a mask, target is implicit, and array needs to be converted to uint8
-        if target_values is None and raster.is_mask:
-            target_values = [1]
-            raster_arr = raster_arr.astype("uint8")
-
-        # We mask target pixels
-        if target_values is not None:
-            mask_boundary = np.logical_or.reduce([raster_arr == target_val for target_val in target_values])
-        # Otherwise, all non-zero values are considered targets
-        else:
-            mask_boundary = raster_arr.astype(bool)
-
-    # 2/ Now, we compute the distance matrix relative to the masked geometry type
-    if distance_unit.lower() == "georeferenced":
-        sampling: int | tuple[float | int, float | int] = raster.res
-    elif distance_unit.lower() == "pixel":
-        sampling = 1
+    # 2/ Now, compute the distance matrix relative to the masked vector geometry or raster target pixels
+    if dask_backend:
+        # Dask keeps the source chunks and adds the finite halo needed by the requested distance
+        assert max_distance is not None
+        proximity = _dask_proximity(
+            target_mask,
+            sampling=sampling,
+            max_distance=max_distance,
+            overlap=overlap,
+        )
     else:
-        raise ValueError('Distance unit must be either "georeferenced" or "pixel".')
+        proximity = _proximity_from_target_mask(target_mask, sampling=sampling, max_distance=max_distance)
 
-    # If not all pixels are targets, then we compute the distance
-    non_targets = np.count_nonzero(mask_boundary)
-    if non_targets > 0:
-        # For multi-band raster, loop over bands
-        if mask_boundary.ndim == 3:
-            list_band_proxi = []
-            for i in range(mask_boundary.shape[0]):
-                prox = distance_transform_edt(~mask_boundary[i, :, :], sampling=sampling)
-                list_band_proxi.append(prox)
-            proximity = np.stack(list_band_proxi, axis=0)
-        else:
-            proximity = distance_transform_edt(~mask_boundary, sampling=sampling)
-    # Otherwise, pass an array full of nodata
-    else:
-        proximity = np.ones(np.shape(mask_boundary)) * np.nan
-
-    # 3/ If there was a vector input, apply the in_and_out argument to optionally mask inside/outside
-    if vector is not None:
-        if in_or_out == "both":
-            pass
-        elif in_or_out in ["in", "out"]:
-            mask_polygon = vector.create_mask(raster, as_array=True)
-            if in_or_out == "in":
-                proximity[~mask_polygon] = 0
-            else:
-                proximity[mask_polygon] = 0
-        else:
-            raise ValueError('The type of proximity must be one of "in", "out" or "both".')
-
-    return proximity
+    # 3/ Finally, construct the matching raster representation
+    return _build_proximity_output(raster, proximity)

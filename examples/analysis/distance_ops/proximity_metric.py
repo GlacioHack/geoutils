@@ -23,9 +23,10 @@ rast.plot(cmap="Blues")
 vect.reproject(rast).plot(fc="none", ec="k", lw=2)
 
 # %%
-# We use the raster as a reference to match for rasterizing the proximity distances with :func:`~geoutils.Vector.proximity`. See :ref:`core-match-ref` for more details.
+# We select the vector boundary, then use the raster as a reference to match for rasterizing the proximity distances
+# with :func:`~geoutils.Vector.proximity`. See :ref:`core-match-ref` for more details.
 
-proximity = vect.proximity(rast)
+proximity = vect.boundary.proximity(rast)
 proximity.plot(cmap="viridis")
 
 # %%
