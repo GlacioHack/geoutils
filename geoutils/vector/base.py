@@ -841,13 +841,27 @@ class VectorBase(ABC):
         self,
         raster: RasterType | None = None,
         size: tuple[int, int] = (1000, 1000),
-        geometry_type: str = "boundary",
-        in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
         distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
+        max_distance: float | None = None,
+        mp_config: MultiprocConfig | None = None,
     ) -> RasterType:
-        """Compute proximity distances to this vector's geometry."""
+        """
+        Compute proximity distances to this vector's current geometry.
 
-        from geoutils.raster.raster import Raster, _default_nodata
+        Apply a geometry operation before proximity() to use a derived geometry, for example
+        ``vector.boundary.proximity(raster)``.
+
+        :param raster: Raster whose grid is used for the proximity output.
+        :param size: Output width and height when raster is not provided.
+        :param distance_unit: Calculate distance in georeferenced or pixel units.
+        :param max_distance: Largest distance to return, with farther cells set to nodata. This value is required for
+            Dask and multiprocessing execution because it defines the overlap between chunks.
+        :param mp_config: Multiprocessing parameters. Cannot be combined with Dask input.
+
+        :returns: Raster of proximity distances on the selected grid.
+        """
+
+        from geoutils.raster.raster import Raster
 
         if raster is None:
             if self.bbox is None:
@@ -858,24 +872,14 @@ class VectorBase(ABC):
             raster = Raster.from_array(data=np.zeros((1000, 1000)), transform=transform, crs=self.crs)
 
         source_vector = self.to_geoutils() if self._is_pd else self
-        proximity = _proximity_from_vector_or_raster(
+        output = _proximity_from_vector_or_raster(
             raster=raster,
             vector=source_vector,
-            geometry_type=geometry_type,
-            in_or_out=in_or_out,
             distance_unit=distance_unit,
+            max_distance=max_distance,
+            mp_config=mp_config,
         )
-
-        out_nodata = _default_nodata(proximity.dtype)
-        raster_out = Raster.from_array(
-            data=proximity,
-            transform=raster.transform,
-            crs=raster.crs,
-            nodata=out_nodata,
-            area_or_point=raster.area_or_point,
-            tags=raster.tags,
-        )
-        return self._cast_raster_output(raster_out)
+        return self._cast_raster_output(output)
 
     def buffer_metric(self: VectorBaseType, buffer_size: float) -> VectorBaseType | gpd.GeoDataFrame:
         """Buffer the vector features in a local metric system."""
