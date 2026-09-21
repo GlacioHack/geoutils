@@ -82,7 +82,6 @@ from geoutils.projtools import (
 from geoutils.raster.referencing import (
     _bbox,
     _coords,
-    _default_nodata,
     _ij2xy,
     _outside_bounds,
     _res,
@@ -2313,9 +2312,9 @@ class RasterBase(ABC):
         self,
         vector: VectorType | None = None,
         target_values: list[float] | None = None,
-        geometry_type: str = "boundary",
-        in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
         distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
+        max_distance: float | None = None,
+        mp_config: MultiprocConfig | None = None,
     ) -> RasterBase:
         """
         Compute proximity distances to the raster target pixels, or to a vector geometry on the raster grid.
@@ -2323,39 +2322,30 @@ class RasterBase(ABC):
         **Match-reference**: a raster can be passed to match its resolution, bounds and CRS for computing
         proximity distances.
 
-        When passing a vector, by default, the boundary of the geometry will be used. The full geometry can be used by
-        passing "geometry", or any lower dimensional geometry attribute such as "centroid", "envelope" or "convex_hull".
-        See all geometry attributes in the Shapely documentation at https://shapely.readthedocs.io/.
+        When passing a vector, its current geometry is used. Apply a vector geometry operation first to calculate
+        proximity to a derived geometry, for example ``vector.boundary.proximity(raster)``.
 
         :param vector: Vector for which to compute the proximity to geometry,
             if not provided computed on this raster target pixels.
         :param target_values: (Only with raster) List of target values to use for the proximity,
             defaults to all non-zero values.
-        :param geometry_type: (Only with a vector) Type of geometry to use for the proximity, defaults to 'boundary'.
-        :param in_or_out: (Only with a vector) Compute proximity only 'in' or 'out'-side the geometry, or 'both'.
         :param distance_unit: Distance unit, either 'georeferenced' or 'pixel'.
+        :param max_distance: Largest distance to return, with farther cells set to nodata. This value is required for
+            Dask and multiprocessing execution because it defines the overlap between chunks.
+        :param mp_config: Multiprocessing parameters. Cannot be combined with Dask input.
 
         :return: Proximity distances raster.
         """
 
-        proximity = _proximity_from_vector_or_raster(
+        output = _proximity_from_vector_or_raster(
             raster=self,
             vector=vector,
             target_values=target_values,
-            geometry_type=geometry_type,
-            in_or_out=in_or_out,
             distance_unit=distance_unit,
+            max_distance=max_distance,
+            mp_config=mp_config,
         )
-
-        out_nodata = _default_nodata(proximity.dtype)
-        return self.from_array(
-            data=proximity,
-            transform=self.transform,
-            crs=self.crs,
-            nodata=out_nodata,
-            area_or_point=self.area_or_point,
-            tags=self.tags,
-        )
+        return self._cast_raster_output(output)
 
     @overload
     def subsample(
