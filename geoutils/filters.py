@@ -238,7 +238,7 @@ def _multiproc_filter_block(
     """Filter one raster block in a serializable multiprocessing task."""
 
     # Convert masked values to NaNs before applying the common filter implementation
-    nan_block = block.get_nanarray()
+    nan_block = block.to_nanarray()
     filtered_block = _filter_base(nan_block, method=method, size=size, **kwargs)
     return block.copy(new_array=filtered_block)
 

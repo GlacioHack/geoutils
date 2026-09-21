@@ -241,7 +241,7 @@ class TestDistance:
         rows, columns = np.indices(values.shape)
         distances = np.hypot(rows - 2, columns - 3)
         expected = np.where(distances <= 2, distances, np.nan)
-        np.testing.assert_allclose(result.get_nanarray(), expected, equal_nan=True)
+        np.testing.assert_allclose(result.to_nanarray(), expected, equal_nan=True)
 
     @pytest.mark.parametrize("max_distance", [-1, np.inf, np.nan])
     def test_proximity__error_invalid_max_distance(self, max_distance: float) -> None:
@@ -299,9 +299,9 @@ class TestDistanceChunked:
         assert not multiproc_result.is_loaded
 
         # Require the same distances and missing cells from each backend
-        expected_values = expected.get_nanarray()
+        expected_values = expected.to_nanarray()
         np.testing.assert_array_equal(dask_result.compute().data, expected_values)
-        np.testing.assert_array_equal(multiproc_result.get_nanarray(), expected_values)
+        np.testing.assert_array_equal(multiproc_result.to_nanarray(), expected_values)
         assert multiproc_result.transform == expected.transform
         assert multiproc_result.crs == expected.crs
 
@@ -337,9 +337,9 @@ class TestDistanceChunked:
         assert isinstance(dask_result.data, da.Array)
         assert not multiproc_source.is_loaded
         assert not multiproc_result.is_loaded
-        expected_values = expected.get_nanarray()
+        expected_values = expected.to_nanarray()
         np.testing.assert_array_equal(dask_result.compute().data, expected_values)
-        np.testing.assert_array_equal(multiproc_result.get_nanarray(), expected_values)
+        np.testing.assert_array_equal(multiproc_result.to_nanarray(), expected_values)
         assert not dask_source._in_memory
         assert not multiproc_source.is_loaded
 

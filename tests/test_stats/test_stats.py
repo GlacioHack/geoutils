@@ -318,7 +318,7 @@ class TestStats:
         assert stat is None
 
         # IQR (scipy) validation with numpy
-        nan_arr = raster.get_nanarray()
+        nan_arr = raster.to_nanarray()
         if nan_arr.ndim == 3:
             nan_arr = nan_arr[0, :, :]
         assert raster.stats(statistics="iqr") == pytest.approx(
@@ -332,7 +332,7 @@ class TestStats:
         raster = gu.Raster(example)
         stats = raster.stats()
         assert list(stats.keys()) == ["band 1", "band 2", "band 3"]
-        data = raster.get_nanarray()
+        data = raster.to_nanarray()
         for band in range(1, raster.count + 1):
             assert stats["band " + str(band)]["Mean"] == pytest.approx(np.nanmean(data[band - 1]))
 

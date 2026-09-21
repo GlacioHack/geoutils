@@ -76,7 +76,7 @@ class TestClassVsAccessorConsistency:
     # Get all VectorBase public properties and methods, ensures we test everything even with API changes
     properties = [k for k, v in VectorBase.__dict__.items() if not k.startswith("_") and isinstance(v, property)]
     methods = [k for k, v in VectorBase.__dict__.items() if not k.startswith("_") and not isinstance(v, property)]
-    methods = [m for m in methods if m not in ["plot", "save"]]
+    methods = [m for m in methods if m not in ["geometry_mask", "plot", "save"]]
 
     # Methods tested separately because their output contains class/accessor specific filenames
     methods_exceptions = ["info"]

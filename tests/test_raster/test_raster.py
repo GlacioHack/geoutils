@@ -447,9 +447,9 @@ class TestRaster:
 
         # Check that the arrays are equal in NaN type
         if rst.count > 1:
-            assert np.array_equal(rst.get_nanarray(), ds.data.squeeze(), equal_nan=True)
+            assert np.array_equal(rst.to_nanarray(), ds.data.squeeze(), equal_nan=True)
         else:
-            assert np.array_equal(rst.get_nanarray(), ds.data.squeeze(), equal_nan=True)
+            assert np.array_equal(rst.to_nanarray(), ds.data.squeeze(), equal_nan=True)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_from_xarray(self, example: str) -> None:
@@ -817,18 +817,15 @@ class TestRaster:
         assert rst1.bounds.top == rst.bounds.top - rst.res[1] / 2
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])
-    def test_get_nanarray(self, example: str) -> None:
-        """
-        Check that self.get_nanarray behaves as expected for examples with invalid data or not, and with several bands
-        or a single one.
-        """
+    def test_to_nanarray(self, example: str) -> None:
+        """Checks that to_nanarray() replaces invalid data and can also return its mask."""
 
         # -- First, we test without returning a mask --
 
         # Get nanarray
         rst = gu.Raster(example)
         rst_copy = rst.copy()
-        rst_arr = rst.get_nanarray()
+        rst_arr = rst.to_nanarray()
 
         # If there is no mask in the masked array, the array should not have NaNs and be equal to that of data.data
         if not np.ma.is_masked(rst.data):
@@ -841,12 +838,12 @@ class TestRaster:
             assert np.ma.allequal(rst.data.squeeze(), rst_arr, fill_value=np.nan)
 
         # Check that modifying the NaN array does not back-propagate to the original array (np.ma.filled returns a view
-        # when there is no invalid data, but in this case get_nanarray should copy the data).
+        # when there is no invalid data, but in this case to_nanarray() should copy the data).
         rst_arr += 5
         assert rst.raster_equal(rst_copy, warn_failure_reason=True)
 
         # -- Then, we test with a mask returned --
-        rst_arr, mask = rst.get_nanarray(return_mask=True)
+        rst_arr, mask = rst.to_nanarray(return_mask=True)
 
         assert np.array_equal(mask, np.ma.getmaskarray(rst.data))
 
@@ -854,6 +851,22 @@ class TestRaster:
         rst_arr += 5
         mask = ~mask
         assert rst.raster_equal(rst_copy, warn_failure_reason=True)
+
+    def test_get_nanarray__deprecated_alias(self) -> None:
+        """Checks that get_nanarray() warns of deprecation, and forwards to to_nanarray()."""
+
+        # Compute the expected array and nodata mask
+        raster = gu.Raster(self.aster_dem_path)
+        expected_array, expected_mask = raster.to_nanarray(floating_dtype="float64", return_mask=True)
+
+        # Check deprecation warning
+        with pytest.warns(DeprecationWarning, match=r"Use to_nanarray\(\) instead"):
+            actual_array, actual_mask = raster.get_nanarray(floating_dtype="float64", return_mask=True)
+
+        # Check equality
+        assert actual_array.dtype == expected_array.dtype
+        assert np.array_equal(actual_array, expected_array, equal_nan=True)
+        assert np.array_equal(actual_mask, expected_mask)
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])
     def test_downsampling(self, example: str) -> None:

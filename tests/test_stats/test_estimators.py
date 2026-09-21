@@ -19,9 +19,9 @@ class TestEstimators:
 
         # Check that the NMAD is computed the same with a masked array or NaN array, and is equal to scipy nmad
         nmad_ma = nmad(self.landsat_raster.data)
-        nmad_array = nmad(self.landsat_raster.get_nanarray(floating_dtype="float64"))
+        nmad_array = nmad(self.landsat_raster.to_nanarray(floating_dtype="float64"))
         nmad_scipy = scipy.stats.median_abs_deviation(
-            self.landsat_raster.get_nanarray(floating_dtype="float64"), axis=None, scale="normal"
+            self.landsat_raster.to_nanarray(floating_dtype="float64"), axis=None, scale="normal"
         )
 
         assert nmad_ma == nmad_array
@@ -38,7 +38,7 @@ class TestEstimators:
 
         # Compute LE on the landsat raster data for a default interval (LE90)
         le_ma = linear_error(self.landsat_raster.data)
-        le_nan_array = linear_error(self.landsat_raster.get_nanarray())
+        le_nan_array = linear_error(self.landsat_raster.to_nanarray())
 
         # Assert the LE90 is computed the same for masked array and NaN array
         assert le_ma == le_nan_array

@@ -148,7 +148,7 @@ class TestClassVsAccessorConsistency:
     # The full list of methods is used a posteriori to check all were tested across multiple tests
     methods = [k for k, v in RasterBase.__dict__.items() if not k.startswith("_") and not isinstance(v, property)]
     # Ignore deprecated methods (already tested through their new name)
-    methods = [m for m in methods if m not in ["to_points", "save"]]
+    methods = [m for m in methods if m not in ["get_nanarray", "to_points", "save"]]
 
     # List of properties that WILL load the input dataset (only one does, the data itself)
     properties_input_load = ["data"]
@@ -346,7 +346,7 @@ class TestClassVsAccessorConsistency:
         ("reduce_points", {"points": "random"}),  # Needs implementation in RasterBase (currently only for Raster)
         ("interp_points", {"points": "random"}),  # "random" will be derived during the test to work on all inputs
         ("proximity", {"target_values": [100]}),
-        ("get_nanarray", {}),
+        ("to_nanarray", {}),
         ("to_pointcloud", {"subsample": 1, "random_state": 42}),
         ("polygonize", {"target_values": "all"}),
         ("subsample", {"subsample": 1000, "random_state": 42}),
