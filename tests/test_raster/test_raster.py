@@ -1220,7 +1220,7 @@ class TestRaster:
     def test_set_mask__unloaded_raster(self) -> None:
         """Checks that set_mask() loads file data and adds the requested mask in place."""
 
-        # Find one valid cell without loading the raster values
+        # Get raster mask without loading values
         raster = gu.Raster(self.landsat_b4_path)
         original_mask = raster.get_mask()
         valid_index = tuple(np.argwhere(~original_mask)[0])
@@ -1234,7 +1234,7 @@ class TestRaster:
         # Check that values were loaded and the new cell was added to the existing mask
         assert raster.is_loaded
         assert raster.data.mask[valid_index]
-        np.testing.assert_array_equal(raster.data.mask, original_mask | new_mask)
+        assert np.array_equal(raster.data.mask, original_mask | new_mask)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])
     def test_getitem_setitem(self, example: str) -> None:
@@ -1746,7 +1746,7 @@ class TestRaster:
 
         # Test dtypes that will modify the data
         for target_dtype2 in dtypes_nonpreserving:
-            with pytest.warns(UserWarning, match="dtype conversion will result in a loss of information.*"):
+            with pytest.warns(UserWarning, match="Converting from .* may alter values.*"):
                 rout = r.astype(target_dtype2)  # type: ignore
 
             assert np.array_equal(
@@ -1778,32 +1778,32 @@ class TestRaster:
         assert r3.nodata == r.nodata
 
     def test_astype__same_dtype_and_lazy_file(self) -> None:
-        """Checks that astype() keeps nodata for the same dtype and defers file-backed conversion until loading."""
+        """Checks that astype() keeps nodata for the same dtype and defers I/O."""
 
-        # Create a loaded byte raster with a non-default nodata value
+        # We create a raster with a non-default nodata value
         values = np.arange(1, 5, dtype=np.uint8).reshape(2, 2)
         raster = gu.Raster.from_array(values, transform=rio.transform.from_origin(0, 2, 1, 1), crs=4326, nodata=0)
 
-        # Convert to the existing type and keep the original nodata value
+        # Converting to the current dtype should keep the current nodata value
         same_dtype = raster.astype(np.uint8)
         assert same_dtype.nodata == 0
         assert np.dtype(same_dtype.dtype) == np.dtype("uint8")
 
-        # Request a file-backed conversion without reading either source or result
+        # Check conversion from a file defers I/O (not loading either source or output)
         source = gu.Raster(self.landsat_b4_path)
         converted = source.astype(np.float32)
         assert not source.is_loaded
         assert not converted.is_loaded
         assert np.dtype(converted.dtype) == np.dtype("float32")
 
-        # Load only the result and compare it with the existing eager conversion
+        # Load result and compare with the eager dtype conversion
         eager_source = gu.Raster(self.landsat_b4_path, load_data=True)
         expected = eager_source.astype(np.float32)
         np.testing.assert_array_equal(converted.data, expected.data)
         assert converted.nodata == expected.nodata
         assert not source.is_loaded
 
-        # Convert to a lazy boolean mask through GeoUtils because Rasterio has no boolean storage type
+        # Check specific boolean behaviour (Rasterio has no boolean storage type)
         lazy_mask = source.astype(bool)
         assert not lazy_mask.is_loaded
         assert lazy_mask.is_mask
@@ -1887,18 +1887,18 @@ class TestRaster:
     def test_to_file__dtype(self, tmp_path: pathlib.Path) -> None:
         """Checks that to_file() casts stored values and metadata to the requested dtype."""
 
-        # Create a byte raster whose values can be represented exactly as floats
+        # Create a byte raster with values that can be represented exactly as floats
         values = np.arange(4, dtype=np.uint8).reshape(2, 2)
         raster = gu.Raster.from_array(values, transform=rio.transform.from_origin(0, 2, 1, 1), crs=4326)
         filename = tmp_path / "float-output.tif"
 
-        # Save to an explicitly requested floating point type
+        # Save forcing floating point type
         raster.to_file(filename, dtype=np.float32)
         saved = gu.Raster(filename)
 
-        # Check both the file metadata and stored values use the requested type
+        # Check both file metadata and stored values use the requested type
         assert np.dtype(saved.dtype) == np.dtype("float32")
-        np.testing.assert_array_equal(saved.data, values.astype(np.float32))
+        assert np.array_equal(saved.data, values.astype(np.float32))
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_from_array(self, example: str) -> None:
@@ -3122,17 +3122,17 @@ class TestArrayInterface:
     def test_array_ufunc__scalar_modulo(self) -> None:
         """Checks that a binary ufunc accepts a scalar before or after a Raster and keeps input order."""
 
-        # Create a small raster with positive values that give distinct reflected modulo results
+        # Create a raster with values that give different modulo results
         values = np.arange(1, 26, dtype=np.int16).reshape(5, 5)
         raster = gu.Raster.from_array(values, transform=self.transform, crs=None)
 
-        # Apply modulo with the Raster on either side of the scalar
+        # Apply modulo with scalar/Raster on either side
         forward = np.mod(raster, 7)
         reflected = np.mod(100, raster)
 
         # Compare both results with NumPy masked-array operations in the same order
-        np.testing.assert_array_equal(forward.data, np.mod(raster.data, 7))
-        np.testing.assert_array_equal(reflected.data, np.mod(100, raster.data))
+        assert np.array_equal(forward.data, np.mod(raster.data, 7))
+        assert np.array_equal(reflected.data, np.mod(100, raster.data))
 
     @pytest.mark.parametrize("arrfunc_str", handled_functions_1in)
     @pytest.mark.parametrize("dtype", ["uint8", "int16", "float32"])

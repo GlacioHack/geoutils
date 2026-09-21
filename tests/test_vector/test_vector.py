@@ -77,7 +77,7 @@ class TestVector:
         assert vector.is_loaded
 
     def test_init__select_file_layer(self, tmp_path: pathlib.Path) -> None:
-        """Checks that Vector selects one named layer for both lazy metadata and data loading."""
+        """Checks that Vector class can select a specific layer, both for lazy metadata and data loading."""
 
         # Write two layers with distinct values and extents to one GeoPackage
         filename = tmp_path / "multiple-layers.gpkg"

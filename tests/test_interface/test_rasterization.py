@@ -130,7 +130,7 @@ class TestRasterVectorInterface:
             vct.rasterize(rst, crs=3857)
 
     def test_rasterize__nodata_background(self) -> None:
-        """Checks that rasterize() treats a non-finite background as nodata without raising a warning."""
+        """Checks that rasterize() masks a non-finite background and keeps finite nodata metadata."""
 
         # Rasterize a unit polygon inside a larger grid and request a NaN background
         with warnings.catch_warnings():
@@ -143,10 +143,68 @@ class TestRasterVectorInterface:
             )
             raster = self.vector.rasterize(res=1, bounds=(9, 9, 13, 13), crs=4326, in_value=1, out_value=np.nan)
 
-        # Check that the background is masked with NaN nodata and the polygon value stays valid
-        assert np.isnan(raster.nodata)
+        # Check that the background is masked, nodata metadata is finite and the polygon value stays valid
+        assert raster.nodata == -99999
         assert np.count_nonzero(raster.data.mask) > 0
         np.testing.assert_array_equal(raster.data.compressed(), np.ones(raster.data.count()))
+
+        # Use a requested finite nodata value while preserving the masked NaN background in memory
+        custom_nodata = self.vector.rasterize(
+            res=1, bounds=(9, 9, 13, 13), crs=4326, in_value=1, out_value=np.nan, nodata=-1
+        )
+        assert custom_nodata.nodata == -1
+        assert np.count_nonzero(custom_nodata.data.mask) > 0
+        np.testing.assert_array_equal(custom_nodata.data.compressed(), np.ones(custom_nodata.data.count()))
+
+        # Return a float32 DataArray with NaNs in the same background cells and finite nodata metadata
+        dataarray = self.vector.ds.vct.rasterize(
+            res=1, bounds=(9, 9, 13, 13), crs=4326, in_value=1, out_value=np.nan, out_dtype=np.float32
+        )
+        assert isinstance(dataarray, xr.DataArray)
+        assert dataarray.dtype == np.float32
+        assert dataarray.rst.nodata == -99999
+        assert np.count_nonzero(np.isnan(dataarray.data)) > 0
+        np.testing.assert_array_equal(dataarray.data[np.isfinite(dataarray.data)], np.ones(1, dtype=np.float32))
+
+        # Reject non-finite values because nodata is the finite value used when writing a raster
+        with pytest.raises(ValueError, match="nodata must be finite"):
+            self.vector.rasterize(res=1, bounds=(9, 9, 13, 13), crs=4326, in_value=1, out_value=np.nan, nodata=np.nan)
+
+    def test_rasterize__nodata_background_chunked(self, tmp_path: Any) -> None:
+        """Checks that chunked rasterization keeps NaNs in memory and writes finite nodata values to a file."""
+
+        pytest.importorskip("dask")
+        import dask.array as da
+
+        # Rasterize lazily into 2 x 2 chunks without computing the DataArray
+        options = {
+            "res": 1,
+            "bounds": (9, 9, 13, 13),
+            "crs": 4326,
+            "in_value": 1,
+            "out_value": np.nan,
+            "out_dtype": np.float32,
+        }
+        dask_result = self.vector.rasterize(**options, dask=True, chunksizes=(2, 2))
+        assert isinstance(dask_result, xr.DataArray)
+        assert isinstance(dask_result.data, da.Array)
+        assert not dask_result._in_memory
+
+        # Compute the lazy values and check that the background uses NaN with finite nodata metadata
+        dask_data = dask_result.data.compute()
+        assert dask_result.rst.nodata == -99999
+        assert np.count_nonzero(np.isnan(dask_data)) > 0
+        np.testing.assert_array_equal(dask_data[np.isfinite(dask_data)], np.ones(1, dtype=np.float32))
+
+        # Write the same chunks to a file and check that its background contains the finite nodata value
+        outfile = tmp_path / "rasterized-nodata.tif"
+        config = MultiprocConfig(chunks=(2, 2), outfile=str(outfile))
+        file_result = self.vector.rasterize(**options, mp_config=config)
+        assert not file_result.is_loaded
+        assert file_result.nodata == -99999
+        assert np.count_nonzero(file_result.data.mask) > 0
+        assert np.all(file_result.data.data[file_result.data.mask] == -99999)
+        np.testing.assert_array_equal(file_result.data.compressed(), np.ones(file_result.data.count()))
 
     def test_create_mask(self) -> None:
         """

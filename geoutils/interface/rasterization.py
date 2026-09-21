@@ -53,6 +53,7 @@ from geoutils.multiproc.mparray import (
     _split_chunk_size,
     _write_multiproc_result,
 )
+from geoutils.raster.referencing import _cast_nodata, _default_nodata
 
 if TYPE_CHECKING:
     from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
@@ -509,7 +510,8 @@ def _rasterize(
     :param grid_coords: Output coordinates.
     :param bounds: Output bounds.
     :param crs: Output CRS.
-    :param nodata: Output nodata value. A non-finite out_value is used by default when nodata is not set.
+    :param nodata: Finite nodata value stored with the output. When omitted, a dtype-specific value is used if
+        out_value is non-finite.
     :param chunksizes: Chunk size (rows, cols) for Dask/Multiproc (if no reference raster is passed, or not chunked).
     :param mp_config: Multiprocessing config.
     :param dask: If True, return a Dask-backed Raster. A Dask-backed reference raster also selects this backend.
@@ -543,9 +545,13 @@ def _rasterize(
     # Normalize burn once
     burn = _normalize_burn_values(vect_geoms=vect.geometry.values, in_value=in_value)
 
-    # Treat a non-finite background as nodata unless the caller selected another value
+    # Use a finite nodata value for non-finite backgrounds and keep it compatible with the output type
+    dtype = np.dtype(_make_dtype(out_value=out_value, burn=burn, out_dtype=out_dtype))
+    if nodata is not None and not np.isfinite(nodata):
+        raise ValueError("nodata must be finite.")
     if nodata is None and not np.isfinite(out_value):
-        nodata = out_value
+        nodata = _default_nodata(dtype)
+    nodata = _cast_nodata(dtype, nodata)
 
     # Runtime import to avoid circular import
     from geoutils.raster import Raster
@@ -566,12 +572,12 @@ def _rasterize(
         if mask_output:
             data = data.view(np.bool_)
 
-        # Mark explicit nodata values before construction so expected background cells do not raise a warning
-        if nodata is not None and not mask_output:
-            if np.isfinite(nodata):
-                data = np.ma.masked_where(data == nodata, data)
-            else:
+        # Mark nodata and non-finite backgrounds before construction so expected missing cells do not raise a warning
+        if not mask_output:
+            if not np.isfinite(out_value):
                 data = np.ma.masked_invalid(data)
+            if nodata is not None:
+                data = np.ma.masked_where(data == nodata, data)
         return Raster.from_array(data=data, transform=out_transform, crs=out_crs, nodata=nodata)
 
     # Build chunked geogrid (shared for Dask and multiproc)
@@ -605,12 +611,13 @@ def _rasterize(
         # Convert each completed byte block to a boolean view without another array allocation
         if mask_output:
             data = data.view(np.bool_)
+        elif not np.isfinite(out_value):
+            data = da.where(da.isfinite(data), data, np.nan)
         return RasterAccessor.from_array(data=data, transform=out_transform, crs=out_crs, nodata=nodata)
 
     # Multiprocessing backend (lazy and writes to file)
 
     # Build minimal output metadata for file writer
-    dtype = _make_dtype(out_value=out_value, burn=burn, out_dtype=out_dtype)
     file_metadata = {
         "height": out_shape[0],
         "width": out_shape[1],
@@ -621,13 +628,17 @@ def _rasterize(
         "nodata": nodata,
     }
     assert mp_config is not None
+
+    # Replace an in-memory non-finite background with the finite nodata value written to disk
+    file_out_value = nodata if not np.isfinite(out_value) else out_value
+    assert file_out_value is not None
     return _multiproc_rasterize(
         burn=burn,
         dst_geotiling=dst_geotiling,
         dst_block_geogrids=dst_block_geogrids,
         mp_config=mp_config,
         file_metadata=file_metadata,
-        out_value=out_value,
+        out_value=file_out_value,
         out_dtype=dtype,
         all_touched=all_touched,
     )

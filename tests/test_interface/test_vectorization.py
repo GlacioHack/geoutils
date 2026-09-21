@@ -352,9 +352,7 @@ class TestPolygonize:
         img_dtype = img.copy()
 
         with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", category=UserWarning, message="dtype conversion will result in a loss of information.*"
-            )
+            warnings.filterwarnings("ignore", category=UserWarning, message="Converting from .* may alter values.*")
             warnings.filterwarnings(
                 "ignore",
                 category=UserWarning,

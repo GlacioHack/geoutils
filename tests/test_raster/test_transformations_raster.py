@@ -340,9 +340,9 @@ class TestTransformation:
             r.translate(xoff=1, yoff=1, distance_unit="wrong_value")  # type: ignore
 
     def test_reproject__unloaded_multiband_to_single_band_reference(self) -> None:
-        """Checks that every band of an unloaded raster is reprojected onto a single-band reference grid."""
+        """Checks that a multi-band raster can use a match reference for reprojection."""
 
-        # Open equivalent multiband sources with deferred and eager data loading
+        # Open multiband and single band rasters, eager and unloaded
         source = gu.Raster(self.landsat_rgb_path)
         eager_source = gu.Raster(self.landsat_rgb_path, load_data=True)
         reference = gu.Raster(self.landsat_b4_crop_path)

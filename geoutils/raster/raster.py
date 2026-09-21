@@ -1618,8 +1618,8 @@ class Raster(RasterBase):
                 preserves_values = np.can_cast(self.dtype, target_dtype, casting="safe")
             if not preserves_values:
                 warnings.warn(
-                    "dtype conversion will result in a loss of information. "
-                    f"Converting from {self.dtype} to {target_dtype} may alter values.",
+                    f"Converting from {self.dtype} to {target_dtype} may alter values because the target dtype "
+                    "cannot safely represent the source values.",
                     category=UserWarning,
                 )
 
