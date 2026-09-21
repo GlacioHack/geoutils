@@ -150,6 +150,7 @@ class RasterBase(ABC):
         self._disk_shape: tuple[int, int, int] | None = None
         self._disk_bands: tuple[int] | None = None
         self._disk_dtype: DTypeLike | None = None
+        self._out_dtype: DTypeLike | None = None
         self._disk_transform: Affine | None = None
         self._out_count: int | None = None
         self._out_shape: tuple[int, int] | None = None

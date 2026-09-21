@@ -757,12 +757,17 @@ class VectorBase(ABC):
         bounds: tuple[float, float, float, float] | None = None,
         crs: CRS | int | None = None,
         *,
+        nodata: int | float | None = None,
         chunksizes: tuple[int, int] | None = None,
         mp_config: MultiprocConfig | None = None,
         dask: bool = False,
         **kwargs: Any,
     ) -> RasterType:
-        """Rasterize vector to a raster or mask, with input geometries burned in."""
+        """
+        Rasterize vector to a raster or mask, with input geometries burned in.
+
+        :param nodata: Output nodata value. A non-finite out_value is used by default when nodata is not set.
+        """
 
         if "xres" in kwargs.keys() or "yres" in kwargs.keys():
             warnings.warn(
@@ -794,6 +799,7 @@ class VectorBase(ABC):
             grid_coords=grid_coords,
             bounds=bounds,
             crs=crs,
+            nodata=nodata,
             chunksizes=chunksizes,
             mp_config=mp_config,
             dask=dask,

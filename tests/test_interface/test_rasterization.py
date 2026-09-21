@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, Literal
 
 import geopandas as gpd
@@ -127,6 +128,19 @@ class TestRasterVectorInterface:
         # Check that errors are raised
         with pytest.raises(InvalidGridError, match="Either 'ref' or 'crs' must be provided"):
             vct.rasterize(rst, crs=3857)
+
+    def test_rasterize__nodata_background(self) -> None:
+        """Checks that rasterize() treats a non-finite background as nodata without raising a warning."""
+
+        # Rasterize a unit polygon inside a larger grid and request a NaN background
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            raster = self.vector.rasterize(res=1, bounds=(9, 9, 13, 13), crs=4326, in_value=1, out_value=np.nan)
+
+        # Check that the background is masked with NaN nodata and the polygon value stays valid
+        assert np.isnan(raster.nodata)
+        assert np.count_nonzero(raster.data.mask) > 0
+        np.testing.assert_array_equal(raster.data.compressed(), np.ones(raster.data.count()))
 
     def test_create_mask(self) -> None:
         """

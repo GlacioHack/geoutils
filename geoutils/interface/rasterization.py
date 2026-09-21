@@ -489,6 +489,7 @@ def _rasterize(
     bounds: tuple[float, float, float, float] | None = None,
     crs: CRS | int | None = None,
     *,
+    nodata: int | float | None = None,
     chunksizes: tuple[int, int] | None = None,
     mp_config: MultiprocConfig | None = None,
     dask: bool = False,
@@ -508,6 +509,7 @@ def _rasterize(
     :param grid_coords: Output coordinates.
     :param bounds: Output bounds.
     :param crs: Output CRS.
+    :param nodata: Output nodata value. A non-finite out_value is used by default when nodata is not set.
     :param chunksizes: Chunk size (rows, cols) for Dask/Multiproc (if no reference raster is passed, or not chunked).
     :param mp_config: Multiprocessing config.
     :param dask: If True, return a Dask-backed Raster. A Dask-backed reference raster also selects this backend.
@@ -541,6 +543,10 @@ def _rasterize(
     # Normalize burn once
     burn = _normalize_burn_values(vect_geoms=vect.geometry.values, in_value=in_value)
 
+    # Treat a non-finite background as nodata unless the caller selected another value
+    if nodata is None and not np.isfinite(out_value):
+        nodata = out_value
+
     # Runtime import to avoid circular import
     from geoutils.raster import Raster
     from geoutils.raster.xr_accessor import RasterAccessor
@@ -559,7 +565,14 @@ def _rasterize(
         # Byte rasterization is supported by Rasterio and has a zero-copy boolean view
         if mask_output:
             data = data.view(np.bool_)
-        return Raster.from_array(data=data, transform=out_transform, crs=out_crs, nodata=None)
+
+        # Mark explicit nodata values before construction so expected background cells do not raise a warning
+        if nodata is not None and not mask_output:
+            if np.isfinite(nodata):
+                data = np.ma.masked_where(data == nodata, data)
+            else:
+                data = np.ma.masked_invalid(data)
+        return Raster.from_array(data=data, transform=out_transform, crs=out_crs, nodata=nodata)
 
     # Build chunked geogrid (shared for Dask and multiproc)
     if chunksizes is None:
@@ -592,7 +605,7 @@ def _rasterize(
         # Convert each completed byte block to a boolean view without another array allocation
         if mask_output:
             data = data.view(np.bool_)
-        return RasterAccessor.from_array(data=data, transform=out_transform, crs=out_crs, nodata=None)
+        return RasterAccessor.from_array(data=data, transform=out_transform, crs=out_crs, nodata=nodata)
 
     # Multiprocessing backend (lazy and writes to file)
 
@@ -605,7 +618,7 @@ def _rasterize(
         "dtype": dtype,
         "crs": out_crs,
         "transform": out_transform,
-        "nodata": None,
+        "nodata": nodata,
     }
     assert mp_config is not None
     return _multiproc_rasterize(

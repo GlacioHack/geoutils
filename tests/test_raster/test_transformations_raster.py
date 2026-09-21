@@ -339,6 +339,26 @@ class TestTransformation:
         with pytest.raises(ValueError, match="Argument 'distance_unit' should be either 'pixel' or 'georeferenced'."):
             r.translate(xoff=1, yoff=1, distance_unit="wrong_value")  # type: ignore
 
+    def test_reproject__unloaded_multiband_to_single_band_reference(self) -> None:
+        """Checks that every band of an unloaded raster is reprojected onto a single-band reference grid."""
+
+        # Open equivalent multiband sources with deferred and eager data loading
+        source = gu.Raster(self.landsat_rgb_path)
+        eager_source = gu.Raster(self.landsat_rgb_path, load_data=True)
+        reference = gu.Raster(self.landsat_b4_crop_path)
+        source.set_nodata(0, update_array=False, update_mask=False)
+        eager_source.set_nodata(0, update_array=False, update_mask=False)
+        assert not source.is_loaded
+
+        # Reproject both sources onto the single-band reference grid
+        result = source.reproject(reference)
+        expected = eager_source.reproject(reference)
+
+        # Check that all three bands use the reference shape and match the eager result
+        assert result.count == source.count == 3
+        assert result.shape == reference.shape
+        assert result.raster_equal(expected, strict_masked=True)
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_reproject(self, example: str) -> None:
 

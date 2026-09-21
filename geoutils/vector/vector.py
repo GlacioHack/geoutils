@@ -76,15 +76,19 @@ class Vector(VectorBase):
 
     @profiler.profile("geoutils.vector.vector.__init__", collect=False)
     def __init__(
-        self, filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry | dict[str, Any]
-    ):
+        self,
+        filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry | dict[str, Any],
+        layer: str | int | None = None,
+    ) -> None:
         """
         Instantiate a vector from either a filename, a GeoPandas dataframe or series, or a Shapely geometry.
 
         :param filename_or_dataset: Path to file, or GeoPandas dataframe or series, or Shapely geometry.
+        :param layer: Layer name or index to read from a file containing multiple layers.
         """
 
         self._name: str | None = None
+        self._layer = layer
         self._ds: gpd.GeoDataFrame | None = None
         self._crs: CRS | None = None
         self._bbox: rio.coords.BoundingBox | None = None
@@ -101,10 +105,12 @@ class Vector(VectorBase):
         # If filename is passed
         elif isinstance(filename_or_dataset, (str, pathlib.Path)):
             self._name = os.fspath(filename_or_dataset)
-            self._set_metadata_from_file(self._name)
+            self._set_metadata_from_file(self._name, layer=layer)
             return
         # If GeoPandas or Shapely object is passed
         elif isinstance(filename_or_dataset, (gpd.GeoDataFrame, gpd.GeoSeries, BaseGeometry)):
+            if layer is not None:
+                raise ValueError("The layer argument is only supported when opening a vector file.")
             if isinstance(filename_or_dataset, gpd.GeoDataFrame):
                 ds = filename_or_dataset
             elif isinstance(filename_or_dataset, gpd.GeoSeries):
@@ -144,10 +150,10 @@ class Vector(VectorBase):
             raise ValueError("The dataset of a vector must be set with a GeoSeries or a GeoDataFrame.")
         self._set_metadata_from_ds(self._ds)
 
-    def _set_metadata_from_file(self, filename: str) -> None:
-        """Read lightweight vector metadata without loading the full GeoDataFrame."""
+    def _set_metadata_from_file(self, filename: str, layer: str | int | None = None) -> None:
+        """Read lightweight vector metadata for one file layer without loading the full GeoDataFrame."""
 
-        info = pyogrio.read_info(filename)
+        info = pyogrio.read_info(filename, layer=layer)
         crs = info.get("crs")
         total_bounds = info.get("total_bounds")
 
@@ -188,6 +194,8 @@ class Vector(VectorBase):
 
         # Build one read box around all deferred crops so the file reader can skip unrelated rows
         read_kwargs = kwargs.copy()
+        if self._layer is not None:
+            read_kwargs.setdefault("layer", self._layer)
         read_bbox = _crop_read_bbox(self._crop_filters)
         if read_bbox is not None:
             # Raise error if a user also passed a bbox to load directly
