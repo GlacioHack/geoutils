@@ -12,14 +12,17 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
+import rasterio as rio
 import xarray as xr
 from geopandas.testing import assert_geodataframe_equal
 from pandas.testing import assert_frame_equal
 from pyproj import CRS
 from pyproj.crs import CompoundCRS
+from shapely.geometry import Polygon
 
 import geoutils as gu
 from geoutils import PointCloud, Raster
+from geoutils._dispatch import is_dask_dataframe
 from geoutils.multiproc import MultiprocConfig
 from geoutils.pointcloud.base import PointCloudBase
 from geoutils.pointcloud.pd_accessor import PointCloudAccessor
@@ -132,6 +135,7 @@ class TestClassVsAccessorConsistency:
     methods_and_kwargs = [
         ("set_data_column", {"new_data_column": "b2"}),
         ("copy", {}),
+        ("clip", {"mask": Polygon([(-0.1, -0.1), (0.5, -0.1), (0.5, 1.1), (-0.1, 1.1)])}),
         ("reproject", {"crs": 4326}),
         ("to_xyz", {}),
         ("to_array", {}),
@@ -142,6 +146,7 @@ class TestClassVsAccessorConsistency:
         ("stats", {}),
         ("stats", {"by": {"group": "b2"}, "bins": {"group": 2}, "statistics": "mean"}),
         ("get_stats", {}),
+        ("plot", {"max_points": 2, "add_cbar": False}),
         ("subsample", {"subsample": 2, "random_state": 42}),
         ("cosample", {"other": "self", "subsample": 2, "random_state": 42}),
         (
@@ -236,6 +241,25 @@ class TestClassVsAccessorConsistency:
             },
         ),
     ]
+
+    def test_geo_interface__point_features_and_bbox(self) -> None:
+        """Checks that a point cloud exposes point features, values and its bounding box."""
+
+        # Create matching class and accessor representations with an explicit point value column
+        pointcloud = PointCloud(self.ds, data_column="b1")
+        ds = self.ds.copy()
+        ds.pc.set_data_column("b1")
+        expected_bbox = rio.coords.BoundingBox(left=0, bottom=0, right=1, top=1)
+        expected_interface = ds.__geo_interface__
+
+        # Check the common name and compatibility alias without losing point cloud metadata
+        assert pointcloud.bbox == expected_bbox
+        assert pointcloud.bounds == expected_bbox
+        assert ds.pc.bbox == expected_bbox
+        assert ds.pc.bounds == expected_bbox
+
+        # Check that the protocol includes each point and both numeric data columns
+        assert pointcloud.__geo_interface__ == expected_interface
 
     @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in class_methods_and_kwargs])
     def test_classmethods__equality(self, method: str, kwargs: dict[str, Any]) -> None:
@@ -343,6 +367,7 @@ class TestClassVsAccessorConsistency:
         ("method", "kwargs"),
         [
             ("crop", {"bbox": (-1, -1, 0.5, 2)}),
+            ("clip", {"mask": (-1, -1, 0.5, 2)}),
             ("reproject", {"crs": 4326}),
             ("translate", {"xoff": 1, "yoff": 2}),
         ],
@@ -396,6 +421,20 @@ class TestAccessorDask:
         assert isinstance(ds, dgpd.GeoDataFrame)
         assert not ds.pc.is_loaded
         assert ds.pc.point_count == len(self.ds)
+
+    def test_bbox__dask(self) -> None:
+        """Checks that a lazy point cloud reads its bounding box without replacing its Dask collection."""
+
+        # Write the eager points and reopen them as two lazy row partitions
+        pytest.importorskip("dask_geopandas")
+        temp_dir = tempfile.TemporaryDirectory()
+        temp_file = os.path.join(temp_dir.name, "test.gpkg")
+        self.ds.to_file(temp_file)
+        lazy = gu.open_pointcloud(temp_file, data_column="b1", chunks=2)
+
+        # Read the saved bounding box while keeping the accessor backed by Dask
+        assert lazy.pc.bbox == rio.coords.BoundingBox(left=0, bottom=0, right=1, top=1)
+        assert not lazy.pc.is_loaded
 
     def test_chunked_methods__equality_loading_laziness(self) -> None:
         """
@@ -473,11 +512,12 @@ class TestAccessorDask:
         )
         assert not ds.pc.is_loaded
 
-        # Subsampling computes only the requested small point selection
-        assert_output_equal(
-            pc.subsample(subsample=2, random_state=42),
-            ds.pc.subsample(subsample=2, random_state=42),
-        )
+        # Subsampling keeps the requested point rows lazy until the Dask result is computed
+        expected = pc.subsample(subsample=2, random_state=42)
+        result = ds.pc.subsample(subsample=2, random_state=42)
+        assert is_dask_dataframe(result)
+        assert result.pc.data_column == "b1"
+        assert_geodataframe_equal(expected.ds, result.compute())
         assert not ds.pc.is_loaded
 
     @pytest.mark.skipif(find_spec("laspy") is None, reason="Only runs if laspy is installed.")
@@ -526,7 +566,7 @@ class TestAccessorDask:
         pc.load()
         expected = pc.grid(
             shape=(3, 3),
-            bounds=pc.bounds,
+            bounds=pc.bbox,
             resampling="nearest",
             dist_nodata_pixel=100,
         )
@@ -535,7 +575,7 @@ class TestAccessorDask:
         ds = gu.open_pointcloud(fn_las, chunks=100)
         output_dask = ds.pc.grid(
             shape=(3, 3),
-            bounds=pc.bounds,
+            bounds=pc.bbox,
             resampling="nearest",
             dist_nodata_pixel=100,
             chunksizes=(2, 1),
@@ -553,7 +593,7 @@ class TestAccessorDask:
         pc_file = PointCloud(fn_las)
         output_mp = pc_file.grid(
             shape=(3, 3),
-            bounds=pc.bounds,
+            bounds=pc.bbox,
             resampling="nearest",
             dist_nodata_pixel=100,
             mp_config=MultiprocConfig(chunks=(2, 1)),

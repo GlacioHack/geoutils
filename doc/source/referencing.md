@@ -83,22 +83,22 @@ can help define a 3D CRS.
 ```
 
 (bounds)=
-### Bounds
+### Bounding boxes
 
-Bounds define the spatial extent of geospatial data, composed of the "left", "right", "bottom" and "top" coordinates.
-The {attr}`~geoutils.Raster.bounds` of a raster or a vector is a {class}`rasterio.coords.BoundingBox` object:
+Bounding boxes define the spatial extent of geospatial data, composed of the "left", "right", "bottom" and "top" coordinates.
+The {attr}`~geoutils.Raster.bbox` of a raster or a vector is a {class}`rasterio.coords.BoundingBox` object:
 
 ```{code-cell} ipython3
-# Show bounds attribute of raster
-rast.bounds
+# Show bounding box of raster
+rast.bbox
 ```
 ```{code-cell} ipython3
-# Show bounds attribute of vector
-vect.bounds
+# Show bounding box of vector
+vect.bbox
 ```
 
 ```{note}
-To define {attr}`~geoutils.Raster.bounds` consistently between rasters and vectors, {attr}`~geoutils.Vector.bounds`
+To define {attr}`~geoutils.Raster.bbox` consistently between rasters and vectors, {attr}`~geoutils.Vector.bbox`
  corresponds to {attr}`geopandas.GeoSeries.total_bounds` (total bounds of all geometry features) converted to a {class}`rasterio.coords.BoundingBox`.
 
 To reproduce the behaviour of {attr}`geopandas.GeoSeries.bounds` (per-feature bounds) with a

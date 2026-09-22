@@ -69,8 +69,8 @@ vect_reproj = vect.reproject(rast)
 # Reproject raster to smaller bounds and different X/Y resolution
 rast_reproj = rast.reproject(
     res=(rast.res[0] * 2, rast.res[1] / 2),
-    bounds={"left": rast.bounds.left, "bottom": rast.bounds.bottom,
-            "right": rast.bounds.left + 10000, "top": rast.bounds.bottom + 10000},
+    bounds={"left": rast.bbox.left, "bottom": rast.bbox.bottom,
+            "right": rast.bbox.left + 10000, "top": rast.bbox.bottom + 10000},
     resampling="cubic")
 ```
 
@@ -134,23 +134,25 @@ _ = ax[2].set_yticklabels([])
 plt.tight_layout()
 ```
 
-## Crop or pad
+## Crop and clip
 
-{func}`geoutils.Raster.crop` or {func}`geoutils.Vector.crop`.
+{func}`geoutils.Raster.crop`, {func}`geoutils.Vector.crop`, {func}`geoutils.Raster.clip` or
+{func}`geoutils.Vector.clip`.
 
-Cropping **modifies the spatial bounds of the geospatial data in a rectangular extent**, by removing or adding data
-(in which case it corresponds to padding) without resampling.
+Cropping selects data in a **rectangular extent** without modifying the selected values or geometries. A file-backed
+raster, vector or point cloud can store this selection and defer reading until its data are requested.
 
-For rasters, cropping removes or adds pixels to the sides of the raster grid.
+For rasters, crop removes complete rows and columns outside the extent. For point clouds, it removes points outside
+the extent. For vectors, the default `mode="intersects"` keeps every unchanged feature touching the extent;
+`mode="within"` keeps only features fully contained by it.
 
-For vectors, cropping removes some geometry features around the bounds, with three options possible:
-1. Removing all features **not intersecting** the cropping geometry,
-2. Removing all features **not contained** in the cropping geometry,
-3. Making all features **exactly clipped** to the cropping geometry (modifies the geometry data).
+Clipping applies an exact geometry and modifies the result. It masks raster cells outside the geometry, removes point
+cloud rows outside it, and cuts vector geometries at its boundary. Raster, vector and point cloud clipping support
+lazy Dask chunks or partitions and file-backed multiprocessing blocks.
 
 ```{code-cell} ipython3
 # Clip the vector to the raster
-vect_clipped = vect_reproj.crop(rast, clip=True)
+vect_clipped = vect_reproj.clip(rast)
 ```
 
 ```{code-cell} ipython3
@@ -223,14 +225,14 @@ be set to that of any reference raster (defaults to the extent that contains exa
 :  code_prompt_hide: "Show the code for creating multiple raster pieces"
 
 # Get 4 cropped bits from initial rasters
-rast1 = rast.crop((rast.bounds.left + 1000, rast.bounds.bottom + 1000,
-                   rast.bounds.left + 3000, rast.bounds.bottom + 3000))
-rast2 = rast.crop((rast.bounds.left + 3000, rast.bounds.bottom + 1000,
-                   rast.bounds.left + 5000, rast.bounds.bottom + 3000))
-rast3 = rast.crop((rast.bounds.left + 1000, rast.bounds.bottom + 3000,
-                   rast.bounds.left + 3000, rast.bounds.bottom + 5000))
-rast4 = rast.crop((rast.bounds.left + 3000, rast.bounds.bottom + 3000,
-                   rast.bounds.left + 5000, rast.bounds.bottom + 5000))
+rast1 = rast.crop((rast.bbox.left + 1000, rast.bbox.bottom + 1000,
+                   rast.bbox.left + 3000, rast.bbox.bottom + 3000))
+rast2 = rast.crop((rast.bbox.left + 3000, rast.bbox.bottom + 1000,
+                   rast.bbox.left + 5000, rast.bbox.bottom + 3000))
+rast3 = rast.crop((rast.bbox.left + 1000, rast.bbox.bottom + 3000,
+                   rast.bbox.left + 3000, rast.bbox.bottom + 5000))
+rast4 = rast.crop((rast.bbox.left + 3000, rast.bbox.bottom + 3000,
+                   rast.bbox.left + 5000, rast.bbox.bottom + 5000))
 # Reproject some in other CRS, with other resolution
 #rast3 = rast3.reproject(crs=4326, res=rast.res[0] * 3)
 #rast4 = rast4.reproject(crs=32610, res=rast.res[0] / 3)

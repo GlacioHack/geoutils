@@ -39,7 +39,7 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
 * - Bounding box
   - `gdalinfo`/`ogrinfo`
   - `gdal raster/vector bbox`
-  - {attr}`~geoutils.Raster.bounds`
+  - {attr}`~geoutils.Raster.bbox`
 
 * - Info summary
   - `gdalinfo`/`ogrinfo`
@@ -56,10 +56,15 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
   - `gdal raster reproject`
   - {meth}`~geoutils.Raster.reproject`
 
-* - Crop/clip
-  - `gdal_translate` / `gdalwarp`
-  - `gdal raster clip`
+* - Crop to extent
+  - `gdal_translate -projwin`
+  - `gdal raster clip --bbox`
   - {meth}`~geoutils.Raster.crop` / {meth}`~geoutils.Raster.icrop`
+
+* - Clip to geometry
+  - `gdalwarp -cutline`
+  - `gdal raster clip --geometry`
+  - {meth}`~geoutils.Raster.clip`
 
 * - Edit referencing
   - `gdal_edit` / `gdalmove.py`
@@ -141,10 +146,15 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
   - `gdal vector reproject`
   - {meth}`~geoutils.Vector.reproject`
 
-* - Crop/clip
+* - Crop to extent
+  - `ogr2ogr -spat`
+  - `gdal vector filter --bbox`
+  - {meth}`~geoutils.Vector.crop`
+
+* - Clip to geometry
   - `ogr2ogr -clipsrc`
   - `gdal vector clip`
-  - {meth}`~geoutils.Vector.crop`
+  - {meth}`~geoutils.Vector.clip`
 
 * - Translate
   - `ogr2ogr` (SQL transform)

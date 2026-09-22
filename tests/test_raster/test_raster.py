@@ -9,10 +9,8 @@ import pathlib
 import re
 import tempfile
 import warnings
-from importlib.util import find_spec
 from tempfile import TemporaryFile
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import rasterio as rio
@@ -449,9 +447,9 @@ class TestRaster:
 
         # Check that the arrays are equal in NaN type
         if rst.count > 1:
-            assert np.array_equal(rst.get_nanarray(), ds.data.squeeze(), equal_nan=True)
+            assert np.array_equal(rst.to_nanarray(), ds.data.squeeze(), equal_nan=True)
         else:
-            assert np.array_equal(rst.get_nanarray(), ds.data.squeeze(), equal_nan=True)
+            assert np.array_equal(rst.to_nanarray(), ds.data.squeeze(), equal_nan=True)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_from_xarray(self, example: str) -> None:
@@ -645,8 +643,9 @@ class TestRaster:
         with pytest.raises(
             ValueError,
             match=re.escape(
-                "New data must be of the same shape as existing data: ({}, {}). Given: "
-                "{}.".format(str(width), str(height), str(new_shape))
+                "New data must be of the same shape as existing data: ({}, {}). Given: {}.".format(
+                    str(width), str(height), str(new_shape)
+                )
             ),
         ):
             rst.data = rst.data.reshape(new_shape)
@@ -818,18 +817,15 @@ class TestRaster:
         assert rst1.bounds.top == rst.bounds.top - rst.res[1] / 2
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])
-    def test_get_nanarray(self, example: str) -> None:
-        """
-        Check that self.get_nanarray behaves as expected for examples with invalid data or not, and with several bands
-        or a single one.
-        """
+    def test_to_nanarray(self, example: str) -> None:
+        """Checks that to_nanarray() replaces invalid data and can also return its mask."""
 
         # -- First, we test without returning a mask --
 
         # Get nanarray
         rst = gu.Raster(example)
         rst_copy = rst.copy()
-        rst_arr = rst.get_nanarray()
+        rst_arr = rst.to_nanarray()
 
         # If there is no mask in the masked array, the array should not have NaNs and be equal to that of data.data
         if not np.ma.is_masked(rst.data):
@@ -842,12 +838,12 @@ class TestRaster:
             assert np.ma.allequal(rst.data.squeeze(), rst_arr, fill_value=np.nan)
 
         # Check that modifying the NaN array does not back-propagate to the original array (np.ma.filled returns a view
-        # when there is no invalid data, but in this case get_nanarray should copy the data).
+        # when there is no invalid data, but in this case to_nanarray() should copy the data).
         rst_arr += 5
         assert rst.raster_equal(rst_copy, warn_failure_reason=True)
 
         # -- Then, we test with a mask returned --
-        rst_arr, mask = rst.get_nanarray(return_mask=True)
+        rst_arr, mask = rst.to_nanarray(return_mask=True)
 
         assert np.array_equal(mask, np.ma.getmaskarray(rst.data))
 
@@ -855,6 +851,22 @@ class TestRaster:
         rst_arr += 5
         mask = ~mask
         assert rst.raster_equal(rst_copy, warn_failure_reason=True)
+
+    def test_get_nanarray__deprecated_alias(self) -> None:
+        """Checks that get_nanarray() warns of deprecation, and forwards to to_nanarray()."""
+
+        # Compute the expected array and nodata mask
+        raster = gu.Raster(self.aster_dem_path)
+        expected_array, expected_mask = raster.to_nanarray(floating_dtype="float64", return_mask=True)
+
+        # Check deprecation warning
+        with pytest.warns(DeprecationWarning, match=r"Use to_nanarray\(\) instead"):
+            actual_array, actual_mask = raster.get_nanarray(floating_dtype="float64", return_mask=True)
+
+        # Check equality
+        assert actual_array.dtype == expected_array.dtype
+        assert np.array_equal(actual_array, expected_array, equal_nan=True)
+        assert np.array_equal(actual_mask, expected_mask)
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])
     def test_downsampling(self, example: str) -> None:
@@ -930,6 +942,47 @@ class TestRaster:
             gu.Raster(example, downsample=[1, 1])  # type: ignore
         with pytest.raises(ValueError, match="downsample must be >=1."):
             gu.Raster(example, downsample=0)  # type: ignore
+
+    @pytest.mark.parametrize("load_data", [False, True])
+    def test_init__downsample_regular_interval(self, tmp_path: pathlib.Path, load_data: bool) -> None:
+        """Checks that file opening downsampling keeps a constant interval."""
+
+        # Write input on dimensions not divisible by 6
+        values = np.arange(5_000, dtype=np.int32).reshape(50, 100)
+        source = gu.Raster.from_array(values, transform=rio.transform.from_origin(0, 50, 1, 1), crs=4326)
+        filename = tmp_path / "gradient.tif"
+        source.to_file(filename)
+
+        # Open with downsampling of 6
+        downsampled = gu.Raster(filename, downsample=6, load_data=load_data)
+        result = downsampled.data.data
+
+        # Check size is as expected, and values match the constant intervals
+        assert downsampled.shape == (8, 16)
+        assert np.all(np.diff(result, axis=0) == 600)
+        assert np.all(np.diff(result, axis=1) == 6)
+
+    @pytest.mark.parametrize("load_data", [False, True])
+    def test_init__downsample_uses_overview(self, tmp_path: pathlib.Path, load_data: bool) -> None:
+        """Checks that downsampling reads an overview when it can."""
+
+        # Write input for full array, then open with downsampling (without overview)
+        values = np.arange(5_000, dtype=np.int32).reshape(50, 100)
+        filename = tmp_path / "gradient.tif"
+        gu.Raster.from_array(values, rio.transform.from_origin(0, 50, 1, 1), 4326).to_file(filename)
+        without_overview = gu.Raster(filename, downsample=6, load_data=load_data).data.data.copy()
+
+        # Add overview for factors of 2 and 4, factor 4 should be the closest suitable overview
+        with rio.open(filename, "r+") as dataset:
+            dataset.build_overviews([2, 4], rio.enums.Resampling.nearest)
+
+        # Check that downsampling the new file uses the overview (slightly changes the sampled values)
+        # without changing the size/transform of the requested grid
+        downsampled = gu.Raster(filename, downsample=6, load_data=load_data)
+        result = downsampled.data.data
+        assert downsampled.shape == (8, 16)
+        assert downsampled.transform == rio.transform.from_origin(0, 50, 6, 6)
+        assert not np.array_equal(result, without_overview)
 
     def test_add_sub(self) -> None:
         """
@@ -1176,6 +1229,25 @@ class TestRaster:
         # Test that proper issue is raised if mask is not a numpy array
         with pytest.raises(ValueError, match="mask must be a numpy array"):
             r.set_mask(1)
+
+    def test_set_mask__unloaded_raster(self) -> None:
+        """Checks that set_mask() loads file data and adds the requested mask in place."""
+
+        # Get raster mask without loading values
+        raster = gu.Raster(self.landsat_b4_path)
+        original_mask = raster.get_mask()
+        valid_index = tuple(np.argwhere(~original_mask)[0])
+        new_mask = np.zeros(raster.shape, dtype=bool)
+        new_mask[valid_index] = True
+        assert not raster.is_loaded
+
+        # Apply the mask directly to the unloaded raster
+        raster.set_mask(new_mask)
+
+        # Check that values were loaded and the new cell was added to the existing mask
+        assert raster.is_loaded
+        assert raster.data.mask[valid_index]
+        assert np.array_equal(raster.data.mask, original_mask | new_mask)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])
     def test_getitem_setitem(self, example: str) -> None:
@@ -1679,13 +1751,15 @@ class TestRaster:
 
             assert np.dtype(rout.dtype) == target_dtype
             assert rout.data.dtype == target_dtype
-            # For any data type, data should be recast to the new type
-            assert rout.nodata == _default_nodata(target_dtype)
+            # Keep nodata when the type is unchanged, otherwise use the default for the new type
+            if np.dtype(target_dtype) == np.dtype(r.dtype):
+                assert rout.nodata == r.nodata
+            else:
+                assert rout.nodata == _default_nodata(target_dtype)
 
         # Test dtypes that will modify the data
         for target_dtype2 in dtypes_nonpreserving:
-
-            with pytest.warns(UserWarning, match="dtype conversion will result in a loss of information.*"):
+            with pytest.warns(UserWarning, match="Converting from .* may alter values.*"):
                 rout = r.astype(target_dtype2)  # type: ignore
 
             assert np.array_equal(
@@ -1716,180 +1790,38 @@ class TestRaster:
         assert r3.data.dtype == dtype
         assert r3.nodata == r.nodata
 
-    # The multi-band example will not have a colorbar, so not used in tests
-    @pytest.mark.parametrize("example", [landsat_b4_path, landsat_b4_crop_path, aster_dem_path])
-    @pytest.mark.parametrize("figsize", np.arange(2, 20, 2))
-    def test_plot_cbar(self, example: str, figsize: NDArrayNum) -> None:
-        """
-        Test cbar matches plot height.
-        """
+    def test_astype__same_dtype_and_lazy_file(self) -> None:
+        """Checks that astype() keeps nodata for the same dtype and defers I/O."""
 
-        pytest.importorskip("matplotlib")
+        # We create a raster with a non-default nodata value
+        values = np.arange(1, 5, dtype=np.uint8).reshape(2, 2)
+        raster = gu.Raster.from_array(values, transform=rio.transform.from_origin(0, 2, 1, 1), crs=4326, nodata=0)
 
-        # Plot raster with cbar
-        r0 = gu.Raster(example)
-        fig, ax = plt.subplots(figsize=(figsize, figsize))
-        r0.plot(
-            ax=ax,
-            add_cbar=True,
-        )
-        fig.axes[0].set_axis_off()
-        fig.axes[1].set_axis_off()
+        # Converting to the current dtype should keep the current nodata value
+        same_dtype = raster.astype(np.uint8)
+        assert same_dtype.nodata == 0
+        assert np.dtype(same_dtype.dtype) == np.dtype("uint8")
 
-        # Get size of main plot
-        ax0_bbox = fig.axes[0].get_tightbbox()
-        xmin, ymin, xmax, ymax = ax0_bbox.bounds
-        h = ymax - ymin
+        # Check conversion from a file defers I/O (not loading either source or output)
+        source = gu.Raster(self.landsat_b4_path)
+        converted = source.astype(np.float32)
+        assert not source.is_loaded
+        assert not converted.is_loaded
+        assert np.dtype(converted.dtype) == np.dtype("float32")
 
-        # Get size of cbar
-        ax_cbar_bbox = fig.axes[1].get_tightbbox()
-        xmin, ymin, xmax, ymax = ax_cbar_bbox.bounds
-        h_cbar = ymax - ymin
-        plt.close("all")
+        # Load result and compare with the eager dtype conversion
+        eager_source = gu.Raster(self.landsat_b4_path, load_data=True)
+        expected = eager_source.astype(np.float32)
+        np.testing.assert_array_equal(converted.data, expected.data)
+        assert converted.nodata == expected.nodata
+        assert not source.is_loaded
 
-        # Assert height is the same
-        assert h == pytest.approx(h_cbar)
-
-    def test_plot(self) -> None:
-
-        pytest.importorskip("matplotlib")
-
-        # Read single band raster and RGB raster
-        img = gu.Raster(self.landsat_b4_path)
-        img_RGB = gu.Raster(self.landsat_rgb_path)
-
-        # Test default plot
-        img.plot()
-
-        # Grab the plot content for checks:
-        # 1. There should be only one image
-        ax = plt.gca()
-        images = ax.get_images()
-        assert len(images) == 1
-        im = images[0]
-        # 2. The image content should be the Y-flipped raster
-        assert np.array_equal(im.get_array(), np.flip(img.get_nanarray(), axis=0), equal_nan=True)
-        # 3. The image coordinate should ascend from bottom-left corner
-        assert im.origin == "lower"
-        # 4. The image extent should match the raster
-        assert im.get_extent() == [img.bounds.left, img.bounds.right, img.bounds.bottom, img.bounds.top]
-
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert True
-
-        # Test with new figure
-        plt.figure()
-        img.plot()
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert True
-
-        # Test with provided ax
-        ax = plt.subplot(111)
-        img.plot(ax=ax)
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert True
-
-        # Test plot RGB
-        ax = plt.subplot(111)
-        img_RGB.plot(ax=ax)
-        images = ax.get_images()
-        assert len(images) == 1
-        im = images[0]
-        # 2. The image content should be the Y-flipped raster, with band index moved to the end (X, Y, band)
-        assert np.array_equal(
-            im.get_array(), np.flip(np.moveaxis(img_RGB.get_nanarray(), 0, -1), axis=0), equal_nan=True
-        )
-        # 3. The image coordinate should ascend from bottom-left corner
-        assert im.origin == "lower"
-        # 4. The image extent should match the raster
-        assert im.get_extent() == [img.bounds.left, img.bounds.right, img.bounds.bottom, img.bounds.top]
-        # Original raster data should not have been modified in-place during moveaxis
-        assert img_RGB.data.shape[0] == 3
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert True
-
-        # Test plotting single band B/W, add_cbar, plot tile
-        ax = plt.subplot(111)
-        img_RGB.plot(bands=1, cmap="gray", ax=ax, add_cbar=False, title="Test")
-        images = ax.get_images()
-        assert len(images) == 1
-        im = images[0]
-        # The image should be the related band
-        assert np.array_equal(im.get_array(), np.flip(img_RGB.get_nanarray()[0, :, :], axis=0), equal_nan=True)
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert True
-
-        # Test vmin, vmax and cbar_title
-        ax = plt.subplot(111)
-        img.plot(cmap="gray", vmin=40, vmax=220, cbar_title="Custom cbar", ax=ax)
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert True
-
-        # Test save fig
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.png")
-        img.plot(savefig_fname=temp_file)
-        if DO_PLOT:
-            plt.show()
-        else:
-            plt.close()
-        assert os.path.isfile(temp_file)
-
-    def test_plot__exceptions(self) -> None:
-        """Check exceptions raised by plot are correct."""
-
-        pytest.importorskip("matplotlib")
-
-        # Read single band raster and RGB raster
-        img = gu.Raster(self.landsat_b4_path)
-        img_RGB = gu.Raster(self.landsat_rgb_path)
-
-        # Raise an error any number other than 1 or 3/4 bands are passed
-        with pytest.raises(ValueError, match="Only single-band or 3/4-band.*"):
-            img_RGB.plot(bands=(1, 2))
-
-        # Raise an error if band number out of range
-        with pytest.raises(ValueError, match="Index must be in range.*"):
-            img.plot(bands=2)
-        with pytest.raises(ValueError, match="Index must be in range.*"):
-            img_RGB.plot(bands=4)
-
-        # Wrong types
-        with pytest.raises(ValueError, match="Index must be int, tuple or None"):
-            img.plot(bands="wrong_type")  # type: ignore
-        with pytest.raises(ValueError, match="vmin or vmax cannot be converted to float"):
-            img.plot(vmin="wrong_type", vmax="wrong_type")  # type: ignore
-        with pytest.raises(ValueError, match="ax must be a matplotlib.axes.Axes instance, 'new' or None."):
-            img.plot(ax="wrong_type")  # type: ignore
-
-    @pytest.mark.skipif(
-        find_spec("matplotlib") is not None, reason="Only runs if matplotlib is missing."
-    )  # type: ignore
-    def test_plot__missing_dep(self) -> None:
-        """Test proper error is raised when matplotlib is not installed."""
-
-        img = gu.Raster(self.landsat_b4_path)
-
-        with pytest.raises(ImportError, match="Optional dependency 'matplotlib' required.*"):
-            img.plot()
+        # Check specific boolean behaviour (Rasterio has no boolean storage type)
+        lazy_mask = source.astype(bool)
+        assert not lazy_mask.is_loaded
+        assert lazy_mask.is_mask
+        np.testing.assert_array_equal(lazy_mask.data, eager_source.astype(bool).data)
+        assert not source.is_loaded
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_to_file(self, example: str) -> None:
@@ -1964,6 +1896,22 @@ class TestRaster:
             temp_dir.cleanup()
         except (NotADirectoryError, PermissionError):
             pass
+
+    def test_to_file__dtype(self, tmp_path: pathlib.Path) -> None:
+        """Checks that to_file() casts stored values and metadata to the requested dtype."""
+
+        # Create a byte raster with values that can be represented exactly as floats
+        values = np.arange(4, dtype=np.uint8).reshape(2, 2)
+        raster = gu.Raster.from_array(values, transform=rio.transform.from_origin(0, 2, 1, 1), crs=4326)
+        filename = tmp_path / "float-output.tif"
+
+        # Save forcing floating point type
+        raster.to_file(filename, dtype=np.float32)
+        saved = gu.Raster(filename)
+
+        # Check both file metadata and stored values use the requested type
+        assert np.dtype(saved.dtype) == np.dtype("float32")
+        assert np.array_equal(saved.data, values.astype(np.float32))
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_from_array(self, example: str) -> None:
@@ -2097,6 +2045,28 @@ class TestRaster:
         """Test _is_bigtiff function for classic TIFF"""
         img = gu.Raster(self.landsat_rgb_path)
         assert img._is_bigtiff() is False
+
+    def test_stack(self) -> None:
+        """Test Raster.merge_rasters using gu.raster.merge_rasters"""
+
+        r1 = gu.Raster(self.landsat_b4_path)
+        r1 = r1.icrop((0, 0, 100, 100))
+        print(r1.shape)
+        r2 = gu.Raster(self.landsat_rgb_path)
+        r1.set_nodata(0)
+        r2.set_nodata(0)
+
+        assert r1.stack(r2).raster_equal(gu.raster.stack([r1, r2]))
+        assert r2.stack(r1).raster_equal(gu.raster.stack([r2, r1]))
+
+        assert r1.stack([r2, r1]).raster_equal(gu.raster.stack([r1, r2, r1]))
+        assert r2.stack([r1, r1]).raster_equal(gu.raster.stack([r2, r1, r1]))
+
+        assert r1.stack(r2, resampling_method="nearest").raster_equal(
+            gu.raster.stack([r1, r2], resampling_method="nearest")
+        )
+        assert r1.stack(r2, reference=1, use_ref_bounds=True).shape == r2.shape
+        assert r2.stack(r1, reference=1, use_ref_bounds=True).shape == r1.shape
 
 
 class TestMask:
@@ -2843,8 +2813,13 @@ class TestArithmetic:
     @pytest.mark.parametrize("power", [2, 3.14, -1])
     def test_power(self, power: float | int) -> None:
         if power > 0:  # Integers to negative integer powers are not allowed.
-            assert self.r1**power == self.from_array(self.r1.data**power, rst_ref=self.r1)
-        assert self.r1_f32**power == self.from_array(self.r1_f32.data**power, rst_ref=self.r1_f32)
+            result = self.r1**power
+            expected = self.from_array(self.r1.data**power, rst_ref=self.r1)
+            assert result.raster_equal(expected)
+
+        result_float = self.r1_f32**power
+        expected_float = self.from_array(self.r1_f32.data**power, rst_ref=self.r1_f32)
+        assert result_float.raster_equal(expected_float)
 
     @pytest.mark.parametrize("dtype", ["float32", "uint8", "int32"])
     def test_numpy_functions(self, dtype: str) -> None:
@@ -3157,6 +3132,21 @@ class TestArrayInterface:
                 with pytest.raises(TypeError):
                     ufunc(rst1, rst2)
 
+    def test_array_ufunc__scalar_modulo(self) -> None:
+        """Checks that a binary ufunc accepts a scalar before or after a Raster and keeps input order."""
+
+        # Create a raster with values that give different modulo results
+        values = np.arange(1, 26, dtype=np.int16).reshape(5, 5)
+        raster = gu.Raster.from_array(values, transform=self.transform, crs=None)
+
+        # Apply modulo with scalar/Raster on either side
+        forward = np.mod(raster, 7)
+        reflected = np.mod(100, raster)
+
+        # Compare both results with NumPy masked-array operations in the same order
+        assert np.array_equal(forward.data, np.mod(raster.data, 7))
+        assert np.array_equal(reflected.data, np.mod(100, raster.data))
+
     @pytest.mark.parametrize("arrfunc_str", handled_functions_1in)
     @pytest.mark.parametrize("dtype", ["uint8", "int16", "float32"])
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])
@@ -3318,9 +3308,26 @@ class TestArrayInterface:
         # assert np.ma.allequal(outputs_ma[0], outputs_rst[0].data) and np.ma.allequal(
         #             outputs_ma[1], outputs_rst[1].data)
 
-    @pytest.mark.parametrize(
-        "np_func_name", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout + handled_functions_2in
-    )  # type: ignore
+    def test_array_ufunc__error_logical_reduce(self) -> None:
+        """Checks that logical reductions cannot silently test the truth value of an entire raster."""
+
+        # Create two boolean rasters with different values across the grid
+        rst1 = gu.Raster.from_array(self.mask1, transform=self.transform, crs=None)
+        rst2 = gu.Raster.from_array(self.mask2, transform=self.transform, crs=None)
+
+        # Check that the supported pairwise call returns the expected raster
+        direct = np.logical_and(rst1, rst2)
+        expected = np.logical_and(rst1.data, rst2.data)
+        assert isinstance(direct, gu.Raster)
+        assert np.array_equal(direct.data, expected)
+
+        # Check that both reduction forms explain why reducing Raster objects is unsupported
+        with pytest.raises(ValueError, match="truth value of a Raster is ambiguous"):
+            np.logical_and.reduce((rst1, rst2))
+        with pytest.raises(NotImplementedError, match="'reduce' method of NumPy ufuncs is not supported"):
+            np.logical_and.reduce(rst1)
+
+    @pytest.mark.parametrize("np_func_name", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout + handled_functions_2in)  # type: ignore
     def test_raise_errors_2nin(self, np_func_name: str) -> None:
         """Check that proper errors are raised when input raster/array don't match (only 2-input functions)."""
 
@@ -3344,51 +3351,46 @@ class TestArrayInterface:
         # Get ufunc
         np_func = getattr(np, np_func_name)
 
-        # Strange errors happening only for these 4 functions...
-        # See issue #457
-        if np_func_name not in ["allclose", "isclose", "array_equal", "array_equiv"]:
+        # Rasters with different CRS, transform, or shape
+        # Different shape
+        georef_tworaster_message = (
+            "Both rasters must have the same shape, transform and CRS for an arithmetic operation. "
+            "For example, use raster1 = raster1.reproject(raster2) to reproject raster1 on the "
+            "same grid and CRS than raster2."
+        )
 
-            # Rasters with different CRS, transform, or shape
-            # Different shape
-            georef_tworaster_message = (
-                "Both rasters must have the same shape, transform and CRS for an arithmetic operation. "
-                "For example, use raster1 = raster1.reproject(raster2) to reproject raster1 on the "
-                "same grid and CRS than raster2."
-            )
+        with pytest.raises(ValueError, match=re.escape(georef_tworaster_message)):
+            np_func(rst, rst_wrong_shape)
 
-            with pytest.raises(ValueError, match=re.escape(georef_tworaster_message)):
-                np_func(rst, rst_wrong_shape)
+        # Different CRS
+        with pytest.raises(ValueError, match=re.escape(georef_tworaster_message)):
+            np_func(rst, rst_wrong_crs)
 
-            # Different CRS
-            with pytest.raises(ValueError, match=re.escape(georef_tworaster_message)):
-                np_func(rst, rst_wrong_crs)
+        # Different transform
+        with pytest.raises(ValueError, match=re.escape(georef_tworaster_message)):
+            np_func(rst, rst_wrong_transform)
 
-            # Different transform
-            with pytest.raises(ValueError, match=re.escape(georef_tworaster_message)):
-                np_func(rst, rst_wrong_transform)
+        # Array with different shape
+        georef_raster_array_message = (
+            "The raster and array must have the same shape for an arithmetic operation. "
+            "For example, if the array comes from another raster, use raster1 = "
+            "raster1.reproject(raster2) beforehand to reproject raster1 on the same grid and CRS "
+            "than raster2. Or, if the array does not come from a raster, define one with raster = "
+            "Raster.from_array(array, array_transform, array_crs, array_nodata) then reproject."
+        )
+        # Different shape, masked array
+        # Check reflectivity just in case (just here, not later)
+        with pytest.raises(ValueError, match=re.escape(georef_raster_array_message)):
+            np_func(ma_wrong_shape, rst)
+        with pytest.raises(ValueError, match=re.escape(georef_raster_array_message)):
+            np_func(rst, ma_wrong_shape)
 
-            # Array with different shape
-            georef_raster_array_message = (
-                "The raster and array must have the same shape for an arithmetic operation. "
-                "For example, if the array comes from another raster, use raster1 = "
-                "raster1.reproject(raster2) beforehand to reproject raster1 on the same grid and CRS "
-                "than raster2. Or, if the array does not come from a raster, define one with raster = "
-                "Raster.from_array(array, array_transform, array_crs, array_nodata) then reproject."
-            )
-            # Different shape, masked array
-            # Check reflectivity just in case (just here, not later)
-            with pytest.raises(ValueError, match=re.escape(georef_raster_array_message)):
-                np_func(ma_wrong_shape, rst)
-            with pytest.raises(ValueError, match=re.escape(georef_raster_array_message)):
-                np_func(rst, ma_wrong_shape)
+        # Different shape, normal array with NaNs
+        with pytest.raises(ValueError, match=re.escape(georef_raster_array_message)):
+            np_func(ma_wrong_shape.filled(np.nan), rst)
+        with pytest.raises(ValueError, match=re.escape(georef_raster_array_message)):
+            np_func(rst, ma_wrong_shape.filled(np.nan))
 
-            # Different shape, normal array with NaNs
-            with pytest.raises(ValueError, match=re.escape(georef_raster_array_message)):
-                np_func(ma_wrong_shape.filled(np.nan), rst)
-            with pytest.raises(ValueError, match=re.escape(georef_raster_array_message)):
-                np_func(rst, ma_wrong_shape.filled(np.nan))
-
-            aop_message = 'One raster has a pixel interpretation "Area" and the other "Point".*'
-
-            with pytest.raises(UserWarning, match=aop_message):
-                np_func(rst, rst_wrong_aop)
+        aop_message = 'One raster has a pixel interpretation "Area" and the other "Point".*'
+        with pytest.raises(UserWarning, match=aop_message):
+            np_func(rst, rst_wrong_aop)

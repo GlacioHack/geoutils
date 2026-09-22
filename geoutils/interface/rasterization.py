@@ -53,6 +53,7 @@ from geoutils.multiproc.mparray import (
     _split_chunk_size,
     _write_multiproc_result,
 )
+from geoutils.raster.referencing import _cast_nodata, _default_nodata
 
 if TYPE_CHECKING:
     from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
@@ -489,6 +490,7 @@ def _rasterize(
     bounds: tuple[float, float, float, float] | None = None,
     crs: CRS | int | None = None,
     *,
+    nodata: int | float | None = None,
     chunksizes: tuple[int, int] | None = None,
     mp_config: MultiprocConfig | None = None,
     dask: bool = False,
@@ -508,6 +510,7 @@ def _rasterize(
     :param grid_coords: Output coordinates.
     :param bounds: Output bounds.
     :param crs: Output CRS.
+    :param nodata: Ndata value stored with the output. When omitted, the default dtype compatible value is used.
     :param chunksizes: Chunk size (rows, cols) for Dask/Multiproc (if no reference raster is passed, or not chunked).
     :param mp_config: Multiprocessing config.
     :param dask: If True, return a Dask-backed Raster. A Dask-backed reference raster also selects this backend.
@@ -541,6 +544,14 @@ def _rasterize(
     # Normalize burn once
     burn = _normalize_burn_values(vect_geoms=vect.geometry.values, in_value=in_value)
 
+    # Define output nodata value
+    dtype = np.dtype(_make_dtype(out_value=out_value, burn=burn, out_dtype=out_dtype))
+    if nodata is not None and not np.isfinite(nodata):
+        raise ValueError("nodata must be finite.")
+    if nodata is None and not np.isfinite(out_value):
+        nodata = _default_nodata(dtype)
+    nodata = _cast_nodata(dtype, nodata)
+
     # Runtime import to avoid circular import
     from geoutils.raster import Raster
     from geoutils.raster.xr_accessor import RasterAccessor
@@ -559,7 +570,14 @@ def _rasterize(
         # Byte rasterization is supported by Rasterio and has a zero-copy boolean view
         if mask_output:
             data = data.view(np.bool_)
-        return Raster.from_array(data=data, transform=out_transform, crs=out_crs, nodata=None)
+
+        # Define nodata mask for construction of masked array
+        if not mask_output:
+            if not np.isfinite(out_value):
+                data = np.ma.masked_invalid(data)
+            if nodata is not None:
+                data = np.ma.masked_where(data == nodata, data)
+        return Raster.from_array(data=data, transform=out_transform, crs=out_crs, nodata=nodata)
 
     # Build chunked geogrid (shared for Dask and multiproc)
     if chunksizes is None:
@@ -592,12 +610,13 @@ def _rasterize(
         # Convert each completed byte block to a boolean view without another array allocation
         if mask_output:
             data = data.view(np.bool_)
-        return RasterAccessor.from_array(data=data, transform=out_transform, crs=out_crs, nodata=None)
+        elif not np.isfinite(out_value):
+            data = da.where(da.isfinite(data), data, np.nan)
+        return RasterAccessor.from_array(data=data, transform=out_transform, crs=out_crs, nodata=nodata)
 
     # Multiprocessing backend (lazy and writes to file)
 
     # Build minimal output metadata for file writer
-    dtype = _make_dtype(out_value=out_value, burn=burn, out_dtype=out_dtype)
     file_metadata = {
         "height": out_shape[0],
         "width": out_shape[1],
@@ -605,16 +624,20 @@ def _rasterize(
         "dtype": dtype,
         "crs": out_crs,
         "transform": out_transform,
-        "nodata": None,
+        "nodata": nodata,
     }
     assert mp_config is not None
+
+    # Use nodata value for background value before file writing, if the user chose a NaN background
+    file_out_value = nodata if not np.isfinite(out_value) else out_value
+    assert file_out_value is not None
     return _multiproc_rasterize(
         burn=burn,
         dst_geotiling=dst_geotiling,
         dst_block_geogrids=dst_block_geogrids,
         mp_config=mp_config,
         file_metadata=file_metadata,
-        out_value=out_value,
+        out_value=file_out_value,
         out_dtype=dtype,
         all_touched=all_touched,
     )
@@ -644,7 +667,6 @@ def _create_mask_pointcloud(
         # Extract resulting boolean array
         return contained.values
     else:
-
         # Runtime import to avoid circularity issues
         from geoutils.pointcloud import PointCloud
 

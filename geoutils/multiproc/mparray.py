@@ -18,6 +18,7 @@
 # limitations under the License.
 
 """Module defining chunked array operations with Multiprocessing."""
+
 from __future__ import annotations
 
 import logging
@@ -99,11 +100,12 @@ class MultiprocConfig:
         :param chunks: The size of the chunks for splitting raster data. Pass an integer for square chunks, or a
             ``(rows, cols)`` tuple for rectangular chunks. Point cloud operations use an integer number of points.
         :param outfile: The file path where the output will be written.
-        :param driver: Output format. None uses GeoTIFF for rasters; point reprojection infers LAS/LAZ or GeoPackage
-            from the output filename, defaulting to GeoPackage when no extension is given.
+        :param driver: Output format. None uses GeoTIFF for raster results. Point cloud file results infer LAS/LAZ or
+            GeoPackage from the output filename where supported, defaulting to GeoPackage when no extension is given.
         :param cluster: A cluster object for distributed computing, or None for sequential processing.
         """
         self.chunks = _validate_chunk_size(chunks)
+        self._outfile_is_temporary = outfile is None
         if outfile is None:
             with tempfile.NamedTemporaryFile() as tmp:
                 self.outfile = tmp.name
@@ -117,7 +119,10 @@ class MultiprocConfig:
         self.cluster = cluster
 
     def copy(self) -> MultiprocConfig:
-        return MultiprocConfig(chunks=self.chunks, outfile=self.outfile, driver=self.driver, cluster=self.cluster)
+        """Copy this configuration, reserving a fresh path when the output is implicit."""
+
+        outfile = None if self._outfile_is_temporary else self.outfile
+        return MultiprocConfig(chunks=self.chunks, outfile=outfile, driver=self.driver, cluster=self.cluster)
 
     @contextmanager
     def temporary(self) -> Iterator[MultiprocConfig]:
@@ -294,33 +299,41 @@ def _load_raster_tile(raster_unload: Raster, tile: NDArrayNum) -> Raster:
     return raster_tile
 
 
+def _add_tile_padding(raster_shape: tuple[int, int], tile: NDArrayNum, padding: int) -> NDArrayNum:
+    """Expand tile bounds by padding and clip them to the raster shape."""
+
+    if not isinstance(padding, int):
+        raise TypeError(f"Padding must be an integer, got {padding}.")
+    if padding < 0:
+        raise ValueError(f"Padding must be non-negative, got {padding}.")
+
+    # Expand each side independently because blocks at raster edges have asymmetric padding
+    padded_tile = np.asarray(tile).copy()
+    padded_tile[0] = max(int(tile[0]) - padding, 0)
+    padded_tile[1] = min(int(tile[1]) + padding, raster_shape[0])
+    padded_tile[2] = max(int(tile[2]) - padding, 0)
+    padded_tile[3] = min(int(tile[3]) + padding, raster_shape[1])
+
+    return padded_tile
+
+
 def _remove_tile_padding(raster_shape: tuple[int, int], raster_tile: Raster, tile: NDArrayNum, padding: int) -> None:
     """
-    Removes the padding added around tiles during map_overlap computation to prevent edge effects.
+    Remove padding from a processed tile while preserving its destination grid.
 
     :param raster_shape: The shape (height, width) of the raster from which tiles are extracted.
     :param raster_tile: The raster tile with possible padding that needs removal.
-    :param tile: The bounding box of the tile as [rowmin, rowmax, colmin, colmax].
+    :param tile: The destination bounds as [rowmin, rowmax, colmin, colmax].
     :param padding: The padding size to be removed from each side of the tile.
     """
-    # New bounding box dimensions after removing padding
-    colmin, rowmin, colmax, rowmax = 0, 0, raster_tile.width, raster_tile.height
+    # Locate the destination block within its edge-clipped padded block
+    padded_tile = _add_tile_padding(raster_shape, tile, padding)
+    rowmin = int(tile[0] - padded_tile[0])
+    colmin = int(tile[2] - padded_tile[2])
+    rowmax = rowmin + int(tile[1] - tile[0])
+    colmax = colmin + int(tile[3] - tile[2])
 
-    # Remove padding only if the tile is not at the DEM's edges
-    if tile[0] != 0:
-        tile[0] += padding
-        rowmin += padding
-    if tile[1] != raster_shape[0]:
-        tile[1] -= padding
-        rowmax -= padding
-    if tile[2] != 0:
-        tile[2] += padding
-        colmin += padding
-    if tile[3] != raster_shape[1]:
-        tile[3] -= padding
-        colmax -= padding
-
-    # Apply the new bounding box to crop the tile and remove the padding
+    # Crop back to the destination block without changing its output bounds
     raster_tile.icrop(bbox=(colmin, rowmin, colmax, rowmax), inplace=True)
 
 
@@ -333,29 +346,32 @@ def _apply_func_block(
     **kwargs: Any,
 ) -> tuple[Any, NDArrayNum]:
     """
-    Apply a function to a specific tile of a raster, handling loading and padding.
+    Apply a function to a padded raster block and crop its Raster result to the destination bounds.
+
+    The destination bounds are expanded with _add_tile_padding() before _load_raster_tile() reads the source.
+    After func() runs, _remove_tile_padding() crops a Raster result back to the unchanged destination bounds.
 
     :param func: The function to apply to each tile.
     :param raster: The input raster.
-    :param tile: The bounding box of the tile as [xmin, xmax, ymin, ymax].
+    :param tile: The destination bounds as [rowmin, rowmax, colmin, colmax].
     :param depth: The padding size used to overlap tiles.
     :param args: Additional arguments to pass to the function being applied.
 
     :return: The processed tile and its bounding box.
     """
-    # Load raster tile
-    raster_tile = _load_raster_tile(raster, tile)
+    # Load the destination block with enough neighboring pixels for the operation
+    raster_shape = (raster.height, raster.width)
+    padded_tile = _add_tile_padding(raster_shape, tile, depth)
+    raster_tile = _load_raster_tile(raster, padded_tile)
 
     # Apply user-defined function to the tile
     result_tile = func(raster_tile, *args, **kwargs)
 
-    # Remove padding
-    # If raster
+    # Crop Raster results back to the destination block before they are returned or written
     if has_geo_attr(result_tile, "transform"):
-        _remove_tile_padding((raster.height, raster.width), result_tile, tile, depth)
-    # Else
+        _remove_tile_padding(raster_shape, result_tile, tile, depth)
     elif isinstance(result_tile, tuple) and has_geo_attr(result_tile[0], "transform"):
-        _remove_tile_padding((raster.height, raster.width), result_tile[0], tile, depth)
+        _remove_tile_padding(raster_shape, result_tile[0], tile, depth)
 
     # If the raster is a mask, convert to uint8 before saving and force nodata to 255
     if has_geo_attr(result_tile, "transform") and result_tile.is_mask:
@@ -406,8 +422,8 @@ def map_overlap(
     else:
         raster = raster_path
 
-    # Generate tiling grid
-    tiling_grid = compute_tiling(mp_config.chunks, raster.shape, raster.shape, overlap=depth)
+    # Generate non-overlapping destination blocks; each worker adds its own clipped padding
+    tiling_grid = compute_tiling(mp_config.chunks, raster.shape, raster.shape)
 
     # Create tasks for multiprocessing
     tasks = []
@@ -588,8 +604,8 @@ def map_blocks(
     else:
         raster = raster_path
 
-    # Generate tiling grid
-    tiling_grid = compute_tiling(mp_config.chunks, raster.shape, raster.shape, overlap=depth)
+    # Generate non-overlapping destination blocks; each worker adds its own clipped padding
+    tiling_grid = compute_tiling(mp_config.chunks, raster.shape, raster.shape)
 
     # Create tasks for multiprocessing
     tasks = []

@@ -42,7 +42,6 @@ class TestDocs:
 
         # Some of the doc scripts in code/ fails on Windows due to permission errors
         if (platform.system() == "Linux") or (platform.system() == "Darwin"):
-
             for filename in filenames:
                 run_code(filename)
             """

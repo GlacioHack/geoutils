@@ -82,7 +82,7 @@ to track memory over time, and adjust `interval` if the function is too fast or 
 ```{code-cell} python
 @profile("raster workflow", memprof=True, interval=0.01)
 def raster_workflow(source_raster):
-    left, bottom, right, top = source_raster.bounds
+    left, bottom, right, top = source_raster.bbox
     cropped = source_raster.crop((left, bottom, (left + right) / 2, top))
     reprojected = cropped.reproject(crs=4326)
     filtered = reprojected.filter("mean", size=3)

@@ -1,19 +1,35 @@
-"""Tests for raster-point interfacing."""
+"""Tests for conversion between rasters and regular point clouds."""
 
 from __future__ import annotations
 
 import re
 from importlib.util import find_spec
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
 import rasterio as rio
+from numpy.typing import NDArray
+from shapely.geometry import Point
 
 import geoutils as gu
-from geoutils import examples
+from geoutils import examples, open_raster
+from geoutils._dispatch import is_dask_dataframe
+from geoutils.multiproc import MultiprocConfig
+from geoutils.multiproc.cluster import MpCluster
 
 
-class TestRasterPointInterface:
+class TestRasterPoint:
+    """
+    Test module for exact raster and regular point cloud conversions.
+
+    These tests cover core eager calls to to_pointcloud() and from_pointcloud_regular(). TestRasterPointChunked covers
+    representative Dask and multiprocessing conversions.
+
+    More extensive tests are available in test_sampling/test_subsampling.py, as subsampling contains most of the core
+    logic for to_pointcloud(), even for a full-array conversion (as this case is also relevant to subsample()).
+    """
 
     # Paths to example data
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
@@ -123,12 +139,12 @@ class TestRasterPointInterface:
         # 4/ Multi-band real raster
         img2 = gu.Raster(self.landsat_rgb_path)
 
-        # By default only loads a single band without loading
+        # By default returns all bands without loading
         points_arr = img2.to_pointcloud(subsample=10, as_array=True)
         points = img2.to_pointcloud(subsample=10)
 
-        assert points_arr.shape == (10, 3)
-        assert points.ds.shape == (10, 2)  # One less column here due to geometry storing X and Y
+        assert points_arr.shape == (10, 5)
+        assert points.ds.shape == (10, 4)  # One less column here due to geometry storing X and Y
         assert not img2.is_loaded
 
         # Storing auxiliary bands
@@ -238,38 +254,287 @@ class TestRasterPointInterface:
         ):
             gu.Raster.from_pointcloud_regular(pc1)
 
+    def test_from_pointcloud_regular__error_invalid_grid_coordinates(self) -> None:
+        """Checks that grid coordinates contain two regularly spaced increasing axes."""
 
-@pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
-class TestToPointcloudChunked:
+        # Create a regular point cloud and its matching three by three coordinate vectors
+        values = np.arange(9).reshape((3, 3))
+        raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 3, 1, 1), 32633)
+        pointcloud = raster.to_pointcloud()
+        x_coords, y_coords = raster.coords(grid=False)
+
+        # Reject an irregular Y axis even when X remains regular
+        irregular_y = y_coords.copy()
+        irregular_y[1] += 0.25
+        with pytest.raises(ValueError, match="Grid coordinates must be regular"):
+            gu.Raster.from_pointcloud_regular(pointcloud, grid_coords=(x_coords, irregular_y))
+
+        # Reject two irregular axes, axes without a measurable interval, and descending coordinates
+        irregular_x = x_coords.copy()
+        irregular_x[1] += 0.25
+        with pytest.raises(ValueError, match="Grid coordinates must be regular"):
+            gu.Raster.from_pointcloud_regular(pointcloud, grid_coords=(irregular_x, irregular_y))
+        with pytest.raises(ValueError, match="at least two values"):
+            gu.Raster.from_pointcloud_regular(pointcloud, grid_coords=(x_coords[:1], y_coords))
+        with pytest.raises(ValueError, match="must increase"):
+            gu.Raster.from_pointcloud_regular(pointcloud, grid_coords=(x_coords[::-1], y_coords))
+        with pytest.raises(TypeError, match="must be 1D arrays"):
+            gu.Raster.from_pointcloud_regular(pointcloud, grid_coords=(x_coords,))  # type: ignore[arg-type]
+
+    def test_from_pointcloud_regular__error_point_outside_grid(self) -> None:
+        """Checks that an aligned point outside the grid cannot wrap around an array edge."""
+
+        # Create a complete two by two point cloud and move its first point one cell left of the grid
+        transform = rio.transform.from_origin(0, 2, 1, 1)
+        raster = gu.Raster.from_array(np.arange(4).reshape((2, 2)), transform, 32633)
+        dataframe = raster.to_pointcloud().ds.copy()
+        dataframe.loc[dataframe.index[0], "geometry"] = Point(-1, 2)
+
+        # Reject the negative column instead of writing its value into the last raster column
+        with pytest.raises(ValueError, match="fall outside the grid"):
+            gu.Raster.from_pointcloud_regular(dataframe, transform=transform, shape=(2, 2))
+
+    @pytest.mark.parametrize(
+        "values",
+        [
+            np.array([[2**40 + 1, 2**40 + 3]], dtype=np.int64),
+            np.array([[1.0 + 2**-30, 2.0 + 2**-29]], dtype=np.float64),
+        ],
+    )
+    def test_to_pointcloud__skip_nodata_false_preserves_precision(self, values: NDArray[Any]) -> None:
+        """Checks that keeping nodata cells does not reduce integer or floating-point precision."""
+
+        # Convert values that float32 cannot represent exactly while retaining every raster cell
+        raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 1, 1, 1), 32633)
+        pointcloud = raster.to_pointcloud(skip_nodata=False)
+
+        # The floating point output should represent every original value exactly
+        assert pointcloud["b1"].dtype == np.dtype("float64")
+        np.testing.assert_array_equal(pointcloud["b1"].to_numpy(), values.ravel().astype(np.float64))
+
+    def test_to_pointcloud__iterable_auxiliary_columns(self) -> None:
+        """Checks that iterable auxiliary bands and names are normalized before repeated use."""
+
+        # Build three bands and pass their auxiliary options as one-use generators
+        values = np.arange(12).reshape((3, 2, 2))
+        raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 2, 1, 1), 32633)
+        bands = (band for band in (2, 3))
+        names = (name for name in ("second", "third"))
+        pointcloud = raster.to_pointcloud(
+            auxiliary_data_bands=bands,
+            auxiliary_column_names=names,
+        )
+
+        # Preserve both auxiliary values and their requested column names
+        assert list(pointcloud.ds.columns) == ["b1", "second", "third", "geometry"]
+        np.testing.assert_array_equal(pointcloud["second"].to_numpy(), values[1].ravel())
+        np.testing.assert_array_equal(pointcloud["third"].to_numpy(), values[2].ravel())
+
+    @pytest.mark.parametrize(
+        "options",
+        [
+            {"data_column_name": "b2", "auxiliary_data_bands": [2]},
+            {"data_column_name": "geometry"},
+        ],
+    )
+    def test_to_pointcloud__error_invalid_column_names(self, options: dict[str, Any]) -> None:
+        """Checks that point data columns cannot be duplicated or replace the geometry column."""
+
+        # Create two bands that would otherwise produce an ambiguous point dataframe
+        values = np.arange(8).reshape((2, 2, 2))
+        raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 2, 1, 1), 32633)
+
+        # Reject duplicate or reserved names before constructing the dataframe
+        with pytest.raises(ValueError, match="must be unique"):
+            raster.to_pointcloud(**options)
+
+
+@pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
+class TestRasterPointChunked:
     """
-    Test module for comparing to_pointcloud() outputs from eager and Dask rasters.
+    Test module for to_pointcloud() across eager, Dask, and multiprocessing backends.
 
-    These tests cover the currently eager point outputs and keep the source Dask array. Expand them to cover lazy
-    outputs when to_pointcloud() returns lazy point data.
+    Dask outputs must stay lazy until explicitly computed. Multiprocessing inputs and point outputs must stay unloaded,
+    and both chunked backends must return the same values as an eager conversion. More extensive chunked sampling tests
+    are available in test_sampling/test_subsampling.py.
     """
 
-    @pytest.mark.parametrize("subsample", [1, 11])
+    @pytest.mark.parametrize("subsample", [1, 11, 17])
+    @pytest.mark.parametrize("skip_nodata", [True, False])
     @pytest.mark.parametrize("as_array", [False, True])
-    def test_to_pointcloud__eager_samples_keep_lazy_source(self, subsample: int, as_array: bool) -> None:
-        """Checks that point sampling returns exact eager values without loading or replacing the Dask source."""
+    def test_to_pointcloud__chunked_backends_equal(
+        self, subsample: int, skip_nodata: bool, as_array: bool, tmp_path: Path
+    ) -> None:
+        """Checks that eager, Dask and Multiprocessing conversions return the same point rows."""
 
         import dask.array as da
 
-        # Include a missing pixel and uneven chunks to check the mask and deterministic sample order
-        values = np.arange(63, dtype=np.float32).reshape((7, 9))
-        values[2, 3] = np.nan
+        # 1/ Write a three-band raster with one nodata pixel and shorter final row/column chunks
+        main_values = np.arange(63, dtype=np.float32).reshape((7, 9))
+        main_values[2, 3] = np.nan
+        values = np.stack((main_values, main_values + 100, main_values + 200))
         transform = rio.transform.from_origin(500000, 8600000, 20, 20)
-        eager = gu.Raster.from_array(values, transform, 32633, nodata=-9999)
-        source = gu.RasterAccessor.from_array(da.from_array(values, chunks=(3, 4)), transform, 32633, nodata=-9999)
-        source_array = source.data
-        options = {"subsample": subsample, "as_array": as_array, "random_state": 42}
+        source_file = tmp_path / "point-source.tif"
+        gu.Raster.from_array(values, transform, 32633, nodata=-9999).to_file(source_file)
 
-        # Sample eager point values while keeping the input array available for lazy operations
+        # 2/ Open the file as a loaded raster, a lazy Dask array, and an unloaded multiprocessing source
+        eager = gu.Raster(source_file)
+        eager.load()
+        dask_source = open_raster(str(source_file), chunks={"band": 1, "x": 4, "y": 3})
+        multiprocessing_source = gu.Raster(source_file)
+        dask_source_array = dask_source.data
+        options = {
+            "subsample": subsample,
+            "skip_nodata": skip_nodata,
+            "as_array": as_array,
+            "random_state": 42,
+            "auxiliary_data_bands": [2, 3],
+            "force_pixel_offset": "center",
+        }
+
+        # 3/ Convert every backend with the same options and matching 3 x 4 chunks
         expected = eager.to_pointcloud(**options)
-        actual = source.rst.to_pointcloud(**options)
+        dask_output = dask_source.rst.to_pointcloud(**options)
+        point_output = tmp_path / f"points-{subsample}-{skip_nodata}.gpkg"
+        with MpCluster({"nb_workers": 2}) as cluster:
+            multiprocessing_output = multiprocessing_source.to_pointcloud(
+                **options,
+                mp_config=MultiprocConfig(chunks=(3, 4), outfile=str(point_output), cluster=cluster),
+            )
+
+        # 4/ Check that the Dask source and output stay lazy until the result is computed explicitly
+        assert dask_source.data is dask_source_array
+        assert not dask_source._in_memory
         if as_array:
-            np.testing.assert_array_equal(expected, actual)
+            assert isinstance(dask_output, da.Array)
+            dask_computed = dask_output.compute()
+            assert isinstance(dask_output, da.Array)
         else:
-            assert expected.pointcloud_equal(actual)
+            assert is_dask_dataframe(dask_output)
+            assert not dask_output.pc.is_loaded
+            assert dask_output.pc.data_column == "b1"
+            dask_computed = dask_output.compute()
+            assert not dask_output.pc.is_loaded
+        assert dask_source.data is dask_source_array
+        assert not dask_source._in_memory
+
+        # 5/ Check each computed result and the expected multiprocessing loading and file behavior
+        assert not multiprocessing_source.is_loaded
+        if as_array:
+            assert isinstance(multiprocessing_output, np.ndarray)
+            assert not point_output.exists()
+            expected_order = np.lexsort((expected[:, 0], expected[:, 1]))
+            dask_order = np.lexsort((dask_computed[:, 0], dask_computed[:, 1]))
+            np.testing.assert_array_equal(expected[expected_order], dask_computed[dask_order])
+            np.testing.assert_array_equal(expected, multiprocessing_output)
+        else:
+            assert not multiprocessing_output.is_loaded
+            assert multiprocessing_output.name == str(point_output)
+            assert point_output.exists()
+
+            # Chunked outputs follow raster chunk order, so compare the same points after sorting by location
+            expected_frame = expected.ds
+            dask_frame = dask_computed
+            multiprocessing_frame = multiprocessing_output.ds
+            expected_order = np.lexsort((expected_frame.geometry.x, expected_frame.geometry.y))
+            dask_order = np.lexsort((dask_frame.geometry.x, dask_frame.geometry.y))
+            multiprocessing_order = np.lexsort((multiprocessing_frame.geometry.x, multiprocessing_frame.geometry.y))
+            expected_frame = expected_frame.iloc[expected_order].reset_index(drop=True)
+            dask_frame = dask_frame.iloc[dask_order].reset_index(drop=True)
+            multiprocessing_frame = multiprocessing_frame.iloc[multiprocessing_order].reset_index(drop=True)
+            np.testing.assert_array_equal(expected_frame.geometry.x, dask_frame.geometry.x)
+            np.testing.assert_array_equal(expected_frame.geometry.y, dask_frame.geometry.y)
+            np.testing.assert_array_equal(expected_frame.geometry.x, multiprocessing_frame.geometry.x)
+            np.testing.assert_array_equal(expected_frame.geometry.y, multiprocessing_frame.geometry.y)
+            for column in ("b1", "b2", "b3"):
+                np.testing.assert_array_equal(expected_frame[column], dask_frame[column])
+                np.testing.assert_array_equal(expected_frame[column], multiprocessing_frame[column])
+            assert multiprocessing_output.is_loaded
+            assert not multiprocessing_source.is_loaded
+
+    def test_to_pointcloud__large_chunked_sample_preserves_precision(self, tmp_path: Path) -> None:
+        """Checks that large Dask and multiprocessing samples preserve float64 raster values."""
+
+        # Write distinct float64 values that would change if converted through float32
+        values = np.arange(80, dtype=np.float64).reshape((8, 10)) + 2**-30
+        source_file = tmp_path / "precise-point-source.tif"
+        output_file = tmp_path / "precise-points.gpkg"
+        gu.Raster.from_array(values, rio.transform.from_origin(0, 8, 1, 1), 32633).to_file(source_file)
+
+        # Select more values than one 3 x 4 chunk through all three backends
+        options = {"subsample": 17, "skip_nodata": False, "random_state": 42}
+        expected = gu.Raster(source_file).to_pointcloud(**options)
+        dask_result = open_raster(str(source_file), chunks={"x": 4, "y": 3}).rst.to_pointcloud(**options).compute()
+        multiprocessing_source = gu.Raster(source_file)
+        multiprocessing_result = multiprocessing_source.to_pointcloud(
+            **options,
+            mp_config=MultiprocConfig(chunks=(3, 4), outfile=str(output_file)),
+        )
+
+        # Keep exact source values and return the same selected values from every backend
+        expected_values = expected["b1"].to_numpy()
+        assert expected_values.dtype == np.dtype("float64")
+        assert np.isin(expected_values, values).all()
+        np.testing.assert_array_equal(np.sort(dask_result["b1"].to_numpy()), np.sort(expected_values))
+        np.testing.assert_array_equal(np.sort(multiprocessing_result["b1"].to_numpy()), np.sort(expected_values))
+        assert not multiprocessing_source.is_loaded
+
+    @pytest.mark.parametrize("suffix", [".las", ".laz"])
+    def test_to_pointcloud__multiproc_las_elevation(self, suffix: str, tmp_path: Path) -> None:
+        """Checks that LAS and LAZ conversion stores the main raster band as elevation."""
+
+        # Write three raster bands with exact integer values and projected pixel-center coordinates
+        main_values = np.arange(80, dtype=np.int16).reshape((8, 10))
+        values = np.stack((main_values, main_values + 100, main_values + 200))
+        source_file = tmp_path / "las-point-source.tif"
+        output_file = tmp_path / f"raster-points{suffix}"
+        gu.Raster.from_array(values, rio.transform.from_origin(500000, 8600000, 20, 20), 32633).to_file(source_file)
+        expected = gu.Raster(source_file).to_pointcloud(auxiliary_data_bands=[2, 3], force_pixel_offset="center").ds
+        source = gu.Raster(source_file)
+
+        # Convert every raster cell, mapping band one to Z and preserving the other bands as extra dimensions
+        result = source.to_pointcloud(
+            auxiliary_data_bands=[2, 3],
+            force_pixel_offset="center",
+            mp_config=MultiprocConfig(chunks=(3, 4), outfile=str(output_file)),
+        )
+
+        # Compare the complete file after sorting the tile-ordered result by its X/Y coordinates
+        assert output_file.exists() and not source.is_loaded and not result.is_loaded
+        assert result.data_column == "Z"
+        result.load(columns=["Z", "b2", "b3"])
+        expected_order = np.lexsort((expected.geometry.x, expected.geometry.y))
+        result_order = np.lexsort((result.geometry.x, result.geometry.y))
+        np.testing.assert_allclose(result.geometry.x.iloc[result_order], expected.geometry.x.iloc[expected_order])
+        np.testing.assert_allclose(result.geometry.y.iloc[result_order], expected.geometry.y.iloc[expected_order])
+        np.testing.assert_array_equal(result.data[result_order], expected["b1"].iloc[expected_order])
+        np.testing.assert_array_equal(result.ds["b2"].iloc[result_order], expected["b2"].iloc[expected_order])
+        np.testing.assert_array_equal(result.ds["b3"].iloc[result_order], expected["b3"].iloc[expected_order])
+
+    def test_to_pointcloud__error_dask_with_multiproc(self) -> None:
+        """Checks that to_pointcloud() rejects multiprocessing with Dask without loading the source."""
+
+        import dask.array as da
+
+        # Build a lazy Dask raster that will trigger Dask execution
+        values = da.arange(20, chunks=7).reshape((4, 5))
+        transform = rio.transform.from_origin(0, 4, 1, 1)
+        source = gu.RasterAccessor.from_array(values, transform, 4326)
+        source_array = source.data
+
+        # Reject multiprocessing before computing or replacing the source Dask array
+        with pytest.raises(ValueError, match="Cannot use Multiprocessing and Dask simultaneously"):
+            source.rst.to_pointcloud(as_array=True, mp_config=MultiprocConfig(chunks=(2, 3)))
         assert source.data is source_array
         assert not source._in_memory
+
+    def test_to_pointcloud__error_xarray_with_multiproc(self) -> None:
+        """Checks that to_pointcloud() rejects multiprocessing for a non-Dask Xarray accessor."""
+
+        # Build an eager Xarray raster without a Dask chunk layout
+        values = np.arange(20).reshape((4, 5))
+        source = gu.RasterAccessor.from_array(values, rio.transform.from_origin(0, 4, 1, 1), 4326)
+
+        # Require a Raster input rather than silently writing the Xarray values to a temporary raster
+        with pytest.raises(ValueError, match="requires a Raster input"):
+            source.rst.to_pointcloud(mp_config=MultiprocConfig(chunks=(2, 3)))

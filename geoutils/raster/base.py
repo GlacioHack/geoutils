@@ -25,12 +25,11 @@ import pathlib
 import struct
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import (
     TYPE_CHECKING,
     Any,
     Callable,
-    Iterable,
     Literal,
     TypeVar,
     Union,
@@ -81,17 +80,16 @@ from geoutils.projtools import (
     merge_bounds,
 )
 from geoutils.raster.referencing import (
-    _bounds,
+    _bbox,
     _coords,
-    _default_nodata,
     _ij2xy,
     _outside_bounds,
     _res,
     _xy2ij,
 )
 from geoutils.raster.testing import _array_equal_or_close
-from geoutils.raster.transformation import _crop, _reproject, _translate
-from geoutils.sampling.subsampling import _subsample
+from geoutils.raster.transformation import _clip, _crop, _reproject, _translate
+from geoutils.sampling.subsampling import _subsample, _subsample_raster
 from geoutils.stats.stats import stats as _stats
 from geoutils.stats.stats import variogram as _variogram
 
@@ -102,11 +100,24 @@ RasterLike = Union["RasterBase", xr.DataArray]
 _UNSET = object()
 
 if TYPE_CHECKING:
+    import matplotlib
+
     from geoutils.interface.gridding import GriddingMethod
     from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
+    from geoutils.raster.raster import Raster
     from geoutils.stats.variography import Variogram
     from geoutils.vector.base import VectorLike
     from geoutils.vector.vector import Vector, VectorType
+
+
+def _validate_downsample(downsample: Number) -> float:
+    """Validate and normalize a raster opening downsampling factor."""
+
+    if isinstance(downsample, (bool, np.bool_)) or not isinstance(downsample, (int, float, np.integer, np.floating)):
+        raise TypeError("downsample must be of type int or float.")
+    if not np.isfinite(downsample) or downsample < 1:
+        raise ValueError("downsample must be >=1 and finite.")
+    return float(downsample)
 
 
 class RasterBase(ABC):
@@ -138,9 +149,11 @@ class RasterBase(ABC):
         self._disk_shape: tuple[int, int, int] | None = None
         self._disk_bands: tuple[int] | None = None
         self._disk_dtype: DTypeLike | None = None
+        self._out_dtype: DTypeLike | None = None
         self._disk_transform: Affine | None = None
         self._out_count: int | None = None
         self._out_shape: tuple[int, int] | None = None
+        self._out_window: rio.windows.Window | None = None
         self._disk_hash: int | None = None
         self._downsample: int | float = 1
         self._profile: dict[str, Any] | None = None
@@ -372,7 +385,6 @@ class RasterBase(ABC):
         else:
             # If we update mask or array, get the masked array
             if update_array or update_mask:
-
                 # Extract the data variable, so the self.data property doesn't have to be called a bunch of times
                 imgdata = self.data
 
@@ -639,9 +651,15 @@ class RasterBase(ABC):
         return _res(self.transform)
 
     @property
+    def bbox(self) -> rio.coords.BoundingBox:
+        """Bounding box of the raster."""
+        return _bbox(transform=self.transform, shape=self.shape)
+
+    @property
     def bounds(self) -> rio.coords.BoundingBox:
-        """Bounding coordinates of the raster."""
-        return _bounds(transform=self.transform, shape=self.shape)
+        """Bounding box of the raster, provided as an alias of bbox."""
+
+        return self.bbox
 
     @property
     def footprint(self) -> Vector:
@@ -738,8 +756,8 @@ class RasterBase(ABC):
             f"Nodata value:         {self.nodata}",
             f"Pixel interpretation: {self.area_or_point}",
             "Pixel size:           {}, {}".format(*self.res),
-            f"Upper left corner:    {self.bounds.left}, {self.bounds.top}",
-            f"Lower right corner:   {self.bounds.right}, {self.bounds.bottom}",
+            f"Upper left corner:    {self.bbox.left}, {self.bbox.top}",
+            f"Lower right corner:   {self.bbox.right}, {self.bbox.bottom}",
         ]
 
         if stats:
@@ -771,6 +789,117 @@ class RasterBase(ABC):
             return None
         else:
             return "\n".join(as_str)
+
+    @overload
+    def plot(
+        self,
+        bands: int | tuple[int, ...] | None = None,
+        ref: RasterLike | VectorLike | CRS | str | int | None = None,
+        cmap: matplotlib.colors.Colormap | str | None = None,
+        max_pixels: Literal["auto"] | int | None = "auto",
+        vmin: float | int | None = None,
+        vmax: float | int | None = None,
+        alpha: float | int | None = None,
+        title: str | None = None,
+        cbar_title: str | None = None,
+        add_cbar: bool = True,
+        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
+        *,
+        resampling: Resampling | str | None = None,
+        return_axes: Literal[False] = False,
+        savefig_fname: str | None = None,
+        **kwargs: Any,
+    ) -> None: ...
+
+    @overload
+    def plot(
+        self,
+        bands: int | tuple[int, ...] | None = None,
+        ref: RasterLike | VectorLike | CRS | str | int | None = None,
+        cmap: matplotlib.colors.Colormap | str | None = None,
+        max_pixels: Literal["auto"] | int | None = "auto",
+        vmin: float | int | None = None,
+        vmax: float | int | None = None,
+        alpha: float | int | None = None,
+        title: str | None = None,
+        cbar_title: str | None = None,
+        add_cbar: bool = True,
+        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
+        *,
+        resampling: Resampling | str | None = None,
+        return_axes: Literal[True],
+        savefig_fname: str | None = None,
+        **kwargs: Any,
+    ) -> tuple[matplotlib.axes.Axes, matplotlib.axes.Axes | None]: ...
+
+    def plot(
+        self,
+        bands: int | tuple[int, ...] | None = None,
+        ref: RasterLike | VectorLike | CRS | str | int | None = None,
+        cmap: matplotlib.colors.Colormap | str | None = None,
+        max_pixels: Literal["auto"] | int | None = "auto",
+        vmin: float | int | None = None,
+        vmax: float | int | None = None,
+        alpha: float | int | None = None,
+        title: str | None = None,
+        cbar_title: str | None = None,
+        add_cbar: bool = True,
+        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
+        *,
+        resampling: Resampling | str | None = None,
+        return_axes: bool = False,
+        savefig_fname: str | None = None,
+        **kwargs: Any,
+    ) -> None | tuple[matplotlib.axes.Axes, matplotlib.axes.Axes | None]:
+        r"""
+        Plot the raster.
+
+        This method performs automatic subsampling to facilitate the plotting of large datasets
+        out-of-memory, then wraps Matplotlib ``imshow`` to which keyword arguments are passed.
+
+        :param bands: Bands to plot, counting from 1 to self.count. Defaults to all bands.
+        :param ref: Reference geospatial object or CRS to match. A reference object also sets the plotted axis
+            limits to its bounds.
+        :param cmap: Colormap to use. Defaults to ``matplotlib.rcParams['image.cmap']``.
+        :param max_pixels: The default ``"auto"`` limits output to the Matplotlib axes width and height in display
+            pixels, as set by the figure size and DPI. An integer limits the total number of plotted pixels, and None
+            keeps the native grid size. This creates a temporary grid through reprojection and does not select a
+            specific overview stored in the source file. See `Rasterio's overview documentation
+            <https://rasterio.readthedocs.io/en/stable/topics/overviews.html>`_.
+        :param vmin: Minimum value for the colorbar. Defaults to the plotted data minimum.
+        :param vmax: Maximum value for the colorbar. Defaults to the plotted data maximum.
+        :param alpha: Raster and colorbar transparency.
+        :param title: Plot title.
+        :param cbar_title: Colorbar label.
+        :param add_cbar: Whether to display a colorbar. Multi-band RGB(A) plots never add one.
+        :param ax: Matplotlib axes, ``"new"`` to create axes, or None to use the current axes.
+        :param resampling: Rasterio resampling method used when the display grid changes. Defaults to the configured
+            reprojection method, except for boolean rasters whose reprojection uses nearest-neighbor resampling.
+        :param return_axes: Whether to return the image and colorbar axes.
+        :param savefig_fname: Optional path at which to save the current figure.
+        :returns: None, or the image axes and optional colorbar axes when ``return_axes=True``.
+        """
+
+        from geoutils.raster.plotting import _plot_raster
+
+        return _plot_raster(
+            self,
+            bands=bands,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            alpha=alpha,
+            title=title,
+            cbar_title=cbar_title,
+            add_cbar=add_cbar,
+            ax=ax,
+            ref=ref,
+            max_pixels=max_pixels,
+            resampling=resampling,
+            return_axes=return_axes,
+            savefig_fname=savefig_fname,
+            **kwargs,
+        )
 
     def stats(
         self,
@@ -961,11 +1090,11 @@ class RasterBase(ABC):
 
             # Three cases: masked/NaN, NaN/masked or NaN/NaN
             if np.ma.isMaskedArray(self.data):
-                left_data = self.get_nanarray()
+                left_data = self.to_nanarray()
                 right_data = other.data
             elif np.ma.isMaskedArray(other.data):
                 left_data = self.data
-                right_data = other.get_nanarray()
+                right_data = other.to_nanarray()
             else:
                 left_data = self.data
                 right_data = other.data
@@ -1111,7 +1240,7 @@ class RasterBase(ABC):
         densify_points = min(max(self.width, self.height), densify_points)
 
         # Calculate new bounds
-        new_bounds = _get_bounds_projected(self.bounds, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points)
+        new_bounds = _get_bounds_projected(self.bbox, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points)
 
         return new_bounds
 
@@ -1131,7 +1260,7 @@ class RasterBase(ABC):
         from geoutils.vector import Vector
 
         footprint = _get_footprint_projected(
-            bounds=self.bounds, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points
+            bounds=self.bbox, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points
         )
         if self._is_xr:
             return footprint  # type: ignore[return-value]
@@ -1181,7 +1310,7 @@ class RasterBase(ABC):
         )
 
         # Calculate intersection of bounding boxes
-        intersection = merge_bounds([self.bounds, raster_bounds_sameproj], merging_algorithm="intersection")
+        intersection = merge_bounds([self.bbox, raster_bounds_sameproj], merging_algorithm="intersection")
 
         # Check that intersection is not void (changed to NaN instead of empty tuple end 2022)
         if intersection == () or all(math.isnan(i) for i in intersection):
@@ -1196,16 +1325,16 @@ class RasterBase(ABC):
         return intersection  # type: ignore
 
     @overload
-    def get_nanarray(
+    def to_nanarray(
         self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[False] = False
     ) -> NDArrayNum: ...
 
     @overload
-    def get_nanarray(
+    def to_nanarray(
         self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[True]
     ) -> tuple[NDArrayNum, NDArrayBool]: ...
 
-    def get_nanarray(
+    def to_nanarray(
         self, floating_dtype: DTypeLike = "float32", *, return_mask: bool = False
     ) -> NDArrayNum | tuple[NDArrayNum, NDArrayBool]:
         """
@@ -1238,6 +1367,26 @@ class RasterBase(ABC):
         else:
             return nanarray
 
+    @overload
+    def get_nanarray(
+        self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[False] = False
+    ) -> NDArrayNum: ...
+
+    @overload
+    def get_nanarray(
+        self, floating_dtype: DTypeLike = "float32", *, return_mask: Literal[True]
+    ) -> tuple[NDArrayNum, NDArrayBool]: ...
+
+    @deprecate(details="Use to_nanarray() instead.")
+    def get_nanarray(
+        self, floating_dtype: DTypeLike = "float32", *, return_mask: bool = False
+    ) -> NDArrayNum | tuple[NDArrayNum, NDArrayBool]:
+        """Call to_nanarray() through its deprecated name."""
+
+        if return_mask:
+            return self.to_nanarray(floating_dtype=floating_dtype, return_mask=True)
+        return self.to_nanarray(floating_dtype=floating_dtype, return_mask=False)
+
     @profiler.profile("geoutils.raster.base.crop", memprof=True)
     def crop(
         self: RasterType,
@@ -1259,6 +1408,20 @@ class RasterBase(ABC):
         :returns: A new cropped raster.
         """
 
+        # Store only the read window when the source values still live on disk
+        if not self._is_xr and not self.is_loaded:
+            raster = cast("Raster", self)
+            output = cast(RasterType, raster._crop_deferred(bbox=bbox, distance_unit="georeferenced"))
+            if inplace:
+                warnings.warn(
+                    message="Argument 'inplace' is deprecated, and will be removed in future releases. "
+                    "Use 'rast = rast.crop()' instead.",
+                    category=DeprecationWarning,
+                )
+                self.__dict__.update(output.__dict__)
+                return None
+            return output
+
         cropped_arr, new_transform = _crop(source_raster=self, bbox=bbox)
 
         # Keep in-place for a bit with deprecation warning
@@ -1271,7 +1434,7 @@ class RasterBase(ABC):
 
             if self._is_xr:
                 raise NotImplementedError(
-                    "In-place cropping raster is deprecated and not supported through the 'rst' " "accessor."
+                    "In-place cropping raster is deprecated and not supported through the 'rst' accessor."
                 )
             else:
                 self._data = cropped_arr
@@ -1282,6 +1445,30 @@ class RasterBase(ABC):
         if self._is_xr:
             return cast(RasterType, cropped_arr)
         return self.from_array(cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point)
+
+    def clip(
+        self: RasterType,
+        mask: Any,
+        all_touched: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> RasterType:
+        """
+        Mask raster cells outside an exact clipping geometry.
+
+        The raster grid and extent stay unchanged. Cells inside the geometry keep their values, while cells outside
+        become masked values for Raster objects and NaN values for Xarray objects.
+
+        :param mask: Clipping geometry, vector, point cloud, raster or bounding box. Georeferenced masks are
+            reprojected to this raster's CRS.
+        :param all_touched: Whether to keep every cell touched by the geometry. By default, keep cells whose center is
+            inside the geometry, following Rasterio rasterization behavior.
+        :param mp_config: Multiprocessing configuration.
+
+        :returns: Raster with cells outside the clipping geometry as NaN or masked.
+        """
+
+        output = _clip(self, mask=mask, all_touched=all_touched, mp_config=mp_config)
+        return self._cast_raster_output(output)
 
     @profiler.profile("geoutils.raster.base.icrop", memprof=True)
     def icrop(
@@ -1297,6 +1484,20 @@ class RasterBase(ABC):
 
         :returns: Cropped raster.
         """
+        # Store only read window when raster is not loaded yet
+        if not self._is_xr and not self.is_loaded:
+            raster = cast("Raster", self)
+            output = cast(RasterType, raster._crop_deferred(bbox=bbox, distance_unit="pixel"))
+            if inplace:
+                warnings.warn(
+                    message="Argument 'inplace' is deprecated, and will be removed in future releases. "
+                    "Use 'rast = rast.icrop()' instead.",
+                    category=DeprecationWarning,
+                )
+                self.__dict__.update(output.__dict__)
+                return None
+            return output
+
         cropped_arr, new_transform = _crop(source_raster=self, bbox=bbox, distance_unit="pixel")
 
         # Keep in-place for a bit with deprecation warning
@@ -1309,7 +1510,7 @@ class RasterBase(ABC):
 
             if self._is_xr:
                 raise NotImplementedError(
-                    "In-place cropping raster is deprecated and not supported through the 'rst' " "accessor."
+                    "In-place cropping raster is deprecated and not supported through the 'rst' accessor."
                 )
             else:
                 self._data = cropped_arr
@@ -1917,7 +2118,7 @@ class RasterBase(ABC):
 
     @deprecate(
         Version("0.3.0"),
-        "Raster.to_points() is deprecated in favor of Raster.to_pointcloud() and will be removed in v0.3.",
+        "Use Raster.to_pointcloud() instead.",
     )
     def to_points(self, **kwargs):  # type: ignore
 
@@ -1928,29 +2129,16 @@ class RasterBase(ABC):
         self,
         data_column_name: str = "b1",
         data_band: int = 1,
-        auxiliary_data_bands: list[int] | None = None,
-        auxiliary_column_names: list[str] | None = None,
+        auxiliary_data_bands: Iterable[int] | None = None,
+        auxiliary_column_names: Iterable[str] | None = None,
         subsample: float | int = 1,
         skip_nodata: bool = True,
         *,
         as_array: Literal[False] = False,
         random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> NDArrayNum: ...
-
-    @overload
-    def to_pointcloud(
-        self,
-        data_column_name: str = "b1",
-        data_band: int = 1,
-        auxiliary_data_bands: list[int] | None = None,
-        auxiliary_column_names: list[str] | None = None,
-        subsample: float | int = 1,
-        skip_nodata: bool = True,
-        *,
-        as_array: Literal[True],
-        random_state: int | np.random.Generator | None = None,
-        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        mp_config: MultiprocConfig | None = None,
+        force_output_to_memory: bool = False,
     ) -> PointCloud: ...
 
     @overload
@@ -1958,68 +2146,73 @@ class RasterBase(ABC):
         self,
         data_column_name: str = "b1",
         data_band: int = 1,
-        auxiliary_data_bands: list[int] | None = None,
-        auxiliary_column_names: list[str] | None = None,
+        auxiliary_data_bands: Iterable[int] | None = None,
+        auxiliary_column_names: Iterable[str] | None = None,
+        subsample: float | int = 1,
+        skip_nodata: bool = True,
+        *,
+        as_array: Literal[True],
+        random_state: int | np.random.Generator | None = None,
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        mp_config: MultiprocConfig | None = None,
+        force_output_to_memory: bool = False,
+    ) -> NDArrayNum: ...
+
+    @overload
+    def to_pointcloud(
+        self,
+        data_column_name: str = "b1",
+        data_band: int = 1,
+        auxiliary_data_bands: Iterable[int] | None = None,
+        auxiliary_column_names: Iterable[str] | None = None,
         subsample: float | int = 1,
         skip_nodata: bool = True,
         *,
         as_array: bool = False,
         random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        mp_config: MultiprocConfig | None = None,
+        force_output_to_memory: bool = False,
     ) -> NDArrayNum | PointCloud: ...
 
     def to_pointcloud(
         self,
         data_column_name: str = "b1",
         data_band: int = 1,
-        auxiliary_data_bands: list[int] | None = None,
-        auxiliary_column_names: list[str] | None = None,
+        auxiliary_data_bands: Iterable[int] | None = None,
+        auxiliary_column_names: Iterable[str] | None = None,
         subsample: float | int = 1,
         skip_nodata: bool = True,
         as_array: bool = False,
         random_state: int | np.random.Generator | None = None,
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
-    ) -> NDArrayNum | PointCloud:
+        mp_config: MultiprocConfig | None = None,
+        force_output_to_memory: bool = False,
+    ) -> Any:
         """
-        Convert raster to point cloud.
+        Convert raster cells to a point cloud, optionally selecting a random subsample.
 
-        A point cloud is a vector of point geometries associated to a data column, and possibly other auxiliary data
-        columns, see geoutils.gu.PointCloud.
-
-        For a single band raster, the main data column name of the point cloud defaults to "b1" and stores values of
-        that single band.
-        For a multi-band raster, the main data column name of the point cloud defaults to "bX" where X is the data band
-        index chosen by the user (defaults to 1, the first band).
-        Optionally, all other bands can also be stored in columns "b1", "b2", etc. For more specific band selection,
-        use Raster.split_bands previous to converting to point cloud.
-
-        Optionally, randomly subsample valid pixels for the data band (nodata values can be skipped, but only for the
-        band that will be used as data column of the point cloud).
-        If 'subsample' is either 1, or is equal to the pixel count, all (valid) points are returned.
-        If 'subsample' is smaller than 1 (for fractions), or smaller than the pixel count, a random subsample
-        of (valid) points is returned.
-
-        If the raster is not loaded, sampling will be done from disk using rasterio.sample after loading only the masks
-        of the dataset.
-
-        Formats:
-            * `as_array` == False: A vector with dataframe columns ["b1", "b2", ..., "geometry"],
-            * `as_array` == True: A numpy ndarray of shape (N, 2 + count) with the columns [x, y, b1, b2..].
+        Cell selection and output construction use the same implementation as subsample(). With the default
+        ``subsample=1``, every eligible cell is returned, while this method keeps conversion arguments first.
 
         :param data_column_name: Name to use for point cloud data column, defaults to "bX" where X is the data band
             number.
         :param data_band: (Only for multi-band rasters) Band to use for data column, defaults to first. Band counting
             starts at 1.
-        :param auxiliary_data_bands: (Only for multi-band rasters) Whether to save other band numbers as auxiliary data
-            columns, defaults to none.
+        :param auxiliary_data_bands: (Only for multi-band rasters) Other bands to save as auxiliary data columns,
+            defaulting to every band other than ``data_band``. Pass an empty iterable to keep only the main band.
         :param auxiliary_column_names: (Only for multi-band rasters) Names to use for auxiliary data bands, only if
             auxiliary data bands is not none, defaults to "b1", "b2", etc.
-        :param subsample: Subsample size. If > 1, parsed as a count, otherwise a fraction.
+        :param subsample: Fraction or maximum number of eligible cells to return, with 1 selecting every cell.
         :param skip_nodata: Whether to skip nodata values.
         :param as_array: Return an array instead of a vector.
         :param random_state: Random state or seed number.
         :param force_pixel_offset: Force offset to derive point coordinate with. Raster coordinates normally only
             associate to upper-left corner "ul" ("Area" definition) or center ("Point" definition).
+        :param mp_config: Worker, tile and output settings for multiprocessing. Point output uses GeoPackage, LAS or
+            LAZ; LAS/LAZ stores the main raster value as elevation. Array output does not write a file. Cannot be
+            combined with a Dask source.
+        :param force_output_to_memory: Keep the complete output in memory instead of using the automatic chunked path.
 
         :raises ValueError: If the sample count or fraction is poorly formatted.
 
@@ -2037,6 +2230,8 @@ class RasterBase(ABC):
             as_array=as_array,
             random_state=random_state,
             force_pixel_offset=force_pixel_offset,
+            mp_config=mp_config,
+            force_output_to_memory=force_output_to_memory,
         )
         if as_array:
             return output
@@ -2118,9 +2313,9 @@ class RasterBase(ABC):
         self,
         vector: VectorType | None = None,
         target_values: list[float] | None = None,
-        geometry_type: str = "boundary",
-        in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
         distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
+        max_distance: float | None = None,
+        mp_config: MultiprocConfig | None = None,
     ) -> RasterBase:
         """
         Compute proximity distances to the raster target pixels, or to a vector geometry on the raster grid.
@@ -2128,121 +2323,208 @@ class RasterBase(ABC):
         **Match-reference**: a raster can be passed to match its resolution, bounds and CRS for computing
         proximity distances.
 
-        When passing a vector, by default, the boundary of the geometry will be used. The full geometry can be used by
-        passing "geometry", or any lower dimensional geometry attribute such as "centroid", "envelope" or "convex_hull".
-        See all geometry attributes in the Shapely documentation at https://shapely.readthedocs.io/.
+        When passing a vector, its current geometry is used. Apply a vector geometry operation first to calculate
+        proximity to a derived geometry, for example ``vector.boundary.proximity(raster)``.
 
         :param vector: Vector for which to compute the proximity to geometry,
             if not provided computed on this raster target pixels.
         :param target_values: (Only with raster) List of target values to use for the proximity,
             defaults to all non-zero values.
-        :param geometry_type: (Only with a vector) Type of geometry to use for the proximity, defaults to 'boundary'.
-        :param in_or_out: (Only with a vector) Compute proximity only 'in' or 'out'-side the geometry, or 'both'.
         :param distance_unit: Distance unit, either 'georeferenced' or 'pixel'.
+        :param max_distance: Largest distance to return, with farther cells set to nodata. This value is required for
+            Dask and multiprocessing execution because it defines the overlap between chunks.
+        :param mp_config: Multiprocessing parameters. Cannot be combined with Dask input.
 
         :return: Proximity distances raster.
         """
 
-        proximity = _proximity_from_vector_or_raster(
+        output = _proximity_from_vector_or_raster(
             raster=self,
             vector=vector,
             target_values=target_values,
-            geometry_type=geometry_type,
-            in_or_out=in_or_out,
             distance_unit=distance_unit,
+            max_distance=max_distance,
+            mp_config=mp_config,
         )
-
-        out_nodata = _default_nodata(proximity.dtype)
-        return self.from_array(
-            data=proximity,
-            transform=self.transform,
-            crs=self.crs,
-            nodata=out_nodata,
-            area_or_point=self.area_or_point,
-            tags=self.tags,
-        )
+        return self._cast_raster_output(output)
 
     @overload
     def subsample(
         self,
         subsample: int | float,
-        return_indices: Literal[False] = False,
         *,
-        band: int = 1,
-        random_state: int | np.random.Generator | None = None,
-        strategy: Literal["sequential", "topk"] = "sequential",
-        mp_config: MultiprocConfig | None = None,
+        bands: int | Iterable[int] | Mapping[str, int] | None = None,
         mask: RasterLike | VectorLike | ArrayLike | None = None,
+        skip_nodata: bool = True,
+        random_state: int | np.random.Generator | None = None,
+        as_array: Literal[False] = False,
+        return_indices: Literal[False] = False,
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> PointCloud: ...
+
+    @overload
+    def subsample(
+        self,
+        subsample: int | float,
+        *,
+        bands: int | None = None,
+        mask: RasterLike | VectorLike | ArrayLike | None = None,
+        skip_nodata: bool = True,
+        random_state: int | np.random.Generator | None = None,
+        as_array: Literal[True],
+        return_indices: Literal[False] = False,
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
     ) -> NDArrayNum: ...
 
     @overload
     def subsample(
         self,
         subsample: int | float,
-        return_indices: Literal[True],
         *,
-        band: int = 1,
-        random_state: int | np.random.Generator | None = None,
-        strategy: Literal["sequential", "topk"] = "sequential",
-        mp_config: MultiprocConfig | None = None,
+        bands: int | None = None,
         mask: RasterLike | VectorLike | ArrayLike | None = None,
+        skip_nodata: bool = True,
+        random_state: int | np.random.Generator | None = None,
+        as_array: Literal[True],
+        return_indices: Literal[True],
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
     ) -> tuple[NDArrayNum, ...]: ...
 
     @overload
     def subsample(
         self,
         subsample: float | int,
-        return_indices: bool = False,
-        band: int = 1,
-        random_state: int | np.random.Generator | None = None,
-        strategy: Literal["sequential", "topk"] = "sequential",
-        mp_config: MultiprocConfig | None = None,
         *,
+        bands: int | Iterable[int] | Mapping[str, int] | None = None,
         mask: RasterLike | VectorLike | ArrayLike | None = None,
-    ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
+        skip_nodata: bool = True,
+        random_state: int | np.random.Generator | None = None,
+        as_array: bool = False,
+        return_indices: bool = False,
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> NDArrayNum | tuple[NDArrayNum, ...] | PointCloud: ...
 
     @profiler.profile("geoutils.raster.base.subsample", memprof=True)
     def subsample(
         self,
         subsample: float | int,
-        return_indices: bool = False,
-        band: int = 1,
-        random_state: int | np.random.Generator | None = None,
-        strategy: Literal["sequential", "topk"] = "sequential",
-        mp_config: MultiprocConfig | None = None,
         *,
+        bands: int | Iterable[int] | Mapping[str, int] | None = None,
         mask: RasterLike | VectorLike | ArrayLike | None = None,
-    ) -> NDArrayNum | tuple[NDArrayNum, ...]:
+        skip_nodata: bool = True,
+        random_state: int | np.random.Generator | None = None,
+        as_array: bool = False,
+        return_indices: bool = False,
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> Any:
         """
-        Randomly sample valid raster values allowed by mask, without replacement.
+        Randomly sample raster cells without replacement.
 
-        :param subsample: Subsample size. If <= 1, a fraction of eligible finite pixels to extract.
-            If > 1, the maximum number of pixels. The mask is applied before calculating this size.
-        :param band: Band to subsample. Use return_indices=True and indexing to subsample the same points over
-            several bands.
-        :param return_indices: Whether to return the extracted indices only.
-        :param random_state: Random state or seed number.
-        :param strategy: "sequential" draws using the traversal order and can depend on chunk layout; "topk" keeps
-            the same seeded sample across chunk layouts.
-        :param mp_config: Worker and tile settings for multiprocessing. Cannot be combined with a Dask source.
-        :param mask: Eligible cells: True in a boolean array or aligned mask raster, or inside vector geometries.
-            Arrays must match the raster shape; mask rasters must share its grid and CRS. Missing mask entries are
-            excluded (e.g. mask=raster.data > 0).
+        The first selected band defines eligible cells when ``skip_nodata=True``. Its selected row and column positions
+        are applied to every requested band, so values and point coordinates remain aligned. Auxiliary band nodata
+        alone does not remove a point.
 
-        :returns: One-dimensional sampled values with the source dtype, or a tuple of row and column index arrays
-            referring to the original grid, including when mask restricts the sample.
+        Raster inputs return a PointCloud by default. Xarray accessor inputs return a GeoDataFrame, and Dask-backed
+        accessors return a lazy Dask GeoDataFrame. With ``as_array=True``, return values from one band or their source
+        row and column positions.
+
+        :param subsample: Fraction of eligible cells to extract when at most 1, otherwise the maximum cell count.
+        :param bands: Bands to return. By default, point output includes every band and array output includes band one.
+            An integer selects one band. An iterable selects bands with default ``b<band>`` column names, while a
+            mapping gives column names as keys and band numbers as values. The first selected band controls eligible
+            cells. Array output accepts only one integer band.
+        :param mask: With ``as_array=True``, restrict eligible raster cells with a boolean or spatial mask.
+        :param skip_nodata: Whether to exclude cells where the first selected band is nodata.
+        :param random_state: Random generator or seed used to make sampling reproducible.
+        :param as_array: Return sampled values or positions instead of a point cloud or dataframe.
+        :param return_indices: With ``as_array=True``, return row and column positions instead of values.
+        :param strategy: Use chunk-independent top-k sampling or sequential sampling.
+        :param force_pixel_offset: Pixel position used to calculate each point coordinate.
+        :param force_output_to_memory: Keep the complete output in memory instead of using the automatic chunked path.
+        :param mp_config: Worker, tile, and output settings for multiprocessing. Point output uses GeoPackage, LAS or
+            LAZ; LAS/LAZ stores the first selected band as elevation. Large array output uses NumPy format.
+
+        :returns: Point output with one row per sampled cell, one-dimensional sampled values, or row/column positions.
         """
 
-        return _subsample(
-            self,
+        if as_array:
+            if bands is None:
+                array_band = 1
+            elif isinstance(bands, int):
+                array_band = bands
+            else:
+                raise ValueError("Argument ``bands`` must be one band number when ``as_array=True``.")
+
+            return _subsample(
+                self,
+                subsample=subsample,
+                band=array_band,
+                return_indices=return_indices,
+                random_state=random_state,
+                strategy=strategy,
+                mp_config=mp_config,
+                skip_nodata=skip_nodata,
+                mask=mask,
+                force_output_to_memory=force_output_to_memory,
+            )
+        if return_indices:
+            raise ValueError("Argument ``return_indices=True`` requires ``as_array=True``.")
+
+        # Normalize band selections into the conversion-oriented internal arguments
+        if bands is None:
+            selected_bands = list(range(1, self.count + 1))
+            column_names = [f"b{band}" for band in selected_bands]
+        elif isinstance(bands, int):
+            selected_bands = [bands]
+            column_names = [f"b{bands}"]
+        elif isinstance(bands, Mapping):
+            selected_bands = list(bands.values())
+            column_names = list(bands)
+        elif isinstance(bands, Iterable) and not isinstance(bands, (str, bytes)):
+            selected_bands = list(bands)
+            column_names = [f"b{band}" for band in selected_bands]
+        else:
+            raise ValueError("Argument ``bands`` must be a band number, an iterable of band numbers, or a mapping.")
+
+        # Check the shared requirements before separating the first band from the remaining bands
+        if len(selected_bands) == 0:
+            raise ValueError("Argument ``bands`` must select at least one band.")
+        if not all(isinstance(band, int) for band in selected_bands):
+            raise ValueError("Argument ``bands`` must contain only integer band numbers.")
+        if len(set(selected_bands)) != len(selected_bands):
+            raise ValueError("Argument ``bands`` must not contain duplicate band numbers.")
+
+        output = _subsample_raster(
+            source_raster=self,
             subsample=subsample,
-            band=band,
-            return_indices=return_indices,
+            data_column_name=column_names[0],
+            data_band=selected_bands[0],
+            auxiliary_data_bands=selected_bands[1:],
+            auxiliary_column_names=column_names[1:],
+            skip_nodata=skip_nodata,
+            as_array=False,
             random_state=random_state,
-            strategy=strategy,
+            force_pixel_offset=force_pixel_offset,
             mp_config=mp_config,
-            mask=mask,
+            force_output_to_memory=force_output_to_memory,
+            rename_default_data_column=False,
         )
+        return self._cast_pointcloud_output(output)
 
     def cosample(
         self,
@@ -2292,8 +2574,7 @@ class RasterBase(ABC):
         :param mask_mode: Whether a vector mask keeps locations "inside" or "outside" its geometries.
         :param subsample: Fraction of common finite locations (e.g. 0.1), or maximum count (e.g. 1000); 1 keeps all.
         :param random_state: Seed or random generator for reproducible sampling (e.g. 42).
-        :param strategy: Raster sampling with "topk" or "sequential"; "topk" keeps the same seeded sample across chunk
-            sizes. Point output always uses "sequential".
+        :param strategy: Sampling with "topk" or "sequential"; "topk" keeps the same seeded sample across chunk sizes.
         :param raster_point_mode: Conversion direction: "grid_points" places points on a raster, "resample_raster"
             reads rasters at points. Defaults to at's locations, or point locations when available. Must agree with at.
         :param grid_method: Point gridding by SciPy interpolation ("nearest", "linear", "cubic"), or circular "idw",
@@ -2365,14 +2646,37 @@ class RasterBase(ABC):
         max_local_distance: float | None = None,
         index_dtype: DTypeLike = np.int32,
         distance_dtype: DTypeLike = np.float64,
+        mp_config: MultiprocConfig | None = None,
     ) -> xr.Dataset:
-        """Sample finite raster cell pairs for statistics by distance.
+        """Sample cell pairs in the raster.
 
-        Logarithmic lag sampling draws isotropic distances across short and long ranges. Anchor strategies reuse
-        raster cells and can confine part of the sample to source chunks, which limits reads from Dask-backed rasters.
+        This function provides different strategies for sampling short and long pairwise distances in large rasters.
+        It supports chunked Dask and Multiprocessing out-of-memory reads, with explicit pair subsampling to also limit
+        the returned data held in memory.
 
-        Strategy, duplicate, oversampling, anchor, and local distance controls apply to ``"loglag"``.
-        Both sampling schemes use ``batch_pairs`` and ``max_rounds``.
+        Sampling methods
+        ----------------
+
+        With the default ``sampling="loglag"``, distances are drawn across a logarithmic scale and directions are
+        drawn uniformly around the first cell, so that short and long distances are both represented. The resulting
+        offsets are rounded to the raster grid. The ``"independent"`` strategy draws a new first cell for every pair,
+        while ``"anchors"`` reuses a limited set of first cells. The default ``"chunk_anchors"`` also draws those
+        first cells from a limited number of source chunks to reduce reads. The ``"anchor_batched"`` strategy draws
+        several distances and directions together for each first cell.
+
+        With ``sampling="random_xy"``, both cells are drawn independently and pairs outside the requested distance
+        range are discarded. Pairs near ``min_distance`` or ``max_distance`` are usually rare, even though these
+        distance extremes are often important for spatial analysis. Log-lag strategy options do not apply;
+        ``batch_pairs`` and ``max_rounds`` control how candidates are collected.
+
+        Memory and chunked inputs
+        -------------------------
+
+        ``n_pairs`` limits the returned data held in memory, while ``batch_pairs`` limits temporary candidate arrays.
+        For Dask and Multiprocessing inputs, finite cells are counted separately by chunk or tile. Pair geometry is
+        generated from the raster grid, then only chunks or tiles containing candidate endpoints are read. The
+        complete raster band is not collected in memory and the Raster stays unloaded. Pair selection and the
+        returned Xarray Dataset are eager for both backends.
 
         :param band: Band to sample, counting from one.
         :param n_pairs: Requested number of pairs with two finite values; fewer may be returned if sampling stops early.
@@ -2400,6 +2704,8 @@ class RasterBase(ABC):
         :param max_local_distance: Largest proposed local distance in CRS units. Defaults to the largest chunk diagonal.
         :param index_dtype: Integer NumPy dtype for returned cell indexes (e.g. ``"int64"`` for very large rasters).
         :param distance_dtype: Floating NumPy dtype for returned distances (e.g. ``"float32"`` to reduce memory).
+        :param mp_config: Worker and tile settings for multiprocessing reads from an unloaded raster. Cannot be
+            combined with Dask inputs. The returned Xarray Dataset is eager.
         :returns: Xarray Dataset with pair and endpoint dimensions, containing cell indexes, values, coordinates,
             and distances.
         """
@@ -2428,6 +2734,7 @@ class RasterBase(ABC):
             max_local_distance=max_local_distance,
             index_dtype=index_dtype,
             distance_dtype=distance_dtype,
+            mp_config=mp_config,
         )
 
     def variogram(

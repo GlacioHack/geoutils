@@ -29,17 +29,17 @@ from typing import (
     Iterable,
     Literal,
     TypeVar,
-    cast,
     overload,
 )
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import pyogrio
 from pyproj import CRS
 
 from geoutils import profiler
-from geoutils._dispatch import get_geo_attr, is_dask_dataframe
+from geoutils._dispatch import get_geo_attr, has_geo_attr, is_dask_dataframe
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface._nodata import NodataPropagation
@@ -58,9 +58,9 @@ from geoutils.sampling.subsampling import _subsample_pointcloud
 from geoutils.stats.stats import stats as _stats
 from geoutils.stats.stats import variogram as _variogram
 from geoutils.vector.base import VectorBase
-from geoutils.vector.transformation import _get_reproject_crs
 
 if TYPE_CHECKING:
+    import matplotlib
     import xarray as xr
 
     from geoutils.interface.interpolation import InterpolationMethod
@@ -72,6 +72,16 @@ if TYPE_CHECKING:
 
 
 PointCloudBaseType = TypeVar("PointCloudBaseType", bound="PointCloudBase")
+
+
+def _validate_downsample(downsample: Number) -> float:
+    """Validate and normalize a point cloud opening downsampling factor."""
+
+    if isinstance(downsample, (bool, np.bool_)) or not isinstance(downsample, (int, float, np.integer, np.floating)):
+        raise TypeError("downsample must be of type int or float.")
+    if not np.isfinite(downsample) or downsample < 1:
+        raise ValueError("downsample must be a finite value greater than or equal to 1.")
+    return float(downsample)
 
 
 class PointCloudBase(VectorBase):
@@ -202,16 +212,105 @@ class PointCloudBase(VectorBase):
         """Number of points in the point cloud."""
 
         if not self._is_pd and not self.is_loaded:
+            # Deferred crop filters require reading selected coordinates before their exact count is known
+            if len(getattr(self, "_crop_filters", [])) > 0:
+                return len(self.ds)
             count = getattr(self, "_nb_points", -1)
-            if count >= 0:
-                return int(count)
-            self.load()
+            if count < 0:
+                # Ask the file driver to count its features without loading their geometries or columns
+                count = int(pyogrio.read_info(self.name, force_feature_count=True)["features"])
+                if count < 0:
+                    raise RuntimeError("Could not determine the number of points from the file metadata.")
+                self._nb_points = count
+            downsample = getattr(self, "_downsample", 1)
+            return int(np.ceil(count / downsample))
         if self._is_dask:
             # Use file or construction metadata before falling back to a Dask row count
             count = _get_dataframe_attrs(self.ds).get("point_count")
             if count is not None:
                 return int(count)
         return len(self.ds)
+
+    def plot(  # type: ignore[override]
+        self,
+        column: str | None = None,
+        ref: RasterLike | VectorLike | CRS | str | int | None = None,
+        cmap: matplotlib.colors.Colormap | str | None = None,
+        vmin: float | int | None = None,
+        vmax: float | int | None = None,
+        alpha: float | int | None = None,
+        cbar_title: str | None = None,
+        add_cbar: bool = True,
+        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
+        return_axes: bool = False,
+        savefig_fname: str | None = None,
+        *,
+        max_points: Literal["auto"] | int | None = "auto",
+        random_state: int | np.random.Generator | None = 0,
+        **kwargs: Any,
+    ) -> None | tuple[matplotlib.axes.Axes, matplotlib.axes.Axes | None]:
+        """
+        Plot the point cloud.
+
+        This method performs automatic subsampling to facilitate the plotting of large datasets
+        out-of-memory, then wraps GeoPandas ``plot`` to which keyword arguments are passed.
+
+        Use ``max_points`` to set the subsampled point count manually.
+
+        :param column: Column to plot. Defaults to the main point cloud data column.
+        :param ref: Reference geospatial object or CRS to match. A reference object also sets the plotted axis
+            limits to its bounds.
+        :param cmap: Colormap to use. Defaults to Matplotlib's configured image colormap.
+        :param vmin: Colorbar minimum value.
+        :param vmax: Colorbar maximum value.
+        :param alpha: Point and colorbar transparency.
+        :param cbar_title: Colorbar label.
+        :param add_cbar: Whether to display a colorbar.
+        :param ax: Matplotlib axes, ``"new"`` to create axes, or None to use the current axes.
+        :param return_axes: Whether to return the plot and colorbar axes.
+        :param savefig_fname: Optional path at which to save the current figure.
+        :param max_points: The default ``"auto"`` limits the sample to the smaller of the Matplotlib axes pixel area
+            and 1,000,000 points, as set by the figure size and DPI. An integer sets an explicit point limit, and None
+            plots every point.
+        :param random_state: Random generator or seed used for deterministic point selection.
+        :returns: None, or the plot axes and optional colorbar axes when ``return_axes=True``.
+        """
+
+        from geoutils.pointcloud.plotting import _plot_pointcloud
+
+        # REMOVE AFTER DEPRECATION: Delete this block when ref_crs compatibility is removed
+        if "ref_crs" in kwargs:
+            if ref is not None:
+                raise TypeError("plot() received both 'ref' and deprecated 'ref_crs'; use only 'ref'.")
+            deprecated_ref = kwargs.pop("ref_crs")
+            warnings.warn(
+                "Argument 'ref_crs' is deprecated; use 'ref' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            # Preserve the old behavior, which matched only the CRS and did not use reference bounds
+            if deprecated_ref is not None:
+                if has_geo_attr(deprecated_ref, "crs"):
+                    deprecated_ref = get_geo_attr(deprecated_ref, "crs")
+                ref = CRS.from_user_input(deprecated_ref)
+
+        return _plot_pointcloud(
+            self,
+            column=column,
+            ref=ref,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            alpha=alpha,
+            cbar_title=cbar_title,
+            add_cbar=add_cbar,
+            ax=ax,
+            max_points=max_points,
+            random_state=random_state,
+            return_axes=return_axes,
+            savefig_fname=savefig_fname,
+            **kwargs,
+        )
 
     @property
     def is_mask(self) -> bool:
@@ -470,7 +569,7 @@ class PointCloudBase(VectorBase):
         random_state: int | np.random.Generator | None = None,
         strategy: Literal["auto", "dense", "sparse", "groupwise"] = "auto",
         backend: Literal["geoutils", "flox"] = "geoutils",
-        subsampling_strategy: Literal["sequential", "topk"] = "sequential",
+        subsampling_strategy: Literal["sequential", "topk"] = "topk",
         interpolation: InterpolationMethod = "linear",
         align: Literal["raise", "reproject"] = "raise",
         observed: bool = True,
@@ -567,54 +666,90 @@ class PointCloudBase(VectorBase):
     def subsample(
         self,
         subsample: int | float,
-        return_indices: Literal[False] = False,
         *,
-        random_state: int | np.random.Generator | None = None,
         mask: RasterLike | PointCloudLike | VectorLike | ArrayLike | None = None,
+        random_state: int | np.random.Generator | None = None,
+        as_array: Literal[False] = False,
+        return_indices: Literal[False] = False,
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> PointCloudLike: ...
+
+    @overload
+    def subsample(
+        self,
+        subsample: int | float,
+        *,
+        mask: RasterLike | PointCloudLike | VectorLike | ArrayLike | None = None,
+        random_state: int | np.random.Generator | None = None,
+        as_array: Literal[True],
+        return_indices: Literal[False] = False,
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
     ) -> NDArrayNum: ...
 
     @overload
     def subsample(
         self,
         subsample: int | float,
-        return_indices: Literal[True],
         *,
-        random_state: int | np.random.Generator | None = None,
         mask: RasterLike | PointCloudLike | VectorLike | ArrayLike | None = None,
+        random_state: int | np.random.Generator | None = None,
+        as_array: Literal[True],
+        return_indices: Literal[True],
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
     ) -> tuple[NDArrayNum, ...]: ...
 
     @overload
     def subsample(
         self,
         subsample: float | int,
-        return_indices: bool = False,
-        random_state: int | np.random.Generator | None = None,
         *,
         mask: RasterLike | PointCloudLike | VectorLike | ArrayLike | None = None,
-    ) -> NDArrayNum | tuple[NDArrayNum, ...]: ...
+        random_state: int | np.random.Generator | None = None,
+        as_array: bool = False,
+        return_indices: bool = False,
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> PointCloudLike | NDArrayNum | tuple[NDArrayNum, ...]: ...
 
     @profiler.profile("geoutils.pointcloud.base.subsample", memprof=True)
     def subsample(
         self,
         subsample: float | int,
-        return_indices: bool = False,
-        random_state: int | np.random.Generator | None = None,
         *,
         mask: RasterLike | PointCloudLike | VectorLike | ArrayLike | None = None,
-    ) -> NDArrayNum | tuple[NDArrayNum, ...]:
+        random_state: int | np.random.Generator | None = None,
+        as_array: bool = False,
+        return_indices: bool = False,
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> Any:
         """
-        Randomly sample finite point cloud values allowed by mask, without replacement.
+        Randomly sample point rows allowed by mask, without replacement.
 
-        :param subsample: Fraction of eligible finite values to sample when at most 1, otherwise the maximum number
-            of values. The mask is applied before calculating this size.
-        :param return_indices: Whether to return sampled row positions instead of values.
+        :param subsample: Fraction (e.g. 0.1 for 10%) or maximum count (e.g. 10000) of eligible locations to use.
+            A value of 1 keeps all locations.
+        :param mask: Mask of inlier points to consider: True in a boolean array or spatial mask, or inside vector
+            geometries. Arrays must have the same length as the point cloud, point cloud masks must have the same
+            ordered coordinates, and raster masks use nearest interpolation.
         :param random_state: Random generator or seed used to make sampling reproducible.
-        :param mask: Eligible points: True in a boolean array or spatial mask, or inside vector geometries.
-            Arrays must have one entry per point. Point masks must follow the same ordered coordinates;
-            raster masks use nearest interpolation. Point and raster masks must share this point cloud's CRS.
-            Missing mask entries are excluded (e.g. mask=points.data > 0).
-        :returns: One-dimensional NumPy values with the source dtype, or a one-element tuple of indices into the
-            original row order. These indices are positions, independent of any dataframe index labels.
+        :param as_array: Whether to return an array with only sampled values or row indices, instead of a point cloud.
+        :param return_indices: With ``as_array=True``, whether to return sampled row indices instead of values.
+        :param strategy: Random sampling strategy. "topk" keeps the same seeded sample across partitions and therefore
+            gives a deterministic result whether chunked or in-memory; "sequential" draws in row order.
+        :param force_output_to_memory: Bypass automatic cutoff selection and return the complete output in memory.
+        :param mp_config: Point partition size and output file used by multiprocessing. Point output uses GeoPackage,
+            LAS or LAZ; LAS/LAZ stores the main point value as elevation. Array output uses NumPy format when a sample
+            exceeds one partition. Cannot be combined with Dask input.
+        :returns: A point cloud containing every selected row by default. With ``as_array=True``, returns
+            one-dimensional values or a one-element tuple of positions into the original row order.
         """
 
         return _subsample_pointcloud(
@@ -622,6 +757,10 @@ class PointCloudBase(VectorBase):
             subsample=subsample,
             return_indices=return_indices,
             random_state=random_state,
+            as_array=as_array,
+            strategy=strategy,
+            mp_config=mp_config,
+            force_output_to_memory=force_output_to_memory,
             mask=mask,
         )
 
@@ -670,8 +809,7 @@ class PointCloudBase(VectorBase):
         :param mask_mode: Whether a vector mask keeps locations "inside" or "outside" its geometries.
         :param subsample: Fraction of common finite locations (e.g. 0.1), or maximum count (e.g. 1000); 1 keeps all.
         :param random_state: Seed or random generator for reproducible sampling (e.g. 42).
-        :param strategy: Raster sampling with "topk" or "sequential"; "topk" keeps the same seeded sample across chunk
-            sizes. Point output always uses "sequential".
+        :param strategy: Sampling with "topk" or "sequential"; "topk" keeps the same seeded sample across chunk sizes.
         :param raster_point_mode: Conversion direction: "grid_points" places points on a raster, "resample_raster"
             reads rasters at points. Defaults to at's locations, or this point cloud's locations. Must agree with at.
         :param grid_method: Point gridding by SciPy interpolation ("nearest", "linear", "cubic"), or circular "idw",
@@ -741,14 +879,38 @@ class PointCloudBase(VectorBase):
         nn_max_batches: int = 200,
         index_dtype: DTypeLike = np.int32,
         distance_dtype: DTypeLike = np.float32,
+        mp_config: MultiprocConfig | None = None,
     ) -> xr.Dataset:
-        """Sample finite point pairs for statistics by distance.
+        """Sample point pairs in the point cloud.
 
-        Exact ring strategies use a KD-tree or hash grid. ``"nn_logvector"`` proposes isotropic log-spaced vectors
-        and accepts a nearby observed endpoint, which is generally faster for large point clouds.
+        This function provides different strategies for sampling short and long pairwise distances in large point
+        clouds. It supports chunked Dask and Multiprocessing out-of-memory reads, with explicit pair subsampling to
+        also limit the returned data held in memory.
 
-        Strategy controls apply to ``"loglag"``. ``"random_xy"`` uses ``max_rounds`` and ``nn_batch_size``.
-        Dask point tables are loaded because the search requires all coordinates.
+        Sampling methods
+        ----------------
+
+        With the default ``sampling="loglag"``, distance targets are drawn across a logarithmic scale so that short
+        and long distances are both represented. The ``"kdtree"`` and ``"hashgrid"`` strategies select a distance
+        range, find observed points at those distances from a sampled first point, and choose one as the second point.
+        They use a SciPy spatial tree and a regular spatial index, respectively. The ``"nn_logvector"`` strategy
+        instead projects an endpoint at a sampled distance and direction, then accepts the nearest observed point when
+        it lies within the ``nn_tolerance`` fraction of that target distance. This is generally faster for large point
+        clouds, but may return fewer pairs when no point is close to a target.
+
+        With ``sampling="random_xy"``, both endpoints are drawn independently and pairs outside the requested distance
+        range are discarded. Pairs near ``min_distance`` or ``max_distance`` are usually rare, even though these
+        distance extremes are often important for spatial analysis. Log-lag strategy options do not apply;
+        ``max_rounds`` and ``nn_batch_size`` control how candidates are collected.
+
+        Memory and chunked inputs
+        -------------------------
+
+        ``n_pairs`` limits the returned data held in memory. Dask partitions and multiprocessing row partitions are
+        processed separately, and their eligible coordinates, values, and original row indexes are staged in
+        temporary disk-backed arrays. The complete point table is not collected in memory and the PointCloud stays
+        unloaded. Log-lag sampling still builds a KD-tree or hash-grid index whose memory grows with the number of
+        eligible points. Pair selection and the returned Xarray Dataset are eager for both backends.
 
         :param n_pairs: Requested number of pairs with two finite values; fewer may be returned if sampling stops early.
         :param sampling: ``"loglag"`` balances short and long distances on a log scale; ``"random_xy"`` draws
@@ -777,6 +939,9 @@ class PointCloudBase(VectorBase):
         :param nn_max_batches: Maximum batches to fill the sample with ``"nn_logvector"``.
         :param index_dtype: Integer NumPy dtype for returned row indexes (e.g. ``"int64"`` for very large point clouds).
         :param distance_dtype: Floating NumPy dtype for returned distances (e.g. ``"float64"`` for greater precision).
+        :param mp_config: Worker and row partition settings for reading an unloaded point cloud into temporary
+            disk-backed arrays. Cannot be combined with Dask inputs. Pair selection and the returned Xarray Dataset
+            are eager.
         :returns: Xarray Dataset with pair and endpoint dimensions, containing original row indexes, values,
             coordinates, and distances.
         """
@@ -803,6 +968,7 @@ class PointCloudBase(VectorBase):
             nn_max_batches=nn_max_batches,
             index_dtype=index_dtype,
             distance_dtype=distance_dtype,
+            mp_config=mp_config,
         )
 
     def variogram(
@@ -865,6 +1031,37 @@ class PointCloudBase(VectorBase):
             **pair_sampling_kwargs,
         )
 
+    def clip(
+        self: PointCloudBaseType,
+        mask: Any,
+        keep_geom_type: bool = False,
+        sort: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> PointCloudBaseType | gpd.GeoDataFrame:
+        """
+        Remove points outside an exact clipping geometry.
+
+        :param mask: Clipping geometry, vector, point cloud, raster or bounding box. Georeferenced masks are
+            reprojected to this point cloud's CRS.
+        :param keep_geom_type: Whether to remove intersections with a different geometry type than the input.
+        :param sort: Whether to sort clipped points by their original index within each partition.
+        :param mp_config: Worker configuration with an integer number of points per chunk. The output format is
+            inferred from ``outfile`` or selected by ``driver`` (``GPKG``, ``LAS`` or ``LAZ``), defaulting to
+            GeoPackage. Cannot be combined with a Dask input.
+        :returns: Clipped PointCloud or GeoDataFrame matching the input interface. Dask GeoDataFrame results stay
+            lazy, and multiprocessing PointCloud results are unloaded.
+        """
+
+        from geoutils.pointcloud.transformation import _clip_pointcloud
+
+        return _clip_pointcloud(
+            self,
+            mask=mask,
+            keep_geom_type=keep_geom_type,
+            sort=sort,
+            mp_config=mp_config,
+        )
+
     @overload
     def reproject(
         self: PointCloudBaseType,
@@ -920,32 +1117,18 @@ class PointCloudBase(VectorBase):
             inferred from ``outfile`` or selected by ``driver`` (``GPKG``, ``LAS`` or ``LAZ``), defaulting to
             GeoPackage. Cannot be combined with Dask input.
         :returns: Reprojected PointCloud or GeoDataFrame matching the input interface, or None when in place.
-            Multiprocessing PointCloud results are unloaded; dataframe accessor results are eager.
+            Dask GeoDataFrame results stay lazy, and multiprocessing PointCloud results are unloaded.
         """
 
-        # Keep the shared vector implementation for eager and lazy dataframe transformations
-        if mp_config is None:
-            return super().reproject(ref=ref, crs=crs, inplace=inplace)
-        if self._is_dask:
-            raise ValueError("Argument ``mp_config`` cannot be combined with a Dask point cloud.")
-        if inplace:
-            raise ValueError("Argument ``inplace`` is not supported with ``mp_config``; use the returned point cloud.")
-
-        # Resolve the target without reading point data, then let workers build the output file
         from geoutils.pointcloud.transformation import _reproject_pointcloud
 
-        target_crs = _get_reproject_crs(ref=ref, crs=crs)
-        projected = _reproject_pointcloud(self, crs=target_crs, mp_config=mp_config)
-        if self._is_pd:
-            # Read every output attribute and use native LAS Z when the file represents heights as a column
-            projected.load(columns="all")
-            return _build_pointcloud_output(
-                projected.ds,
-                data_column=projected.data_column,
-                as_dataframe=True,
-                attrs=_get_dataframe_attrs(self.ds),
-            )
-        return cast(PointCloudBaseType, projected)
+        return _reproject_pointcloud(
+            self,
+            ref=ref,
+            crs=crs,
+            inplace=inplace,
+            mp_config=mp_config,
+        )
 
     @profiler.profile("geoutils.pointcloud.base.grid", memprof=True)
     def grid(

@@ -20,6 +20,18 @@ import geoutils.vector.pd_accessor as vector_pd_accessor
 from geoutils.multiproc import MultiprocConfig
 
 
+def _point_grid(size: int = 10) -> gpd.GeoDataFrame:
+    """Create a square point grid with one unique value per row."""
+
+    x = np.tile(np.arange(size), size)
+    y = np.repeat(np.arange(size), size)
+    return gpd.GeoDataFrame(
+        {"value": np.arange(size * size)},
+        geometry=gpd.points_from_xy(x, y),
+        crs=4326,
+    )
+
+
 class TestPointCloudAccessor:
     """Check that the Pandas ``pc`` accessor exposes PointCloud behavior and lazy Dask support."""
 
@@ -67,6 +79,26 @@ class TestPointCloudAccessor:
         # Compute the empty collection and check its columns, types and unchanged lazy source
         assert_geodataframe_equal(source.compute(), expected)
         assert source.expr is graph and not source.pc.is_loaded
+
+    def test_open_pointcloud__downsample_loading_laziness(self, tmp_path: Path) -> None:
+        """Checks that chunked opening keeps the sample lazy and exactly matches eager opening."""
+
+        pytest.importorskip("dask_geopandas")
+
+        # Open the same file eagerly and in Dask partitions
+        # (with chunk size not multiple of downsampling factor to check potential edge effects)
+        filename = tmp_path / "points.gpkg"
+        _point_grid().to_file(filename, index=False)
+        eager = gu.open_pointcloud(str(filename), data_column="value", downsample=4)
+        lazy = gu.open_pointcloud(str(filename), data_column="value", chunks=17, downsample=4)
+
+        # Check source is lazy, and result is exactly the same with eager
+        assert lazy.pc._is_dask
+        assert lazy.pc.point_count == 25
+        assert_geodataframe_equal(
+            lazy.compute().reset_index(drop=True),
+            eager.reset_index(drop=True),
+        )
 
     def test_accessor(self) -> None:
         """Expose point-cloud metadata, values and conversion through the accessor."""
@@ -202,11 +234,12 @@ class TestPointCloudAccessor:
         [
             ("copy", {}),
             ("crop", {"bbox": (0, 0, 500, 500)}),
+            ("clip", {"mask": (0, 0, 500, 500)}),
             ("translate", {"xoff": 1, "yoff": 2}),
         ],
     )
     def test_geometric_methods__dask_geopandas(self, method: str, kwargs: dict[str, object]) -> None:
-        """Checks that lazy copies have the same location metadata while cropping and translation recalculate it."""
+        """Checks that copy() keeps bounds and point count while crop(), clip() and translate() update them."""
 
         dgpd = pytest.importorskip("dask_geopandas")
         from dask.callbacks import Callback
@@ -243,7 +276,7 @@ class TestPointCloudAccessor:
         assert output.pc.point_count == len(expected)
         assert ds.pc.point_count == source_count
         assert ds.pc.bounds == source_bounds
-        assert_geodataframe_equal(output.compute(), expected)
+        assert_geodataframe_equal(output.compute().sort_index(), expected.sort_index())
         assert not ds.pc.is_loaded
         assert not output.pc.is_loaded
 

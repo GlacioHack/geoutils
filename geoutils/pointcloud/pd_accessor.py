@@ -26,6 +26,7 @@ import warnings
 from typing import Any, Literal
 
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 import pyogrio
 import rasterio as rio
@@ -33,8 +34,10 @@ from pyproj import CRS
 
 from geoutils._dispatch import is_dask_dataframe, is_dask_geodataframe
 from geoutils._misc import import_optional
-from geoutils.pointcloud.base import PointCloudBase
+from geoutils._typing import Number
+from geoutils.pointcloud.base import PointCloudBase, _validate_downsample
 from geoutils.pointcloud.dataframe import (
+    _build_pointcloud_output,
     _get_dataframe_attrs,
     _import_dask_dataframe,
     _set_dataframe_attrs,
@@ -49,7 +52,6 @@ from geoutils.pointcloud.las import (
 from geoutils.vector.pd_accessor import (
     VectorAccessor,
     _import_dask_geopandas,
-    _register_dask_vector_accessor,
     _replace_geodataframe,
 )
 
@@ -57,15 +59,21 @@ _DASK_ACCESSOR_REGISTERED = False
 
 
 def _register_dask_pointcloud_accessor() -> None:
-    """Register the ``pc`` accessor on Dask DataFrames lazily."""
+    """
+    Add the ``.pc`` property to Dask DataFrames when lazy point cloud support is first needed.
+
+    Pandas and Dask keep separate lists of dataframe accessors. The Pandas decorator on PointCloudAccessor therefore
+    makes ``.pc`` available only on Pandas and GeoPandas objects. This function adds the same accessor to Dask objects
+    without importing the optional Dask DataFrame package during ordinary GeoUtils imports.
+    """
 
     global _DASK_ACCESSOR_REGISTERED
 
-    # Dask warns if the same accessor is registered more than once
+    # Register once because the accessor is added to the shared Dask DataFrame class for the rest of the process
     if _DASK_ACCESSOR_REGISTERED:
         return
 
-    # Register only after Dask is available so normal imports remain lightweight
+    # Import Dask only when a lazy point cloud is requested, then attach PointCloudAccessor as its ``.pc`` property
     # https://docs.dask.org/en/stable/dataframe-extend.html#accessors
     import_optional("dask")
     with warnings.catch_warnings():
@@ -141,11 +149,34 @@ def _set_pointcloud_attrs_from_file(ds: Any, filename: str, data_column: str | N
     )
 
 
+def _downsample_open_pointcloud(pointcloud: Any, downsample: float) -> Any:
+    """Apply an opening downsampling factor while keeping a lazy dataframe result lazy."""
+
+    if downsample == 1:
+        return pointcloud
+
+    # Convert the factor to the count convention shared by eager and Dask point subsampling
+    source = pointcloud.pc
+    source_count = source.point_count
+    if source_count == 0:
+        return pointcloud
+    target_count = max(1, int(np.ceil(source_count / downsample)))
+    request: int | float = target_count if target_count > 1 else 1 / source_count
+    sampled = source.subsample(request, random_state=0)
+
+    # Preserve the complete source extent while recording the exact deterministic sample size
+    attrs = _get_dataframe_attrs(sampled)
+    attrs.update({"bounds": source.bounds, "point_count": target_count})
+    _set_dataframe_attrs(sampled, attrs)
+    return sampled
+
+
 def open_pointcloud(
     filename: str,
     data_column: str | None = None,
     columns: Literal["all", "main"] | list[str] = "main",
     chunks: int | None = None,
+    downsample: Number = 1,
 ) -> gpd.GeoDataFrame | Any:
     """
     Open a point cloud as a GeoDataFrame or a lazy Dask-GeoPandas GeoDataFrame if ``chunks`` is passed.
@@ -159,6 +190,8 @@ def open_pointcloud(
     :param columns: LAS dimensions to read. ``main`` reads the data column, ``all`` reads every dimension, and a list
         selects specific dimensions. Ignored for other vector formats.
     :param chunks: Number of points or features per Dask partition. If None, load eagerly into one GeoDataFrame.
+    :param downsample: Factor by which to reduce the number of points. For example, 2 keeps up to ``ceil(N / 2)``
+        points selected by a deterministic random sample. The default 1 keeps all points.
     :returns: An eager GeoDataFrame, or a lazy Dask-GeoPandas GeoDataFrame when ``chunks`` is passed.
     """
 
@@ -166,6 +199,7 @@ def open_pointcloud(
 
     if chunks is not None and chunks <= 0:
         raise ValueError("Argument 'chunks' must be a strictly positive integer.")
+    downsample = _validate_downsample(downsample)
 
     # LAS needs its own slice reader while regular vector formats use GeoPandas
     is_las = _is_laspy_supported(filename)
@@ -173,17 +207,23 @@ def open_pointcloud(
     if not is_las:
         if chunks is None:
             # Preserve the established eager PointCloud loading and validation path
-            pc = PointCloud(filename, data_column=data_column)
+            pc = PointCloud(filename, data_column=data_column, downsample=downsample)
             pc.ds.attrs["data_column"] = pc.data_column
             return pc.ds
 
         # Dask-GeoPandas creates file partitions without loading all features
         dgpd = _import_dask_geopandas()
-        _register_dask_vector_accessor()
-        _register_dask_pointcloud_accessor()
         dgdf = dgpd.read_file(filename, chunksize=chunks)
         _set_pointcloud_attrs_from_file(dgdf, filename=filename, data_column=data_column)
-        return dgdf
+        # Use the common output builder to add point metadata and the Dask ``.pc`` and ``.vct`` properties
+        pointcloud = _build_pointcloud_output(
+            dgdf,
+            data_column=data_column,
+            as_dataframe=True,
+            attrs=_get_dataframe_attrs(dgdf),
+            preserve_locations=True,
+        )
+        return _downsample_open_pointcloud(pointcloud, downsample)
 
     # Native LAS Z values are the default point-cloud data
     if data_column is None:
@@ -193,8 +233,7 @@ def open_pointcloud(
     metadata = _load_laspy_metadata(filename)
     if data_column not in metadata.columns:
         raise ValueError(
-            f"Data column {data_column} not found among columns. Available columns are: "
-            f"{', '.join(metadata.columns)}."
+            f"Data column {data_column} not found among columns. Available columns are: {', '.join(metadata.columns)}."
         )
     columns_to_load = _resolve_las_columns(
         columns=columns,
@@ -204,7 +243,7 @@ def open_pointcloud(
 
     if chunks is None:
         # The eager path loads all requested LAS dimensions into one GeoDataFrame
-        pc = PointCloud(filename, data_column=data_column)
+        pc = PointCloud(filename, data_column=data_column, downsample=downsample)
         pc.load(columns=columns, mp_config=None)
         pc.ds.attrs["data_column"] = pc.data_column
         return pc.ds
@@ -212,8 +251,6 @@ def open_pointcloud(
     # Load optional Dask components only for partitioned LAS output
     dd = _import_dask_dataframe()
     dgpd = _import_dask_geopandas()
-    _register_dask_vector_accessor()
-    _register_dask_pointcloud_accessor()
     dask = import_optional("dask")
     delayed = dask.delayed
 
@@ -249,7 +286,15 @@ def open_pointcloud(
             "geometry_type": "Point",
         },
     )
-    return ddf
+    # Use the common output builder to add point metadata and the Dask ``.pc`` and ``.vct`` properties
+    pointcloud = _build_pointcloud_output(
+        ddf,
+        data_column=data_column,
+        as_dataframe=True,
+        attrs=_get_dataframe_attrs(ddf),
+        preserve_locations=True,
+    )
+    return _downsample_open_pointcloud(pointcloud, downsample)
 
 
 @pd.api.extensions.register_dataframe_accessor("pc")
@@ -332,7 +377,7 @@ class PointCloudAccessor(PointCloudBase, VectorAccessor):
         return self.ds.crs
 
     @property
-    def bounds(self) -> rio.coords.BoundingBox:
+    def bbox(self) -> rio.coords.BoundingBox:
         """Total bounding box of the point cloud."""
 
         if self._is_dask:
@@ -391,7 +436,6 @@ class PointCloudAccessor(PointCloudBase, VectorAccessor):
         :param kwargs: Additional attributes to set on the LasPy header.
         """
 
-        # The common writer streams Dask partitions or eager chunks as appropriate
         _write_laspy(
             filename=filename,
             pc=self.ds,

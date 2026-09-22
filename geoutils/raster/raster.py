@@ -26,9 +26,8 @@ from __future__ import annotations
 import copy
 import pathlib
 import warnings
-from collections import abc
 from contextlib import ExitStack
-from typing import IO, TYPE_CHECKING, Any, Callable, overload
+from typing import IO, Any, Callable, cast, overload
 
 import numpy as np
 import rasterio as rio
@@ -39,8 +38,9 @@ from affine import Affine
 from packaging.version import Version
 from rasterio.crs import CRS
 
+import geoutils as gu
 from geoutils import profiler
-from geoutils._misc import deprecate, import_optional
+from geoutils._misc import deprecate
 from geoutils._typing import (
     DTypeLike,
     MArrayNum,
@@ -48,7 +48,7 @@ from geoutils._typing import (
     NDArrayNum,
     Number,
 )
-from geoutils.raster.base import RasterBase, RasterType
+from geoutils.raster.base import RasterBase, RasterType, _validate_downsample
 from geoutils.raster.referencing import (
     _cast_nodata,
     _cast_pixel_interpretation,
@@ -58,15 +58,13 @@ from geoutils.raster.satimg import (
     decode_sensor_metadata,
     parse_and_convert_metadata_from_filename,
 )
+from geoutils.raster.transformation import _crop_window, _open_downsampled_raster
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
     from typing import Literal
 except ImportError:
     from typing_extensions import Literal  # type: ignore
-
-if TYPE_CHECKING:
-    import matplotlib
 
 # List of NumPy "array" functions that are handled.
 # Note: all universal function are supported: https://numpy.org/doc/stable/reference/ufuncs.html
@@ -189,9 +187,11 @@ def _load_rio(
     * window : to load a cropped version
     * resampling : to set the resampling algorithm
     """
+    # Use the complete dataset unless a window is passed or derived from a transform
+    window = kwargs.pop("window", None)
+
     # If out_shape is passed, no need to account for transform and shape
     if kwargs.get("out_shape") is not None:
-        window = None
         # If multi-band raster, the out_shape needs to contain the count
         if out_count is not None and out_count > 1:
             kwargs["out_shape"] = (out_count, *kwargs["out_shape"])
@@ -251,7 +251,6 @@ def _cast_numeric_array_raster(
 
     # If other is a raster
     if isinstance(other, Raster):
-
         nodata2 = other.nodata
         dtype2 = other.data.dtype
         other_data: NDArrayNum | MArrayNum | Number = other.data
@@ -268,7 +267,6 @@ def _cast_numeric_array_raster(
 
     # If other is an array
     elif isinstance(other, np.ndarray):
-
         # Squeeze first axis of other data if possible
         if other.ndim == 3 and other.shape[0] == 1:
             other_data = other.squeeze(axis=0)
@@ -361,7 +359,10 @@ class Raster(RasterBase):
         :param load_data: Whether to load the array during instantiation. Default is False.
         :param parse_sensor_metadata: Whether to parse sensor metadata from filename and similarly-named metadata files.
         :param silent: Whether to parse metadata silently or with console output.
-        :param downsample: Downsample the array once loaded by a round factor. Default is no downsampling.
+        :param downsample: Downsampling factor (e.g., 2 selects one out of two pixels for every row/column). Rows or
+            columns that do not fill a complete interval are omitted. Default 1 keeps the native resolution. See
+            `Rasterio's overview documentation <https://rasterio.readthedocs.io/en/stable/topics/overviews.html>`_
+            for how stored overviews can make reduced reads faster.
         :param force_nodata: Force nodata value to be used (overwrites the metadata). Default reads from metadata.
         """
 
@@ -376,7 +377,6 @@ class Raster(RasterBase):
 
         # This is for Raster.from_array to work.
         if isinstance(filename_or_dataset, dict):
-
             self.tags = filename_or_dataset["tags"]
             # To have "area_or_point" user input go through checks of the set() function without shifting the transform
             self.set_area_or_point(filename_or_dataset["area_or_point"], shift_area_or_point=False)
@@ -407,6 +407,8 @@ class Raster(RasterBase):
 
         # Image is a file on disk.
         elif isinstance(filename_or_dataset, (str, pathlib.Path, rio.io.DatasetReader, rio.io.MemoryFile)):
+            downsample = _validate_downsample(downsample)
+
             # ExitStack is used instead of "with rio.open(filename_or_dataset) as ds:".
             # This is because we might not actually want to open it like that, so this is equivalent
             # to the pseudocode:
@@ -456,37 +458,45 @@ class Raster(RasterBase):
             else:
                 count = len(bands)
 
-            # Downsampled image size
-            if not isinstance(downsample, (int, float)):
-                raise TypeError("downsample must be of type int or float.")
-            if downsample < 1:
-                raise ValueError("downsample must be >=1.")
-
+            # Compute the complete output intervals that fit inside the source raster
             if downsample == 1:
                 out_shape = (self.height, self.width)
             else:
-                down_width = int(np.ceil(self.width / downsample))
-                down_height = int(np.ceil(self.height / downsample))
+                down_width = max(1, int(np.floor(self.width / downsample)))
+                down_height = max(1, int(np.floor(self.height / downsample)))
                 out_shape = (down_height, down_width)
                 res = tuple(np.asarray(self.res) * downsample)
-                self.transform = rio.transform.from_origin(self.bounds.left, self.bounds.top, res[0], res[1])
+                self.transform = rio.transform.from_origin(self.bbox.left, self.bbox.top, res[0], res[1])
                 self._downsample = downsample
 
             # This will record the downsampled out_shape is data is only loaded later on by .load()
             self._out_shape = out_shape
+            self._out_window = rio.windows.Window(0, 0, out_shape[1], out_shape[0])
             self._out_count = count
 
             if load_data:
-                # Mypy doesn't like the out_shape for some reason. I can't figure out why! (erikmannerfelt, 14/01/2022)
-                # Don't need to pass shape and transform, because out_shape overrides it
-                self.data = _load_rio(
-                    ds,
-                    indexes=bands,
-                    masked=self._masked,
-                    convert_to_mask=is_mask,
-                    out_shape=out_shape,
-                    out_count=count,
-                )  # type: ignore
+                if downsample > 1:
+                    # Read a suitable overview through the exact grid requested by the downsampling factor
+                    with _open_downsampled_raster(ds, downsample) as downsampled:
+                        self.data = _load_rio(
+                            downsampled,
+                            indexes=bands,
+                            masked=self._masked,
+                            convert_to_mask=is_mask,
+                        )
+                else:
+                    # Mypy doesn't like the out_shape for some reason. I can't figure out why!
+                    # (erikmannerfelt, 14/01/2022)
+                    # Don't need to pass shape and transform, because out_shape overrides it
+                    self.data = _load_rio(
+                        ds,
+                        indexes=bands,
+                        masked=self._masked,
+                        convert_to_mask=is_mask,
+                        out_shape=out_shape,
+                        out_count=count,
+                        window=self._out_window,
+                    )  # type: ignore
 
             # Probably don't want to use set_nodata that can update array, setting self._nodata is sufficient
             # Set nodata only if data is loaded
@@ -505,6 +515,18 @@ class Raster(RasterBase):
         if parse_sensor_metadata and self.name is not None:
             sensor_meta = parse_and_convert_metadata_from_filename(self.name, silent=silent)
             self._tags.update(sensor_meta)
+
+    @property
+    def __geo_interface__(self) -> dict[str, Any]:
+        """Return the raster extent as a GeoJSON-like polygon mapping."""
+
+        # Convert the named bounding box to plain floats used by the protocol
+        left, bottom, right, top = (float(value) for value in self.bbox)
+        bbox = (left, bottom, right, top)
+
+        # Follow the GeoJSON right-hand rule for the exterior rectangle
+        coordinates = (((left, bottom), (right, bottom), (right, top), (left, top), (left, bottom)),)
+        return {"type": "Polygon", "bbox": bbox, "coordinates": coordinates}
 
     @property
     def data(self) -> MArrayNum:
@@ -592,7 +614,6 @@ class Raster(RasterBase):
 
         # 1/ If the new data is not a masked array and contains non-finite values such as NaNs, define a mask
         if not np.ma.isMaskedArray(new_data):
-
             # Have to write it this way, because wrapper np.ma.mask_invalid always creates a boolean array,
             # instead of attributing nomask (mask = False, single boolean) when no invalids exist
             mask = ~np.isfinite(new_data)
@@ -795,8 +816,11 @@ class Raster(RasterBase):
 
     @property
     def dtype(self) -> DTypeLike:
-        if not self.is_loaded and self._disk_dtype is not None:
-            return self._disk_dtype
+        if not self.is_loaded:
+            if self._out_dtype is not None:
+                return self._out_dtype
+            if self._disk_dtype is not None:
+                return self._disk_dtype
         return self.data.dtype
 
     @property
@@ -807,6 +831,29 @@ class Raster(RasterBase):
         # Otherwise check data type
         else:
             return np.dtype(self.dtype) == np.bool_
+
+    def _crop_deferred(
+        self: RasterType,
+        bbox: Any,
+        distance_unit: Literal["georeferenced", "pixel"],
+    ) -> RasterType:
+        """Return an unloaded raster whose future read is limited to the selected window."""
+
+        final_window, new_transform = _crop_window(self, bbox=bbox, distance_unit=distance_unit)
+        source_window = self._out_window or rio.windows.Window(0, 0, self.width, self.height)
+
+        # Compose the new selection with any opening downsampling or earlier deferred crop
+        output = self.copy(deep=False)
+        output._out_window = rio.windows.Window(
+            col_off=source_window.col_off + final_window.col_off,
+            row_off=source_window.row_off + final_window.row_off,
+            width=final_window.width,
+            height=final_window.height,
+        )
+        output._out_shape = (int(final_window.height), int(final_window.width))
+        output._out_count = output.count
+        output._set_transform(new_transform)
+        return output
 
     def _load_only_mask(self, bands: int | list[int] | None = None, **kwargs: Any) -> NDArrayBool:
         """
@@ -839,19 +886,33 @@ class Raster(RasterBase):
             if self._out_shape is not None:
                 out_count = len(valid_bands)
 
-        # If a downsampled out_shape was defined during instantiation
-        with rio.open(self.name) as dataset:
-            mask = _load_rio(
-                dataset,
-                only_mask=True,
-                indexes=list(valid_bands),
-                masked=self._masked,
-                transform=self.transform,
-                shape=self.shape,
-                out_shape=self._out_shape,
-                out_count=out_count,
-                **kwargs,
-            )
+        # Read a suitable overview for a reduced grid, or use the native dataset without downsampling
+        read_kwargs = kwargs.copy()
+        with ExitStack() as stack:
+            source = stack.enter_context(rio.open(self.name))
+            if self._downsample > 1:
+                dataset = stack.enter_context(_open_downsampled_raster(source, self._downsample))
+                mask = _load_rio(
+                    dataset,
+                    only_mask=True,
+                    indexes=list(valid_bands),
+                    masked=self._masked,
+                    window=self._out_window,
+                    out_shape=self._out_shape,
+                    out_count=out_count,
+                    **read_kwargs,
+                )
+            else:
+                mask = _load_rio(
+                    source,
+                    only_mask=True,
+                    indexes=list(valid_bands),
+                    masked=self._masked,
+                    window=self._out_window,
+                    out_shape=self._out_shape,
+                    out_count=out_count,
+                    **read_kwargs,
+                )
 
         # Rasterio says the mask should be returned in 2D for a single band but it seems not
         mask = mask.squeeze()
@@ -894,19 +955,35 @@ class Raster(RasterBase):
         # Save which bands are loaded
         self._bands_loaded = valid_bands
 
-        # If a downsampled out_shape was defined during instantiation
-        with rio.open(self.name) as dataset:
-            self.data = _load_rio(
-                dataset,
-                indexes=list(valid_bands),
-                masked=self._masked,
-                convert_to_mask=self._is_mask,
-                transform=self.transform,
-                shape=self.shape,
-                out_shape=self._out_shape,
-                out_count=self._out_count,
-                **kwargs,
-            )
+        # Read a suitable overview for a reduced grid, or use the native dataset without downsampling
+        read_kwargs = kwargs.copy()
+        if self._out_dtype is not None and np.dtype(self._out_dtype) != np.bool_:
+            read_kwargs["out_dtype"] = self._out_dtype
+        with ExitStack() as stack:
+            source = stack.enter_context(rio.open(self.name))
+            if self._downsample > 1:
+                dataset = stack.enter_context(_open_downsampled_raster(source, self._downsample))
+                self.data = _load_rio(
+                    dataset,
+                    indexes=list(valid_bands),
+                    masked=self._masked,
+                    convert_to_mask=self._is_mask,
+                    window=self._out_window,
+                    out_shape=self._out_shape,
+                    out_count=self._out_count,
+                    **read_kwargs,
+                )
+            else:
+                self.data = _load_rio(
+                    source,
+                    indexes=list(valid_bands),
+                    masked=self._masked,
+                    convert_to_mask=self._is_mask,
+                    window=self._out_window,
+                    out_shape=self._out_shape,
+                    out_count=self._out_count,
+                    **read_kwargs,
+                )
 
         # Probably don't want to use set_nodata() that updates the array
         # Set nodata value with the loaded array
@@ -1448,7 +1525,9 @@ class Raster(RasterBase):
     def __and__(self: RasterType, other: RasterType | NDArrayBool) -> RasterType:
         """Bitwise and between masks, or a mask and an array."""
         self_data, other_data = _cast_numeric_array_raster(
-            self, other, operation_name="an arithmetic operation"  # type: ignore
+            self,
+            other,  # type: ignore[arg-type]
+            operation_name="an arithmetic operation",
         )[0:2]
 
         return self.copy(self_data & other_data)  # type: ignore
@@ -1462,7 +1541,9 @@ class Raster(RasterBase):
         """Bitwise or between masks, or a mask and an array."""
 
         self_data, other_data = _cast_numeric_array_raster(
-            self, other, operation_name="an arithmetic operation"  # type: ignore
+            self,
+            other,  # type: ignore[arg-type]
+            operation_name="an arithmetic operation",
         )[0:2]
 
         return self.copy(self_data | other_data)  # type: ignore
@@ -1476,7 +1557,9 @@ class Raster(RasterBase):
         """Bitwise xor between masks, or a mask and an array."""
 
         self_data, other_data = _cast_numeric_array_raster(
-            self, other, operation_name="an arithmetic operation"  # type: ignore
+            self,
+            other,  # type: ignore[arg-type]
+            operation_name="an arithmetic operation",
         )[0:2]
 
         return self.copy(self_data ^ other_data)  # type: ignore
@@ -1519,32 +1602,48 @@ class Raster(RasterBase):
         :returns: Raster with updated dtype (or None if inplace).
         """
 
+        target_dtype = np.dtype(dtype)
+        dtype_changed = target_dtype != np.dtype(self.dtype)
+
         # Check for all data type except boolean, that we support in addition to other types
-        if np.dtype(dtype) != np.bool_:
+        if target_dtype != np.bool_:
             # Check that dtype is supported by rasterio
-            if not rio.dtypes.check_dtype(dtype):
+            if not rio.dtypes.check_dtype(target_dtype):
                 raise TypeError(f"{dtype} is not supported by rasterio")
 
             # Check that data type change will not result in a loss of information
-            if not rio.dtypes.can_cast_dtype(self.data, dtype):
+            if self.is_loaded:
+                preserves_values = rio.dtypes.can_cast_dtype(self.data, target_dtype)
+            else:
+                preserves_values = np.can_cast(self.dtype, target_dtype, casting="safe")
+            if not preserves_values:
                 warnings.warn(
-                    "dtype conversion will result in a loss of information. "
-                    f"{rio.dtypes.get_minimum_dtype(self.data)} is the minimum type to represent the data.",
+                    f"Converting from {self.dtype} to {target_dtype} may alter values because the target dtype "
+                    "cannot safely represent the source values.",
                     category=UserWarning,
                 )
 
-        out_data = self.data.astype(dtype)
+        # Keep file-backed rasters lazy by recording the type Rasterio should use at the next read
+        if not self.is_loaded:
+            output = self if inplace else self.copy()
+            output._out_dtype = target_dtype
+            output._is_mask = target_dtype == np.bool_
+            if convert_nodata and dtype_changed:
+                output._nodata = None if target_dtype == np.bool_ else _default_nodata(target_dtype)
+            return None if inplace else output
+
+        out_data = self.data.astype(target_dtype)
 
         if inplace:
             self._data = out_data  # type: ignore
-            if convert_nodata:
-                self.set_nodata(new_nodata=_default_nodata(dtype))
+            if convert_nodata and dtype_changed:
+                self.set_nodata(new_nodata=None if target_dtype == np.bool_ else _default_nodata(target_dtype))
             return None
         else:
-            if not convert_nodata:
+            if not convert_nodata or not dtype_changed:
                 nodata = self.nodata
             else:
-                nodata = _default_nodata(dtype)
+                nodata = None if target_dtype == np.bool_ else _default_nodata(target_dtype)
             return self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=self.area_or_point)
 
     def set_mask(self, mask: NDArrayBool | Raster) -> None:
@@ -1563,10 +1662,7 @@ class Raster(RasterBase):
             raise ValueError("mask must be a numpy array or a raster.")
 
         # Check that new_data has correct shape
-        if self.is_loaded:
-            orig_shape = self.data.shape
-        else:
-            raise AttributeError("self.data must be loaded first, with e.g. self.load()")
+        orig_shape = self.data.shape
 
         # If the mask is a Mask instance, pass the boolean array
         if isinstance(mask, Raster) and mask.is_mask:
@@ -1601,11 +1697,13 @@ class Raster(RasterBase):
             "_disk_shape",
             "_disk_bands",
             "_disk_dtype",
+            "_out_dtype",
             "_disk_transform",
             "_downsample",
             "_name",
             "_driver",
             "_out_shape",
+            "_out_window",
             "_out_count",
             "_obj",
         ]
@@ -1673,11 +1771,16 @@ class Raster(RasterBase):
     #
     #     return self._data
 
+    def __bool__(self) -> bool:
+        """Reject a single truth value because a raster contains one value per pixel."""
+
+        raise ValueError("The truth value of a Raster is ambiguous. Use np.any(raster) or np.all(raster) instead.")
+
     def __array_ufunc__(
         self,
         ufunc: Callable[[NDArrayNum | tuple[NDArrayNum, NDArrayNum]], NDArrayNum | tuple[NDArrayNum, NDArrayNum]],
         method: str,
-        *inputs: Raster | tuple[Raster, Raster] | tuple[NDArrayNum, Raster] | tuple[Raster, NDArrayNum],
+        *inputs: Raster | NDArrayNum | Number,
         **kwargs: Any,
     ) -> Raster | tuple[Raster, Raster]:
         """
@@ -1690,6 +1793,11 @@ class Raster(RasterBase):
 
         # In addition to running ufuncs, this function takes over arithmetic operations (__add__, __multiply__, etc...)
         # when the first input provided is a NumPy array and second input a Raster.
+
+        # Reject ufunc methods that operate on the dimensions of a single array. A sequence of rasters is converted to
+        # an object array before dispatch and is instead rejected by __bool__ when a logical reduction tests its items.
+        if method != "__call__":
+            raise NotImplementedError(f"The '{method}' method of NumPy ufuncs is not supported for Raster objects.")
 
         # The Raster ufuncs behave exactly as arithmetic operations (+, *, .) of NumPy masked array (call np.ma instead
         # of np when available). There is an inconsistency when calling np.ma: operations return a full boolean mask
@@ -1717,36 +1825,47 @@ class Raster(RasterBase):
 
         # If the universal function takes two inputs (Note: no ufunc exists that has three inputs or more)
         else:
-
             # Check the casting between Raster and array inputs, and return error messages if not consistent
+            input_data: tuple[MArrayNum | NDArrayNum | Number, MArrayNum | NDArrayNum | Number]
             if isinstance(inputs[0], Raster):
                 raster = inputs[0]
                 other = inputs[1]
+                raster_data, other_data, nodata, aop = _cast_numeric_array_raster(
+                    raster,
+                    other,
+                    "an arithmetic operation",
+                )
+                input_data = (raster_data, other_data)
             else:
-                raster = inputs[1]  # type: ignore
+                raster = self
                 other = inputs[0]
-            nodata, aop = _cast_numeric_array_raster(raster, other, "an arithmetic operation")[-2:]  # type: ignore
+                raster_data, other_data, nodata, aop = _cast_numeric_array_raster(
+                    raster,
+                    other,
+                    "an arithmetic operation",
+                )
+                input_data = (other_data, raster_data)
 
             if ufunc.nout == 1:
                 return self.from_array(
-                    data=final_ufunc(inputs[0].data, inputs[1].data, **kwargs),  # type: ignore
+                    data=final_ufunc(*input_data, **kwargs),
                     transform=self.transform,
                     crs=self.crs,
-                    nodata=self.nodata,
+                    nodata=nodata,
                     area_or_point=aop,
                 )
 
             # If the universal function has two outputs (Note: no ufunc exists that has three outputs or more)
             else:
-                output = final_ufunc(inputs[0].data, inputs[1].data, **kwargs)  # type: ignore
+                output = final_ufunc(*input_data, **kwargs)
                 return self.from_array(
                     data=output[0],
                     transform=self.transform,
                     crs=self.crs,
-                    nodata=self.nodata,
+                    nodata=nodata,
                     area_or_point=aop,
                 ), self.from_array(
-                    data=output[1], transform=self.transform, crs=self.crs, nodata=self.nodata, area_or_point=aop
+                    data=output[1], transform=self.transform, crs=self.crs, nodata=nodata, area_or_point=aop
                 )
 
     def __array_function__(
@@ -1762,63 +1881,66 @@ class Raster(RasterBase):
             return NotImplemented
 
         # For subclassing
-        if not all(issubclass(t, self.__class__) for t in types):
+        if not all(issubclass(t, (self.__class__, np.ndarray)) for t in types):
             return NotImplemented
-
-        # We now choose the behaviour of array functions
-        # For median, np.median ignores masks of masked array, so we force np.ma.median
-        if func.__name__ in ["median", "nanmedian"]:
-            func = np.ma.median
-            first_arg = args[0].data
-
-        # For percentiles and quantiles, there exist no masked array version, so we compute on the valid data directly
-        elif func.__name__ in ["percentile", "nanpercentile"]:
-            first_arg = args[0].data.compressed()
-
-        elif func.__name__ in ["quantile", "nanquantile"]:
-            first_arg = args[0].data.compressed()
-
-        elif func.__name__ in ["gradient"]:
-            if self.count == 1:
-                first_arg = args[0].data
-            else:
-                warnings.warn("Applying np.gradient to first raster band only.", category=UserWarning)
-                first_arg = args[0].data[0, :, :]
-
-        # Otherwise, we run the numpy function normally (most take masks into account)
-        else:
-            first_arg = args[0].data
 
         # Separate one and two input functions
         cast_required = False
         aop = None  # The None value is never used (aop only used when cast_required = True)
         if func.__name__ in _HANDLED_FUNCTIONS_1NIN:
+            # We now choose the behaviour of array functions
+            # For median, np.median ignores masks of masked array, so we force np.ma.median
+            if func.__name__ in ["median", "nanmedian"]:
+                func = np.ma.median
+                first_arg = args[0].data
+
+            # For percentiles and quantiles, there exist no masked array version, so we compute on the valid data
+            # directly
+            elif func.__name__ in ["percentile", "nanpercentile", "quantile", "nanquantile"]:
+                first_arg = args[0].data.compressed()
+
+            elif func.__name__ == "gradient":
+                if self.count == 1:
+                    first_arg = args[0].data
+                else:
+                    warnings.warn("Applying np.gradient to first raster band only.", category=UserWarning)
+                    first_arg = args[0].data[0, :, :]
+
+            # Otherwise, we run the numpy function normally (most take masks into account)
+            else:
+                first_arg = args[0].data
             outputs = func(first_arg, *args[1:], **kwargs)  # type: ignore
+
         # Two input functions require casting
         else:
             # Check the casting between Raster and array inputs, and return error messages if not consistent
             if isinstance(args[0], Raster):
                 raster = args[0]
                 other = args[1]
+                raster_data, other_data, nodata, aop = _cast_numeric_array_raster(
+                    raster, other, operation_name="an arithmetic operation"
+                )
+                first_arg, second_arg = raster_data, other_data
             else:
                 raster = args[1]
                 other = args[0]
-            nodata, aop = _cast_numeric_array_raster(raster, other, operation_name="an arithmetic operation")[-2:]
+                raster_data, other_data, nodata, aop = _cast_numeric_array_raster(
+                    raster, other, operation_name="an arithmetic operation"
+                )
+                first_arg, second_arg = other_data, raster_data
             cast_required = True
-            second_arg = args[1].data
             outputs = func(first_arg, second_arg, *args[2:], **kwargs)  # type: ignore
 
         # Below, we recast to Raster if the shape was preserved, otherwise return an array
         # First, if there are several outputs in a tuple which are arrays
         if isinstance(outputs, tuple) and isinstance(outputs[0], np.ndarray):
-            if all(output.shape == args[0].data.shape for output in outputs):
-
+            if all(output.shape == self.data.shape for output in outputs):
                 # If casting was not necessary, copy all attributes except array
                 # Otherwise update array, nodata and
                 if cast_required:
                     return tuple(
                         self.from_array(
-                            data=output, transform=self.transform, crs=self.crs, nodata=self.nodata, area_or_point=aop
+                            data=output, transform=self.transform, crs=self.crs, nodata=nodata, area_or_point=aop
                         )
                         for output in outputs
                     )
@@ -1828,12 +1950,11 @@ class Raster(RasterBase):
                 return outputs
         # Second, if there is a single output which is an array
         elif isinstance(outputs, np.ndarray):
-            if outputs.shape == args[0].data.shape:
-
+            if outputs.shape == self.data.shape:
                 # If casting was not necessary, copy all attributes except array
                 if cast_required:
                     return self.from_array(
-                        data=outputs, transform=self.transform, crs=self.crs, nodata=self.nodata, area_or_point=aop
+                        data=outputs, transform=self.transform, crs=self.crs, nodata=nodata, area_or_point=aop
                     )
                 else:
                     return self.copy(new_array=outputs)
@@ -1901,6 +2022,12 @@ class Raster(RasterBase):
 
         # Use nodata set by user, otherwise default to self's
         nodata = nodata if nodata is not None else self.nodata
+        output_dtype = np.dtype(dtype) if dtype is not None else np.dtype(self.dtype)
+
+        # If the output is a mask, convert to uint8 before saving and force nodata to 255
+        if output_dtype == np.bool_:
+            output_dtype = np.dtype("uint8")
+            nodata = 255
 
         # Declare type of save_data to work in all occurrences
         save_data: NDArrayNum
@@ -1910,25 +2037,26 @@ class Raster(RasterBase):
             raise AttributeError("No data loaded, and alternative blank_value not set.")
         elif blank_value is not None:
             if isinstance(blank_value, int) | isinstance(blank_value, float):
-                save_data = np.zeros(self.data.shape)
+                save_data = np.zeros(self.data.shape, dtype=output_dtype)
                 save_data[:] = blank_value
             else:
                 raise ValueError("blank_values must be one of int, float (or None).")
         else:
             save_data = self.data
 
-            # If the raster is a mask, convert to uint8 before saving and force nodata to 255
-            if self.data.dtype == bool:
-                save_data = save_data.astype("uint8")
-                nodata = 255
+        # Make nodata compatible with the requested file type before filling masked values
+        nodata = _cast_nodata(output_dtype, cast(int | float | None, nodata))
 
-            # If masked array, save with masked values replaced by nodata
-            if isinstance(save_data, np.ma.masked_array):
-                # In this case, nodata=None is not compatible, so revert to default values, only if masked values exist
-                if (nodata is None) & (np.count_nonzero(save_data.mask) > 0):
-                    nodata = _default_nodata(save_data.dtype)
-                    warnings.warn(f"No nodata set, will use default value of {nodata}", category=UserWarning)
-                save_data = save_data.filled(nodata)
+        # If masked array, save with masked values replaced by nodata
+        if isinstance(save_data, np.ma.masked_array):
+            # In this case, nodata=None is not compatible, so revert to default values, only if masked values exist
+            if (nodata is None) & (np.count_nonzero(save_data.mask) > 0):
+                nodata = _default_nodata(output_dtype)
+                warnings.warn(f"No nodata set, will use default value of {nodata}", category=UserWarning)
+            # Convert masked data before filling so nodata is represented in the requested output type
+            save_data = save_data.astype(output_dtype, copy=False).filled(nodata)
+        else:
+            save_data = save_data.astype(output_dtype, copy=False)
 
         # Cast to 3D before saving if single band
         if self.count == 1:
@@ -1972,7 +2100,7 @@ class Raster(RasterBase):
 
     @deprecate(
         removal_version=Version("0.3.0"),
-        details="The function .save() will be soon deprecated, use .to_file() instead.",
+        details="Use .to_file() instead.",
     )  # type: ignore
     def save(
         self,
@@ -2045,203 +2173,6 @@ class Raster(RasterBase):
 
         return ds
 
-    @overload
-    def plot(
-        self,
-        bands: int | tuple[int, ...] | None = None,
-        cmap: matplotlib.colors.Colormap | str | None = None,
-        vmin: float | int | None = None,
-        vmax: float | int | None = None,
-        alpha: float | int | None = None,
-        title: str | None = None,
-        cbar_title: str | None = None,
-        add_cbar: bool = True,
-        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
-        *,
-        return_axes: Literal[False] = False,
-        savefig_fname: str | None = None,
-        **kwargs: Any,
-    ) -> None: ...
-
-    @overload
-    def plot(
-        self,
-        bands: int | tuple[int, ...] | None = None,
-        cmap: matplotlib.colors.Colormap | str | None = None,
-        vmin: float | int | None = None,
-        vmax: float | int | None = None,
-        alpha: float | int | None = None,
-        title: str | None = None,
-        cbar_title: str | None = None,
-        add_cbar: bool = True,
-        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
-        *,
-        return_axes: Literal[True],
-        savefig_fname: str | None = None,
-        **kwargs: Any,
-    ) -> tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]: ...
-
-    def plot(
-        self,
-        bands: int | tuple[int, ...] | None = None,
-        cmap: matplotlib.colors.Colormap | str | None = None,
-        vmin: float | int | None = None,
-        vmax: float | int | None = None,
-        alpha: float | int | None = None,
-        title: str | None = None,
-        cbar_title: str | None = None,
-        add_cbar: bool = True,
-        ax: matplotlib.axes.Axes | Literal["new"] | None = None,
-        return_axes: bool = False,
-        savefig_fname: str | None = None,
-        **kwargs: Any,
-    ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
-        r"""
-        Plot the raster, with axes in projection of image.
-
-        This method is a wrapper to matplotlib.imshow with modifications to work on raster (flip Y-axis, lower origin,
-        equal scale). Any \*\*kwargs which you give this method will be passed to matplotlib.imshow.
-        If the raster is passed with 3(4) bands, it is plotted as RGB(Alpha).
-
-        :param bands: Bands to plot, counting from 1 to self.count (default is all bands).
-        :param cmap: Colormap to use. Default is plt.rcParams['image.cmap'].
-        :param vmin: Minimum value for colorbar. Default is data min.
-        :param vmax: Maximum value for colorbar. Default is data max.
-        :param alpha: Transparency of raster and colorbar. Default is None.
-        :param title: Title of the plot. Default is None.
-        :param cbar_title: Colorbar label title. Default is None.
-        :param add_cbar: Set to True to display a colorbar. Default is True.
-        :param ax: A figure ax to be used for plotting. If None, will plot on current axes.
-            If "new", will create a new axis.
-        :param return_axes: Whether to return axes.
-        :param savefig_fname: Path to quick save the output figure (previously created if an ax is give, new if not)
-            with a default DPI, no transparency and no metadata. Use `plt.savefig()` to specify other save
-            parameters or after other customizations. Warning: `plt.close()` or `plt.show()` still needs to be called
-            to close the figure.
-
-        :returns: None, or (ax, caxes) if return_axes is True.
-        """
-
-        matplotlib = import_optional("matplotlib")
-        import matplotlib.pyplot as plt
-        from mpl_toolkits.axes_grid1 import make_axes_locatable
-
-        # If data is not loaded, need to load it
-        if not self.is_loaded:
-            self.load()
-
-        # Set matplotlib interpolation to None by default, to avoid spreading gaps in plots
-        if "interpolation" not in kwargs.keys():
-            kwargs.update({"interpolation": None})
-
-        # Check if specific band selected, or take all
-        # if self.count=3 (4) => plotted as RGB(A)
-        if bands is None or isinstance(bands, tuple):
-            # Use all if None was specified
-            if bands is None:
-                bands = tuple(range(1, self.count + 1))
-            # Check the number of bands is 1, 3 or 4
-            if len(bands) not in [1, 3, 4]:
-                raise ValueError(
-                    f"Only single-band or 3/4-band (RGB-A) plotting is supported. "
-                    f"Found {len(bands)} bands. Use the `bands` argument to specify bands."
-                )
-            if len(bands) == 1:
-                bands = bands[0]
-        elif isinstance(bands, int):
-            if bands > self.count:
-                raise ValueError(f"Index must be in range 1-{self.count:d}")
-            pass
-        else:
-            raise ValueError("Index must be int, tuple or None")
-
-        # Get data
-        if self.count == 1:
-            data = self.data
-        else:
-            data = self.data[np.array(bands) - 1, :, :]
-
-        # If multiple bands (RGB), cbar does not make sense
-        if isinstance(bands, abc.Sequence):
-            if len(bands) > 1:
-                add_cbar = False
-            # Re-order axes for RGB plotting
-            data = np.moveaxis(data, 0, -1)  # type: ignore
-
-        # Create colorbar
-        # Use rcParam default
-        if cmap is None:
-            cmap = plt.get_cmap(plt.rcParams["image.cmap"])
-        elif isinstance(cmap, str):
-            cmap = plt.get_cmap(cmap)
-        elif isinstance(cmap, matplotlib.colors.Colormap):
-            pass
-
-        # Set colorbar min/max values (needed for ScalarMappable)
-        if vmin is None:
-            vmin = float(np.nanmin(data))
-
-        if vmax is None:
-            vmax = float(np.nanmax(data))
-
-        # Make sure they are numbers, to avoid mpl error
-        try:
-            vmin = float(vmin)
-            vmax = float(vmax)
-        except ValueError:
-            raise ValueError("vmin or vmax cannot be converted to float")
-
-        # Create axes
-        if ax is None:
-            ax0 = plt.gca()
-        elif isinstance(ax, str) and ax.lower() == "new":
-            _, ax0 = plt.subplots()
-        elif isinstance(ax, matplotlib.axes.Axes):
-            ax0 = ax
-        else:
-            raise ValueError("ax must be a matplotlib.axes.Axes instance, 'new' or None.")
-
-        # Use data array directly, as rshow on self.ds will re-load data
-        extent = [self.bounds.left, self.bounds.right, self.bounds.bottom, self.bounds.top]
-        ax0.imshow(
-            np.flip(data, axis=0),
-            extent=extent,
-            origin="lower",  # So that the array is not upside-down
-            aspect="equal",
-            cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
-            alpha=alpha,
-            **kwargs,
-        )
-        if title is not None:
-            ax0.set_title(title)
-
-        # Add colorbar
-        if add_cbar:
-            divider = make_axes_locatable(ax0)
-            cax = divider.append_axes("right", size="5%", pad="2%")
-            norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
-            cbar = matplotlib.colorbar.ColorbarBase(cax, cmap=cmap, norm=norm)
-            cbar.solids.set_alpha(alpha)
-
-            if cbar_title is not None:
-                cbar.set_label(cbar_title)
-        else:
-            cbar = None
-
-        plt.sca(ax0)
-        plt.tight_layout()
-
-        # if savefig_fname filled, save the plot
-        if savefig_fname:
-            plt.savefig(savefig_fname)
-
-        # If returning axes
-        if return_axes:
-            return ax0, cax
-        return None
-
     def split_bands(self: RasterType, bands: list[int] | int | None = None, deep: bool = True) -> list[RasterType]:
         """
         Split the bands into separate rasters.
@@ -2285,6 +2216,41 @@ class Raster(RasterBase):
 
         return raster_bands
 
+    def stack(
+        self,
+        rasters: Raster | list[Raster],
+        reference: int | Raster = 0,
+        resampling_method: str | rio.enums.Resampling = None,
+        use_ref_bounds: bool = False,
+    ) -> Raster:
+        """
+        Stack this raster with one or more rasters into a multi-band raster.
+
+        All input rasters are reprojected and resampled to a common grid defined by the reference raster.
+        The reference can be either this raster (reference=0) or another raster (reference>0, defined by its index)
+
+        The output multi-band extent is the union of all raster extents, except if `use_ref_bounds`
+        is used, in which case the reference raster bounds are used. Its number of bands equals the sum of the bands
+        from this raster and all additional rasters.
+
+        Note that all rasters will be loaded once in memory. The data is only loaded for
+        reprojection then deleted to optimize memory usage.
+
+        :param rasters: Raster or list of rasters to be stacked.
+        :param reference: Index of reference raster in the list or separate reference raster.
+            Defaults to this raster.
+        :param resampling_method: Resampling method for reprojection.
+        :param use_ref_bounds: If True, will use reference bounds, otherwise will use maximum bounds of all rasters.
+
+        :returns: The merged raster with same CRS and resolution (and optionally bounds) as the reference.
+        """
+        if isinstance(rasters, Raster):
+            raster_list: list[Raster] = [self, rasters]
+        else:
+            raster_list = [self] + rasters  # type: ignore
+
+        return gu.raster.stack(raster_list, reference, resampling_method, use_ref_bounds)
+
 
 class Mask(Raster):
     """
@@ -2312,9 +2278,7 @@ class Mask(Raster):
     See the API for more details.
     """
 
-    @deprecate(
-        removal_version=Version("0.3.0"), details="The Mask class is deprecated, use Raster(is_mask=True) instead."
-    )  # type: ignore
+    @deprecate(removal_version=Version("0.3.0"), details="Use Raster(is_mask=True) instead.")  # type: ignore
     def __init__(
         self,
         *args: Any,

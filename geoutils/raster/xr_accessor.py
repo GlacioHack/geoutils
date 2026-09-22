@@ -32,22 +32,64 @@ from affine import Affine
 from rasterio.crs import CRS
 from rioxarray.rioxarray import affine_to_coords
 
-from geoutils._typing import DTypeLike, MArrayNum, NDArrayBool, NDArrayNum
-from geoutils.raster.base import RasterBase
+from geoutils._typing import DTypeLike, MArrayNum, NDArrayBool, NDArrayNum, Number
+from geoutils.raster.base import RasterBase, _validate_downsample
+from geoutils.raster.transformation import (
+    _open_downsampled_raster,
+    _overview_level_for_downsample,
+)
 
 
-def open_raster(filename: str, is_mask: bool = False, **kwargs: Any) -> xr.DataArray:
+def open_raster(
+    filename: str,
+    is_mask: bool = False,
+    downsample: Number = 1,
+    **kwargs: Any,
+) -> xr.DataArray:
     """
-    Open a raster using Rioxarray, always masked and squeezed.
+    Open a raster as an Xarray dataset.
+
+    This function relies directly on rioxarray.open_rasterio(), to which keyword arguments are passed.
+
+    The raster array is always masked (i.e. forced to floating with NaNs) and squeezed (single-band dimension
+    removed).
+
+    Use ``downsample`` to open a smaller raster by sampling rows and columns at regular intervals. For example,
+    ``downsample=2`` keeps one row and one column out of every two, returning about one quarter of the source pixels.
+
+    To open an overview (reduced copy) already stored in the file, pass ``overview_level`` through ``kwargs`` passed
+    to Rioxarray. Level 0 selects the first stored overview, level 1 the second, and so on. The returned array uses
+    that overview's shape and resolution. See Rioxarray's `Cloud Optimized GeoTIFF example
+    <https://corteva.github.io/rioxarray/stable/examples/COG.html>`_.
+
+    Overviews are also used automatically with ``downsample``: GeoUtils reads the closest suitable overview and
+    resamples it to the requested factor, or reads the original raster if no suitable overview exists. ``downsample``
+    and ``overview_level`` cannot be combined because one selects an overview automatically and the other explicitly.
+    See `Rasterio's overview documentation <https://rasterio.readthedocs.io/en/stable/topics/overviews.html>`_ for how
+    reduced reads use stored overviews.
 
     :param filename: Path to the raster file to open.
     :param is_mask: Whether to return the raster values as booleans.
+    :param downsample: Downsampling factor (e.g., 2 selects one out of two pixels for every row/column). Rows or
+        columns that do not fill a complete interval are omitted. Default 1 keeps the native resolution.
     :param kwargs: Keyword arguments passed to :func:`rioxarray.open_rasterio`.
     :returns: The opened raster as a Rioxarray DataArray.
     """
 
-    # Open with Rioxarray, cast to float32 if integer type
-    ds = rioxr.open_rasterio(filename, masked=True, **kwargs)
+    downsample = _validate_downsample(downsample)
+    if downsample > 1 and kwargs.get("overview_level") is not None:
+        raise ValueError("downsample and overview_level cannot be used together.")
+
+    # Open the native grid directly, or expose an exact reduced grid through a lazy GDAL virtual raster
+    if downsample == 1:
+        ds = rioxr.open_rasterio(filename, masked=True, **kwargs)
+    else:
+        with rasterio.open(filename) as source:
+            overview_level = _overview_level_for_downsample(source, downsample)
+            with _open_downsampled_raster(source, downsample) as vrt:
+                if overview_level is not None:
+                    kwargs["overview_level"] = overview_level
+                ds = rioxr.open_rasterio(vrt, masked=True, **kwargs)
 
     # Remove the band dimension if there is only one
     if ds.sizes.get("band") == 1:

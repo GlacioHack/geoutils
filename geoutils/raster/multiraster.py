@@ -26,10 +26,11 @@ from typing import Any, Callable
 import numpy as np
 import rasterio as rio
 import rasterio.warp
+from packaging.version import Version
 
+from geoutils._misc import deprecate
 from geoutils._typing import NDArrayNum
 from geoutils.projtools import align_bounds, merge_bounds
-from geoutils.raster.array import get_array_and_mask
 from geoutils.raster.raster import Raster, _default_nodata
 
 
@@ -107,7 +108,7 @@ def load_multiple_rasters(
             new_bounds = align_bounds(ref_rst.transform, intersection)
             new_bounds = {"left": new_bounds[0], "bottom": new_bounds[1], "right": new_bounds[2], "top": new_bounds[3]}
         else:
-            new_bounds = ref_rst.bounds
+            new_bounds = ref_rst.bbox
 
         # Reproject all rasters
         for index, rst in enumerate(output_rst):
@@ -116,32 +117,29 @@ def load_multiple_rasters(
                 out_rst.load()
             output_rst[index] = out_rst
 
-    # if no crop or reproject option, simply load the rasters
-    if (not crop) & (not reproject):
-        for rst in output_rst:
+    # Load any output that remains deferred after metadata-only opening or cropping
+    for rst in output_rst:
+        if not rst.is_loaded:
             rst.load()
 
     return output_rst
 
 
-def stack_rasters(
+def stack(
     rasters: list[Raster],
     reference: int | Raster = 0,
     resampling_method: str | rio.enums.Resampling = None,
     use_ref_bounds: bool = False,
-    diff: bool = False,
-    progress: bool = True,
 ) -> Raster:
     """
     Stack a list of rasters on their maximum extent into a multi-band raster.
 
-    The input rasters can have any transform or CRS, and will be reprojected to the
-    reference raster's CRS and resolution.
-    The output multi-band raster has an extent that is the union of all raster extents,
-    except if `use_ref_bounds` is used,
-    and the number of band equal to the number of input rasters.
+    All input rasters are reprojected and resampled to a common grid defined by the reference raster.
 
-    Use diff=True to return directly the difference to the reference raster.
+    The input rasters can have any transform or CRS, and will be reprojected to the reference raster's CRS
+    and resolution.
+    The output multi-band raster has an extent that is the union of all raster extents, except if `use_ref_bounds` is
+    used, and number of bands equals the sum of the bands from this raster and all additional rasters.
 
     Note that all rasters will be loaded once in memory. The data is only loaded for
     reprojection then deleted to optimize memory usage.
@@ -151,16 +149,9 @@ def stack_rasters(
         Defaults to the first raster in the list.
     :param resampling_method: Resampling method for reprojection.
     :param use_ref_bounds: If True, will use reference bounds, otherwise will use maximum bounds of all rasters.
-    :param diff: If True, will return the difference to the reference raster.
-    :param progress: If True, will display a progress bar. Default is True.
 
     :returns: The merged raster with same CRS and resolution (and optionally bounds) as the reference.
     """
-
-    # Check raster has a single band
-    if any(r.count > 1 for r in rasters):
-        warnings.warn("Some input Rasters have multiple bands, only their first band will be used.")
-
     # Select reference raster
     if isinstance(reference, int):
         reference_raster = rasters[reference]
@@ -171,7 +162,7 @@ def stack_rasters(
 
     # Set output bounds
     if use_ref_bounds:
-        dst_bounds = reference_raster.bounds
+        dst_bounds = reference_raster.bbox
     else:
         dst_bounds = merge_bounds(
             [raster.get_bounds_projected(out_crs=reference_raster.crs) for raster in rasters],
@@ -208,18 +199,13 @@ def stack_rasters(
             reprojected_raster = reprojected_raster.copy()
             reprojected_raster.set_nodata(nodata)
 
-        # Optionally calculate difference
-        if diff:
-            diff_to_ref = (reference_raster.data - reprojected_raster.data).squeeze()
-            diff_to_ref, _ = get_array_and_mask(diff_to_ref)
-            data.append(diff_to_ref)
+        # img_data, _ = get_array_and_mask(reprojected_raster.data.squeeze())
+        # Use only first band
+        if reprojected_raster.count == 1:
+            data.append(reprojected_raster.data[:])
         else:
-            # img_data, _ = get_array_and_mask(reprojected_raster.data.squeeze())
-            # Use only first band
-            if reprojected_raster.count == 1:
-                data.append(reprojected_raster.data[:])
-            else:
-                data.append(reprojected_raster.data[0, :])
+            for b in range(reprojected_raster.count):
+                data.append(reprojected_raster.data[b, :])
 
         # Remove unloaded rasters
         if not raster.is_loaded:
@@ -244,13 +230,25 @@ def stack_rasters(
     return r
 
 
+@deprecate(
+    removal_version=Version("1.0.0"),
+    details="Use gu.raster.stack() instead.",
+)  # type: ignore
+def stack_rasters(
+    rasters: list[Raster],
+    reference: int | Raster = 0,
+    resampling_method: str | rio.enums.Resampling = None,
+    use_ref_bounds: bool = False,
+) -> Raster:
+    return stack(rasters, reference, resampling_method, use_ref_bounds)
+
+
 def merge_rasters(
     rasters: list[Raster],
     reference: int | Raster = 0,
     merge_algorithm: Callable | list[Callable] = np.nanmean,  # type: ignore
     resampling_method: str | rio.enums.Resampling = None,
     use_ref_bounds: bool = False,
-    progress: bool = True,
 ) -> Raster:
     """
     Spatially merge a list of rasters into one larger raster of their maximum extent.
@@ -270,7 +268,6 @@ def merge_rasters(
         If several algorithms are provided, each result is returned as a separate band.
     :param resampling_method: Resampling method for reprojection.
     :param use_ref_bounds: If True, will use reference bounds, otherwise will use maximum bounds of all rasters.
-    :param progress: If True, will display a progress bar. Default is True.
 
     :returns: The merged raster with same CRS and resolution (and optionally bounds) as the reference.
     """
@@ -296,12 +293,11 @@ def merge_rasters(
         raise ValueError("reference should be either an integer or geoutils.Raster object")
 
     # Reproject and stack all rasters
-    raster_stack = stack_rasters(
+    raster_stack = stack(
         rasters,
         reference=reference,
         resampling_method=resampling_method,
         use_ref_bounds=use_ref_bounds,
-        progress=progress,
     )
 
     # Try to use the keyword axis=0 for the merging algorithm (if it's a numpy ufunc).
@@ -330,7 +326,7 @@ def merge_rasters(
     merged_raster = reference_raster.from_array(
         data=np.reshape(merged_data, (len(merged_data),) + merged_data[0].shape),
         transform=rio.transform.from_bounds(
-            *raster_stack.bounds, width=merged_data[0].shape[1], height=merged_data[0].shape[0]
+            *raster_stack.bbox, width=merged_data[0].shape[1], height=merged_data[0].shape[0]
         ),
         crs=reference_raster.crs,
         nodata=nodata,

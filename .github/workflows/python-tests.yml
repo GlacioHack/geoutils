@@ -38,6 +38,10 @@ jobs:
         channel-priority: strict
         activate-environment: geoutils-dev
 
+    - uses: astral-sh/setup-uv@v10.1.0
+      with:
+        enable-cache: true
+
     - name: Get month for resetting cache
       id: get-date
       run: echo "cache_date=$(/bin/date -u '+%Y%m')" >> $GITHUB_ENV
@@ -66,11 +70,11 @@ jobs:
     # If/else equivalent to install base environment, or base+optional
     - name: Install project environment (base)
       if: ${{ matrix.dep-level == 'base' }}
-      run: pip install -e .[test]
+      run: uv pip install -e ".[test]"
 
     - name: Install project environment (optional)
       if: ${{ matrix.dep-level != 'base' }}
-      run: pip install -e .[test,${{ matrix.dep-level }}]
+      run: uv pip install -e ".[test,${{ matrix.dep-level }}]"
 
     - name: Check import works
       run: python -c "import geoutils"

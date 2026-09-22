@@ -20,10 +20,9 @@
 """This module defines the cluster configurations."""
 
 import multiprocessing
-import sys
 from collections.abc import Iterable, Iterator
 from multiprocessing.pool import Pool
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Literal, Optional
 
 
 def _map_bounded(
@@ -35,7 +34,7 @@ def _map_bounded(
     """
     Run a function for many inputs without submitting all the work at once.
 
-    Submit up to ``max_pending`` calls, wait for their results, and then start the next batch. This limits how many
+    Keep up to ``max_pending`` calls active and replace each completed call with the next input. This limits how many
     jobs and input values the cluster must keep at one time. Return results in the same order as the inputs, together
     with the position of each input.
 
@@ -51,20 +50,39 @@ def _map_bounded(
     if max_pending <= 0:
         raise ValueError("Argument ``max_pending`` must be a positive integer.")
 
-    # Submit one small batch at a time
+    # Fill the first bounded group without consuming the remaining input arguments
+    indexed_arguments = enumerate(arguments)
     pending: list[tuple[int, Any]] = []
-    for index, args in enumerate(arguments):
+    for _ in range(max_pending):
+        try:
+            index, args = next(indexed_arguments)
+        except StopIteration:
+            break
         pending.append((index, cluster.submit(function, *args)))
-        if len(pending) == max_pending:
-            # Wait for the batch and return its results in input order
-            results = cluster.gather([future for _, future in pending])
-            yield from ((task_index, result) for (task_index, _), result in zip(pending, results))
-            pending = []
 
-    # Finish the last, smaller batch
-    if pending:
-        results = cluster.gather([future for _, future in pending])
-        yield from ((task_index, result) for (task_index, _), result in zip(pending, results))
+    # Replace completed calls immediately while keeping returned results in input order
+    completed: dict[int, Any] = {}
+    next_result = 0
+    while pending:
+        futures = [future for _, future in pending]
+        completed_position, result = next(iter(cluster.iter_completed(futures)))
+        task_index, _ = pending.pop(completed_position)
+        completed[task_index] = result
+
+        ready = []
+        while next_result in completed:
+            ready.append((next_result, completed.pop(next_result)))
+            next_result += 1
+
+        # Count completed results against the limit until an earlier input allows them to be returned
+        while len(pending) + len(completed) < max_pending:
+            try:
+                index, args = next(indexed_arguments)
+            except StopIteration:
+                break
+            pending.append((index, cluster.submit(function, *args)))
+
+        yield from ready
 
 
 class ClusterGenerator:
@@ -150,10 +168,22 @@ class BasicCluster(AbstractCluster):
 
 
 class MpCluster(AbstractCluster):
-    def __init__(self, conf: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(
+        self,
+        conf: Optional[Dict[str, Any]] = None,
+        *,
+        start_method: Literal["fork", "forkserver", "spawn"] | None = None,
+    ) -> None:
         """
-        Initializes a multiprocessing cluster.
-        :param conf: Configuration dictionary, which may contain the number of workers.
+        Initialize a multiprocessing cluster with a safe platform start method.
+
+        By default, workers start through ``forkserver`` when the platform provides it (this avoids copying the
+        process active threads and library state into replacement workers).
+        Platforms without ``forkserver``, including Windows, use ``spawn`` instead.
+
+        :param conf: Configuration dictionary, which may contain ``nb_workers`` and ``max_tasks_per_child``.
+        :param start_method: Optional multiprocessing start method. Use this only when a workload requires a method
+            other than the safe platform default.
         """
         super().__init__()
         nb_workers = 1
@@ -161,9 +191,17 @@ class MpCluster(AbstractCluster):
         if conf is not None:
             nb_workers = conf.get("nb_workers", 1)
             max_tasks_per_child = conf.get("max_tasks_per_child", 10)
-        # Using the 'forkserver' context for more controlled process handling
-        # Windows requires spawn, preserve existing fork behavior elsewhere
-        ctx_in_main = multiprocessing.get_context("spawn" if sys.platform == "win32" else "fork")
+
+        # Prefer "forkserver" (so that "recycled" workers do not inherit threads, locks; for example opened GDAL files)
+        available_methods = multiprocessing.get_all_start_methods()
+        if start_method is None:
+            start_method = "forkserver" if "forkserver" in available_methods else "spawn"
+        elif start_method not in available_methods:
+            methods = ", ".join(available_methods)
+            raise ValueError(f"Start method {start_method!r} is not available on this platform. Available: {methods}.")
+        self.start_method = start_method
+        ctx_in_main = multiprocessing.get_context(start_method)
+
         # Recycling stays configurable so memory tests can distinguish it from a crash
         self.pool = ctx_in_main.Pool(processes=nb_workers, maxtasksperchild=max_tasks_per_child)
 

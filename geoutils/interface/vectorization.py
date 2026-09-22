@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Generic, Literal, TypeVar, cast
 
 import geopandas as gpd
 import numpy as np
@@ -44,7 +44,8 @@ from geoutils.multiproc.mparray import MultiprocConfig
 from geoutils.raster.referencing import _cast_nodata
 
 if TYPE_CHECKING:
-    from geoutils.raster.base import Raster, RasterBase, RasterType
+    from geoutils.raster.base import RasterBase, RasterType
+    from geoutils.raster.raster import Raster
     from geoutils.vector.vector import Vector
 
 try:
@@ -628,7 +629,6 @@ def _chunked_label_block_per_value(
     next_id = 1  # Label counter within block
 
     for v in uniq:
-
         # Select mask pixels of this value
         sel = m & (vQ == v)
         if not sel.any():
@@ -1259,7 +1259,9 @@ def _chunked_polygonize_block_labels(
 
     # Map label -> value using dict; dict is typically fine (uniq_labs count ~= polygons)
     out_dtype = np.asarray(values).dtype
-    lab2val = {int(l): _canon_scalar(rep_vals[i], atol=float_tol, out_dtype=out_dtype) for i, l in enumerate(uniq_labs)}
+    lab2val = {
+        int(label): _canon_scalar(rep_vals[i], atol=float_tol, out_dtype=out_dtype) for i, label in enumerate(uniq_labs)
+    }
 
     # 2/ Polygonize label raster and attach values via lookup.
     feats: list[dict[str, Any]] = []
@@ -2017,7 +2019,6 @@ def _chunked_polygonize_core(
 
     # 3) Stitch polygons
     if prepared.strategy == "label_union":
-
         # Global ids already attached; just dissolve
         out = gdf.dissolve(by=prepared.id_column, as_index=False, aggfunc="first")
         return out.reset_index(drop=True)
@@ -2208,16 +2209,17 @@ def _polygonize(
     # For Multiprocessing
     if mp_backend:
         assert mp_config is not None
+        raster = cast("Raster", source_raster)
         # Temporary switch bands
-        orig_bands = source_raster.bands
-        source_raster._bands = (band,)
+        orig_bands = raster.bands
+        raster._bands = (band,)
         gdf = _multiproc_polygonize(
-            source_raster=source_raster,
+            source_raster=raster,
             prepared=prepared,
             mp_config=mp_config,
         )
         # Rewrite original bands
-        source_raster._bands = orig_bands
+        raster._bands = orig_bands
     # For Dask
     else:
         if source_raster.data.ndim != 2:

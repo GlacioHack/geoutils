@@ -93,7 +93,6 @@ def lazy_test_files(tmp_path_factory: Any) -> list[str]:
     list_name = ["everest_landsat_b4", "everest_landsat_rgb", "exploradores_aster_dem"]
     list_fn_out = []
     for name in list_name:
-
         # Get filepath
         fn = examples.get_path_test(name)
 
@@ -123,7 +122,6 @@ def lazy_test_files_tiny(tmp_path_factory: Any) -> list[str]:
     list_name = ["everest_landsat_b4", "everest_landsat_rgb", "exploradores_aster_dem"]
     list_fn_out = []
     for name in list_name:
-
         # Get filepath
         fn = examples.get_path_test(name)
 

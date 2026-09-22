@@ -49,6 +49,7 @@ from geoutils import profiler
 from geoutils._misc import copy_doc
 from geoutils.vector.base import VectorBase
 from geoutils.vector.base import VectorLike as VectorLike  # noqa: F401
+from geoutils.vector.transformation import _apply_crop_filters, _crop_read_bbox
 
 if TYPE_CHECKING:
     from geoutils.raster.base import RasterType
@@ -66,8 +67,8 @@ class Vector(VectorBase):
             Geodataframe of the vector.
         crs: :class:`pyproj.crs.CRS`
             Coordinate reference system of the vector.
-        bounds: :class:`rio.coords.BoundingBox`
-            Coordinate bounds of the vector.
+        bbox: :class:`rio.coords.BoundingBox`
+            Bounding box of the vector.
 
     All other attributes are derivatives of those attributes, or read from the file on disk.
     See the API for more details.
@@ -75,21 +76,26 @@ class Vector(VectorBase):
 
     @profiler.profile("geoutils.vector.vector.__init__", collect=False)
     def __init__(
-        self, filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry | dict[str, Any]
-    ):
+        self,
+        filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry | dict[str, Any],
+        layer: str | int | None = None,
+    ) -> None:
         """
         Instantiate a vector from either a filename, a GeoPandas dataframe or series, or a Shapely geometry.
 
         :param filename_or_dataset: Path to file, or GeoPandas dataframe or series, or Shapely geometry.
+        :param layer: Layer name or index to read from a file containing multiple layers.
         """
 
         self._name: str | None = None
+        self._layer = layer
         self._ds: gpd.GeoDataFrame | None = None
         self._crs: CRS | None = None
-        self._bounds: rio.coords.BoundingBox | None = None
+        self._bbox: rio.coords.BoundingBox | None = None
         self._columns: pd.Index | None = None
         self._feature_count: int | None = None
         self._geometry_type: str | None = None
+        self._crop_filters: list[tuple[tuple[float, float, float, float], Literal["intersects", "within"]]] = []
 
         # If Vector is passed, simply point back to Vector
         if isinstance(filename_or_dataset, Vector):
@@ -99,10 +105,12 @@ class Vector(VectorBase):
         # If filename is passed
         elif isinstance(filename_or_dataset, (str, pathlib.Path)):
             self._name = os.fspath(filename_or_dataset)
-            self._set_metadata_from_file(self._name)
+            self._set_metadata_from_file(self._name, layer=layer)
             return
         # If GeoPandas or Shapely object is passed
         elif isinstance(filename_or_dataset, (gpd.GeoDataFrame, gpd.GeoSeries, BaseGeometry)):
+            if layer is not None:
+                raise ValueError("The layer argument is only supported when opening a vector file.")
             if isinstance(filename_or_dataset, gpd.GeoDataFrame):
                 ds = filename_or_dataset
             elif isinstance(filename_or_dataset, gpd.GeoSeries):
@@ -142,16 +150,16 @@ class Vector(VectorBase):
             raise ValueError("The dataset of a vector must be set with a GeoSeries or a GeoDataFrame.")
         self._set_metadata_from_ds(self._ds)
 
-    def _set_metadata_from_file(self, filename: str) -> None:
-        """Read lightweight vector metadata without loading the full GeoDataFrame."""
+    def _set_metadata_from_file(self, filename: str, layer: str | int | None = None) -> None:
+        """Read lightweight vector metadata for one file layer without loading the full GeoDataFrame."""
 
-        info = pyogrio.read_info(filename)
+        info = pyogrio.read_info(filename, layer=layer)
         crs = info.get("crs")
         total_bounds = info.get("total_bounds")
 
         self._crs = CRS.from_user_input(crs) if crs else None
         if total_bounds is not None:
-            self._bounds = rio.coords.BoundingBox(*total_bounds)
+            self._bbox = rio.coords.BoundingBox(*total_bounds)
         self._columns = pd.Index(list(info.get("fields", [])) + ["geometry"])
         self._feature_count = info.get("features")
         self._geometry_type = info.get("geometry_type")
@@ -160,7 +168,7 @@ class Vector(VectorBase):
         """Update cached vector metadata from an in-memory GeoDataFrame."""
 
         self._crs = ds.crs
-        self._bounds = rio.coords.BoundingBox(*ds.total_bounds)
+        self._bbox = rio.coords.BoundingBox(*ds.total_bounds)
         self._columns = ds.columns
         self._feature_count = len(ds)
         self._geometry_type = ds.geom_type.iloc[0] if len(ds) > 0 else None
@@ -184,7 +192,24 @@ class Vector(VectorBase):
         if self.name is None:
             raise AttributeError("Cannot load as name is not set anymore. Did you manually update the name attribute?")
 
-        self.ds = gpd.read_file(self.name, **kwargs)
+        # Build one read box around all deferred crops so the file reader can skip unrelated rows
+        read_kwargs = kwargs.copy()
+        if self._layer is not None:
+            read_kwargs.setdefault("layer", self._layer)
+        read_bbox = _crop_read_bbox(self._crop_filters)
+        if read_bbox is not None:
+            # Raise error if a user also passed a bbox to load directly
+            if "bbox" in read_kwargs:
+                raise ValueError("Cannot pass a load bbox after crop() has already defined deferred spatial filters.")
+            read_kwargs["bbox"] = read_bbox
+
+        # Read, then apply each crop in order without changing any geometry
+        ds = gpd.read_file(self.name, **read_kwargs)
+        ds = _apply_crop_filters(ds, self._crop_filters)
+
+        # Store the selected rows and clear the filters now that they have been applied
+        self.ds = ds
+        self._crop_filters = []
 
     @property
     def columns(self) -> pd.Index:
@@ -314,13 +339,13 @@ class Vector(VectorBase):
     @property
     def total_bounds(self) -> rio.coords.BoundingBox:
         """Total bounds of the vector."""
-        if not self.is_loaded and self._bounds is not None:
-            return np.array(self._bounds)
+        if not self.is_loaded and self._bbox is not None:
+            return np.array(self._bbox)
         return self.ds.total_bounds
 
-    # Exception ! Vector.bounds corresponds to the total_bounds
+    # Exception ! Vector.bbox corresponds to the total_bounds
     @property
-    def bounds(self) -> rio.coords.BoundingBox:
+    def bbox(self) -> rio.coords.BoundingBox:
         """
         Total bounding box of the vector.
 
@@ -328,9 +353,15 @@ class Vector(VectorBase):
         but not ``GeoDataFrame.bounds`` (per-feature bounds) which is instead defined as
         ``Vector.geom_bounds``.
         """
-        if not self.is_loaded and self._bounds is not None:
-            return self._bounds
+        if not self.is_loaded and self._bbox is not None:
+            return self._bbox
         return rio.coords.BoundingBox(*self.ds.total_bounds)
+
+    @property
+    def __geo_interface__(self) -> dict[str, Any]:
+        """Return geometries and feature columns as a GeoJSON-like mapping."""
+
+        return self.ds.__geo_interface__
 
     # --------------------------------------------
     # GeoPandasBase - Methods that return a Series
@@ -684,10 +715,6 @@ class Vector(VectorBase):
         return self._override_gdf_output(
             self.ds.explode(column=column, ignore_index=ignore_index, index_parts=index_parts, **kwargs)
         )
-
-    @copy_doc(gpd.GeoDataFrame, "Vector")
-    def clip(self: VectorType, mask: Any, keep_geom_type: bool = False, sort: bool = False) -> VectorType:
-        return self._override_gdf_output(self.ds.clip(mask=mask, keep_geom_type=keep_geom_type, sort=sort))
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
     def sjoin(self: VectorType, df: VectorType | gpd.GeoDataFrame, *args: Any, **kwargs: Any) -> VectorType:

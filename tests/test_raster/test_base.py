@@ -148,7 +148,7 @@ class TestClassVsAccessorConsistency:
     # The full list of methods is used a posteriori to check all were tested across multiple tests
     methods = [k for k, v in RasterBase.__dict__.items() if not k.startswith("_") and not isinstance(v, property)]
     # Ignore deprecated methods (already tested through their new name)
-    methods = [m for m in methods if m not in ["to_points", "save"]]
+    methods = [m for m in methods if m not in ["get_nanarray", "to_points", "save"]]
 
     # List of properties that WILL load the input dataset (only one does, the data itself)
     properties_input_load = ["data"]
@@ -170,6 +170,7 @@ class TestClassVsAccessorConsistency:
         "georeferenced_grid_equal",
         "intersection",
         "edit",
+        "subsample",
     ]
     # List of methods that WILL NOT load the input for certain arguments
     methods_input_noload_allowed_args = {"info": {"stats": [False]}}
@@ -190,6 +191,32 @@ class TestClassVsAccessorConsistency:
     # List of methods that WILL NOT LOAD the output for certain arguments
     # copy(new_array=not None) will load
     methods_output_noload_allowed_args = {"copy": {"deep": [True, False], "new_array": [None]}}
+
+    def test_geo_interface__bbox_polygon(self, lazy_test_files: list[str]) -> None:
+        """Checks that a raster exposes its bounding polygon without loading data."""
+
+        # Create matching class and accessor rasters with different X/Y pixel sizes
+        transform = rio.transform.from_origin(10, 20, 2, 3)
+        raster = Raster.from_array(np.ones((2, 3)), transform=transform, crs=32610)
+        array = RasterAccessor.from_array(np.ones((2, 3)), transform=transform, crs=32610)
+        expected_bbox = rio.coords.BoundingBox(left=10, bottom=14, right=16, top=20)
+        expected_interface = {
+            "type": "Polygon",
+            "bbox": tuple(expected_bbox),
+            "coordinates": (((10.0, 14.0), (16.0, 14.0), (16.0, 20.0), (10.0, 20.0), (10.0, 14.0)),),
+        }
+
+        # Check the common name and compatibility alias through both APIs, and the protocol on the Raster
+        assert raster.bbox == expected_bbox
+        assert raster.bounds == expected_bbox
+        assert array.rst.bbox == expected_bbox
+        assert array.rst.bounds == expected_bbox
+        assert raster.__geo_interface__ == expected_interface
+
+        # Read only file metadata and check that creating the mapping leaves the raster values unloaded
+        file_raster = Raster(lazy_test_files[0])
+        assert file_raster.__geo_interface__["bbox"] == tuple(file_raster.bbox)
+        assert not file_raster.is_loaded
 
     def test_info__crs_name(self) -> None:
         """Checks that info reports the CRS name for 2D, compound and missing CRS metadata."""
@@ -309,7 +336,9 @@ class TestClassVsAccessorConsistency:
         # 2/ This second list of methods will load the input Raster (access .data)
         # 2.1. Not in-place
         ("copy", {"new_array": "placeholder"}),  # Copy with new array does load! Will create array of right size below.
+        ("clip", {"mask": "random"}),
         ("info", {"stats": True, "verbose": False}),  # Info with stats loads
+        ("plot", {"max_pixels": 1_000, "add_cbar": False}),
         ("reproject", {"crs": CRS.from_epsg(4326)}),
         ("raster_equal", {"other": "self"}),
         ("raster_allclose", {"other": "self"}),
@@ -317,7 +346,7 @@ class TestClassVsAccessorConsistency:
         ("reduce_points", {"points": "random"}),  # Needs implementation in RasterBase (currently only for Raster)
         ("interp_points", {"points": "random"}),  # "random" will be derived during the test to work on all inputs
         ("proximity", {"target_values": [100]}),
-        ("get_nanarray", {}),
+        ("to_nanarray", {}),
         ("to_pointcloud", {"subsample": 1, "random_state": 42}),
         ("polygonize", {"target_values": "all"}),
         ("subsample", {"subsample": 1000, "random_state": 42}),
@@ -395,12 +424,25 @@ class TestClassVsAccessorConsistency:
                 raster.bounds.bottom + 411,
             )
             args.update({"bbox": bbox})
+        elif method == "clip":
+            mask = (
+                raster.bounds.left + 100,
+                raster.bounds.bottom + 200,
+                raster.bounds.left + 320,
+                raster.bounds.bottom + 411,
+            )
+            args.update({"mask": mask})
         elif method in ["raster_equal", "raster_allclose", "georeferenced_grid_equal", "intersection"]:
             args.update({"other": ds.copy(deep=False)})
         elif method == "cosample":
             args.update({"other": raster})
         elif method == "copy" and "new_array" in args:
             args.update({"new_array": np.ones(ds.shape)})
+
+        # Load both inputs because clip() needs their raster values
+        if method == "clip":
+            raster.load()
+            ds.load()
 
         # Apply method for each class
         output_raster = getattr(raster, method)(**args)
@@ -426,7 +468,10 @@ class TestClassVsAccessorConsistency:
                 noload_allowed_args=self.methods_input_noload_allowed_args,
             )
             assert raster.is_loaded is should_input_be_loaded
-            assert ds._in_memory is should_input_be_loaded
+            if method == "subsample":
+                assert ds._in_memory
+            else:
+                assert ds._in_memory is should_input_be_loaded
 
         # In the case of a Raster / DataArray output, check if output is loaded or not
         # (apart from in-place metadata setting, only a few functions don't load output, such as: crop/icrop, copy,
@@ -438,9 +483,7 @@ class TestClassVsAccessorConsistency:
                 noload=self.methods_output_noload,
                 noload_allowed_args=self.methods_output_noload_allowed_args,
             )
-            # TODO: Raster class does not load input, but does load output for "crop/icrop"
-            if method not in ["crop", "icrop"]:
-                assert output_raster.is_loaded is should_output_be_loaded
+            assert output_raster.is_loaded is should_output_be_loaded
             assert output_ds._in_memory is should_output_be_loaded
 
         # Finally, assert exact equality of outputs
@@ -507,11 +550,7 @@ class TestClassVsAccessorConsistency:
         ("cosample", {"other": "self", "subsample": 100, "strategy": "topk", "random_state": 42}),
         (
             "subsample",
-            {"subsample": 100, "strategy": "topk"},
-        ),
-        (
-            "subsample",
-            {"subsample": 100, "strategy": "topk", "return_indices": True},
+            {"subsample": 100, "random_state": 42, "strategy": "topk", "as_array": True},
         ),
     )
 
@@ -570,7 +609,6 @@ class TestClassVsAccessorConsistency:
 
         # For a raster-type output (reprojection, rasterize, create_mask, proximity, etc...)
         if isinstance(output_raster, Raster):
-
             # 1/ For Dask object: both inputs and outputs should be unloaded + lazy, and compute
             # Input
             assert not ds._in_memory
@@ -601,7 +639,6 @@ class TestClassVsAccessorConsistency:
 
         # For an array-type output (interpolation, subsampling, reduction, ...)
         elif isinstance(output_raster, np.ndarray):
-
             # 1/ For Dask object: both inputs and outputs should be unloaded + lazy, and compute
             # Input
             assert not ds._in_memory

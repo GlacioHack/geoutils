@@ -76,10 +76,28 @@ class TestClassVsAccessorConsistency:
     # Get all VectorBase public properties and methods, ensures we test everything even with API changes
     properties = [k for k, v in VectorBase.__dict__.items() if not k.startswith("_") and isinstance(v, property)]
     methods = [k for k, v in VectorBase.__dict__.items() if not k.startswith("_") and not isinstance(v, property)]
-    methods = [m for m in methods if m not in ["plot", "save"]]
+    methods = [m for m in methods if m not in ["geometry_mask", "plot", "save"]]
 
     # Methods tested separately because their output contains class/accessor specific filenames
     methods_exceptions = ["info"]
+
+    def test_geo_interface__features_and_bbox(self) -> None:
+        """Checks that a vector exposes its geometries, columns and total bounding box."""
+
+        # Create matching class and accessor representations of the same three polygon features
+        vector = Vector(self.ds)
+        ds = self.ds.copy()
+        expected_bbox = rio.coords.BoundingBox(left=0, bottom=0, right=7, top=7)
+        expected_interface = ds.__geo_interface__
+
+        # Check the common name and compatibility alias for the total bounding box
+        assert vector.bbox == expected_bbox
+        assert vector.bounds == expected_bbox
+        assert ds.vct.bbox == expected_bbox
+        assert ds.vct.bounds == expected_bbox
+
+        # Check that the interface preserves every geometry and the integer feature column
+        assert vector.__geo_interface__ == expected_interface
 
     @pytest.mark.parametrize("prop", properties)
     def test_properties__equality(self, prop: str) -> None:
@@ -103,6 +121,7 @@ class TestClassVsAccessorConsistency:
         ("vector_equal", {"other": "self"}),
         ("vector_allclose", {"other": "self"}),
         ("crop", {"bbox": (-1, -1, 3, 3)}),
+        ("clip", {"mask": (-1, -1, 3, 3)}),
         ("reproject", {"crs": CRS.from_epsg(4326)}),
         ("translate", {"xoff": 1, "yoff": 2}),
         (
@@ -223,7 +242,7 @@ class TestClassVsAccessorConsistency:
     def test_shared_methods_are_owned_by_base(self) -> None:
         """Check that GeoUtils operations shared with the accessor are not redefined on Vector."""
 
-        shared_methods = {"vector_equal", "vector_allclose", "crop", "reproject", "rasterize", "proximity"}
+        shared_methods = {"vector_equal", "vector_allclose", "crop", "clip", "reproject", "rasterize", "proximity"}
         assert shared_methods <= set(VectorBase.__dict__)
         assert shared_methods.isdisjoint(Vector.__dict__)
 

@@ -20,9 +20,10 @@
 
 from __future__ import annotations
 
+import copy
 import warnings
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, Union, overload
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, Union, cast, overload
 
 import geopandas as gpd
 import numpy as np
@@ -34,11 +35,12 @@ from shapely.geometry.base import BaseGeometry
 
 from geoutils import profiler
 from geoutils._dispatch import (
+    _check_match_bbox,
     get_geo_attr,
     has_geo_attr,
     is_dask_dataframe,
 )
-from geoutils._misc import deprecate, import_optional
+from geoutils._misc import deprecate
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.rasterization import _create_mask, _rasterize
@@ -50,7 +52,7 @@ from geoutils.projtools import (
 )
 from geoutils.vector.geometric import _buffer_metric, _buffer_without_overlap
 from geoutils.vector.testing import _vector_allclose, _vector_equal
-from geoutils.vector.transformation import _crop, _reproject
+from geoutils.vector.transformation import _clip, _crop, _reproject
 
 if TYPE_CHECKING:
     import matplotlib
@@ -60,6 +62,7 @@ if TYPE_CHECKING:
 
 
 VectorBaseType = TypeVar("VectorBaseType", bound="VectorBase")
+_UNSET = object()
 # Accept Vector subclasses and accessors, as well as GeoDataFrames
 VectorLike = Union["VectorBase", gpd.GeoDataFrame]
 
@@ -238,8 +241,8 @@ class VectorBase(ABC):
             + str_ds
             + "\n  crs="
             + self.crs.__str__()
-            + "\n  bounds="
-            + self.bounds.__str__()
+            + "\n  bbox="
+            + self.bbox.__str__()
             + ")"
         )
 
@@ -256,8 +259,8 @@ class VectorBase(ABC):
             + str_ds
             + "\n  <b>crs=</b>"
             + self.crs.__str__()
-            + "\n  <b>bounds=</b>"
-            + self.bounds.__repr__()
+            + "\n  <b>bbox=</b>"
+            + self.bbox.__repr__()
             + ")</span></pre>"
         )
 
@@ -294,7 +297,7 @@ class VectorBase(ABC):
 
     def plot(
         self,
-        ref_crs: RasterLike | VectorLike | CRS | int | None = None,
+        ref: RasterLike | VectorLike | CRS | str | int | None = None,
         cmap: matplotlib.colors.Colormap | str | None = None,
         vmin: float | int | None = None,
         vmax: float | int | None = None,
@@ -305,73 +308,65 @@ class VectorBase(ABC):
         return_axes: bool = False,
         savefig_fname: str | None = None,
         **kwargs: Any,
-    ) -> None | tuple[matplotlib.axes.Axes, matplotlib.colors.Colormap]:
+    ) -> None | tuple[matplotlib.axes.Axes, matplotlib.axes.Axes | None]:
         r"""
         Plot the vector.
 
         This method is a wrapper to geopandas.GeoDataFrame.plot. Any \*\*kwargs are passed to it.
         """
 
-        matplotlib = import_optional("matplotlib")
         import matplotlib.pyplot as plt
-        from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-        if has_geo_attr(ref_crs, "crs"):
-            crs = get_geo_attr(ref_crs, "crs")
+        from geoutils.vector.plotting import (
+            _create_axes,
+            _get_reference_bbox,
+            _plot_geodataframe,
+        )
+
+        # REMOVE AFTER DEPRECATION: Delete this block when ref_crs compatibility is removed
+        if "ref_crs" in kwargs:
+            if ref is not None:
+                raise TypeError("plot() received both 'ref' and deprecated 'ref_crs'; use only 'ref'.")
+            deprecated_ref = kwargs.pop("ref_crs")
+            warnings.warn(
+                "Argument 'ref_crs' is deprecated; use 'ref' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            # Preserve the old behavior, which matched only the CRS and did not use reference bounds
+            if deprecated_ref is not None:
+                if has_geo_attr(deprecated_ref, "crs"):
+                    deprecated_ref = get_geo_attr(deprecated_ref, "crs")
+                ref = CRS.from_user_input(deprecated_ref)
+
+        reference_bbox = None
+        if has_geo_attr(ref, "crs"):
+            crs = get_geo_attr(ref, "crs")
             vect_reproj = self.reproject(crs=crs)
-        elif isinstance(ref_crs, (CRS, int)):
-            vect_reproj = self.reproject(crs=ref_crs)
+            reference_bbox = _get_reference_bbox(ref)
+        elif isinstance(ref, (CRS, str, int)):
+            vect_reproj = self.reproject(crs=ref)
         else:
             vect_reproj = self
 
-        if ax is None:
-            ax0 = plt.gca()
-        elif isinstance(ax, str) and ax.lower() == "new":
-            _, ax0 = plt.subplots()
-        elif isinstance(ax, matplotlib.axes.Axes):
-            ax0 = ax
-        else:
-            raise ValueError("ax must be a matplotlib.axes.Axes instance, 'new' or None.")
-
-        if "column" in kwargs.keys() and add_cbar:
-            add_cbar = True
-        else:
-            add_cbar = False
-
-        legend = bool(add_cbar)
-        if "legend" in list(kwargs.keys()):
-            legend = kwargs.pop("legend")
-
-        if "legend_kwds" in list(kwargs.keys()) and legend:
-            legend_kwds = kwargs.pop("legend_kwds")
-            if cbar_title is not None:
-                legend_kwds.update({"label": cbar_title})
-        elif cbar_title is not None:
-            legend_kwds = {"label": cbar_title}
-        else:
-            legend_kwds = None
-
-        if add_cbar or cbar_title:
-            divider = make_axes_locatable(ax0)
-            cax = divider.append_axes("right", size="5%", pad="2%")
-            norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
-            cbar = matplotlib.colorbar.ColorbarBase(cax, cmap=cmap, norm=norm)
-            cbar.solids.set_alpha(alpha)
-        else:
-            cax = None
-
+        ax0 = _create_axes(ax)
+        column = kwargs.pop("column", None)
         plot_ds = _as_geodataframe(vect_reproj)
-        plot_ds.plot(
+        cax = _plot_geodataframe(
+            dataframe=plot_ds,
             ax=ax0,
-            cax=cax,
+            column=column,
             cmap=cmap,
             vmin=vmin,
             vmax=vmax,
             alpha=alpha,
-            legend=legend,
-            legend_kwds=legend_kwds,
+            cbar_title=cbar_title,
+            add_cbar=add_cbar,
             **kwargs,
         )
+        if reference_bbox is not None:
+            ax0.set_xlim(reference_bbox.left, reference_bbox.right)
+            ax0.set_ylim(reference_bbox.bottom, reference_bbox.top)
         plt.sca(ax0)
 
         if savefig_fname:
@@ -388,10 +383,21 @@ class VectorBase(ABC):
         return self.ds.total_bounds
 
     @property
-    def bounds(self) -> rio.coords.BoundingBox:
+    def bbox(self) -> rio.coords.BoundingBox:
         """Total bounding box of the vector."""
 
-        return rio.coords.BoundingBox(*self.ds.total_bounds)
+        # Reduce lazy partitions to four coordinates without replacing the Dask collection
+        dataframe = self.ds
+        total_bounds = dataframe.total_bounds
+        if is_dask_dataframe(dataframe):
+            total_bounds = total_bounds.compute()
+        return rio.coords.BoundingBox(*total_bounds)
+
+    @property
+    def bounds(self) -> rio.coords.BoundingBox:
+        """Total bounding box of the vector, provided as an alias of bbox."""
+
+        return self.bbox
 
     @property
     def footprint(self) -> Any:
@@ -409,61 +415,157 @@ class VectorBase(ABC):
     def crop(
         self: VectorBaseType,
         bbox: RasterLike | VectorLike | tuple[float, float, float, float],
-        clip: bool,
+        mode: Literal["intersects", "within"] = "intersects",
         *,
         inplace: Literal[False] = False,
         crop_geom: Any = None,
+        **kwargs: Any,
     ) -> VectorBaseType | gpd.GeoDataFrame: ...
 
     @overload
     def crop(
         self: VectorBaseType,
         bbox: RasterLike | VectorLike | tuple[float, float, float, float],
-        clip: bool,
+        mode: Literal["intersects", "within"] = "intersects",
         *,
         inplace: Literal[True],
         crop_geom: Any = None,
+        **kwargs: Any,
     ) -> None: ...
 
     @overload
     def crop(
         self: VectorBaseType,
         bbox: RasterLike | VectorLike | tuple[float, float, float, float],
-        clip: bool,
+        mode: Literal["intersects", "within"] = "intersects",
         *,
         inplace: bool = False,
         crop_geom: Any = None,
+        **kwargs: Any,
     ) -> VectorBaseType | gpd.GeoDataFrame | None: ...
 
     @profiler.profile("geoutils.vector.base.crop", memprof=True)
     def crop(
         self: VectorBaseType,
         bbox: RasterLike | VectorLike | tuple[float, float, float, float] = None,
-        clip: bool = False,
+        mode: Literal["intersects", "within"] = "intersects",
         *,
         inplace: bool = False,
         crop_geom: Any = None,
+        **kwargs: Any,
     ) -> VectorBaseType | gpd.GeoDataFrame | None:
         """
-        Crop the vector to given extent.
+        Crop vector to a bounding box, without modifying geometric features.
+
+        Equivalent to selecting geometries intersecting or contained within a bounding box.
+        To cut each feature with another geometry or bounding box, use ``clip()``.
 
         **Match-reference:** a reference raster or vector can be passed to match bounds during cropping.
+
+        :param bbox: Bounding box or georeferenced reference object defining the selected extent.
+        :param mode: ``"intersects"`` keeps every geometry touching the extent. ``"within"`` keeps only geometries
+            entirely inside it.
+        :param inplace: Whether to replace this vector's selected rows. Dask-backed vectors cannot be changed in place.
+        :param crop_geom: Deprecated alias of ``bbox``.
+        :param kwargs: Deprecated ``clip`` argument. Use clip() for exact clipping.
+        :returns: A vector or dataframe containing unchanged selected geometries, or None when ``inplace=True``.
         """
+
+        deprecated_clip = kwargs.pop("clip", _UNSET)
+        if len(kwargs) > 0:
+            unexpected = next(iter(kwargs))
+            raise TypeError(f"crop() got an unexpected keyword argument {unexpected!r}")
+        if deprecated_clip is not _UNSET:
+            warnings.warn(
+                "Argument 'clip' is deprecated; use crop() without it or call clip() separately.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
 
         if crop_geom is not None:
             warnings.warn(DeprecationWarning("Argument 'crop_geom' is deprecated, use 'bbox' instead."))
             bbox = crop_geom
         if bbox is None:
             raise ValueError("Argument 'bbox' must be passed.")
-        if inplace and is_dask_dataframe(self.ds):
+        if mode not in ("intersects", "within"):
+            raise ValueError("Argument 'mode' must be either 'intersects' or 'within'.")
+        if inplace and self._is_pd and is_dask_dataframe(self.ds):
             raise ValueError("Dask-backed vectors cannot be modified in place; use the returned dataframe instead.")
 
-        new_ds = _crop(self, bbox=bbox, clip=clip)
+        # Preserve crop(..., clip=True) by clipping to the normalized rectangular crop extent
+        if deprecated_clip is not _UNSET and deprecated_clip:
+            normalized_bbox = tuple(float(value) for value in _check_match_bbox(self, bbox))
+            new_ds = _clip(self, mask=normalized_bbox, keep_geom_type=False, sort=False)
+            if inplace:
+                self.ds = new_ds
+                return None
+            return self._override_gdf_output(new_ds)
+
+        # Store file filters without reading any feature geometry or attribute values
+        if not self._is_pd and not self.is_loaded and self.name is not None:
+            normalized_bbox = tuple(float(value) for value in _check_match_bbox(self, bbox))
+            output = copy.copy(self)
+            output._crop_filters = list(getattr(self, "_crop_filters", [])) + [(normalized_bbox, mode)]
+            output._bounds = None
+            output._feature_count = None
+            if hasattr(output, "_nb_points"):
+                output._nb_points = -1
+
+            if inplace:
+                self.__dict__.update(output.__dict__)
+                return None
+            return output
+
+        new_ds = _crop(self, bbox=bbox, mode=mode)
 
         if inplace:
             self.ds = new_ds
             return None
         return self._override_gdf_output(new_ds)
+
+    def clip(
+        self: VectorBaseType,
+        mask: Any,
+        keep_geom_type: bool = False,
+        sort: bool = False,
+        mp_config: MultiprocConfig | None = None,
+    ) -> VectorBaseType | gpd.GeoDataFrame:
+        """
+        Clip geometries exactly to a mask.
+
+        Vector geometries are intersected with the mask. Point cloud rows outside the mask are removed. Unlike
+        crop(), this operation can change geometry data and therefore reads an unloaded source.
+
+        :param mask: Clipping geometry, vector, point cloud, raster or bounding box. Georeferenced masks are
+            reprojected to this object's CRS.
+        :param keep_geom_type: Whether to remove intersections with a different geometry type than the input.
+        :param sort: Whether to sort clipped geometries by their original index.
+        :param mp_config: Worker configuration with an integer number of features per chunk. Multiprocessing writes
+            an unloaded GeoPackage result and cannot be combined with a Dask input.
+        :returns: A vector, point cloud or dataframe clipped to the mask.
+        """
+
+        if mp_config is not None:
+            if self._is_pd and is_dask_dataframe(self.ds):
+                raise ValueError("Argument ``mp_config`` cannot be combined with a Dask vector.")
+
+            # Keep file-backed vectors unloaded while workers clip independent source row ranges
+            from geoutils.vector.transformation import _clip_vector_multiproc
+
+            clipped_vector = _clip_vector_multiproc(
+                self,
+                mask=mask,
+                keep_geom_type=keep_geom_type,
+                sort=sort,
+                mp_config=mp_config,
+            )
+            if self._is_pd:
+                clipped_vector.load()
+                return clipped_vector.ds
+            return cast(VectorBaseType, clipped_vector)
+
+        clipped = _clip(self, mask=mask, keep_geom_type=keep_geom_type, sort=sort)
+        return self._override_gdf_output(clipped)
 
     @overload
     def reproject(
@@ -613,7 +715,7 @@ class VectorBase(ABC):
         mp_config: MultiprocConfig | None = None,
         dask: bool = False,
     ) -> RasterType | PointCloudLike | NDArrayBool:
-        """Create a raster or point cloud mask from the vector features."""
+        """Create a raster or point cloud mask from the vector geometry features."""
 
         # Functional interfaces operate on Vector while outputs follow the caller type
         source_vector = self.to_geoutils() if self._is_pd else self
@@ -641,6 +743,9 @@ class VectorBase(ABC):
             return self._cast_raster_output(output)
         return output
 
+    # Keep the Rasterio-style name as an equivalent public alias
+    geometry_mask = create_mask
+
     @profiler.profile("geoutils.vector.base.rasterize", memprof=True)
     def rasterize(
         self,
@@ -655,12 +760,42 @@ class VectorBase(ABC):
         bounds: tuple[float, float, float, float] | None = None,
         crs: CRS | int | None = None,
         *,
+        nodata: int | float | None = None,
         chunksizes: tuple[int, int] | None = None,
         mp_config: MultiprocConfig | None = None,
         dask: bool = False,
         **kwargs: Any,
     ) -> RasterType:
-        """Rasterize vector to a raster or mask, with input geometries burned in."""
+        """
+        Rasterize vector to a raster or mask, with input geometries burned in.
+
+        **Match-reference:** a raster can be passed to match its resolution, bounds and CRS when rasterizing the vector.
+
+        Alternatively, the output grid can be defined with res, shape, grid_coords, bounds and crs.
+
+        Burn value is set by user and can be either a single number, or an iterable of same length as self.ds.
+        Default is an index from 1 to len(self.ds).
+
+        :param ref: Reference raster whose grid is matched by the output.
+        :param in_value: Burn values as a scalar, an iterable matching the number of geometries, or None for 1 to N.
+        :param out_value: Background fill value outside the geometries.
+        :param all_touched: Whether to burn every pixel touched by a geometry.
+        :param out_dtype: Output raster data type.
+        :param res: Output spatial resolution as one value or an X/Y pair.
+        :param shape: Output shape as rows and columns.
+        :param grid_coords: Output X and Y coordinates.
+        :param bounds: Output bounds as left, bottom, right and top.
+        :param crs: Output coordinate reference system.
+        :param nodata: Finite nodata value stored with the output. When omitted, a dtype-specific value is used if
+            out_value is non-finite.
+        :param chunksizes: Spatial chunk sizes as rows and columns. Defaults to multiprocessing configuration chunks,
+            reference chunks or 1024 by 1024.
+        :param mp_config: Multiprocessing configuration. Cannot be combined with Dask execution.
+        :param dask: Whether to return a lazy Dask-backed DataArray. A Dask-backed reference also selects this backend.
+        :param kwargs: Deprecated raster, xres and yres aliases.
+
+        :returns: Raster or DataArray containing the burned geometries.
+        """
 
         if "xres" in kwargs.keys() or "yres" in kwargs.keys():
             warnings.warn(
@@ -692,6 +827,7 @@ class VectorBase(ABC):
             grid_coords=grid_coords,
             bounds=bounds,
             crs=crs,
+            nodata=nodata,
             chunksizes=chunksizes,
             mp_config=mp_config,
             dask=dask,
@@ -714,7 +850,7 @@ class VectorBase(ABC):
             out_crs = get_geo_attr(raster_or_vector, "crs")
 
         df = _get_footprint_projected(
-            get_geo_attr(raster_or_vector, "bounds"),
+            get_geo_attr(raster_or_vector, "bbox"),
             in_crs=get_geo_attr(raster_or_vector, "crs"),
             out_crs=out_crs,
             densify_points=densify_points,
@@ -739,41 +875,45 @@ class VectorBase(ABC):
         self,
         raster: RasterType | None = None,
         size: tuple[int, int] = (1000, 1000),
-        geometry_type: str = "boundary",
-        in_or_out: Literal["in"] | Literal["out"] | Literal["both"] = "both",
         distance_unit: Literal["pixel"] | Literal["georeferenced"] = "georeferenced",
+        max_distance: float | None = None,
+        mp_config: MultiprocConfig | None = None,
     ) -> RasterType:
-        """Compute proximity distances to this vector's geometry."""
+        """
+        Compute proximity distances to this vector's current geometry.
 
-        from geoutils.raster.raster import Raster, _default_nodata
+        Apply a geometry operation before proximity() to use a derived geometry, for example
+        ``vector.boundary.proximity(raster)``.
+
+        :param raster: Raster whose grid is used for the proximity output.
+        :param size: Output width and height when raster is not provided.
+        :param distance_unit: Calculate distance in georeferenced or pixel units.
+        :param max_distance: Largest distance to return, with farther cells set to nodata. This value is required for
+            Dask and multiprocessing execution because it defines the overlap between chunks.
+        :param mp_config: Multiprocessing parameters. Cannot be combined with Dask input.
+
+        :returns: Raster of proximity distances on the selected grid.
+        """
+
+        from geoutils.raster.raster import Raster
 
         if raster is None:
-            if self.bounds is None:
+            if self.bbox is None:
                 raise ValueError("To automatically rasterize on the vector, bounds need to be defined.")
 
-            left, bottom, right, top = self.bounds
+            left, bottom, right, top = self.bbox
             transform = rio.transform.from_bounds(left, bottom, right, top, size[0], size[1])
             raster = Raster.from_array(data=np.zeros((1000, 1000)), transform=transform, crs=self.crs)
 
         source_vector = self.to_geoutils() if self._is_pd else self
-        proximity = _proximity_from_vector_or_raster(
+        output = _proximity_from_vector_or_raster(
             raster=raster,
             vector=source_vector,
-            geometry_type=geometry_type,
-            in_or_out=in_or_out,
             distance_unit=distance_unit,
+            max_distance=max_distance,
+            mp_config=mp_config,
         )
-
-        out_nodata = _default_nodata(proximity.dtype)
-        raster_out = Raster.from_array(
-            data=proximity,
-            transform=raster.transform,
-            crs=raster.crs,
-            nodata=out_nodata,
-            area_or_point=raster.area_or_point,
-            tags=raster.tags,
-        )
-        return self._cast_raster_output(raster_out)
+        return self._cast_raster_output(output)
 
     def buffer_metric(self: VectorBaseType, buffer_size: float) -> VectorBaseType | gpd.GeoDataFrame:
         """Buffer the vector features in a local metric system."""
@@ -784,7 +924,7 @@ class VectorBase(ABC):
     def get_bounds_projected(self, out_crs: CRS, densify_points: int = 5000) -> rio.coords.BoundingBox:
         """Get vector bounds projected in a specified CRS."""
 
-        return _get_bounds_projected(self.bounds, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points)
+        return _get_bounds_projected(self.bbox, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points)
 
     def get_footprint_projected(
         self: VectorBaseType, out_crs: CRS, densify_points: int = 5000
@@ -792,7 +932,7 @@ class VectorBase(ABC):
         """Get vector footprint projected in a specified CRS."""
 
         new_ds = _get_footprint_projected(
-            bounds=self.bounds, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points
+            bounds=self.bbox, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points
         )
         return self._override_gdf_output(new_ds)
 
@@ -824,7 +964,7 @@ class VectorBase(ABC):
 
     @deprecate(
         removal_version=Version("0.3.0"),
-        details="The function .save() will be soon deprecated, use .to_file() instead.",
+        details="Use .to_file() instead.",
     )
     def save(self, *args: Any, **kwargs: Any) -> None:
         """Write the vector to file."""

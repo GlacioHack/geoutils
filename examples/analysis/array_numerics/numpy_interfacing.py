@@ -39,7 +39,7 @@ aspect.plot(cmap="twilight", cbar_title="Aspect (degrees)")
 # We use NumPy logical operations to isolate the terrain oriented South and above three thousand meters. The rasters will be logically cast to a
 # boolean :class:`Raster<geoutils.Raster>`.
 
-mask = np.logical_and.reduce((aspect > -45, aspect < 45, rast > 3000))
+mask = np.logical_and(np.logical_and(aspect > -45, aspect < 45), rast > 3000)
 mask
 
 # %%

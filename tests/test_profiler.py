@@ -230,7 +230,6 @@ class TestProfiling:
 
         # if profiling is activate
         if s_rd or s_gr:
-
             # in each case, output dir exist
             assert op.isdir(output_path)
 
@@ -241,7 +240,7 @@ class TestProfiling:
 
                 # check data in pickle
                 df = pd.read_pickle(op.join(output_path, "raw_data.pickle"))
-                assert len(df) == 1
+                assert len(df[df["level"] == 0]) == 1
 
             else:
                 assert not op.isfile(op.join(output_path, "raw_data.pickle"))

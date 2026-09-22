@@ -89,9 +89,9 @@ def _bounds_from_tuple(bounds: BoundingBox | Sequence[float]) -> BoundingBox:
 
     left, bottom, right, top = (float(value) for value in bounds)
     if left > right:
-        raise ValueError("Bounds left coordinate must be smaller than or equal to right " "coordinate.")
+        raise ValueError("Bounds left coordinate must be smaller than or equal to right coordinate.")
     if bottom > top:
-        raise ValueError("Bounds bottom coordinate must be smaller than or equal to top " "coordinate.")
+        raise ValueError("Bounds bottom coordinate must be smaller than or equal to top coordinate.")
     return BoundingBox(left=left, bottom=bottom, right=right, top=top)
 
 
@@ -541,18 +541,20 @@ def _as_geodataframe(pc: gpd.GeoDataFrame | pd.DataFrame, crs: CRS | None = None
     )
 
 
-def _iter_dataframe_chunks(pc: gpd.GeoDataFrame | pd.DataFrame, chunk_size: int | None) -> Iterator[gpd.GeoDataFrame]:
-    """Split an eager dataframe into the row partitions consumed by the common writer."""
+def _iter_dataframe_partitions(
+    pc: gpd.GeoDataFrame | pd.DataFrame, partition_size: int | None
+) -> Iterator[gpd.GeoDataFrame]:
+    """Split an eager dataframe into row partitions for the common writer."""
 
-    if chunk_size is None:
+    if partition_size is None:
         yield _as_geodataframe(pc)
         return
 
-    if chunk_size <= 0:
+    if partition_size <= 0:
         raise ValueError("Argument 'chunks' must be a strictly positive integer.")
 
-    for start in range(0, len(pc), chunk_size):
-        yield _as_geodataframe(pc.iloc[start : start + chunk_size])
+    for start in range(0, len(pc), partition_size):
+        yield _as_geodataframe(pc.iloc[start : start + partition_size])
 
 
 def _non_geometry_columns(pc: gpd.GeoDataFrame | pd.DataFrame) -> list[str]:
@@ -609,10 +611,63 @@ def _build_laspy_header(
     for column in _extra_las_columns(pc=pc, data_column=data_column, header=header):
         dtype = pc[column].dtype
         if not np.issubdtype(dtype, np.number) and not np.issubdtype(dtype, np.bool_):
-            raise TypeError(f"LAS extra dimension '{column}' must have a numeric or " "boolean dtype.")
+            raise TypeError(f"LAS extra dimension '{column}' must have a numeric or boolean dtype.")
         header.add_extra_dim(laspy.ExtraBytesParams(name=column, type=dtype))
 
     return header
+
+
+def _las_coordinate_bounds(dataframe: gpd.GeoDataFrame, elevation_column: str | None) -> np.ndarray[Any, Any] | None:
+    """Return finite X/Y/elevation bounds for one dataframe partition, or None when it is empty."""
+
+    if len(dataframe) == 0:
+        return None
+    elevation = dataframe[elevation_column].to_numpy() if elevation_column is not None else dataframe.geometry.z
+    coordinates = np.column_stack((dataframe.geometry.x, dataframe.geometry.y, elevation))
+    if not np.isfinite(coordinates).all():
+        raise ValueError("LAS and LAZ output requires finite X, Y and elevation values.")
+    return np.stack((coordinates.min(axis=0), coordinates.max(axis=0)))
+
+
+def _build_laspy_header_from_partitions(
+    partition_filenames: Sequence[str | pathlib.Path],
+    elevation_column: str | None,
+    partition_bounds: Sequence[np.ndarray[Any, Any] | None] | None = None,
+) -> Any:
+    """Build one LAS header from saved partition schemas and provided or scanned coordinate bounds."""
+
+    if len(partition_filenames) == 0:
+        raise ValueError("LAS output requires at least one saved partition.")
+    if partition_bounds is not None and len(partition_bounds) != len(partition_filenames):
+        raise ValueError("LAS partition bounds must match the saved partitions.")
+
+    # Read the first partition for its schema, then use worker bounds or scan every saved partition
+    first = pd.read_pickle(partition_filenames[0])
+    if partition_bounds is None:
+        partition_bounds = [
+            _las_coordinate_bounds(first if index == 0 else pd.read_pickle(filename), elevation_column)
+            for index, filename in enumerate(partition_filenames)
+        ]
+    finite_bounds = [bounds for bounds in partition_bounds if bounds is not None]
+
+    # Use millimeter precision for projected coordinates and elevation, and finer precision for geographic X/Y
+    crs = None if first.crs is None else CRS.from_user_input(first.crs)
+    scales = np.array([1e-8, 1e-8, 1e-3] if crs is not None and crs.is_geographic else [1e-3, 1e-3, 1e-3])
+    offsets = np.zeros(3)
+    if finite_bounds:
+        minimum = np.min([bounds[0] for bounds in finite_bounds], axis=0)
+        maximum = np.max([bounds[1] for bounds in finite_bounds], axis=0)
+        offsets = minimum + (maximum - minimum) / 2
+        required_scales = (maximum - minimum) / (2 * (np.iinfo(np.int32).max - 1))
+        scales = np.maximum(scales, required_scales)
+
+    return _build_laspy_header(
+        first,
+        data_column=elevation_column,
+        offsets=tuple(offsets),
+        scales=tuple(scales),
+        crs=crs,
+    )
 
 
 def _dataframe_to_lasdata(pc: gpd.GeoDataFrame | pd.DataFrame, data_column: str | None, header: Any) -> Any:
@@ -620,11 +675,11 @@ def _dataframe_to_lasdata(pc: gpd.GeoDataFrame | pd.DataFrame, data_column: str 
 
     laspy = import_optional("laspy")
 
-    # Reset point counts and bounds because they are recalculated for this chunk
+    # Reset point counts and bounds because they are recalculated for this partition
     pc = _as_geodataframe(pc)
-    chunk_header = header.copy()
-    chunk_header.partial_reset()
-    las = laspy.LasData(chunk_header)
+    partition_header = header.copy()
+    partition_header.partial_reset()
+    las = laspy.LasData(partition_header)
 
     # Map dataframe geometry and the selected value column to native LAS coordinates
     las.x = pc.geometry.x.values
@@ -645,11 +700,27 @@ def _dataframe_to_lasdata(pc: gpd.GeoDataFrame | pd.DataFrame, data_column: str 
     return las
 
 
+def _check_las_attributes(dataframe: gpd.GeoDataFrame, data_column: str | None, encoded: Any) -> None:
+    """Check that LAS dimension types preserve every non-coordinate dataframe value exactly."""
+
+    columns = [column for column in dataframe.columns if column not in (dataframe.geometry.name, data_column)]
+    for column in columns:
+        expected_values = dataframe[column].to_numpy()
+        encoded_values = np.asarray(encoded[column])
+
+        # Compare Python scalars so mixed numeric types do not hide integer rounding during NumPy promotion
+        equal_values = expected_values.astype(object) == encoded_values.astype(object)
+        equal_values |= pd.isna(expected_values) & pd.isna(encoded_values)
+        if not np.all(equal_values):
+            raise ValueError(f"LAS output cannot preserve the values in column {column!r} with its dimension type.")
+
+
 def _write_laspy_partitions(
     filename: str | pathlib.Path,
     partitions: Iterable[gpd.GeoDataFrame | pd.DataFrame],
     data_column: str | None,
     header: Any,
+    check_attributes: bool = False,
 ) -> None:
     """Append eager dataframe partitions from any backend to one LAS/LAZ stream."""
 
@@ -662,8 +733,37 @@ def _write_laspy_partitions(
         for part in partitions:
             if len(part) == 0:
                 continue
-            las = _dataframe_to_lasdata(pc=part, data_column=data_column, header=header)
+            dataframe = _as_geodataframe(part)
+            if check_attributes:
+                try:
+                    las = _dataframe_to_lasdata(pc=dataframe, data_column=data_column, header=header)
+                except OverflowError as error:
+                    raise ValueError(
+                        "LAS output cannot preserve point attributes with the selected dimension types."
+                    ) from error
+                _check_las_attributes(dataframe, data_column, las)
+            else:
+                las = _dataframe_to_lasdata(pc=dataframe, data_column=data_column, header=header)
             writer.write_points(las.points)
+
+
+def _write_laspy_saved_partitions(
+    filename: str | pathlib.Path,
+    partition_filenames: Iterable[str | pathlib.Path],
+    data_column: str | None,
+    header: Any,
+    check_attributes: bool = False,
+) -> None:
+    """Read saved dataframe partitions one at a time and append them directly to one LAS/LAZ stream."""
+
+    partitions = (pd.read_pickle(partition_filename) for partition_filename in partition_filenames)
+    _write_laspy_partitions(
+        filename=filename,
+        partitions=partitions,
+        data_column=data_column,
+        header=header,
+        check_attributes=check_attributes,
+    )
 
 
 # Eager and Dask partition writers
@@ -677,11 +777,11 @@ def _write_laspy_dataframe(
     header: Any,
     chunks: int | None = None,
 ) -> None:
-    """Feed an eager dataframe, optionally split by rows, to the common writer."""
+    """Feed an eager dataframe, optionally split into row partitions, to the common writer."""
 
     _write_laspy_partitions(
         filename=filename,
-        partitions=_iter_dataframe_chunks(pc=pc, chunk_size=chunks),
+        partitions=_iter_dataframe_partitions(pc=pc, partition_size=chunks),
         data_column=data_column,
         header=header,
     )
@@ -718,17 +818,40 @@ def _write_laspy_dask_dataframe(
 ##################################
 
 
-def _write_laspy_temp_chunk(
+def _write_laspy_temp_partition(
     filename: str | pathlib.Path,
-    pc: gpd.GeoDataFrame | pd.DataFrame,
+    pc: gpd.GeoDataFrame | pd.DataFrame | str | pathlib.Path,
     data_column: str | None,
     header: Any,
+    check_attributes: bool = False,
 ) -> str:
-    """Write one worker-owned dataframe partition to a temporary LAS file."""
+    """
+    Write one dataframe or saved dataframe partition to a temporary LAS file.
+
+    When exact attribute preservation is required, _dataframe_to_lasdata() encodes the partition first so integer
+    overflow and scaled dimension rounding can be detected before the temporary file is accepted.
+    """
+
+    # Load saved partitions inside the worker so the parent process only sends their small filenames
+    saved_partition = pd.read_pickle(pc) if isinstance(pc, (str, pathlib.Path)) else pc
+    dataframe = _as_geodataframe(saved_partition)
+
+    # Check conversions that must preserve every attribute before saving the encoded LAS records
+    if check_attributes:
+        try:
+            encoded = _dataframe_to_lasdata(dataframe, data_column=data_column, header=header)
+        except OverflowError as error:
+            raise ValueError(
+                "LAS output cannot preserve point attributes with the selected dimension types."
+            ) from error
+
+        _check_las_attributes(dataframe, data_column, encoded)
+        encoded.write(filename)
+        return os.fspath(filename)
 
     _write_laspy_dataframe(
         filename=filename,
-        pc=pc,
+        pc=dataframe,
         data_column=data_column,
         header=header,
         chunks=None,
@@ -738,11 +861,11 @@ def _write_laspy_temp_chunk(
 
 def _stitch_laspy_files(
     filename: str | pathlib.Path,
-    chunk_filenames: Iterable[str | pathlib.Path],
+    partition_filenames: Iterable[str | pathlib.Path],
     header: Any,
     chunk_size: int,
 ) -> None:
-    """Stream worker-owned temporary files into the final LAS/LAZ output."""
+    """Stream partition files into the final LAS/LAZ output."""
 
     laspy = import_optional("laspy")
 
@@ -750,39 +873,48 @@ def _stitch_laspy_files(
     write_header = header.copy()
     write_header.partial_reset()
     with laspy.open(filename, mode="w", header=write_header) as writer:
-        for chunk_filename in chunk_filenames:
-            with laspy.open(chunk_filename) as reader:
+        for partition_filename in partition_filenames:
+            with laspy.open(partition_filename) as reader:
                 for points in reader.chunk_iterator(chunk_size):
                     writer.write_points(points)
 
 
 def _write_laspy_multiproc_partitions(
     filename: str | pathlib.Path,
-    pc: gpd.GeoDataFrame | pd.DataFrame,
+    partitions: Iterable[gpd.GeoDataFrame | pd.DataFrame | str | pathlib.Path],
     data_column: str | None,
     header: Any,
-    chunks: int,
+    chunk_size: int,
     cluster: Any,
+    check_attributes: bool = False,
 ) -> None:
-    """Write eager row partitions in workers, then stitch them in source order."""
+    """
+    Write dataframe partitions in workers, then stitch them in their supplied order.
 
-    if chunks <= 0:
+    _write_laspy_temp_partition() gives each worker an independent LAS file because a shared LAS stream cannot be
+    written concurrently. _stitch_laspy_files() then copies those encoded records into the destination without
+    reordering rows.
+    """
+
+    if chunk_size <= 0:
         raise ValueError("Argument 'chunks' must be a strictly positive integer.")
 
     # Workers write independent files because concurrent writes to one LAS stream are unsafe
     with tempfile.TemporaryDirectory() as tmp_dir:
-        tmp_paths = [pathlib.Path(tmp_dir) / f"chunk_{index}.las" for index, _ in enumerate(range(0, len(pc), chunks))]
         futures = []
-        for tmp_path, part in zip(tmp_paths, _iter_dataframe_chunks(pc=pc, chunk_size=chunks)):
-            futures.append(cluster.submit(_write_laspy_temp_chunk, tmp_path, part, data_column, header))
+        for index, part in enumerate(partitions):
+            partition_path = pathlib.Path(tmp_dir) / f"partition_{index}.las"
+            futures.append(
+                cluster.submit(_write_laspy_temp_partition, partition_path, part, data_column, header, check_attributes)
+            )
 
         # Gather paths in input order before streaming all temporary files together
         written_paths = cluster.gather(futures)
         _stitch_laspy_files(
             filename=filename,
-            chunk_filenames=written_paths,
+            partition_filenames=written_paths,
             header=header,
-            chunk_size=chunks,
+            chunk_size=chunk_size,
         )
 
 
@@ -883,7 +1015,7 @@ def _write_laspy(
     """
     Dispatch LAS/LAZ writing to the eager, Dask or multiprocessing partition path.
 
-    Eager dataframes are optionally split into sequential row chunks. Dask
+    Eager dataframes are optionally split into sequential row partitions. Dask
     dataframes are computed one existing partition at a time. Multiprocessing
     writes independent temporary files in workers and stitches them afterward.
     """
@@ -916,10 +1048,10 @@ def _write_laspy(
     if mp_config is not None:
         _write_laspy_multiproc_partitions(
             filename=filename,
-            pc=pc,
+            partitions=_iter_dataframe_partitions(pc=pc, partition_size=_point_partition_size(mp_config)),
             data_column=data_column,
             header=header,
-            chunks=_point_partition_size(mp_config),
+            chunk_size=_point_partition_size(mp_config),
             cluster=mp_config.cluster,
         )
         return

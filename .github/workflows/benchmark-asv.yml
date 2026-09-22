@@ -45,12 +45,16 @@ jobs:
           channel-priority: strict
           activate-environment: geoutils-dev
 
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
+
       - name: Install benchmark environment
         run: |
           mamba install pyyaml python=3.12
-          python .github/scripts/generate_yml_env_fixed_py.py --pyv 3.12 --add "gdal<3.13.3" environment.yml
+          python .github/scripts/generate_yml_env_fixed_py.py --pyv 3.12 --add "gdal<3.13.3,pdal>=2.10" environment.yml
           mamba env update -n geoutils-dev -f environment-ci-py3.12.yml
-          pip install -e .[benchmark]
+          uv pip install -e ".[benchmark]"
 
       # ASV keeps results from different processor models in separate histories
       - name: Configure comparable CI machine metadata

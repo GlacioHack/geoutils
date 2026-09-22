@@ -31,5 +31,5 @@ class TestGapFill:
         )
 
         result = raster.fill_nodata(max_search_distance=2, interpolation=interpolation)  # type: ignore[arg-type]
-        assert np.array_equal(result.get_nanarray(), np.array([[1.0, 1.0, 1.0, np.nan]]), equal_nan=True)
-        assert np.array_equal(raster.get_nanarray(), np.array([[1.0, np.nan, np.nan, np.nan]]), equal_nan=True)
+        assert np.array_equal(result.to_nanarray(), np.array([[1.0, 1.0, 1.0, np.nan]]), equal_nan=True)
+        assert np.array_equal(raster.to_nanarray(), np.array([[1.0, np.nan, np.nan, np.nan]]), equal_nan=True)

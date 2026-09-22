@@ -29,17 +29,17 @@ vect = vect.crop(rast)
 
 # %%
 # .. note::
-#      By default, :func:`~geoutils.Vector.crop` is done in-place, replacing ``vect``. This behaviour can be modified by passing ``inplace=False``.
+#      :func:`~geoutils.Vector.crop` returns a new vector and leaves the source unchanged.
 #
 
 rast.plot(ax="new", cmap="Greys_r", alpha=0.7)
 vect.plot(ref=rast, fc="none", ec="tab:purple", lw=3)
 
 # %%
-# The :func:`~geoutils.Vector.crop` keeps all features with geometries intersecting the extent to crop to. We can also force a clipping of the geometries
-# within the bounds using ``clip=True``.
+# The :func:`~geoutils.Vector.crop` keeps all features with geometries intersecting the extent without changing them.
+# Use :func:`~geoutils.Vector.clip` to cut their geometries exactly at the raster footprint.
 
-vect = vect.crop(rast, clip=True)
+vect = vect.clip(rast)
 rast.plot(ax="new", cmap="Greys_r", alpha=0.7)
 vect.plot(ref=rast, fc="none", ec="tab:purple", lw=3)
 

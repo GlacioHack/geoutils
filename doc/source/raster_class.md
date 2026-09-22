@@ -53,7 +53,7 @@ A **raster** has **four main attributes**:
 A **raster** also contains many derivative attributes, with naming generally consistent with that of [GDAL's recently overhauled CLI](https://gdal.org/en/stable/programs/index.html) or Rasterio.
 
 A first category includes georeferencing attributes directly derived from {attr}`~geoutils.Raster.transform`, namely: {attr}`~geoutils.Raster.shape`,
-{attr}`~geoutils.Raster.height`, {attr}`~geoutils.Raster.width`, {attr}`~geoutils.Raster.res`, {attr}`~geoutils.Raster.bounds`.
+{attr}`~geoutils.Raster.height`, {attr}`~geoutils.Raster.width`, {attr}`~geoutils.Raster.res`, {attr}`~geoutils.Raster.bbox`.
 
 A second category concerns the attributes derived from the raster array shape and type: {attr}`~geoutils.Raster.count`, {attr}`~geoutils.Raster.bands` and
 {attr}`~geoutils.Raster.dtype`. The two former refer to the number of bands loaded in a **raster**, and the band indexes.
@@ -165,11 +165,11 @@ rast.data
 ```
 
 For those less familiar with {class}`MaskedArrays<numpy.ma.MaskedArray>` and the associated functions in NumPy, an unmasked {class}`~numpy.ndarray` filled with
-{class}`~numpy.nan` on masked values can be extracted using {func}`~geoutils.Raster.get_nanarray`.
+{class}`~numpy.nan` on masked values can be extracted using {func}`~geoutils.Raster.to_nanarray`.
 
 ```{code-cell} ipython3
 # Get raster's nan-array
-rast.get_nanarray()
+rast.to_nanarray()
 ```
 
 ```{important}
@@ -235,7 +235,7 @@ As with all geospatial handling methods, the {func}`~geoutils.Raster.reproject` 
 {class}`~geoutils.Vector` as a reference to match. In that case, no other argument is necessary.
 
 A **raster** reference will enforce to match its {attr}`~geoutils.Raster.transform` and {class}`~geoutils.Raster.crs`.
-A {class}`~geoutils.Vector` reference will enforce to match its {attr}`~geoutils.Vector.bounds` and {class}`~geoutils.Vector.crs`.
+A {class}`~geoutils.Vector` reference will enforce to match its {attr}`~geoutils.Vector.bbox` and {class}`~geoutils.Vector.crs`.
 
 See {ref}`core-match-ref` for more details.
 ```
@@ -246,7 +246,7 @@ attributes. For more details, see the {ref}`specific section and function descri
 ```{code-cell} ipython3
 # Original bounds and resolution
 print(rast.res)
-print(rast.bounds)
+print(rast.bbox)
 ```
 
 ```{code-cell} ipython3
@@ -306,9 +306,10 @@ Resampling methods are listed in **[the dedicated section of Rasterio's API](htt
 
 [//]: # (```)
 
-## Crop
+## Crop and clip
 
-Cropping a **raster** is done through the {func}`~geoutils.Raster.crop` function, which enforces new {attr}`~geoutils.Raster.bounds`.
+Cropping a **raster** is done through the {func}`~geoutils.Raster.crop` function, which selects the rows and columns
+within new {attr}`~geoutils.Raster.bbox` without modifying their values.
 Additionally, you can use the {func}`~geoutils.Raster.icrop` method to crop the raster using pixel coordinates instead of geographic bounds.
 Both cropping methods can be used before loading the raster's data into memory. This optimization can prevent loading unnecessary parts of the data, which is particularly useful when working with large rasters.
 
@@ -335,6 +336,19 @@ print(rast_crop.bounds)
 # Crop raster using pixel coordinates
 rast_icrop = rast.icrop(bbox=(2, 2, 6, 6))
 print(rast_icrop.bounds)
+```
+
+Use {func}`~geoutils.Raster.clip` to apply an exact geometry while keeping the raster grid and extent. Cells inside
+the geometry keep their values and cells outside it become nodata. Set `all_touched=True` to keep every cell touched
+by the geometry instead of selecting cells by their centers.
+
+```{code-cell} ipython3
+from shapely.geometry import Polygon
+
+# Mask cells outside a triangular geometry spanning the raster
+left, bottom, right, top = rast.bbox
+triangle = Polygon([(left, bottom), (right, bottom), (left, top)])
+rast_clip = rast.clip(triangle)
 ```
 
 ## Polygonize

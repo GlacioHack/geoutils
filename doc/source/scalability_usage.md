@@ -91,7 +91,7 @@ sub_ds = ds_reproj.rst.subsample(
 sub_ds
 ```
 
-The output array is again lazy, and in this case we can use {meth}`~dask.array.Array.compute()` to return the in-memory NumPy array:
+The output point dataframe is again lazy. Calling `compute()` returns an in-memory GeoDataFrame:
 ```{code-cell} python
 sub_ds.compute()
 ```
@@ -131,21 +131,31 @@ rast_reproj_mp
 If the output is a {class}`~geoutils.Raster`, it is written to disk out-of-memory, and the returned object is a {class}`~geoutils.Raster` of that file without data loaded.
 This keeps syntax consistent with in-memory code, and allows to easily chain operations.
 
-For other output types, the Multiprocessing backends will load the result in-memory.
+Point outputs are written to a GeoPackage and returned as an unloaded {class}`~geoutils.PointCloud`.
 
 ```{code-cell} python
-# Subsample out-of-memory and return loaded array
+# Subsample out-of-memory and return an unloaded point cloud
+point_config = MultiprocConfig(chunks=200, outfile="subsample.gpkg")
 samp_rast_mp = rast_reproj_mp.subsample(
     subsample=5000,
+    mp_config=point_config,
 )
 
 samp_rast_mp
 ```
 
+Large multiprocessing value or index outputs requested with ``as_array=True`` from
+{meth}`~geoutils.Raster.subsample` or {meth}`~geoutils.PointCloud.subsample` use the same sample-size decision and
+are written to a NumPy ``.npy`` file.
+Dask inputs continue through their partitioned execution path without a file-backed result. Pass
+``force_output_to_memory=True`` to raster or point subsampling when the complete sample should be returned in memory
+even though it is larger than one input chunk.
+
 ```{code-cell} ipython3
 :tags: [remove-cell]
 import os
 os.remove(mp_config.outfile)
+os.remove(point_config.outfile)
 ```
 
 This backend is convenient when working directly with {class}`~geoutils.Raster` objects and performing **step-by-step processing**.

@@ -9,6 +9,7 @@ from importlib.util import find_spec
 import geopandas as gpd
 import numpy as np
 import pytest
+import rasterio as rio
 import xarray as xr
 from geopandas.testing import assert_geodataframe_equal
 from pyproj import CRS
@@ -52,6 +53,18 @@ class TestVectorAccessor:
         assert_geodataframe_equal(reprojected.compute(), expected)
         assert not ds.vct.is_loaded
         assert not reprojected.vct.is_loaded
+
+    def test_bbox__dask_geopandas(self) -> None:
+        """Checks that a lazy vector reads its bounding box without replacing its Dask collection."""
+
+        # Open the same features through lazy and eager GeoPandas representations
+        pytest.importorskip("dask_geopandas")
+        lazy = gu.open_vector(self.aster_outlines_path, chunks=1)
+        eager = gu.open_vector(self.aster_outlines_path)
+
+        # Compute the total bounding box while keeping the accessor backed by Dask
+        assert lazy.vct.bbox == rio.coords.BoundingBox(*eager.total_bounds)
+        assert not lazy.vct.is_loaded
 
     def test_translate_vector__dask_geopandas(self) -> None:
         """Translate vector partitions lazily and match the eager accessor result."""
@@ -113,16 +126,15 @@ class TestVectorAccessor:
         assert not ds.vct.is_loaded
 
     @pytest.mark.parametrize(
-        ("method", "clip"),
-        [("copy", False), ("crop", False), ("crop", True)],
-        ids=["copy", "crop", "crop-and-clip"],
+        "method",
+        ["copy", "crop", "clip"],
     )
-    def test_copy_crop_vector__dask_geopandas(self, method: str, clip: bool) -> None:
-        """Keep copied and cropped vector partitions lazy and equal to eager GeoPandas."""
+    def test_copy_crop_clip__dask_geopandas(self, method: str) -> None:
+        """Checks that Dask copy(), crop() and clip() stay lazy and match the in-memory result."""
 
         dgpd = pytest.importorskip("dask_geopandas")
 
-        # Use the middle half of the source extent so cropping has visible work to perform
+        # Use the middle half of the source bounds so crop() and clip() remove some geometries
         expected_source = gu.open_vector(self.aster_outlines_path)
         left, bottom, right, top = expected_source.total_bounds
         bbox = (
@@ -131,7 +143,12 @@ class TestVectorAccessor:
             right - (right - left) / 4,
             top - (top - bottom) / 4,
         )
-        kwargs = {"bbox": bbox, "clip": clip} if method == "crop" else {}
+        if method == "crop":
+            kwargs = {"bbox": bbox}
+        elif method == "clip":
+            kwargs = {"mask": bbox}
+        else:
+            kwargs = {}
 
         # Apply the same operation to eager and lazy accessors
         ds = gu.open_vector(self.aster_outlines_path, chunks=1)
@@ -277,7 +294,7 @@ class TestVectorAccessor:
         assert isinstance(proximity, xr.DataArray)
 
     def test_create_mask_points__dask_geopandas(self) -> None:
-        """Create lazy point masks as either Dask-GeoPandas or Dask Array output."""
+        """Checks that create_mask() creates lazy Dask-GeoPandas and Dask array point masks."""
 
         dgpd = pytest.importorskip("dask_geopandas")
         import dask.array as da

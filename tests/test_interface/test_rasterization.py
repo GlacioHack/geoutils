@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, Literal
 
 import geopandas as gpd
@@ -128,10 +129,86 @@ class TestRasterVectorInterface:
         with pytest.raises(InvalidGridError, match="Either 'ref' or 'crs' must be provided"):
             vct.rasterize(rst, crs=3857)
 
+    def test_rasterize__nodata_background(self) -> None:
+        """Checks that rasterize() works properly with a NaN background."""
+
+        # Rasterize polygon and request a NaN background value
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            # Ignore the Affine 3.1 transition warning emitted inside Rasterio
+            warnings.filterwarnings(
+                "ignore",
+                message=r"Use `@` matmul instead of `\*` mul operator for matrix multiplication",
+                category=PendingDeprecationWarning,
+            )
+            raster = self.vector.rasterize(res=1, bounds=(9, 9, 13, 13), crs=4326, in_value=1, out_value=np.nan)
+
+        # Check that background is masked, nodata metadata is finite and polygon value are valid
+        assert raster.nodata == -99999
+        assert np.count_nonzero(raster.data.mask) > 0
+        np.testing.assert_array_equal(raster.data.compressed(), np.ones(raster.data.count()))
+
+        # Check with manual nodata
+        custom_nodata = self.vector.rasterize(
+            res=1, bounds=(9, 9, 13, 13), crs=4326, in_value=1, out_value=np.nan, nodata=-1
+        )
+        assert custom_nodata.nodata == -1
+        assert np.count_nonzero(custom_nodata.data.mask) > 0
+        np.testing.assert_array_equal(custom_nodata.data.compressed(), np.ones(custom_nodata.data.count()))
+
+        # Check with a float32 array with NaNs
+        dataarray = self.vector.ds.vct.rasterize(
+            res=1, bounds=(9, 9, 13, 13), crs=4326, in_value=1, out_value=np.nan, out_dtype=np.float32
+        )
+        assert isinstance(dataarray, xr.DataArray)
+        assert dataarray.dtype == np.float32
+        assert dataarray.rst.nodata == -99999
+        assert np.count_nonzero(np.isnan(dataarray.data)) > 0
+        np.testing.assert_array_equal(dataarray.data[np.isfinite(dataarray.data)], np.ones(1, dtype=np.float32))
+
+        # Raise error on non-finite nodata
+        with pytest.raises(ValueError, match="nodata must be finite"):
+            self.vector.rasterize(res=1, bounds=(9, 9, 13, 13), crs=4326, in_value=1, out_value=np.nan, nodata=np.nan)
+
+    def test_rasterize__nodata_background_chunked(self, tmp_path: Any) -> None:
+        """Checks that chunked rasterization keeps NaNs in memory and writes finite nodata values to a file."""
+
+        pytest.importorskip("dask")
+        import dask.array as da
+
+        # Rasterize lazily into 2 x 2 chunks
+        options = {
+            "res": 1,
+            "bounds": (9, 9, 13, 13),
+            "crs": 4326,
+            "in_value": 1,
+            "out_value": np.nan,
+            "out_dtype": np.float32,
+        }
+        dask_result = self.vector.rasterize(**options, dask=True, chunksizes=(2, 2))
+        assert isinstance(dask_result, xr.DataArray)
+        assert isinstance(dask_result.data, da.Array)
+        assert not dask_result._in_memory
+
+        # Compute lazy values and check that background uses NaN with finite nodata metadata
+        dask_data = dask_result.data.compute()
+        assert dask_result.rst.nodata == -99999
+        assert np.count_nonzero(np.isnan(dask_data)) > 0
+        np.testing.assert_array_equal(dask_data[np.isfinite(dask_data)], np.ones(1, dtype=np.float32))
+
+        # Write chunks to file and check that background contains the finite nodata value
+        outfile = tmp_path / "rasterized-nodata.tif"
+        config = MultiprocConfig(chunks=(2, 2), outfile=str(outfile))
+        file_result = self.vector.rasterize(**options, mp_config=config)
+        assert not file_result.is_loaded
+        assert file_result.nodata == -99999
+        assert np.count_nonzero(file_result.data.mask) > 0
+        assert np.all(file_result.data.data[file_result.data.mask] == -99999)
+        np.testing.assert_array_equal(file_result.data.compressed(), np.ones(file_result.data.count()))
+
     def test_create_mask(self) -> None:
-        """
-        Test Vector.create_mask.
-        """
+        """Checks for create_mask()."""
+
         # First with given res and bounds -> Should be a 21 x 21 array with 0 everywhere except center pixel
         vector = self.vector.copy()
         out_mask = vector.create_mask(res=1, bounds=(0, 0, 21, 21), as_array=True)
@@ -157,7 +234,7 @@ class TestRasterVectorInterface:
         # Check that no warning is raised when creating a mask with a xres not multiple of vector bounds
         mask = vector.create_mask(res=1.01)
 
-        # Check that by default, create_mask returns a Mask
+        # Check that by default, create_mask() returns a mask raster
         assert isinstance(mask, gu.Raster) and mask.is_mask
 
         # Check that an error is raised if no input is passed
@@ -171,6 +248,20 @@ class TestRasterVectorInterface:
         with pytest.raises(ValueError, match="Input arguments must define a valid raster or point cloud."):
             vector.create_mask("lol")  # type: ignore
 
+    def test_geometry_mask__alias(self) -> None:
+        """Checks that geometry_mask() is a direct alias with the same result as create_mask()."""
+
+        # Check that both names are actually the same implementation, on Vector and the vct accessor
+        assert self.vector.geometry_mask.__func__ is self.vector.create_mask.__func__
+        assert self.vector.ds.vct.geometry_mask.__func__ is self.vector.ds.vct.create_mask.__func__
+
+        # They should return the same boolean array
+        expected = self.vector.create_mask(res=1, bounds=(0, 0, 21, 21), as_array=True)
+        actual = self.vector.geometry_mask(res=1, bounds=(0, 0, 21, 21), as_array=True)
+        accessor_actual = self.vector.ds.vct.geometry_mask(res=1, bounds=(0, 0, 21, 21), as_array=True)
+        np.testing.assert_array_equal(actual, expected)
+        np.testing.assert_array_equal(accessor_actual, expected)
+
     @pytest.mark.parametrize("all_touched", [False, True])
     @pytest.mark.parametrize("in_value_mode", ["scalar", "iterable", "none"])
     def test_rasterize_create_mask__chunked_backends_equal(
@@ -180,7 +271,7 @@ class TestRasterVectorInterface:
         in_value_mode: str,
     ) -> None:
         """
-        Test that rasterize and create_mask return exactly the same eager, Dask and Multiprocessing outputs.
+        Checks that rasterize() and create_mask() return the same eager, Dask and multiprocessing outputs.
 
         Dask outputs must remain lazy until computed and Multiprocessing outputs must initially remain file-backed.
         """

@@ -168,8 +168,8 @@ rast =  gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
 
 # Get 50 random points to sample within the raster extent
 rng = np.random.default_rng(42)
-x_coords = rng.uniform(rast.bounds.left, rast.bounds.right, 50)
-y_coords = rng.uniform(rast.bounds.bottom, rast.bounds.top, 50)
+x_coords = rng.uniform(rast.bbox.left, rast.bbox.right, 50)
+y_coords = rng.uniform(rast.bbox.bottom, rast.bbox.top, 50)
 
 pc_int = rast.interp_points(points=(x_coords, y_coords))
 ```
@@ -222,13 +222,13 @@ plt.tight_layout()
 
 ### Raster to points
 
-{func}`geoutils.Raster.to_pointcloud`
+{func}`geoutils.Raster.subsample`
 
 **A raster can be converted exactly into a point cloud**, which each pixel in the raster is associated to its pixel
 values to create a point cloud on a regular grid.
 
 ```{code-cell} ipython3
-pc = rast.to_pointcloud(subsample=10000)
+pc = rast.subsample(10000)
 ```
 
 ```{code-cell} ipython3

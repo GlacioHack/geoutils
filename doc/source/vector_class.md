@@ -29,7 +29,7 @@ In short, {class}`~geoutils.Vector` is a "convenience" composition class built o
 directly on the {class}`~geopandas.GeoDataFrame`. Dataframe functionalities from Pandas can be called from its {attr}`~geoutils.Vector.ds`.
 
 ```{caution}
-The {attr}`~geoutils.Vector.bounds` attribute of a {class}`~geoutils.Vector` corresponds to the {attr}`~geopandas.GeoDataFrame.total_bounds` attribute of a
+The {attr}`~geoutils.Vector.bbox` attribute of a {class}`~geoutils.Vector` corresponds to the {attr}`~geopandas.GeoDataFrame.total_bounds` attribute of a
 {class}`~geopandas.GeoDataFrame` converted to a {class}`rasterio.coords.BoundingBox`, for consistency between rasters and vectors.
 
 The equivalent of {attr}`geopandas.GeoDataFrame.bounds` (i.e., a per-feature bounds) for {class}`Vectors<geoutils.Vector>` is {attr}`~geoutils.Vector.geom_bounds`.
@@ -150,9 +150,10 @@ print(vect_reproj.crs)
 Calling {func}`geoutils.Vector.to_crs` is also possible, but mirrors GeoPandas' API (a match-reference argument cannot be passed).
 ```
 
-## Crop
+## Crop and clip
 
-Cropping a {class}`~geoutils.Vector` is done through the {func}`~geoutils.Vector.crop` function, which enforces new {attr}`~geoutils.Vector.bounds`.
+Cropping a {class}`~geoutils.Vector` with {func}`~geoutils.Vector.crop` selects features relative to a rectangular
+extent without changing their geometries.
 
 
 ```{important}
@@ -162,15 +163,18 @@ As with all geospatial handling methods, the {func}`~geoutils.Vector.crop` funct
 See {ref}`core-match-ref` for more details.
 ```
 
-The {func}`~geoutils.Vector.crop` function can also be passed a {class}`list` or {class}`tuple` of bounds (`xmin`, `ymin`, `xmax`, `ymax`).
+The {func}`~geoutils.Vector.crop` function can also be passed a {class}`list` or {class}`tuple` of bounds (`xmin`,
+`ymin`, `xmax`, `ymax`). Unloaded vectors defer this selection until their data are requested.
 
-By default, {func}`~geoutils.Vector.crop` returns a new {class}`~geoutils.Vector` which keeps all intersecting geometries. It can also be passed the `clip` argument to clip
-intersecting geometries to the extent.
+By default, crop returns a new {class}`~geoutils.Vector` containing every unchanged geometry that intersects the
+extent. Pass `mode="within"` to keep only geometries fully contained by it. Use {func}`~geoutils.Vector.clip` to cut
+intersecting geometries exactly at a mask boundary.
 
 ```{code-cell} ipython3
-# Crop vector to smaller bounds
-vect_crop = vect.crop((-73.5, -46.6, -73.4, -46.5), clip=True)
-vect_crop.info()
+# Select fully contained features, or cut geometries to the same extent
+bbox = (-73.5, -46.6, -73.4, -46.5)
+vect_crop = vect.crop(bbox, mode="within")
+vect_clip = vect.clip(bbox)
 ```
 
 ## Rasterize

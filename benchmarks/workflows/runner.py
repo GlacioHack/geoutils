@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import os
+import pathlib
 import tempfile
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
@@ -36,6 +37,7 @@ from benchmarks.workflows.registry import (
     OperationStrategyName,
     resolve_operation_parameters,
 )
+from geoutils._dispatch import is_dask_dataframe
 from geoutils._misc import (
     _get_process_mem_mb,
     _prepare_benchmark_process,
@@ -50,7 +52,7 @@ from geoutils.profiler import ProfileMetrics, profile_call
 ###################################
 
 
-# Keep input sizes, worker settings and measured results consistent across ASV, GDAL and large-data tests
+# Keep input sizes, worker settings and measured results consistent across ASV, external CLIs and large-data tests
 @dataclass
 class BenchmarkConfig:
     """Collect deterministic data, chunk, worker and profiling settings."""
@@ -64,6 +66,7 @@ class BenchmarkConfig:
     profile_interval: float = 0.05
     raster_value: float = 1.0
     subsample_size: int = 2048
+    pointcloud_subsample_size: int | None = None
     ninterp: int = 2048
     point_partition_size: int = 16
     polygon_regions_per_axis: int = 1
@@ -77,6 +80,7 @@ class BenchmarkConfig:
     grid_dist_nodata_pixel: float = float("inf")
     dask_write_batch_size: int = 4
     trim_dask_memory: bool = False
+    point_output_driver: Literal["GPKG", "LAS", "LAZ"] = "GPKG"
     directory: str | None = None
 
 
@@ -165,6 +169,24 @@ def read_raster_center(filename: str) -> float:
         row = dataset.height // 2
         col = dataset.width // 2
         return float(dataset.read(1, window=rio.windows.Window(col, row, 1, 1))[0, 0])
+
+
+def read_point_file_sample(filename: str, column: str) -> tuple[int, float]:
+    """Read the feature count and one value without loading a complete point file."""
+
+    if pathlib.Path(filename).suffix.lower() in (".las", ".laz"):
+        laspy = import_optional("laspy")
+        with laspy.open(filename) as reader:
+            count = int(reader.header.point_count)
+            sample = reader.read_points(1)
+        return count, float(sample.z[0])
+
+    import pyogrio
+
+    # Use file metadata for the complete row count and read only one feature for the constant-value check
+    info = pyogrio.read_info(filename, force_feature_count=True)
+    sample = pyogrio.read_dataframe(filename, columns=[column], max_features=1)
+    return int(info["features"]), float(sample[column].iloc[0])
 
 
 ##############################
@@ -446,6 +468,10 @@ class BenchmarkRunner:
             with rio.Env(GDAL_CACHEMAX=self.config.gdal_cachemax_mb):
                 # Default recycling bounds allocator and native-library caches in long jobs
                 self.mp_cluster = MpCluster(conf={"nb_workers": self.config.n_workers})
+
+                # Forkserver and spawn workers import modules independently, so finish their warm-up before profiling
+                warmup = self.mp_cluster.submit(_prepare_benchmark_process, self.config.gdal_cachemax_mb)
+                self.mp_cluster.compute(warmup)
         finally:
             # Restore the caller environment after all workers have inherited it
             if previous_cachemax is None:
@@ -564,9 +590,12 @@ class BenchmarkRunner:
 
         from geoutils.multiproc import MultiprocConfig
 
+        point_output = operation in ("subsample", "to_pointcloud")
+        suffix = f".{self.config.point_output_driver.lower()}" if point_output else ".tif"
         return MultiprocConfig(
             chunks=self.config.chunks,
-            outfile=self._output_path(operation),
+            outfile=self._output_path(operation, suffix=suffix),
+            driver=self.config.point_output_driver if point_output else None,
             cluster=self.mp_cluster,
         )
 
@@ -832,26 +861,74 @@ class BenchmarkRunner:
             return self._grouped_statistics(raster, operation_method, operation_strategy)
 
         if operation == "subsample":
-            # Return only a fixed-size selection from the much larger raster
-            mp_config = self._multiproc_config(operation) if self.backend == "multiprocessing" else None
-            subsample_kwargs: dict[str, Any] = {"random_state": 42}
-            if operation_strategy is not None:
-                subsample_kwargs["strategy"] = operation_strategy
-            sample = (
-                raster.rst.subsample(
-                    self.config.subsample_size,
-                    **subsample_kwargs,
-                )
-                if self.backend == "dask"
-                else raster.subsample(
-                    self.config.subsample_size,
-                    **subsample_kwargs,
-                    mp_config=mp_config,
-                )
-            )
-            if hasattr(sample, "compute"):
-                sample = sample.compute()
-            return float(np.asarray(sample).mean())
+            # Build a fixed-size point result while the source remains larger than worker memory
+            options = {
+                "subsample": self.config.subsample_size,
+                "random_state": 42,
+                "force_pixel_offset": "center",
+            }
+            if self.backend == "dask":
+                points = raster.rst.subsample(**options)
+                if not is_dask_dataframe(points) or points.pc.is_loaded:
+                    raise AssertionError("Dask subsample() output must remain lazy before computation.")
+                dataframe = points.compute()
+                if points.pc.is_loaded:
+                    raise AssertionError("Computing a Dask result must not load its original point cloud wrapper.")
+                if raster._in_memory:
+                    raise AssertionError("Computing a Dask subsample must not load its source raster.")
+                output_count = len(dataframe)
+                value = float(dataframe["b1"].iloc[0])
+            else:
+                points = raster.subsample(**options, mp_config=self._multiproc_config(operation))
+                if points.is_loaded:
+                    raise AssertionError("Multiprocessing subsample() output must remain unloaded.")
+                self._last_output_file = str(points.name)
+                output_count, value = read_point_file_sample(self._last_output_file, "b1")
+                if points.is_loaded:
+                    raise AssertionError("Reading the output file must not load its PointCloud wrapper.")
+                if raster.is_loaded:
+                    raise AssertionError("Multiprocessing subsample() must not load its source raster.")
+
+            # Check the requested count and constant source values without retaining the complete raster
+            if output_count != self.config.subsample_size:
+                raise AssertionError("Subsampling returned an unexpected number of rows.")
+            return value
+
+        if operation == "to_pointcloud":
+            # Convert every cell by default, or use a bounded sample for the larger-than-memory contract
+            point_count = self.config.pointcloud_subsample_size
+            options = {
+                "subsample": 1 if point_count is None else point_count,
+                "random_state": 42,
+                "force_pixel_offset": "center",
+            }
+            expected_count = self.config.shape[0] * self.config.shape[1] if point_count is None else point_count
+            if self.backend == "dask":
+                points = raster.rst.to_pointcloud(**options)
+                if not is_dask_dataframe(points) or points.pc.is_loaded:
+                    raise AssertionError("Dask to_pointcloud() output must remain lazy before computation.")
+                dataframe = points.compute()
+                if points.pc.is_loaded:
+                    raise AssertionError("Computing a Dask result must not load its original point cloud wrapper.")
+                if raster._in_memory:
+                    raise AssertionError("Computing a Dask point cloud must not load its source raster.")
+                output_count = len(dataframe)
+                value = float(dataframe["b1"].iloc[0])
+            else:
+                points = raster.to_pointcloud(**options, mp_config=self._multiproc_config(operation))
+                if points.is_loaded:
+                    raise AssertionError("Multiprocessing to_pointcloud() output must remain unloaded.")
+                self._last_output_file = str(points.name)
+                output_count, value = read_point_file_sample(self._last_output_file, "b1")
+                if points.is_loaded:
+                    raise AssertionError("Reading the output file must not load its PointCloud wrapper.")
+                if raster.is_loaded:
+                    raise AssertionError("Multiprocessing point conversion must not load its source raster.")
+
+            # Check the requested count and constant source values without retaining the complete raster
+            if output_count != expected_count:
+                raise AssertionError("Point conversion returned an unexpected number of rows.")
+            return value
 
         if operation == "interp_points":
             # Interpolate only requested positions while source chunks stay file-backed

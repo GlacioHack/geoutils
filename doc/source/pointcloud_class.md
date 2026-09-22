@@ -47,7 +47,8 @@ point geometries.
 Additionally, new attributes such as {attr}`~geoutils.PointCloud.point_count` and new methods specific to point clouds are detailed further below.
 
 Generic vector attributes and methods are inherited through the {class}`~geoutils.Vector` object, such as
-{attr}`~geoutils.Vector.bounds`, {attr}`~geoutils.Vector.crs`, {func}`~xdem.Vector.reproject` and {func}`~xdem.Vector.crop`.
+{attr}`~geoutils.Vector.bbox`, {attr}`~geoutils.Vector.crs`, {func}`~geoutils.Vector.reproject` and
+{func}`~geoutils.Vector.crop`.
 
 ```{tip}
 The complete list of {class}`~geoutils.Vector` attributes and methods can be found in [the Vector section of the API](https://geoutils.readthedocs.io/en/stable/api.html#vector).
@@ -104,7 +105,7 @@ neighbors remain nodata.
 
 ```{code-cell} ipython3
 # Grid the point cloud on a 100x100 grid on its extent
-coords = (np.linspace(pc.bounds.left, pc.bounds.right, 100), np.linspace(pc.bounds.bottom, pc.bounds.top, 100))
+coords = (np.linspace(pc.bbox.left, pc.bbox.right, 100), np.linspace(pc.bbox.bottom, pc.bbox.top, 100))
 rst = pc.grid(grid_coords=coords, resampling="idw", dist_nodata_pixel=3)
 ```
 
@@ -167,12 +168,15 @@ Statistics of a point cloud can be computed using {func}`~geoutils.PointCloud.st
 pc.stats(["mean", "max", "std"])
 ```
 
-A point cloud can also be quickly subsampled using {func}`~geoutils.PointCloud.subsample`, which considers only valid values, and returns either a point
-cloud or an array:
+A point cloud can also be quickly subsampled using {func}`~geoutils.PointCloud.subsample`, which considers only valid
+values and returns the complete selected point rows by default:
 
 ```{code-cell} ipython3
-# Get 500 random points in the point cloud
+# Get 500 random points
 pc_sub = pc.subsample(500)
+
+# Return only their values as an array
+values_sub = pc.subsample(500, as_array=True)
 ```
 
 See {ref}`stats` for more details.

@@ -79,8 +79,7 @@ def _xy2ij(
     # Input checks
     if op not in [np.float32, np.float64, float]:
         raise UserWarning(
-            "Operator is not of type float: rio.Dataset.index might "
-            "return unreliable indexes due to rounding issues."
+            "Operator is not of type float: rio.Dataset.index might return unreliable indexes due to rounding issues."
         )
 
     i, j = rio.transform.rowcol(transform, x, y, op=op, precision=precision)
@@ -109,7 +108,6 @@ def _xy2ij(
 
     # If the user wants to shift according to the interpretation
     if shift_area_or_point:
-
         # Shift by half a pixel if the AREA_OR_POINT attribute is "Point", otherwise leave as is
         if area_or_point is not None and area_or_point == "Point":
             if not isinstance(i.flat[0], (np.floating, float)):
@@ -194,8 +192,8 @@ def _res(transform: rio.transform.Affine) -> tuple[float, float]:
     return transform[0], abs(transform[4])
 
 
-def _bounds(transform: rio.transform.Affine, shape: tuple[int, int]) -> rio.coords.BoundingBox:
-    """See description of Raster.bounds."""
+def _bbox(transform: rio.transform.Affine, shape: tuple[int, int]) -> rio.coords.BoundingBox:
+    """See description of Raster.bbox."""
 
     return rio.coords.BoundingBox(*rio.transform.array_bounds(height=shape[0], width=shape[1], transform=transform))
 
@@ -284,7 +282,7 @@ def _cast_nodata(out_dtype: DTypeLike, nodata: int | float | None) -> int | floa
     :return: Cast nodata value.
     """
 
-    if out_dtype == bool:
+    if out_dtype == bool:  # noqa: E721
         nodata = None
     if nodata is not None and not rio.dtypes.can_cast_dtype(nodata, out_dtype):
         nodata = _default_nodata(out_dtype)

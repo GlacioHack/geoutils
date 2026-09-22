@@ -198,9 +198,7 @@ def _assert_vectors_equal_ordered(g1: gpd.GeoDataFrame, g2: gpd.GeoDataFrame, ex
     if not all(eq):
         i = next(i for i, ok in enumerate(eq) if not ok)
         a, b = g1.geometry.values[i], g2.geometry.values[i]
-        raise AssertionError(
-            "Geometry mismatch at index " f"{i}\n" f"{_geom_debug(a, b)}\n" f"a.wkt={a.wkt}\n\nb.wkt={b.wkt}\n"
-        )
+        raise AssertionError(f"Geometry mismatch at index {i}\n{_geom_debug(a, b)}\na.wkt={a.wkt}\n\nb.wkt={b.wkt}\n")
 
 
 def assert_vectors_equal(
@@ -354,9 +352,7 @@ class TestPolygonize:
         img_dtype = img.copy()
 
         with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore", category=UserWarning, message="dtype conversion will result in a loss of information.*"
-            )
+            warnings.filterwarnings("ignore", category=UserWarning, message="Converting from .* may alter values.*")
             warnings.filterwarnings(
                 "ignore",
                 category=UserWarning,
@@ -490,7 +486,7 @@ class TestPolygonize:
         assert ds.data.chunks is not None
 
         # Prepare target_values
-        nan = raster_base.get_nanarray()
+        nan = raster_base.to_nanarray()
         if target_mode == "scalar":
             target_values = np.unique(nan[~np.isnan(nan)])[0]  # First unique value we find for scalars
         elif target_mode == "range":

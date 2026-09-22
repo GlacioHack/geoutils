@@ -22,6 +22,7 @@ from geoutils.multiproc.cluster import (
 )
 from geoutils.multiproc.mparray import (
     MultiprocConfig,
+    _add_tile_padding,
     _apply_func_block,
     _generate_tiling_grid,
     _load_raster_tile,
@@ -82,7 +83,6 @@ def _custom_func_bands(raster: Raster, n_bands: int) -> Raster:
 
 
 class TestTiling:
-
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
 
     @pytest.mark.parametrize("overlap", [0, 5])
@@ -293,40 +293,42 @@ class TestMultiproc:
     @pytest.mark.parametrize("padding", [0, 1, 10])
     def test_remove_tile_padding(self, example: str, padding: int) -> None:
         """
-        Test removing padding from a raster tile after processing.
+        Checks that removing padding restores the destination block at raster edges and in its interior.
         """
         raster = Raster(example)
-        # Extract a tile with padding
+
+        # Expand an interior block whose row padding is clipped by the top raster edge
         tile = np.array([0, 100, 50, 150])
-        tile_pad = tile + np.array([-1, 1, -1, 1]) * padding
+        padded_tile = _add_tile_padding((raster.height, raster.width), tile, padding)
 
         raster_tile = _load_raster_tile(raster, tile)
-        raster_tile_with_padding = _load_raster_tile(raster, tile_pad)
+        raster_tile_with_padding = _load_raster_tile(raster, padded_tile)
 
-        # Remove padding and ensure it's back to the original size
+        # Remove the available padding and recover the exact destination data and grid
         _remove_tile_padding((raster.height, raster.width), raster_tile_with_padding, tile, padding)
         assert raster_tile_with_padding.raster_equal(raster_tile)
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])
-    @pytest.mark.parametrize("padding", [0, 1, 3])
+    @pytest.mark.parametrize("padding", [0, 1, 6])
     def test_apply_func_block(self, example: str, padding: int) -> None:
         """
-        Test applying a function to a raster tile and handling padding removal.
+        Checks that a block function supports padding larger than half the destination block width.
         """
         raster = Raster(example)
         tile = np.array([10, 20, 10, 20])  # [rowmin, rowmax, colmin, colmax]
         size = 2
 
-        # Apply map_block
-        result_tile, _ = _apply_func_block(_custom_func_overlap, raster, tile, padding, size)
+        # Filter a 10 x 10 block using up to six neighboring pixels on each side
+        result_tile, result_bounds = _apply_func_block(_custom_func_overlap, raster, tile, padding, size)
 
+        # Compare the cropped worker result with the same block filtered as part of the full raster
         raster = _custom_func_overlap(raster, size)
-        # If padding >=1, The result should be the equal to the original tile filtered
         original_tile_filtered = _load_raster_tile(raster, tile)
         if padding >= size - 1:
             assert result_tile.raster_equal(original_tile_filtered)
         else:
             assert not result_tile.raster_equal(original_tile_filtered)
+        assert np.array_equal(result_bounds, tile)
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])
     @pytest.mark.parametrize("tile_size", [100, 200])
@@ -444,6 +446,26 @@ class TestMultiproc:
 
 class TestMapOverlapChunked:
     """Test module for map_overlap() loading behavior and exact equality with eager raster calculations."""
+
+    def test_map_overlap__depth_larger_than_half_chunk(self, tmp_path: Path) -> None:
+        """Checks that an overlap deeper than half a chunk gives the same result as eager."""
+
+        # Write a 9 x 11 raster so the final row and column chunks are shorter than the requested 4 x 5 chunks
+        values = np.arange(99, dtype=np.float32).reshape(9, 11)
+        transform = rio.transform.from_origin(500_000, 4_500_000, 10, 10)
+        source_file = tmp_path / "source.tif"
+        output_file = tmp_path / "filtered.tif"
+        Raster.from_array(values, transform, 32633).to_file(source_file)
+        source = Raster(source_file)
+
+        # Filter with three support pixels per side, exceeding half of both requested chunk dimensions
+        config = MultiprocConfig(chunks=(4, 5), outfile=str(output_file))
+        result = map_overlap(_custom_func_overlap, source, config, 3, depth=3)
+        expected = _custom_func_overlap(Raster(source_file), 3)
+
+        # Check file is unloaded and matches the eager result
+        assert not source.is_loaded
+        assert result.raster_equal(expected)
 
     @pytest.mark.parametrize("source_bands, output_bands", [(1, 3), (3, 1)])
     @pytest.mark.parametrize("execution_mode", ["basic", "multiprocessing"])

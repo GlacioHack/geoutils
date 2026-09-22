@@ -14,7 +14,6 @@ from geoutils.vector.geometric import _extract_vertices, _generate_voronoi_polyg
 
 
 class TestGeometric:
-
     # Create a synthetic vector file with a square of size 1, started at position (10, 10)
     poly1 = Polygon([(10, 10), (11, 10), (11, 11), (10, 11)])
     gdf = gpd.GeoDataFrame({"geometry": [poly1]}, crs="EPSG:4326")

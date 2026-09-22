@@ -60,7 +60,13 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
   - Rasterio / PyProj
 
 * - {meth}`~geoutils.Raster.crop()`
-  - Crop to bounds, either intersecting (untouched) allowing efficient I/O, or clipped (data modified).
+  - Crop to a bounding box without changing values or geometries (deferred I/O). Vectors are kept either by
+    intersection or containment.
+  - ✅
+  - Rasterio / GeoPandas
+
+* - {meth}`~geoutils.Raster.clip()`
+  - Clip to an exact geometry: mask cells for rasters, remove data for points, and cut geometries for vectors.
   - ✅
   - Rasterio / GeoPandas
 
@@ -95,7 +101,7 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
   - Pandas / NumPy / Dask
 
 * - {meth}`~geoutils.Raster.subsample()`
-  - Randomly sample valid values. Choose `strategy="topk"` for the same cells across chunk layouts.
+  - Randomly sample valid raster cells as a point cloud or value/index array.
   - ✅
   - NumPy
 
@@ -191,7 +197,7 @@ These rely only on metadata and therefore **do not load or modify underlying dat
 * - {attr}`~geoutils.Raster.crs`
   - Coordinate reference system (CRS) of object.
 
-* - {attr}`~geoutils.Raster.bounds`
+* - {attr}`~geoutils.Raster.bbox`
   - Bounding box of object.
 
 * - {attr}`~geoutils.Raster.footprint`
