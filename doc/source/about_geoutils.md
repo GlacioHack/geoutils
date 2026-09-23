@@ -39,7 +39,8 @@ In particular, GeoUtils:
 - Naturally handles **different `dtype` and `nodata`** values through its NumPy masked-array interface.
 
 ```{note}
-We are working on adding Dask support through an Xarray accessor for our next release.
+GeoUtils provides lazy, chunked Dask execution through the {class}`rst <geoutils.RasterAccessor>`,
+{class}`vct <geoutils.VectorAccessor>` and {class}`pc <geoutils.PointCloudAccessor>` accessors.
 ```
 
 ## Who is behind GeoUtils?

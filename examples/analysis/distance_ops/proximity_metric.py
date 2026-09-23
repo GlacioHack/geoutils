@@ -2,7 +2,7 @@
 Proximity to raster or vector
 =============================
 
-This example demonstrates the calculation of proximity distances to a raster or vector using :func:`~geoutils.Raster.proximity`.
+This example demonstrates the calculation of proximity distances to a raster or vector using :meth:`~geoutils.raster.base.RasterBase.proximity`.
 """
 
 # %%
@@ -13,21 +13,22 @@ import geoutils as gu
 
 filename_rast = gu.examples.get_path("everest_landsat_b4")
 filename_vect = gu.examples.get_path("everest_rgi_outlines")
-rast = gu.Raster(filename_rast)
-vect = gu.Vector(filename_vect)
+rast = gu.open_raster(filename_rast)
+vect = gu.open_vector(filename_vect)
 vect = vect[vect["RGIId"] == "RGI60-15.10055"]
-rast = rast.crop(vect)
+rast = rast.rst.crop(vect)
 
 # Plot the raster and vector
-rast.plot(cmap="Blues")
-vect.reproject(rast).plot(fc="none", ec="k", lw=2)
+rast.rst.plot(cmap="Blues")
+vect.vct.reproject(rast).vct.plot(fc="none", ec="k", lw=2)
 
 # %%
 # We select the vector boundary, then use the raster as a reference to match for rasterizing the proximity distances
-# with :func:`~geoutils.Vector.proximity`. See :ref:`core-match-ref` for more details.
+# with :meth:`~geoutils.vector.base.VectorBase.proximity`. See :ref:`core-match-ref` for more details.
 
-proximity = vect.boundary.proximity(rast)
-proximity.plot(cmap="viridis")
+boundary = vect.set_geometry(vect.boundary)
+proximity = boundary.vct.proximity(rast.rst)
+proximity.rst.plot(cmap="viridis")
 
 # %%
 # Proximity can also be computed to target pixels of a raster, or that of a mask
@@ -36,17 +37,17 @@ proximity.plot(cmap="viridis")
 import numpy as np
 
 mask_200 = np.abs(rast - 200) < 30
-mask_200.plot()
+mask_200.rst.plot()
 
 # %%
 # Because a mask is :class:`bool`, no need to pass target pixels
 
-proximity_mask = mask_200.proximity()
-proximity_mask.plot(cmap="viridis")
+proximity_mask = mask_200.rst.proximity()
+proximity_mask.rst.plot(cmap="viridis")
 
 # %%
-# By default, proximity is computed using the georeference unit from a :class:`~geoutils.Raster`'s :attr:`~geoutils.Raster.res`, here **meters**. It can also
+# By default, proximity is computed using the raster's georeferenced resolution, here **meters**. It can also
 # be computed in pixels.
 
-proximity_mask = mask_200.proximity(distance_unit="pixel")
-proximity_mask.plot(cmap="viridis")
+proximity_mask = mask_200.rst.proximity(distance_unit="pixel")
+proximity_mask.rst.plot(cmap="viridis")

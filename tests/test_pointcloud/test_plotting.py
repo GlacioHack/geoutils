@@ -11,6 +11,7 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
+from affine import Affine
 
 import geoutils as gu
 
@@ -55,6 +56,40 @@ class TestPlot:
             filename = os.path.join(directory, "test.png")
             pointcloud.plot(ax="new", savefig_fname=filename)
             assert os.path.isfile(filename)
+        plt.close()
+
+    def test_plot__boolean_colorbar(self) -> None:
+        """Checks that a boolean point mask uses a labeled continuous colorbar without changing its data."""
+
+        # Create a point mask whose two boolean values would otherwise make GeoPandas select a categorical legend
+        dataframe = gpd.GeoDataFrame(
+            {"mask": [False, True]},
+            geometry=gpd.points_from_xy([0, 1], [0, 1]),
+            crs=32632,
+        )
+        pointcloud = gu.PointCloud(dataframe, data_column="mask")
+
+        # Plot the mask through the normal point cloud colorbar path
+        _, colorbar_ax = pointcloud.plot(cbar_title="Intersects vector", return_axes=True)
+
+        assert colorbar_ax is not None
+        assert colorbar_ax.get_ylabel() == "Intersects vector"
+        assert pointcloud.data.dtype == bool
+        plt.close()
+
+    def test_plot__fixed_color(self) -> None:
+        """Checks that an explicit color overrides the default data column without creating a colorbar."""
+
+        # Create a point cloud whose main data column would otherwise control marker colors
+        pointcloud = gu.PointCloud(_point_grid(3), data_column="value")
+
+        # Draw every point in one color and check that no numeric values or colorbar were attached
+        _, colorbar_ax = pointcloud.plot(color="darkred", max_points=None, return_axes=True)
+        collection = plt.gca().collections[0]
+
+        assert colorbar_ax is None
+        assert collection.get_array() is None
+        np.testing.assert_allclose(collection.get_facecolor()[0, :3], (0.5451, 0.0, 0.0), atol=1e-4)
         plt.close()
 
     def test_plot__point_budget(self) -> None:
@@ -102,6 +137,66 @@ class TestPlot:
         assert 0 <= gap < map_position.width / 2
         assert colorbar_position.height == pytest.approx(map_position.height)
         plt.close(ax.figure)
+
+    def test_plot__reference_panel_size(self) -> None:
+        """Checks that a reference-matched point plot has the same map and colorbar size as a raster plot."""
+
+        # Create a wide reference that makes equal-aspect axes shorter than their original subplot slots
+        reference = gu.Raster.from_array(np.ones((10, 100)), Affine(1, 0, 0, 0, -1, 10), 3857)
+        dataframe = gpd.GeoDataFrame(
+            {"value": [0, 1]},
+            geometry=gpd.points_from_xy([0, 100], [0, 1]),
+            crs=3857,
+        )
+        pointcloud = gu.PointCloud(dataframe, data_column="value")
+
+        # Plot the same extent in paired panels whose titles occupy one and two lines
+        fig, axes = plt.subplots(1, 2)
+        axes[0].set_title("Raster")
+        raster_ax, raster_colorbar_ax = reference.plot(ax=axes[0], max_pixels=None, return_axes=True)
+        axes[1].set_title("Reduced\npoint cloud")
+        point_ax, point_colorbar_ax = pointcloud.plot(
+            ref=reference,
+            ax=axes[1],
+            max_points=None,
+            return_axes=True,
+        )
+        assert raster_colorbar_ax is not None
+        assert point_colorbar_ax is not None
+        fig.tight_layout()
+        fig.canvas.draw()
+
+        # Matching data bounds and non-resizing colorbars should give both panels the same size
+        raster_position = raster_ax.get_position()
+        point_position = point_ax.get_position()
+        assert point_position.y0 == pytest.approx(raster_position.y0)
+        assert point_position.width == pytest.approx(raster_position.width)
+        assert point_position.height == pytest.approx(raster_position.height)
+        assert point_colorbar_ax.get_position().width == pytest.approx(raster_colorbar_ax.get_position().width)
+        assert point_colorbar_ax.get_position().height == pytest.approx(raster_colorbar_ax.get_position().height)
+
+        plt.close(fig)
+
+    def test_plot__projected_tick_spacing(self) -> None:
+        """Checks that long projected coordinates do not overlap on a narrow plot."""
+
+        # Create one narrow panel with six-digit easting labels like those in documentation figures
+        dataframe = gpd.GeoDataFrame(
+            {"value": [0, 1]},
+            geometry=gpd.points_from_xy([470_000, 510_000], [3_080_000, 3_120_000]),
+            crs=32632,
+        )
+        pointcloud = gu.PointCloud(dataframe, data_column="value")
+        fig, axes = plt.subplots(1, 3, figsize=(4, 3))
+
+        # Plot in the first panel and compare the rendered bounds of neighboring labels
+        pointcloud.plot(ax=axes[0], max_points=None)
+        fig.canvas.draw()
+        labels = [label for label in axes[0].get_xticklabels() if label.get_visible() and label.get_text()]
+        label_boxes = [label.get_window_extent() for label in labels]
+
+        assert all(not first.overlaps(second) for first, second in zip(label_boxes[:-1], label_boxes[1:]))
+        plt.close(fig)
 
     def test_plot__match_reference_crs(self) -> None:
         """Checks that reference matching reprojects the point sample CRS and crops to bounds."""

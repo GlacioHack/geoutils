@@ -1225,9 +1225,9 @@ class RasterBase(ABC):
 
         return same_grid
 
-    def get_bounds_projected(self, out_crs: CRS, densify_points: int = 5000) -> rio.coords.BoundingBox:
+    def get_bbox_projected(self, out_crs: CRS, densify_points: int = 5000) -> rio.coords.BoundingBox:
         """
-        Get raster bounds projected in a specified CRS.
+        Get the raster bounding box projected in a specified CRS.
 
         :param out_crs: Output CRS.
         :param densify_points: Maximum points to be added between image corners to account for non linear edges.
@@ -1240,9 +1240,9 @@ class RasterBase(ABC):
         densify_points = min(max(self.width, self.height), densify_points)
 
         # Calculate new bounds
-        new_bounds = _get_bounds_projected(self.bbox, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points)
+        new_bbox = _get_bounds_projected(self.bbox, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points)
 
-        return new_bounds
+        return new_bbox
 
     def get_footprint_projected(self, out_crs: CRS, densify_points: int = 5000) -> Vector:
         """
@@ -1303,14 +1303,14 @@ class RasterBase(ABC):
         """
 
         # Reproject the bounds of raster to self's
-        raster_bounds_sameproj = (
-            other.rst.get_bounds_projected(self.crs)
+        raster_bbox_sameproj = (
+            other.rst.get_bbox_projected(self.crs)
             if isinstance(other, xr.DataArray)
-            else other.get_bounds_projected(self.crs)
+            else other.get_bbox_projected(self.crs)
         )
 
         # Calculate intersection of bounding boxes
-        intersection = merge_bounds([self.bbox, raster_bounds_sameproj], merging_algorithm="intersection")
+        intersection = merge_bounds([self.bbox, raster_bbox_sameproj], merging_algorithm="intersection")
 
         # Check that intersection is not void (changed to NaN instead of empty tuple end 2022)
         if intersection == () or all(math.isnan(i) for i in intersection):
@@ -2030,7 +2030,7 @@ class RasterBase(ABC):
         Apply a filter to the array.
 
         :param method: The filter to apply. Can be a string ("gaussian", "median", "mean", "max", "min", "distance")
-                       for built-in filters, or a custom callable that takes a 2D ndarray and returns one.
+            for built-in filters, or a custom callable that takes a 2D ndarray and returns one.
         :param size: Window size for filter
         :param mp_config: Multiprocessing configuration.
         :param sigma: Optional standard deviation for Gaussian filtering.
@@ -2039,12 +2039,13 @@ class RasterBase(ABC):
             Only used with built-in filters.
         :param outlier_threshold:  The minimum difference abs(array - mean) for a pixel to be considered an outlier.
             Only used when `method="distance"`.
-        :param kwargs : Additional keyword arguments passed to the underlying filter implementation.
+        :param kwargs: Additional keyword arguments passed to the underlying filter implementation.
 
-        :return: A new Raster instance with the filtered data (or None if inplace).
+        :returns: A new Raster instance with the filtered data (or None if inplace).
 
         :raises ValueError: If the filter name is not one of the predefined options.
         :raises TypeError: If `method` is neither a string nor a callable.
+
         """
 
         if "inplace" in kwargs:

@@ -2,7 +2,7 @@
 Creating a raster from array
 ============================
 
-This example demonstrates the creation of a raster through :func:`~geoutils.Raster.from_array`.
+This example demonstrates the creation of a raster through :meth:`~geoutils.raster.base.RasterBase.from_array`.
 """
 
 import numpy as np
@@ -24,16 +24,16 @@ transform = rio.transform.from_bounds(0, 0, 1, 1, 3, 3)
 crs = pyproj.CRS.from_epsg(4326)
 
 # Create a raster
-rast = gu.Raster.from_array(data=arr, transform=transform, crs=crs, nodata=255)
+rast = gu.RasterAccessor.from_array(data=arr, transform=transform, crs=crs, nodata=255)
 rast
 
 # %%
 # We can print info on the raster.
-rast.info()
+rast.rst.info()
 
 # %%
-# The array has been automatically cast into a :class:`~numpy.ma.MaskedArray`, to respect :class:`~geoutils.Raster.nodata` values.
-rast.data
+# The missing value is represented by a NaN in the :class:`xarray.DataArray`.
+rast.rst.data
 
 # %%
 # We could also have created directly from a :class:`~numpy.ma.MaskedArray`.
@@ -43,10 +43,10 @@ mask = rng.integers(0, 2, size=(5, 5), dtype="bool")
 ma = np.ma.masked_array(data=arr, mask=mask)
 
 # This time, we pass directly the masked array
-rast = gu.Raster.from_array(data=ma, transform=transform, crs=crs, nodata=255)
+rast = gu.RasterAccessor.from_array(data=ma, transform=transform, crs=crs, nodata=255)
 rast
 
 # %%
-# The different functionalities of GeoUtils will respect :class:`~geoutils.Raster.nodata` values, starting with :func:`~geoutils.Raster.plot`,
+# The different functionalities of GeoUtils will respect missing values, starting with :meth:`~geoutils.raster.base.RasterBase.plot`,
 # which will ignore them during plotting (transparent).
-rast.plot(cmap="copper")
+rast.rst.plot(cmap="copper")

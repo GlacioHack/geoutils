@@ -2,7 +2,7 @@
 Open/save a point cloud
 =======================
 
-This example demonstrates the instantiation of a point cloud through :class:`geoutils.PointCloud` and saving with :func:`~geoutils.Vector.save`.
+This example demonstrates opening a point cloud with :func:`geoutils.open_pointcloud` and saving it with the :class:`pc <geoutils.PointCloudAccessor>` accessor.
 """
 
 import geoutils as gu
@@ -10,27 +10,27 @@ import geoutils as gu
 # %%
 # We open an example vector.
 filename_pc = gu.examples.get_path("coromandel_lidar")
-pc = gu.PointCloud(filename_pc, data_column="Z")
+pc = gu.open_pointcloud(filename_pc, data_column="Z")
 pc
 
 # %%
-# A point cloud is a subclass of :class:`~geoutils.Vector`, with a main attribute :attr:`~geoutils.PointCloud.data_column` pointing to the main data column
-# of the point cloud.
+# A point cloud is a :class:`geopandas.GeoDataFrame`, with a main attribute :attr:`~geoutils.pointcloud.base.PointCloudBase.data_column` pointing to the main data column
+# through its ``pc`` accessor.
 # All other attributes are :ref:`inherited from Shapely and GeoPandas<vector-from-geopandas>`. See also :ref:`vector-class`.
 
 # %%
 #
 # .. note::
-#        A point cloud can also be instantiated with a :class:`geopandas.GeoDataFrame`, see :ref:`sphx_glr_io_examples_import_export_import_vector.py`.
+#        GeoUtils point cloud methods can also be used on an existing :class:`geopandas.GeoDataFrame`.
 #
 # We can print more info on the point cloud.
-pc.info()
+pc.pc.info()
 
 # %%
 # Let's plot the point cloud main column
-pc.plot(cbar_title="Elevation (m)")
+pc.pc.plot(cbar_title="Elevation (m)")
 
 # %%
-# Finally, a point cloud is saved using :func:`~geoutils.Vector.save`.
+# Finally, a point cloud is saved using :meth:`~geoutils.VectorAccessor.to_file`.
 
-pc.to_file("mypc.gpkg")
+pc.pc.to_file("mypc.gpkg")

@@ -164,7 +164,7 @@ class TestClassVsAccessorConsistency:
         "coords",
         "outside_image",
         "info",
-        "get_bounds_projected",
+        "get_bbox_projected",
         "get_footprint_projected",
         "copy",
         "georeferenced_grid_equal",
@@ -324,7 +324,7 @@ class TestClassVsAccessorConsistency:
         ("coords", {"grid": True}),
         ("get_metric_crs", {"local_crs_type": "universal"}),
         ("get_footprint_projected", {"out_crs": CRS.from_epsg(4326)}),
-        ("get_bounds_projected", {"out_crs": CRS.from_epsg(4326)}),
+        ("get_bbox_projected", {"out_crs": CRS.from_epsg(4326)}),
         ("georeferenced_grid_equal", {"other": "self"}),
         ("outside_image", {"xi": [-2, 10000, 10], "yj": [10, 50, 20]}),
         # 1.2. In-place methods

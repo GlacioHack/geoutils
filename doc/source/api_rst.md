@@ -1,5 +1,5 @@
 (api-rst)=
-# The `rst` accessor
+# The {class}`rst <geoutils.RasterAccessor>` accessor
 
 The {class}`rst <geoutils.RasterAccessor>` accessor is the interface to GeoUtils raster methods on {class}`xarray.DataArray` objects.
 
@@ -13,6 +13,8 @@ Below is the full class description specific to {class}`rst <geoutils.RasterAcce
 
 .. autoclass:: RasterAccessor
     :members:
+    :exclude-members: to_file, to_geoutils
     :inherited-members:
     :undoc-members: false
     :show-inheritance:
+```

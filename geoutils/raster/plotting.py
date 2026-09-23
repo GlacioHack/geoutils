@@ -30,7 +30,7 @@ from rasterio.enums import Resampling
 from geoutils._dispatch import get_geo_attr, has_geo_attr, is_dask_array
 from geoutils._misc import import_optional
 from geoutils.raster.referencing import _default_nodata
-from geoutils.vector.plotting import _get_reference_bbox
+from geoutils.vector.plotting import _create_colorbar_axes, _get_reference_bbox, _reduce_tick_label_overlap
 
 if TYPE_CHECKING:
     import matplotlib
@@ -200,7 +200,6 @@ def _plot_raster(
 
     matplotlib = import_optional("matplotlib")
     import matplotlib.pyplot as plt
-    from mpl_toolkits.axes_grid1 import make_axes_locatable
 
     # Create the axes before calculating their display "max pixel size"
     ax0 = _create_axes(ax)
@@ -284,8 +283,7 @@ def _plot_raster(
     # Add a colorbar (only beside single band plots)
     cax = None
     if add_cbar:
-        divider = make_axes_locatable(ax0)
-        cax = divider.append_axes("right", size="5%", pad="2%")
+        cax = _create_colorbar_axes(ax0)
         norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
         cbar = matplotlib.colorbar.ColorbarBase(cax, cmap=cmap, norm=norm)
         cbar.solids.set_alpha(alpha)
@@ -294,6 +292,7 @@ def _plot_raster(
 
     plt.sca(ax0)
     plt.tight_layout()
+    _reduce_tick_label_overlap(ax0)
     if savefig_fname:
         plt.savefig(savefig_fname)
     if return_axes:

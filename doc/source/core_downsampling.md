@@ -13,6 +13,16 @@ kernelspec:
 (core-downsampling)=
 # Downsampling for opening and plotting
 
+```{code-cell} ipython3
+:tags: [remove-cell]
+
+# Match the figure resolution and text size used by the other feature pages
+from matplotlib import pyplot as plt
+plt.rcParams["figure.dpi"] = 600
+plt.rcParams["savefig.dpi"] = 600
+plt.rcParams["font.size"] = 9
+```
+
 Rasters and point clouds can both contain much more data than an analysis or a figure needs. GeoUtils provides two
 levels of reduction with consistent roles across these objects:
 
@@ -29,9 +39,8 @@ import geoutils as gu
 raster_path = gu.examples.get_path("exploradores_aster_dem")
 point_path = gu.examples.get_path("coromandel_lidar")
 
-raster = gu.Raster(raster_path, downsample=4)
-raster_xarray = gu.open_raster(raster_path, downsample=4)
-points = gu.PointCloud(point_path, data_column="Z", downsample=4)
+raster = gu.open_raster(raster_path, downsample=4)
+points = gu.open_pointcloud(point_path, data_column="Z", downsample=4)
 ```
 
 The factor has a meaning appropriate to each data type:
@@ -43,10 +52,10 @@ The factor has a meaning appropriate to each data type:
 * - Object
   - Effect of `downsample=4`
   - Approximate size
-* - {class}`~geoutils.Raster` or {func}`~geoutils.open_raster`
+* - {func}`~geoutils.open_raster`
   - Multiply the source pixel size by 4 in both directions
   - One sixteenth of the source pixels
-* - {class}`~geoutils.PointCloud`
+* - {func}`~geoutils.open_pointcloud`
   - Select a deterministic random sample of the complete point rows
   - `ceil(point_count / 4)` points
 ```
@@ -55,21 +64,25 @@ For rasters, rows or columns that do not fill a complete interval are omitted. F
 keep their geometries, main data values and auxiliary columns. A factor of 1, the default, keeps the native raster grid
 or every point. Opening with `downsample` does not alter the source file.
 
-For point cloud files, the sample is currently selected after the rows are read. It reduces the resulting object and
-the cost of later operations, but does not reduce the peak memory needed by the initial file read.
+For point cloud files opened eagerly, the sample is selected after the rows are read. It reduces the resulting object
+and the cost of later operations, but does not reduce the peak memory needed by the initial file read. Pass `chunks`
+to {func}`~geoutils.open_pointcloud` when that initial read must also stay partitioned and lazy.
+
+The same options are available when opening the corresponding {class}`~geoutils.Raster` and
+{class}`~geoutils.PointCloud` objects.
 
 ## Reduce data only for plotting
 
 The default `plot()` behavior limits the amount of data sent to Matplotlib while leaving the source object unchanged:
 
 ```{code-cell} ipython3
-raster.plot(max_pixels="auto")
-points.plot(max_points="auto", ax="new")
+raster.rst.plot(max_pixels="auto")
+points.pc.plot(max_points="auto", ax="new")
 ```
 
 For a raster, `max_pixels="auto"` limits the display grid to the Matplotlib axes width and height in display pixels,
 as determined by the figure size and DPI. An integer sets a maximum total pixel count. The grid keeps the raster
-aspect ratio and is produced through {meth}`~geoutils.Raster.reproject` with the selected `resampling` method.
+aspect ratio and is produced through {meth}`~RasterBase.reproject` with the selected `resampling` method.
 
 For a point cloud, `max_points="auto"` limits the sample to the smaller of the Matplotlib axes pixel area and one
 million points. An integer sets the maximum sample size, and `random_state` controls the random point selection. The
@@ -102,7 +115,7 @@ with rio.open(overview_path, "r+") as dataset:
 ```
 
 ```{code-cell} ipython3
-raster_xarray = gu.open_raster(overview_path, overview_level=0)
+raster_overview = gu.open_raster(overview_path, overview_level=0)
 ```
 
 Level 0 selects the first stored overview, level 1 the second, and so on. The returned raster has the shape and
@@ -119,7 +132,7 @@ so explicitly:
 - `downsample` defines the final shape, coordinates and resolution. A stored overview is used as the source for that
   grid when possible.
 - `overview_level` returns the selected overview's own stored grid and is available through {func}`~geoutils.open_raster`.
-- `max_pixels` creates a temporary grid for {meth}`~geoutils.Raster.plot` and does not explicitly select a stored
+- `max_pixels` creates a temporary grid for {meth}`~RasterBase.plot` and does not explicitly select a stored
   overview.
 
 ```{code-cell} ipython3
@@ -127,6 +140,6 @@ so explicitly:
 
 from pathlib import Path
 
-raster_xarray.close()
+raster_overview.close()
 Path(overview_path).unlink()
 ```

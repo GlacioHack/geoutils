@@ -16,6 +16,10 @@ kernelspec:
 
 A point cloud represents 2D point geometries of georeferenced coordinates associated with a main 1D data array, and optionally auxiliary data.
 
+GeoUtils also exposes point cloud methods through the {class}`pc <geoutils.PointCloudAccessor>` accessor on a
+{class}`geopandas.GeoDataFrame`. We recommend this interface for new workflows, while the
+{class}`~geoutils.PointCloud` object remains available with the same point cloud methods.
+
 Although a subtype of {class}`~geoutils.Vector`, point clouds have a very different nature than other vectors and are
 ubiquitous in geospatial analysis, requiring their own object type.
 For **numerical operations**, a point cloud manipulation is facilitated by its own arithmetic to manipulate its main data array, as well as a
@@ -95,25 +99,6 @@ pc2 = geoutils.PointCloud.from_array(np.array([[1, 2, 3], [4, 5, 6]]), crs=4326)
 pc3 = geoutils.PointCloud.from_tuples([(1, 2, 3), (4, 5, 6)], crs=4326)
 ```
 
-## Gridding to a raster
-
-Gridding a {class}`~geoutils.PointCloud` into a specific grid can be done through the {func}`~geoutils.PointCloud.grid` function, using nearest,
-linear or cubic interpolation, or circular inverse-distance weighting and statistics. Circular statistics include mean,
-minimum, maximum, range, count, population standard deviation, average point-to-cell distance and average spacing
-between points. Invalid point coordinates or values are ignored, and cells without the required number of finite
-neighbors remain nodata.
-
-```{code-cell} ipython3
-# Grid the point cloud on a 100x100 grid on its extent
-coords = (np.linspace(pc.bbox.left, pc.bbox.right, 100), np.linspace(pc.bbox.bottom, pc.bbox.top, 100))
-rst = pc.grid(grid_coords=coords, resampling="idw", dist_nodata_pixel=3)
-```
-
-Use `min_points` to require several finite neighbors in the circular support, for example
-`pc.grid(..., resampling="mean", min_points=3)`.
-The default `engine="scipy"` supports every method. `engine="numba"` provides an optional compiled implementation for
-nearest and circular methods except `average_distance_pts`, which can be faster depending on the number of points.
-
 ## Arithmetic
 
 
@@ -159,24 +144,16 @@ np.isclose(pc1, pc1+0.05, atol=0.1)
 
 See {ref}`core-array-funcs` for more details.
 
-## Statistics
+## Related features
 
-Statistics of a point cloud can be computed using {func}`~geoutils.PointCloud.stats`.
+For more details on features applicable to point clouds, refer to the following pages!
 
-```{code-cell} ipython3
-# Get mean, max and STD of the point cloud
-pc.stats(["mean", "max", "std"])
-```
-
-A point cloud can also be quickly subsampled using {func}`~geoutils.PointCloud.subsample`, which considers only valid
-values and returns the complete selected point rows by default:
-
-```{code-cell} ipython3
-# Get 500 random points
-pc_sub = pc.subsample(500)
-
-# Return only their values as an array
-values_sub = pc.subsample(500, as_array=True)
-```
-
-See {ref}`stats` for more details.
+| Topic | Documentation |
+|---|---|
+| CRS, bounds, and footprints | {ref}`referencing` |
+| Reprojection, crop, clip, interpolation, reduction, and gridding | {ref}`transformations` |
+| Subsampling, co-sampling, and pair sampling | {ref}`sampling` |
+| Global, grouped, and spatial statistics | {ref}`stats` |
+| Downsampling for opening and plotting | {ref}`core-downsampling` |
+| Lazy and out-of-memory execution | {ref}`scalability-index` |
+| Complete method and attribute listing | {ref}`pointcloud-api` |

@@ -147,7 +147,7 @@ def stats(
         bins={"elevation": elevation_bins})
 
     Use ``values`` with index of band (for raster) or label of column (for point cloud) to select input, which
-    defaults to all bands for a raster, and the main data column for a point cloud.
+    defaults to all bands for a raster, and the main data column for a point cloud::
 
         # Select only band 2 (defaults to all bands)
         raster.stats(["mean", "std"], values=[1, 2])
@@ -174,19 +174,20 @@ def stats(
     - Sum: sum of all data,
     - Sum of squares: sum of the squares of all data,
     - 90th percentile: point below which 90% of the data falls,
-    - IQR (Interquartile Range): difference between the 75th and 25th percentile of a dataset
-    - LE90 (Linear Error with 90% confidence): difference between the 95th and 5th percentiles of a dataset, \
-    representing the range within which 90% of the data points lie.
-    - NMAD (Normalized Median Absolute Deviation): robust measure of variability in the data, less sensitive to \
-    outliers compared to standard deviation.
-    - RMSE (Root Mean Square Error): commonly used to express the magnitude of errors or variability and can give \
-    insight into the spread of the data. Only relevant when the raster represents a difference of two objects. \
+    - IQR (Interquartile Range): difference between the 75th and 25th percentile of a dataset.
+    - LE90 (Linear Error with 90% confidence): difference between the 95th and 5th percentiles of a dataset,
+      representing the range within which 90% of the data points lie.
+    - NMAD (Normalized Median Absolute Deviation): robust measure of variability in the data, less sensitive to
+      outliers compared to standard deviation.
+    - RMSE (Root Mean Square Error): commonly used to express the magnitude of errors or variability and can give
+      insight into the spread of the data. Only relevant when the raster represents a difference of two objects.
     - Std (Standard deviation): measures the spread or dispersion of the data around the mean,
     - Valid count: number of unmasked entries for masked arrays, or finite entries for ordinary arrays.
     - Total count: total size of the raster.
     - Percentage valid points: ratio between Valid count and Total count.
 
     If an inlier mask is passed:
+
     - Total inlier count: number of data points in the inlier mask.
     - Valid inlier count: number of unmasked data points in the array after applying the inlier mask.
     - Percentage inlier points: ratio between Valid inlier count and Valid count. Useful for classification statistics.
@@ -278,7 +279,7 @@ def stats(
     :param subsample: Fraction (e.g. 0.1 for 10%) or maximum count (e.g. 10000) of eligible locations to use.
         A value of 1 keeps all locations. Counts describe the sampled locations.
     :param subsample_per_group: Whether to apply subsample within each combined group (True, stratified sampling) or
-    once across all groups (False). Without ``by``, both use one global sample.
+        once across all groups (False). Without ``by``, both use one global sample.
     :param random_state: Seed to reproduce subsampling (e.g. 42), or an existing random generator.
     :param strategy: Combine chunk statistics for all groups ("dense"), only groups present in each chunk
         ("sparse"), or gather each complete group ("groupwise"). "auto" chooses from the statistics and group count;

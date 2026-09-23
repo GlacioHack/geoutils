@@ -22,10 +22,10 @@ operation.
 
 The rules of using match-reference with {class}`Rasters<geoutils.Raster>` or {class}`Vectors<geoutils.Vector>` are always the same:
 
- - If the **reference** passed is a {class}`~geoutils.Vector`, it can enforce a matching of its {attr}`~geoutils.Vector.bbox` and/or of its {attr}`~geoutils.Vector.crs` (its only two
+ - If the **reference** passed is a {class}`~geoutils.Vector`, it can enforce a matching of its {attr}`~VectorBase.bbox` and/or of its {attr}`~VectorBase.crs` (its only two
    georeferencing attributes),
- - If the **reference** is a {class}`~geoutils.Raster`, it can also enforce a matching of any aspect of its {attr}`~geoutils.Raster.transform` (i.e, its
-   {attr}`~geoutils.Raster.res`, {attr}`~geoutils.Raster.bbox` or {attr}`~geoutils.Raster.shape`) and/or of its {attr}`~geoutils.Raster.crs`.
+ - If the **reference** is a {class}`~geoutils.Raster`, it can also enforce a matching of any aspect of its {attr}`~RasterBase.transform` (i.e, its
+   {attr}`~RasterBase.res`, {attr}`~RasterBase.bbox` or {attr}`~RasterBase.shape`) and/or of its {attr}`~RasterBase.crs`.
 
 Which of these attributes are eventually used to enforce the matching **depends entirely on the nature of the operation**, which are listed below.
 
@@ -41,16 +41,16 @@ or {class}`~geoutils.Vector`:
    * - **Operation**
      - Enforced on {class}`~geoutils.Raster`
      - Enforced on {class}`~geoutils.Vector`
-   * - {func}`~geoutils.Raster.reproject`
-     - {attr}`~geoutils.Raster.transform` and {attr}`~geoutils.Raster.crs`
-     - {attr}`~geoutils.Vector.bbox`<sup>1</sup> and {attr}`~geoutils.Vector.crs`
-   * - {func}`~geoutils.Raster.crop`
-     - {attr}`~geoutils.Vector.bbox`
-     - {attr}`~geoutils.Raster.bbox`
+   * - {meth}`~RasterBase.reproject`
+     - {attr}`~RasterBase.transform` and {attr}`~RasterBase.crs`
+     - {attr}`~VectorBase.bbox`<sup>1</sup> and {attr}`~VectorBase.crs`
+   * - {meth}`~RasterBase.crop`
+     - {attr}`~VectorBase.bbox`
+     - {attr}`~RasterBase.bbox`
 
 ```
 
-<sup>1</sup>Because a {class}`~geoutils.Vector` only possesses the {attr}`~geoutils.Vector.bbox` attribute of a {class}`~geoutils.Raster`'s {attr}`~geoutils.Raster.transform`.
+<sup>1</sup>Because a {class}`~geoutils.Vector` only possesses the {attr}`~VectorBase.bbox` attribute of a {class}`~geoutils.Raster`'s {attr}`~RasterBase.transform`.
 
 
 ## Other operations supporting match-reference
@@ -60,12 +60,12 @@ at modifying the georeferencing of {class}`Rasters<geoutils.Raster>` or {class}`
 
 ### From vector to raster
 
-The {func}`~geoutils.Vector.rasterize` operation to convert from {class}`~geoutils.Vector` to {class}`~geoutils.Raster` accepts a {class}`~geoutils.Raster` to define the
-grid and georeferencing. The behaviour is similar for {func}`~geoutils.Vector.create_mask`, that directly relies on {func}`~geoutils.Vector.rasterize` to
+The {meth}`~VectorBase.rasterize` operation to convert from {class}`~geoutils.Vector` to {class}`~geoutils.Raster` accepts a {class}`~geoutils.Raster` to define the
+grid and georeferencing. The behaviour is similar for {meth}`~VectorBase.create_mask`, that directly relies on {meth}`~VectorBase.rasterize` to
 rasterize directly into a boolean {class}`~geoutils.Raster`.
 
-In addition, the {func}`~geoutils.Vector.proximity` operation to compute proximity distances from the vector also relies on a
-{func}`~geoutils.Vector.rasterize`, and therefore also accepts a {class}`~geoutils.Raster` as reference.
+In addition, the {meth}`~VectorBase.proximity` operation to compute proximity distances from the vector also relies on a
+{meth}`~VectorBase.rasterize`, and therefore also accepts a {class}`~geoutils.Raster` as reference.
 
 Therefore, the behaviour is consistent for all {class}`~geoutils.Vector` methods that can be passed a {class}`~geoutils.Raster`:
 
@@ -75,12 +75,12 @@ Therefore, the behaviour is consistent for all {class}`~geoutils.Vector` methods
 
    * - **Operation on {class}`~geoutils.Vector`**
      - **Behaviour**
-   * - {func}`~geoutils.Vector.rasterize`
-     - Gridding with {attr}`~geoutils.Raster.transform` and {attr}`~geoutils.Raster.crs`
-   * - {func}`~geoutils.Vector.create_mask`
-     - Gridding with {attr}`~geoutils.Raster.transform` and {attr}`~geoutils.Raster.crs`
-   * - {func}`~geoutils.Vector.proximity`
-     - Gridding with {attr}`~geoutils.Raster.transform` and {attr}`~geoutils.Raster.crs`
+   * - {meth}`~VectorBase.rasterize`
+     - Gridding with {attr}`~RasterBase.transform` and {attr}`~RasterBase.crs`
+   * - {meth}`~VectorBase.create_mask`
+     - Gridding with {attr}`~RasterBase.transform` and {attr}`~RasterBase.crs`
+   * - {meth}`~VectorBase.proximity`
+     - Gridding with {attr}`~RasterBase.transform` and {attr}`~RasterBase.crs`
 ```
 
 ### And inversely
@@ -88,7 +88,7 @@ Therefore, the behaviour is consistent for all {class}`~geoutils.Vector` methods
 However, in the case of {class}`~geoutils.Raster` methods that yield a {class}`~geoutils.Vector` or {class}`~geoutils.Raster`, a reference is rarely needed.
 This is because this reference is derived directly from the input {class}`~geoutils.Raster` itself, harnessing the object-based structure of GeoUtils.
 
-The user can always {func}`~geoutils.Vector.crop` or {func}`~geoutils.Vector.reproject` the output afterwards, if desired.
+The user can always {meth}`~VectorBase.crop` or {meth}`~VectorBase.reproject` the output afterwards, if desired.
 
 ```{list-table}
    :widths: 50 50
@@ -96,8 +96,8 @@ The user can always {func}`~geoutils.Vector.crop` or {func}`~geoutils.Vector.rep
 
    * - **Operation on {class}`~geoutils.Raster`**
      - **Behaviour**
-   * - {func}`~geoutils.Raster.polygonize`
-     - Using `.self` ({class}`~geoutils.Raster`) as reference for {attr}`~geoutils.Raster.transform` and {attr}`~geoutils.Raster.crs`
-   * - {func}`~geoutils.Raster.proximity`
-     - Using `.self` ({class}`~geoutils.Raster`) as reference for {attr}`~geoutils.Raster.transform` and {attr}`~geoutils.Raster.crs`
+   * - {meth}`~RasterBase.polygonize`
+     - Using `.self` ({class}`~geoutils.Raster`) as reference for {attr}`~RasterBase.transform` and {attr}`~RasterBase.crs`
+   * - {meth}`~RasterBase.proximity`
+     - Using `.self` ({class}`~geoutils.Raster`) as reference for {attr}`~RasterBase.transform` and {attr}`~RasterBase.crs`
 ```

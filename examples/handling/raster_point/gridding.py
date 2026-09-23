@@ -2,7 +2,7 @@
 Gridding points to raster
 =========================
 
-This example demonstrates the gridding of a point cloud into a raster using :func:`~geoutils.PointCloud.gridding`.
+This example demonstrates the gridding of a point cloud into a raster using :meth:`~geoutils.pointcloud.base.PointCloudBase.grid`.
 """
 
 # %%
@@ -12,23 +12,26 @@ This example demonstrates the gridding of a point cloud into a raster using :fun
 import geoutils as gu
 
 filename_pc = gu.examples.get_path("coromandel_lidar")
-pc = gu.PointCloud(filename_pc, data_column="Z")
+pc = gu.open_pointcloud(filename_pc, data_column="Z")
 
 # Plot the point cloud
-pc.plot(cmap="terrain", cbar_title="Elevation (m)")
+pc.pc.plot(cmap="terrain", cbar_title="Elevation (m)")
 
 # %%
 # We generate grid coordinates to interpolate to, alternatively we could pass a raster to use as reference.
 
 import numpy as np
 
-grid_coords = (np.linspace(pc.bounds.left, pc.bounds.right, 100), np.linspace(pc.bounds.bottom, pc.bounds.top, 100))
+grid_coords = (
+    np.linspace(pc.pc.bbox.left, pc.pc.bbox.right, 100),
+    np.linspace(pc.pc.bbox.bottom, pc.pc.bbox.top, 100),
+)
 
 # %%
 # We then perform the interpolation
-rast = pc.grid(grid_coords=grid_coords)
+rast = pc.pc.grid(grid_coords=grid_coords)
 
 # %%
 # Finally, we plot the resulting raster
 
-rast.plot(ax="new", cmap="terrain", cbar_title="Elevation (m)")
+rast.rst.plot(ax="new", cmap="terrain", cbar_title="Elevation (m)")

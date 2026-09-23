@@ -26,14 +26,14 @@ GeoUtils is a Python package for **accessible**, **consistent** and **scalable**
 
 ```{important}
 :class: margin
-GeoUtils ``v0.2`` is released with more consistent point cloud support! We are working on Xarray and GeoPandas accessors for all data objects, as well as other scalability features.
+GeoUtils ``v0.3`` is released with Xarray/GeoPandas accessors and full Dask support for rasters and point clouds (with benchmarking)! We are refining composability and vector scalability before a ``v1.0``.
 ```
 
 GeoUtils is built on top of core geospatial packages (Rasterio, GeoPandas, PyProj) and numerical packages
-(NumPy, SciPy, Numba) to provide **consistent higher-level functionalities at the interface of raster, vector and point
-cloud objects** (such as match-reference reprojection, point interpolation or gridding).
+(NumPy, SciPy, Numba) to provide **consistent higher-level functionalities for raster, vector and point
+cloud objects** (such as reprojection, rasterization, polygonization, point interpolation, or gridding).
 
-It strives **to be computationally scalable** by adding **lazy and chunked implementations** to most **raster and point cloud** operations (Dask, Multiprocessing)
+It is **computationally scalable** by implementing **lazy and chunked execution (Dask, Multiprocessing)** to all **raster, point cloud and vector** operations
 and **provides accessors to naturally extend existing Python data-structures** (Xarray, Pandas).
 
 GeoUtils is **tailored to perform quantitative analysis that implicitly understands the intricacies of geospatial data**
@@ -55,7 +55,7 @@ If you are looking to **port your GDAL or QGIS workflow in Python**, GeoUtils is
 Learn more about why we developed GeoUtils.
 
 +++
-[Learn more »](about_geoutils)
+{ref}`Learn more » <about-geoutils>`
 :::
 
 :::{grid-item-card} {material-regular}`data_exploration;2em` Quick start
@@ -65,7 +65,7 @@ Learn more about why we developed GeoUtils.
 Run a short example of the package functionalities.
 
 +++
-[Learn more »](quick_start)
+{ref}`Learn more » <quick-start>`
 :::
 
 :::{grid-item-card} {material-regular}`preview;2em` Features
@@ -75,7 +75,7 @@ Run a short example of the package functionalities.
 Dive into the full documentation.
 
 +++
-[Learn more »](core_index)
+{ref}`Learn more » <core-index>`
 :::
 
 ::::
@@ -111,11 +111,10 @@ scalability_index
 data_object_index
 referencing
 transformations
-raster_vector_point
-distance_ops
-stats
-sampling
+proximity
 filters
+sampling
+stats
 ```
 
 ```{toctree}

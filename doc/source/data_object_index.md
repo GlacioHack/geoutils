@@ -1,7 +1,8 @@
 (data-object-index)=
 # Geospatial data objects
 
-Prefer to learn by running examples? Explore our example galleries on {ref}`examples-io`, {ref}`examples-handling` and {ref}`examples-analysis`.
+GeoUtils extends Xarray and GeoPandas through accessors and also provides dedicated GeoUtils objects. These pages
+describe the data structure for each geospatial type and the differences between its two interfaces.
 
 ```{toctree}
 :maxdepth: 2

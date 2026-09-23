@@ -1052,14 +1052,24 @@ class Variogram:
             raise ValueError("A fitted variogram model is required for evaluation.")
         return self.model.correlation(distance)
 
-    def plot(self, ax: Any | None = None, *, show_error: bool = True, **kwargs: Any) -> Any:
+    def plot(
+        self,
+        ax: Any | None = None,
+        *,
+        show_error: bool = True,
+        show_counts: bool = True,
+        xscale: Literal["log", "linear"] = "log",
+        **kwargs: Any,
+    ) -> Any:
         """
-        Plot measured bins and the fitted model when present.
+        Plot measured bins, pair counts, and the fitted model when present.
 
         :param ax: Existing Matplotlib axes. A new figure and axes are created by default.
         :param show_error: Whether to draw available sampling errors.
+        :param show_counts: Whether to add a small pair-count histogram above the variogram.
+        :param xscale: Scale used for lag distances. Logarithmic by default.
         :param kwargs: Keyword arguments passed to the measured point plot.
-        :returns: Matplotlib axes containing the variogram.
+        :returns: Main Matplotlib axes containing the empirical variogram and fitted model.
         """
 
         # Import Matplotlib only when the caller requests a plot
@@ -1067,13 +1077,152 @@ class Variogram:
         if ax is None:
             _, ax = pyplot.subplots()
 
-        # Draw measured bins and optional error bars, then add the fitted curve
+        # Draw the empirical values with a neutral style that remains distinct from the fitted curve
         error = self.semivariance_error if show_error else None
-        ax.errorbar(self.lags, self.semivariance, yerr=error, fmt="o", **kwargs)
+        empirical_options = {
+            "fmt": "o",
+            "markersize": 4.5,
+            "markerfacecolor": "white",
+            "markeredgecolor": "0.35",
+            "markeredgewidth": 1.0,
+            "color": "0.35",
+            "ecolor": "0.55",
+            "elinewidth": 1.0,
+            "capsize": 2.0,
+            "linestyle": "none",
+            "label": "Empirical",
+        }
+        empirical_options.update(kwargs)
+        empirical_artist = ax.errorbar(self.lags, self.semivariance, yerr=error, **empirical_options)
+
+        # Evaluate a smooth fitted curve across the positive distance range shown on the logarithmic axis
         if self.model is not None and np.any(np.isfinite(self.lags)):
-            distances = np.linspace(0, float(np.nanmax(self.lags)), 500)
-            ax.plot(distances, self.variogram(distances))
+            maximum_distance = float(np.nanmax(self.lags))
+            if self.bin_edges is not None and np.any(np.isfinite(self.bin_edges)):
+                maximum_distance = max(maximum_distance, float(np.nanmax(self.bin_edges)))
+            if xscale == "log":
+                positive_lags = self.lags[np.isfinite(self.lags) & (self.lags > 0)]
+                if len(positive_lags) == 0:
+                    raise ValueError("A logarithmic lag axis requires at least one positive lag distance.")
+                minimum_distance = float(np.nanmin(positive_lags))
+                if self.bin_lower_edges is not None:
+                    positive_edges = self.bin_lower_edges[
+                        np.isfinite(self.bin_lower_edges) & (self.bin_lower_edges > 0)
+                    ]
+                    if len(positive_edges) > 0:
+                        minimum_distance = min(minimum_distance, float(np.nanmin(positive_edges)))
+                    if self.bin_edges is not None:
+                        zero_edge = (
+                            np.isfinite(self.bin_lower_edges)
+                            & (self.bin_lower_edges <= 0)
+                            & np.isfinite(self.bin_edges)
+                            & (self.bin_edges > 0)
+                            & np.isfinite(self.lags)
+                            & (self.lags > 0)
+                        )
+                        inferred_edges = self.lags[zero_edge] ** 2 / self.bin_edges[zero_edge]
+                        inferred_edges = inferred_edges[inferred_edges > 0]
+                        if len(inferred_edges) > 0:
+                            minimum_distance = min(minimum_distance, float(np.nanmin(inferred_edges)))
+                distances = np.geomspace(minimum_distance, maximum_distance, 500)
+            else:
+                distances = np.linspace(0, maximum_distance, 500)
+            model_artist = ax.plot(
+                distances, self.variogram(distances), color="0.15", linewidth=1.5, label="Model fit"
+            )[0]
+            ax.legend(handles=[empirical_artist, model_artist], frameon=False)
+
+        # Keep the main panel light so the two neutral data layers remain easy to distinguish
         ax.set(xlabel="Lag distance", ylabel="Semivariance")
+        ax.grid(axis="y", color="0.9", linewidth=0.6)
+        ax.set_axisbelow(True)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+        # Use a logarithmic lag axis with ordinary decimal labels instead of powers of ten
+        ax.set_xscale(xscale)
+        if xscale == "log":
+            from matplotlib.ticker import ScalarFormatter
+
+            formatter = ScalarFormatter()
+            formatter.set_scientific(False)
+            formatter.set_useOffset(False)
+            ax.xaxis.set_major_formatter(formatter)
+
+        # Add counts in a shallow panel without replacing the caller's main axes
+        if show_counts and len(self.counts) > 0:
+            import_optional("mpl_toolkits", package_name="matplotlib")
+            from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+            count_axis = make_axes_locatable(ax).append_axes("top", size="25%", pad=0.08, sharex=ax)
+
+            # Use stored distance-bin limits, or infer limits halfway between lag centers when they are unavailable
+            if self.bin_lower_edges is not None and self.bin_edges is not None:
+                lower_edges = self.bin_lower_edges
+                upper_edges = self.bin_edges
+                histogram_counts = self.counts
+            else:
+                finite_bins = np.isfinite(self.lags)
+                finite_lags = self.lags[finite_bins]
+                histogram_counts = self.counts[finite_bins]
+                if len(finite_lags) > 1:
+                    middle_edges = (finite_lags[:-1] + finite_lags[1:]) / 2
+                    first_edge = max(0.0, float(2 * finite_lags[0] - middle_edges[0]))
+                    last_edge = float(2 * finite_lags[-1] - middle_edges[-1])
+                    inferred_edges = np.r_[first_edge, middle_edges, last_edge]
+                elif len(finite_lags) == 1:
+                    half_width = max(abs(float(finite_lags[0])) / 2, 0.5)
+                    inferred_edges = np.array([max(0.0, finite_lags[0] - half_width), finite_lags[0] + half_width])
+                else:
+                    inferred_edges = np.array([], dtype=float)
+                lower_edges = inferred_edges[:-1]
+                upper_edges = inferred_edges[1:]
+
+            # Replace an undisplayable zero edge with a boundary centered on the first lag in logarithmic space
+            displayed_lower_edges = np.asarray(lower_edges, dtype=float).copy()
+            if xscale == "log":
+                infer_edge = (
+                    np.isfinite(displayed_lower_edges)
+                    & (displayed_lower_edges <= 0)
+                    & np.isfinite(upper_edges)
+                    & (upper_edges > 0)
+                    & np.isfinite(self.lags)
+                    & (self.lags > 0)
+                )
+                inferred_lower_edges = self.lags[infer_edge] ** 2 / upper_edges[infer_edge]
+                valid_inference = (inferred_lower_edges > 0) & (inferred_lower_edges < upper_edges[infer_edge])
+                displayed_lower_edges[np.flatnonzero(infer_edge)[valid_inference]] = inferred_lower_edges[
+                    valid_inference
+                ]
+
+            # Match each count bar to its distance bin and share the exact horizontal limits with the main panel
+            valid_bins = (
+                np.isfinite(displayed_lower_edges) & np.isfinite(upper_edges) & (upper_edges > displayed_lower_edges)
+            )
+            if xscale == "log":
+                valid_bins &= displayed_lower_edges > 0
+            if np.any(valid_bins):
+                widths = upper_edges[valid_bins] - displayed_lower_edges[valid_bins]
+                count_axis.bar(
+                    displayed_lower_edges[valid_bins],
+                    histogram_counts[valid_bins],
+                    width=widths,
+                    align="edge",
+                    color="0.78",
+                    edgecolor="white",
+                    linewidth=0.6,
+                )
+                minimum_displayed = float(np.nanmin(displayed_lower_edges[valid_bins]))
+                ax.set_xlim(minimum_displayed, float(np.nanmax(upper_edges[valid_bins])))
+
+            # Remove repeated labels and heavy borders from the compact count panel
+            count_axis.set_ylabel("Pair count")
+            count_axis.tick_params(axis="x", which="both", bottom=False, labelbottom=False)
+            count_axis.grid(axis="y", color="0.92", linewidth=0.5)
+            count_axis.set_axisbelow(True)
+            count_axis.spines["top"].set_visible(False)
+            count_axis.spines["right"].set_visible(False)
+            count_axis.spines["bottom"].set_visible(False)
         return ax
 
     ############################

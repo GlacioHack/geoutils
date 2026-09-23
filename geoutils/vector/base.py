@@ -321,6 +321,7 @@ class VectorBase(ABC):
             _create_axes,
             _get_reference_bbox,
             _plot_geodataframe,
+            _reduce_tick_label_overlap,
         )
 
         # REMOVE AFTER DEPRECATION: Delete this block when ref_crs compatibility is removed
@@ -368,6 +369,7 @@ class VectorBase(ABC):
             ax0.set_xlim(reference_bbox.left, reference_bbox.right)
             ax0.set_ylim(reference_bbox.bottom, reference_bbox.top)
         plt.sca(ax0)
+        _reduce_tick_label_overlap(ax0)
 
         if savefig_fname:
             plt.savefig(savefig_fname)
@@ -921,8 +923,8 @@ class VectorBase(ABC):
         new_ds = _buffer_metric(gdf=self.ds, buffer_size=buffer_size)
         return self._override_gdf_output(new_ds)
 
-    def get_bounds_projected(self, out_crs: CRS, densify_points: int = 5000) -> rio.coords.BoundingBox:
-        """Get vector bounds projected in a specified CRS."""
+    def get_bbox_projected(self, out_crs: CRS, densify_points: int = 5000) -> rio.coords.BoundingBox:
+        """Get the vector bounding box projected in a specified CRS."""
 
         return _get_bounds_projected(self.bbox, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points)
 
