@@ -2,11 +2,11 @@
 From/to GeoPandas
 =================
 
-This example demonstrates importing or exporting a :class:`geopandas.GeoDataFrame` from and to a :class:`~geoutils.Vector`.
+This example demonstrates using the :class:`vct <geoutils.VectorAccessor>` accessor on a :class:`geopandas.GeoDataFrame`.
 """
 
 # %%
-# A vector can be imported from a :class:`geopandas.GeoDataFrame` simply by instantiating :class:`~geoutils.Vector`.
+# GeoUtils vector methods are available directly on a :class:`geopandas.GeoDataFrame` through its ``vct`` accessor.
 
 import geopandas as gpd
 
@@ -14,15 +14,15 @@ import geoutils as gu
 
 filename_vect = gu.examples.get_path("exploradores_rgi_outlines")
 ds = gpd.read_file(filename_vect)
-vect = gu.Vector(ds)
+vect = ds
 vect
 
 # %%
 # We plot the vector.
 
-vect.plot(column="RGIId", add_cbar=False)
+vect.vct.plot(column="RGIId", add_cbar=False)
 
 # %%
-# To export, the :class:`geopandas.GeoDataFrame` is always stored as an attribute as :class:`~geoutils.Vector` is composed from it. See :ref:`core-composition`.
+# The vector remains a native :class:`geopandas.GeoDataFrame`, so it can be exported or passed directly to GeoPandas operations.
 
-vect.ds
+vect

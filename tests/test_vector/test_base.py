@@ -144,7 +144,7 @@ class TestClassVsAccessorConsistency:
             },
         ),
         ("buffer_metric", {"buffer_size": 1}),
-        ("get_bounds_projected", {"out_crs": CRS.from_epsg(4326)}),
+        ("get_bbox_projected", {"out_crs": CRS.from_epsg(4326)}),
         ("get_footprint_projected", {"out_crs": CRS.from_epsg(4326)}),
         ("get_metric_crs", {"local_crs_type": "universal"}),
         ("buffer_without_overlap", {"buffer_size": 1, "metric": False}),

@@ -18,7 +18,7 @@ GeoUtils uses and proposes several data examples to manipulate and test the diff
 
 ## Description
 
-Several sites (Coromandel Peninsula in New Zealand, Mount Everest and Exploradores Glacier in Chili) are proposed to cover different kinds of data:
+Several sites (Coromandel Peninsula in New Zealand, Mount Everest and Exploradores Glacier in Chile) are proposed to cover different kinds of data:
 
 | Alias                          |                        Site and Filename                         |    Type     |                                     Description                                    |
 |-------------------------------:|:----------------------------------------------------------------:|:-----------:|:----------------------------------------------------------------------------------:|
@@ -31,8 +31,8 @@ Several sites (Coromandel Peninsula in New Zealand, Mount Everest and Explorador
 | `"exploradores_rgi_outlines"`  |      Exploradores_ASTER<br/>17_rgi60_glacier_outlines.gpkg       |   Vector    | Glacier outlines around the Exploradores Glacier around 2000 [(2)](#doi) |
 
 
+(doi)=
 ```{note}
- <a name="doi"></a>
 If you need more information about the data, you can read this [page](https://github.com/GlacioHack/geoutils-data/blob/main/README.md)
 of the [geoutils-data repository project](https://github.com/GlacioHack/geoutils-data) where they are stored, described and referenced with their Digital Object Identifier:
 

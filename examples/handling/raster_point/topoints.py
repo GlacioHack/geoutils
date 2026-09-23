@@ -2,7 +2,7 @@
 Raster to regular points
 ========================
 
-This example demonstrates the conversion of a raster regular-grid values to a point cloud using :func:`geoutils.Raster.to_points`.
+This example demonstrates the conversion of raster regular-grid values to a point cloud using :meth:`~geoutils.raster.base.RasterBase.to_pointcloud`.
 """
 
 # %%
@@ -12,20 +12,20 @@ This example demonstrates the conversion of a raster regular-grid values to a po
 import geoutils as gu
 
 filename_rast = gu.examples.get_path("exploradores_aster_dem")
-rast = gu.Raster(filename_rast)
-rast = rast.crop([rast.bounds.left, rast.bounds.bottom, rast.bounds.left + 500, rast.bounds.bottom + 500])
+rast = gu.open_raster(filename_rast)
+rast = rast.rst.crop([rast.rst.bbox.left, rast.rst.bbox.bottom, rast.rst.bbox.left + 500, rast.rst.bbox.bottom + 500])
 
 # %%
 # Let's plot the raster.
-rast.plot(cmap="terrain")
+rast.rst.plot(cmap="terrain")
 
 # %%
 # We convert the raster to points. By default, this returns a vector with column geometry burned.
 
-pc = rast.to_pointcloud()
+pc = rast.rst.to_pointcloud()
 pc
 
 # %%
 # We plot the point vector.
 
-pc.plot(ax="new", cmap="terrain", legend=True)
+pc.pc.plot(ax="new", cmap="terrain", legend=True)

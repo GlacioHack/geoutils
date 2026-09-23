@@ -169,6 +169,66 @@ class TestVariogramStorage:
         np.testing.assert_allclose(result.lags, [2, np.nan], equal_nan=True)
 
 
+class TestVariogramPlot:
+    """Test module for pair-count panels, lag scales, and default empirical and fitted variogram styles."""
+
+    def test_plot__count_histogram_log_scale_and_neutral_styles(self) -> None:
+        """Checks that plot() uses plain log ticks and aligns counts above neutral variogram layers."""
+
+        # Create three unequal distance bins with a fitted model and sampling errors
+        matplotlib = pytest.importorskip("matplotlib")
+        pyplot = pytest.importorskip("matplotlib.pyplot")
+        pytest.importorskip("skgstat")
+        variogram = gu.Variogram(
+            lags=np.array([0.5, 2.0, 4.5]),
+            semivariance=np.array([0.2, 0.7, 1.1]),
+            counts=np.array([8, 15, 6]),
+            semivariance_error=np.array([0.03, 0.05, 0.08]),
+            bin_lower_edges=np.array([0.0, 1.0, 3.0]),
+            bin_edges=np.array([1.0, 3.0, 6.0]),
+            model=VariogramModel("spherical", effective_range=5.0, partial_sill=1.2),
+        )
+
+        # Plot into an existing axes so callers keep the main variogram axes for later customization
+        figure, input_axis = pyplot.subplots(figsize=(6, 4))
+        output_axis = variogram.plot(ax=input_axis)
+        figure.canvas.draw()
+
+        # Check the returned axes, plain logarithmic lag labels, and aligned bars with their original bin widths
+        assert output_axis is input_axis
+        assert len(figure.axes) == 2
+        assert output_axis.get_xscale() == "log"
+        visible_tick_labels = [label.get_text() for label in output_axis.get_xticklabels() if label.get_visible()]
+        assert visible_tick_labels
+        assert not any("e" in label.lower() or "^" in label or "×" in label for label in visible_tick_labels)
+        count_axis = next(axis for axis in figure.axes if axis is not output_axis)
+        np.testing.assert_allclose([patch.get_x() for patch in count_axis.patches], [0.25, 1, 3])
+        np.testing.assert_allclose([patch.get_width() for patch in count_axis.patches], [0.75, 2, 3])
+        np.testing.assert_allclose([patch.get_height() for patch in count_axis.patches], variogram.counts)
+        assert count_axis.get_ylabel() == "Pair count"
+        assert count_axis.get_xscale() == output_axis.get_xscale()
+        np.testing.assert_allclose(count_axis.get_xlim(), output_axis.get_xlim())
+        assert count_axis.get_shared_x_axes().joined(count_axis, output_axis)
+        assert count_axis.get_position().x0 == pytest.approx(output_axis.get_position().x0)
+        assert count_axis.get_position().x1 == pytest.approx(output_axis.get_position().x1)
+        count_ticks = [*count_axis.xaxis.get_major_ticks(), *count_axis.xaxis.get_minor_ticks()]
+        assert not any(tick.tick1line.get_visible() for tick in count_ticks)
+
+        # Check that both labelled variogram layers use distinct grayscale colors
+        empirical_container = next(
+            container for container in output_axis.containers if container.get_label() == "Empirical"
+        )
+        model_line = next(line for line in output_axis.lines if line.get_label() == "Model fit")
+        colors = []
+        for line in (empirical_container.lines[0], model_line):
+            color = matplotlib.colors.to_rgb(line.get_color())
+            assert color[0] == pytest.approx(color[1])
+            assert color[1] == pytest.approx(color[2])
+            colors.append(color)
+        assert colors[0] != colors[1]
+        pyplot.close(figure)
+
+
 class TestVariogramEstimation:
     """Checks variogram estimation and fitting through raster and point cloud methods.
 

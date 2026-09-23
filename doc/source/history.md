@@ -7,10 +7,10 @@ More information on how the package was created, who are the people behind it, a
 ## Creation
 
 GeoUtils was created during the [GlacioHack](https://github.com/GlacioHack) hackaton event, that took place online on November 8, 2020 and was initiated by
-Amaury Dehecq<sup>2</sup>.
+Amaury Dehecq<sup>1</sup>.
 
 ```{margin}
-<sup>2</sup>More on our GlacioHack founder at [adehecq.github.io](https://adehecq.github.io/)!
+<sup>1</sup>More on our GlacioHack founder at [adehecq.github.io](https://adehecq.github.io/)!
 ```
 
 GeoUtils is inspired by previous efforts that were built directly on top of GDAL and OGR, namely:
@@ -21,11 +21,11 @@ GeoUtils is inspired by previous efforts that were built directly on top of GDAL
 - the package [salem](https://github.com/fmaussion/salem).
 
 The initial core development of GeoUtils was mainly performed by members of the Glaciology group of the _Laboratory of Hydraulics, Hydrology and
-Glaciology (VAW)_ at ETH Zürich<sup>3</sup> and of the _University of Fribourg_, both in Switzerland. The package also received contributions by members of
+Glaciology (VAW)_ at ETH Zürich<sup>2</sup> and of the _University of Fribourg_, both in Switzerland. The package also received contributions by members of
 the _University of Oslo_, Norway, the _University of Washington_, US and _Université Grenobles Alpes_, France.
 
 ```{margin}
-<sup>3</sup>Check-out [glaciology.ch](https://glaciology.ch) on our founding group of VAW glaciology!
+<sup>2</sup>Check-out [glaciology.ch](https://glaciology.ch) on our founding group of VAW glaciology!
 ```
 
 ## Joining effort with **demcompare**

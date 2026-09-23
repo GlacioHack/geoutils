@@ -35,6 +35,7 @@ from geoutils.vector.plotting import (
     _create_axes,
     _get_reference_bbox,
     _plot_geodataframe,
+    _reduce_tick_label_overlap,
 )
 
 if TYPE_CHECKING:
@@ -157,7 +158,8 @@ def _plot_pointcloud(
     )
     dataframe = display.ds.compute() if is_dask_dataframe(display.ds) else display.ds
 
-    if column is None:
+    # Use the main data column unless the caller supplied one fixed color for every point
+    if column is None and "color" not in kwargs:
         column = source.data_column
 
     # We plot after GeoPandas sets the map aspect so geographic colorbars remain next to the data axes
@@ -190,6 +192,7 @@ def _plot_pointcloud(
         )
         ax0.autoscale_view()
     plt.sca(ax0)
+    _reduce_tick_label_overlap(ax0)
 
     if savefig_fname:
         plt.savefig(savefig_fname)

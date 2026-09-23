@@ -2,7 +2,7 @@
 Polygonize a raster
 ===================
 
-This example demonstrates the polygonizing of a raster using :func:`geoutils.Raster.polygonize`.
+This example demonstrates the polygonizing of a raster using :meth:`~geoutils.raster.base.RasterBase.polygonize`.
 """
 
 # %%
@@ -12,33 +12,33 @@ This example demonstrates the polygonizing of a raster using :func:`geoutils.Ras
 import geoutils as gu
 
 filename_rast = gu.examples.get_path("exploradores_aster_dem")
-rast = gu.Raster(filename_rast)
-rast = rast.crop([rast.bounds.left, rast.bounds.bottom, rast.bounds.left + 5000, rast.bounds.bottom + 5000])
+rast = gu.open_raster(filename_rast)
+rast = rast.rst.crop([rast.rst.bbox.left, rast.rst.bbox.bottom, rast.rst.bbox.left + 5000, rast.rst.bbox.bottom + 5000])
 # %%
 # Let's plot the raster.
-rast.plot(cmap="terrain")
+rast.rst.plot(cmap="terrain")
 
 # %%
 # We polygonize the raster.
 
-rast_polygonized = rast.polygonize()
-rast_polygonized.plot(ax="new")
+rast_polygonized = rast.rst.polygonize()
+rast_polygonized.vct.plot(ax="new")
 
 # %%
-# By default, :func:`~geoutils.Raster.polygonize` will try to polygonize target all valid values. Instead, one can specify discrete values to target by
+# By default, :meth:`~geoutils.raster.base.RasterBase.polygonize` will try to polygonize target all valid values. Instead, one can specify discrete values to target by
 # passing a number or :class:`list`, or a range of values by passing a :class:`tuple`.
 
 # A range of values to polygonize
-rast_polygonized = rast.polygonize((2500, 3000))
-rast_polygonized.plot(ax="new")
+rast_polygonized = rast.rst.polygonize((2500, 3000))
+rast_polygonized.vct.plot(ax="new")
 
 # %%
-# An even simpler way to do this is to compute a boolean :func:`~geoutils.Raster` to polygonize using logical
-# comparisons on the :func:`~geoutils.Raster`.
+# An even simpler way to do this is to compute a boolean :class:`xarray.DataArray` to polygonize using logical
+# comparisons on the raster.
 
-rast_polygonized = ((2500 < rast) & (rast < 3000)).polygonize()
-rast_polygonized.plot(ax="new")
+rast_polygonized = ((2500 < rast) & (rast < 3000)).rst.polygonize()
+rast_polygonized.vct.plot(ax="new")
 
 # %%
 # .. note::
-#           See :ref:`core-py-ops` for more details on casting to boolean :func:`~geoutils.Raster`.
+#           See :ref:`core-py-ops` for more details on casting to boolean.

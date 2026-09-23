@@ -35,7 +35,7 @@ filename_landsat = gu.examples.get_path("everest_landsat_b4")
 rast_landsat = gu.Raster(filename_landsat, parse_sensor_metadata=True, silent=False)
 ```
 
-The metadata is then stored in the {attr}`~geoutils.Raster.tags` attribute of the raster.
+The metadata is then stored in the {attr}`~RasterBase.tags` attribute of the raster.
 
 ```{code-cell} ipython3
 rast_aster.tags

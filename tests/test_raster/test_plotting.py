@@ -48,16 +48,61 @@ class TestPlot:
         # Plot a raster with a colorbar at several figure sizes
         raster = gu.Raster(example)
         fig, ax = plt.subplots(figsize=(figsize, figsize))
-        raster.plot(ax=ax, add_cbar=True)
-        fig.axes[0].set_axis_off()
-        fig.axes[1].set_axis_off()
+        map_ax, colorbar_ax = raster.plot(ax=ax, add_cbar=True, return_axes=True)
+        assert colorbar_ax is not None
+        map_ax.set_axis_off()
+        colorbar_ax.set_axis_off()
 
         # Height of the main plot and colorbar should be equal
-        plot_height = fig.axes[0].get_tightbbox().height
-        colorbar_height = fig.axes[1].get_tightbbox().height
+        plot_height = map_ax.get_tightbbox().height
+        colorbar_height = colorbar_ax.get_tightbbox().height
         plt.close(fig)
 
         assert plot_height == pytest.approx(colorbar_height)
+
+    def test_plot__colorbar_preserves_map_size(self) -> None:
+        """Checks that adding a colorbar does not change the size of a map in paired axes."""
+
+        # Create a wide raster whose equal data aspect makes its axes height depend on the available width
+        values = np.arange(1_000).reshape(10, 100)
+        raster = gu.Raster.from_array(values, Affine(1, 0, 0, 0, -1, 10), 3857)
+        fig, axes = plt.subplots(1, 2)
+
+        # Plot the same raster without and with a colorbar
+        raster.plot(ax=axes[0], max_pixels=None, add_cbar=False)
+        _, colorbar_ax = raster.plot(ax=axes[1], max_pixels=None, return_axes=True)
+        assert colorbar_ax is not None
+        fig.tight_layout()
+        fig.canvas.draw()
+
+        # The colorbar follows the second map while both maps keep identical rectangles
+        first_position = axes[0].get_position()
+        second_position = axes[1].get_position()
+        assert second_position.y0 == pytest.approx(first_position.y0)
+        assert second_position.width == pytest.approx(first_position.width)
+        assert second_position.height == pytest.approx(first_position.height)
+        assert colorbar_ax.get_position().height == pytest.approx(second_position.height)
+        plt.close(fig)
+
+    def test_plot__projected_tick_spacing(self) -> None:
+        """Checks that long projected coordinates do not overlap on a narrow plot."""
+
+        # Create one narrow panel with six-digit easting labels like those in documentation figures
+        raster = gu.Raster.from_array(
+            np.ones((10, 10)),
+            Affine(4_000, 0, 470_000, 0, -4_000, 3_120_000),
+            32632,
+        )
+        fig, axes = plt.subplots(1, 3, figsize=(4, 3))
+
+        # Plot in the first panel and compare the rendered bounds of neighboring labels
+        raster.plot(ax=axes[0], max_pixels=None, add_cbar=False)
+        fig.canvas.draw()
+        labels = [label for label in axes[0].get_xticklabels() if label.get_visible() and label.get_text()]
+        label_boxes = [label.get_window_extent() for label in labels]
+
+        assert all(not first.overlaps(second) for first, second in zip(label_boxes[:-1], label_boxes[1:]))
+        plt.close(fig)
 
     def test_plot__native_single_band(self) -> None:
         """Checks that disabling the pixel limit plots every source value at the source extent."""

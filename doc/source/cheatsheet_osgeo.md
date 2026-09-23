@@ -5,7 +5,7 @@ This page helps users familiar with **GDAL/OGR** migrate their operations to the
 
 Regarding function names, GeoUtils exposes **an API almost entirely consistent with the recently overhauled GDAL CLI**.
 
-Note that GeoUtils is **object-oriented** (methods run on {class}`~geoutils.Raster`, {class}`~geoutils.Vector`, {class}`~geoutils.PointCloud`, or on {class}`~xarray.DataArray` and {class}`~geopandas.GeoDataFrame` through {class}`rst <geoutils.RasterAccessor>`, `vct` and `pc` accessors), while GDAL/OGR utilities are typically **file-oriented** (read from disk, write to disk).
+Note that GeoUtils is **object-oriented** (methods run on {class}`~geoutils.Raster`, {class}`~geoutils.Vector`, {class}`~geoutils.PointCloud`, or on {class}`~xarray.DataArray` and {class}`~geopandas.GeoDataFrame` through {class}`rst <geoutils.RasterAccessor>`, {class}`vct <geoutils.VectorAccessor>` and {class}`pc <geoutils.PointCloudAccessor>` accessors), while GDAL/OGR utilities are typically **file-oriented** (read from disk, write to disk).
 
 We also provide a conversion table for operations specific to DEMs (e.g. slope, aspect, roughness indexes) that are supported through our sister-package [xDEM](https://xdem.readthedocs.io/en/stable/).
 
@@ -34,17 +34,17 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
 * - Footprint
   - `gdalinfo`/`ogrinfo`
   - `gdal raster/vector footprint`
-  - {attr}`~geoutils.Raster.footprint`
+  - {attr}`~RasterBase.footprint`
 
 * - Bounding box
   - `gdalinfo`/`ogrinfo`
   - `gdal raster/vector bbox`
-  - {attr}`~geoutils.Raster.bbox`
+  - {attr}`~RasterBase.bbox`
 
 * - Info summary
   - `gdalinfo`/`ogrinfo`
   - `gdal raster/vector info`
-  - {attr}`~geoutils.Raster.info`
+  - {meth}`~RasterBase.info`
 
 * - <span class="gu-table-section">Raster ⟶ Raster</span>
   -
@@ -54,22 +54,22 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
 * - Reproject/warp
   - `gdalwarp`
   - `gdal raster reproject`
-  - {meth}`~geoutils.Raster.reproject`
+  - {meth}`~RasterBase.reproject`
 
 * - Crop to extent
   - `gdal_translate -projwin`
   - `gdal raster clip --bbox`
-  - {meth}`~geoutils.Raster.crop` / {meth}`~geoutils.Raster.icrop`
+  - {meth}`~RasterBase.crop` / {meth}`~RasterBase.icrop`
 
 * - Clip to geometry
   - `gdalwarp -cutline`
   - `gdal raster clip --geometry`
-  - {meth}`~geoutils.Raster.clip`
+  - {meth}`~RasterBase.clip`
 
 * - Edit referencing
   - `gdal_edit` / `gdalmove.py`
   - `gdal raster edit`
-  - {meth}`~geoutils.Raster.edit` (or individual metadata setters), {meth}`~geoutils.Raster.translate`
+  - {meth}`~RasterBase.edit` (or individual metadata setters), {meth}`~RasterBase.translate`
 
 * - Convert file format
   - `gdal_translate`
@@ -79,17 +79,17 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
 * - Filter
   - —
   - `gdal raster neighbors`
-  - {meth}`~geoutils.Raster.filter`
+  - {meth}`~RasterBase.filter`
 
 * - Proximity distance
   - `gdal_proximity`
   - `gdal raster proximity`
-  - {meth}`~geoutils.Raster.proximity`
+  - {meth}`~RasterBase.proximity`
 
 * - Raster calculator
   - `gdal_calc.py`
   - `gdal raster calc`
-  - NumPy array interface on {attr}`~geoutils.Raster.data`
+  - NumPy array interface on {attr}`~RasterBase.data`
 
 * - Mosaic / merge rasters
   - `gdal_merge.py`
@@ -104,12 +104,12 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
 * - Fill nodata gaps
   - `gdal_fillnodata.py`
   - `gdal raster fill-nodata`
-  - {meth}`~geoutils.Raster.fill_nodata`
+  - {meth}`~RasterBase.fill_nodata`
 
 * - Remove small raster regions
   - `gdal_sieve.py`
   - `gdal raster sieve`
-  - {meth}`~geoutils.Raster.sieve`
+  - {meth}`~RasterBase.sieve`
 
 * - Generate contours
   - `gdal_contour`
@@ -124,7 +124,7 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
 * - Interpolate at coordinates
   - `gdallocationinfo`
   - `gdal raster pixel-info`
-  - {meth}`~geoutils.Raster.to_pointcloud`/{meth}`~geoutils.Raster.interp_points`
+  - {meth}`~RasterBase.to_pointcloud`/{meth}`~RasterBase.interp_points`
 
 * - <span class="gu-table-section">Raster ⟶ Vector</span>
   -
@@ -134,7 +134,7 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
 * - Polygonize
   - `gdal_polygonize.py`
   - `gdal raster polygonize`
-  - {meth}`~geoutils.Raster.polygonize`
+  - {meth}`~RasterBase.polygonize`
 
 * - <span class="gu-table-section">Vector ⟶ Vector</span>
   -
@@ -144,27 +144,27 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
 * - Reproject
   - `ogr2ogr`
   - `gdal vector reproject`
-  - {meth}`~geoutils.Vector.reproject`
+  - {meth}`~VectorBase.reproject`
 
 * - Crop to extent
   - `ogr2ogr -spat`
   - `gdal vector filter --bbox`
-  - {meth}`~geoutils.Vector.crop`
+  - {meth}`~VectorBase.crop`
 
 * - Clip to geometry
   - `ogr2ogr -clipsrc`
   - `gdal vector clip`
-  - {meth}`~geoutils.Vector.clip`
+  - {meth}`~VectorBase.clip`
 
 * - Translate
   - `ogr2ogr` (SQL transform)
   - —
-  - {meth}`~geoutils.Vector.translate`
+  - {meth}`~VectorBase.translate`
 
 * - Copy
   - `ogr2ogr`
   - `gdal vector convert`
-  - {meth}`~geoutils.Vector.copy`
+  - {meth}`~VectorBase.copy`
 
 * - Geometric operations
   - `ogr2ogr` (specific)
@@ -179,7 +179,7 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
 * - Rasterize
   - `gdal_rasterize`
   - `gdal vector rasterize`
-  - {meth}`~geoutils.Vector.rasterize`
+  - {meth}`~VectorBase.rasterize`
 
 * - <span class="gu-table-section">Point ⟶ Raster</span>
   -
@@ -189,7 +189,7 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
 * - Grid points
   - `gdal_grid`
   - `gdal vector grid`
-  - {meth}`~geoutils.PointCloud.grid`
+  - {meth}`~PointCloudBase.grid`
 ```
 
 ## GDAL DEM utilities

@@ -140,7 +140,7 @@ class TestTransformation:
             r_cropped3 = r.crop(r_cropped_reproj)
 
         # Original CRS bounds can be deformed during transformation, but result should be equivalent to this
-        r_cropped4 = r.crop(bbox=r_cropped_reproj.get_bounds_projected(out_crs=r.crs))
+        r_cropped4 = r.crop(bbox=r_cropped_reproj.get_bbox_projected(out_crs=r.crs))
         assert r_cropped3.raster_equal(r_cropped4)
 
         # -- Test with inplace=True -- #
@@ -195,7 +195,7 @@ class TestTransformation:
 
         # Second, we check that bound reprojection is done automatically if the CRS differ
         r_cropped2 = r.crop(outlines)
-        r_cropped2_bbox_reproj = r.crop(bbox=outlines.get_bounds_projected(out_crs=r.crs))
+        r_cropped2_bbox_reproj = r.crop(bbox=outlines.get_bbox_projected(out_crs=r.crs))
         assert list(r_cropped2.bounds) == list(r_cropped2_bbox_reproj.bounds)
 
         # -- Test crop works as expected even if transform has been modified, e.g. through downsampling -- #

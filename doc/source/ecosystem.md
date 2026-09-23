@@ -46,5 +46,4 @@ Several platforms provide geospatial datasets, cloud environments and learning r
 - **[Geodes](https://geodes-portal.cnes.fr/)** and **[Geodes-Tools](https://geodes-tools.cnes.fr/en/)** — CNES portals for distributing satellite datasets, and sharing tools and resources for their processing
 - **[USGS EarthExplorer](https://earthexplorer.usgs.gov/)** — satellite and elevation data
 - **[Copernicus Data Space](https://dataspace.copernicus.eu/)** — Sentinel satellite data
-- **[Radiant Earth MLHub](https://mlhub.earth/)** — open Earth observation datasets
 - **[CryoCloud](https://www.cryocloud.io/)** — open cloud platform for geospatial data analysis

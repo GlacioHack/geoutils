@@ -2,7 +2,7 @@
 NumPy interfacing
 =================
 
-This example demonstrates NumPy interfacing with rasters on :class:`Rasters<geoutils.Raster>`. See :ref:`core-array-funcs` for more details.
+This example demonstrates NumPy interfacing with rasters on :class:`xarray.DataArray` objects with the :class:`rst <geoutils.RasterAccessor>` accessor. See :ref:`core-array-funcs` for more details.
 """
 
 # %%
@@ -12,10 +12,10 @@ This example demonstrates NumPy interfacing with rasters on :class:`Rasters<geou
 import geoutils as gu
 
 filename_rast = gu.examples.get_path("exploradores_aster_dem")
-rast = gu.Raster(filename_rast)
+rast = gu.open_raster(filename_rast)
 
 # %% We plot it.
-rast.plot(cmap="terrain")
+rast.rst.plot(cmap="terrain")
 
 # %%
 #
@@ -24,12 +24,12 @@ rast.plot(cmap="terrain")
 import numpy as np
 
 # Get the x and y gradient as 1D arrays
-gradient_y, gradient_x = np.gradient(rast)
+gradient_y, gradient_x = np.gradient(rast.values)
 # Estimate the orientation in degrees casting to 2D
-aspect = np.arctan2(-gradient_x, gradient_y)
-aspect = (aspect * 180 / np.pi) + np.pi
+aspect_values = np.arctan2(-gradient_x, gradient_y)
+aspect = rast.copy(data=(aspect_values * 180 / np.pi) + np.pi)
 
-aspect.plot(cmap="twilight", cbar_title="Aspect (degrees)")
+aspect.rst.plot(cmap="twilight", cbar_title="Aspect (degrees)")
 
 # %%
 #
@@ -37,7 +37,7 @@ aspect.plot(cmap="twilight", cbar_title="Aspect (degrees)")
 #        For rigorous slope and aspect calculation (matching that of GDAL), **check-out our sister package** `xDEM <https://xdem.readthedocs.io/en/latest/index.html>`_.
 #
 # We use NumPy logical operations to isolate the terrain oriented South and above three thousand meters. The rasters will be logically cast to a
-# boolean :class:`Raster<geoutils.Raster>`.
+# boolean :class:`xarray.DataArray`.
 
 mask = np.logical_and(np.logical_and(aspect > -45, aspect < 45), rast > 3000)
 mask
@@ -45,4 +45,4 @@ mask
 # %%
 # We plot the mask.
 
-mask.plot()
+mask.rst.plot()

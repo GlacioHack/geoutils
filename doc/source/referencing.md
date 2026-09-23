@@ -15,7 +15,7 @@ kernelspec:
 
 Below, a summary of the **georeferencing attributes** of geospatial data objects and the **methods to manipulate these
 georeferencing attributes** in different projections, without any data transformation. For georeferenced transformations
-(such as reprojection, cropping), see {ref}`geotransformations`.
+(such as reprojection and cropping), see {ref}`transformations`.
 
 ```{code-cell} ipython3
 :tags: [remove-cell]
@@ -35,7 +35,11 @@ load only their metadata by default**, allowing quick operations on georeferenci
 
 ### Metadata summary
 
-To summarize all the metadata of a geospatial data object, including its georeferencing, {func}`~geoutils.Raster.info` can be used:
+{meth}`ds.rst.info() or Raster.info() <RasterBase.info>`<br>
+{meth}`gdf.vct.info() or Vector.info() <VectorBase.info>`<br>
+{meth}`gdf.pc.info() or PointCloud.info() <PointCloudBase.info>`
+
+These methods summarize all the metadata of a geospatial data object, including its georeferencing.
 
 
 ```{code-cell} ipython3
@@ -45,33 +49,37 @@ To summarize all the metadata of a geospatial data object, including its georefe
 :  code_prompt_hide: "Hide the code for opening example files"
 
 import geoutils as gu
-rast = gu.Raster(gu.examples.get_path("exploradores_aster_dem"))
-vect = gu.Vector(gu.examples.get_path("exploradores_rgi_outlines"))
+ds = gu.open_raster(gu.examples.get_path("exploradores_aster_dem"))
+gdf = gu.open_vector(gu.examples.get_path("exploradores_rgi_outlines"))
 ```
 
 ```{code-cell} ipython3
 # Print raster info
-rast.info()
+ds.rst.info()
 ```
 
 ```{code-cell} ipython3
 # Print vector info
-vect.info()
+gdf.vct.info()
 ```
 
 ### Coordinate reference systems
 
+{attr}`ds.rst.crs or Raster.crs <RasterBase.crs>`<br>
+{attr}`gdf.vct.crs or Vector.crs <VectorBase.crs>`<br>
+{attr}`gdf.pc.crs or PointCloud.crs <PointCloudBase.crs>`
+
 [Coordinate reference systems (CRSs)](https://en.wikipedia.org/wiki/Spatial_reference_system), sometimes also called
-spatial reference systems (SRSs), define the 2D projection of the geospatial data. They are stored as a
-{class}`pyproj.crs.CRS` object in {attr}`~geoutils.Raster.crs`.
+spatial reference systems (SRSs), define the 2D projection of geospatial data. GeoUtils stores them as
+{class}`pyproj.crs.CRS` objects.
 
 ```{code-cell} ipython3
 # Show CRS attribute of raster
-print(rast.crs)
+print(ds.rst.crs)
 ```
 ```{code-cell} ipython3
 # Show CRS attribute of vector as a WKT
-print(vect.crs.to_wkt())
+print(gdf.vct.crs.to_wkt())
 ```
 
 More information on the manipulation of {class}`pyproj.crs.CRS` objects can be found in [PyProj's documentation](https://pyproj4.github.io/pyproj/stable/).
@@ -85,20 +93,24 @@ can help define a 3D CRS.
 (bounds)=
 ### Bounding boxes
 
-Bounding boxes define the spatial extent of geospatial data, composed of the "left", "right", "bottom" and "top" coordinates.
-The {attr}`~geoutils.Raster.bbox` of a raster or a vector is a {class}`rasterio.coords.BoundingBox` object:
+{attr}`ds.rst.bbox or Raster.bbox <RasterBase.bbox>`<br>
+{attr}`gdf.vct.bbox or Vector.bbox <VectorBase.bbox>`<br>
+{attr}`gdf.pc.bbox or PointCloud.bbox <PointCloudBase.bbox>`
+
+Bounding boxes define the spatial extent of geospatial data through the "left", "right", "bottom" and "top"
+coordinates. GeoUtils represents them with {class}`rasterio.coords.BoundingBox` objects.
 
 ```{code-cell} ipython3
 # Show bounding box of raster
-rast.bbox
+ds.rst.bbox
 ```
 ```{code-cell} ipython3
 # Show bounding box of vector
-vect.bbox
+gdf.vct.bbox
 ```
 
 ```{note}
-To define {attr}`~geoutils.Raster.bbox` consistently between rasters and vectors, {attr}`~geoutils.Vector.bbox`
+To define {attr}`~RasterBase.bbox` consistently between rasters and vectors, {attr}`~VectorBase.bbox`
  corresponds to {attr}`geopandas.GeoSeries.total_bounds` (total bounds of all geometry features) converted to a {class}`rasterio.coords.BoundingBox`.
 
 To reproduce the behaviour of {attr}`geopandas.GeoSeries.bounds` (per-feature bounds) with a
@@ -107,37 +119,43 @@ To reproduce the behaviour of {attr}`geopandas.GeoSeries.bounds` (per-feature bo
 
 ### Footprints
 
-As reprojections between CRSs deform shapes, including extents, it is often better to consider a vectorized footprint
-to calculate intersections in different projections. The {class}`~geoutils.Raster.footprint` is a
-{class}`~geoutils.Vector` object with a single polygon geometry for which points have been densified, allowing
-reliable computation of extents between CRSs.
+{attr}`ds.rst.footprint or Raster.footprint <RasterBase.footprint>`<br>
+{attr}`gdf.vct.footprint or Vector.footprint <VectorBase.footprint>`<br>
+{attr}`gdf.pc.footprint or PointCloud.footprint <PointCloudBase.footprint>`
+
+As reprojections between CRSs deform shapes, including extents, a vectorized footprint provides more reliable
+intersections than a bounding box. It contains a single polygon whose edges are densified when projected into another
+CRS.
 
 ```{code-cell} ipython3
-# Print raster footprint
-rast.get_footprint_projected(rast.crs)
-```
-```{code-cell} ipython3
-# Plot vector footprint
-vect.get_footprint_projected(vect.crs).plot()
+# Plot the raster and vector footprints together
+_, ax = pyplot.subplots()
+ds.rst.footprint.vct.plot(ax=ax, fc="none", ec="tab:blue", lw=2)
+gdf.vct.footprint.vct.reproject(ds).vct.plot(ax=ax, fc="none", ec="tab:orange", lw=2)
+_ = ax.set_title("Raster (blue) and vector (orange) footprints")
 ```
 
 ### Grid (only for rasters)
 
-A raster's grid origin and resolution are defined by its geotransform attribute, {attr}`~geoutils.Raster.transform`.
-Combined with the 2D shape of the data array {attr}`~geoutils.Raster.shape` (and independently of the number of
-bands {attr}`~geoutils.Raster.bands`), these two attributes define the georeferenced grid of a raster.
+{attr}`ds.rst.transform or Raster.transform <RasterBase.transform>`<br>
+{attr}`ds.rst.shape or Raster.shape <RasterBase.shape>`
 
-From it are derived the resolution {attr}`~geoutils.Raster.res`, and {attr}`~geoutils.Raster.height` and
-{attr}`~geoutils.Raster.width`, as well as the bounds detailed above in {ref}`bounds`.
+These attributes define a raster's georeferenced grid through its origin, resolution and 2D array shape, independently
+of the number of bands {attr}`~RasterBase.bands`.
+
+From the grid are derived the resolution {attr}`~RasterBase.res`, and {attr}`~RasterBase.height` and
+{attr}`~RasterBase.width`, as well as the bounds detailed above in {ref}`bounds`.
 
 ```{code-cell} ipython3
 # Get raster transform and shape
-print(rast.transform)
-print(rast.shape)
+print(ds.rst.transform)
+print(ds.rst.shape)
 ```
 
 (pixel-interpretation)=
 ### Pixel interpretation (only for rasters)
+
+{attr}`ds.rst.area_or_point or Raster.area_or_point <RasterBase.area_or_point>`
 
 A largely overlooked aspect of a raster's georeferencing is the pixel interpretation stored in the
 [AREA_OR_POINT metadata](https://gdal.org/user/raster_data_model.html#metadata).
@@ -146,11 +164,11 @@ of the pixel (and typically refers to the upper-left corner coordinate)**, or as
 where **the value relates to a point sample (and typically refers to the center of the pixel)**, the latter often used
 for digital elevation models (DEMs).
 
-Pixel interpretation is stored as a string in the {attr}`geoutils.Raster.area_or_point` attribute.
+Pixel interpretation is stored as a string.
 
 ```{code-cell} ipython3
 # Get pixel interpretation of raster
-rast.area_or_point
+ds.rst.area_or_point
 ```
 
 Although this interpretation is not intended to influence georeferencing, it **can influence sub-pixel coordinate
@@ -170,79 +188,107 @@ This behaviour can be modified at the package-level by using GeoUtils' {ref}`con
 
 Several functionalities are available to facilitate the manipulation of the georeferencing.
 
-### Getting projected bounds and footprints
+### Projected bounding boxes
 
-Retrieving projected bounds or footprints in any CRS is possible using directly {func}`~geoutils.Raster.get_bounds_projected`
-and {func}`~geoutils.Raster.get_footprint_projected`.
+{meth}`ds.rst.get_bbox_projected() or Raster.get_bbox_projected() <RasterBase.get_bbox_projected>`<br>
+{meth}`gdf.vct.get_bbox_projected() or Vector.get_bbox_projected() <VectorBase.get_bbox_projected>`<br>
+{meth}`gdf.pc.get_bbox_projected() or PointCloud.get_bbox_projected() <VectorBase.get_bbox_projected>`
+
+These methods return the bounding box in another CRS, accounting for non-linear deformation by densifying its edges
+during projection.
+
+### Projected footprints
+
+{meth}`ds.rst.get_footprint_projected() or Raster.get_footprint_projected() <RasterBase.get_footprint_projected>`<br>
+{meth}`gdf.vct.get_footprint_projected() or Vector.get_footprint_projected() <VectorBase.get_footprint_projected>`<br>
+{meth}`gdf.pc.get_footprint_projected() or PointCloud.get_footprint_projected() <VectorBase.get_footprint_projected>`
+
+These methods retain the densified polygon instead of reducing the projected result to a bounding box.
 
 ```{code-cell} ipython3
 # Get footprint of larger buffered vector in polar stereo CRS (to show deformations)
-vect.buffer_metric(10**6).get_footprint_projected(3995).plot()
+gdf.vct.buffer_metric(10**6).vct.get_footprint_projected(3995).vct.plot()
 ```
 
-### Getting a metric CRS
+### Metric CRS
 
-A local metric coordinate system can be estimated for both {class}`Rasters<geoutils.Raster>` and {class}`Vectors<geoutils.Vector>` through the
-{func}`~geoutils.Raster.get_metric_crs` function.
+{meth}`ds.rst.get_metric_crs() or Raster.get_metric_crs() <RasterBase.get_metric_crs>`<br>
+{meth}`gdf.vct.get_metric_crs() or Vector.get_metric_crs() <VectorBase.get_metric_crs>`<br>
+{meth}`gdf.pc.get_metric_crs() or PointCloud.get_metric_crs() <VectorBase.get_metric_crs>`
 
-The metric system returned can be either "universal" (zone of the Universal Transverse Mercator or Universal Polar Stereographic system), or "custom"
-(Mercator or Polar projection centered on the {class}`Raster<geoutils.Raster>` or {class}`Vector<geoutils.Vector>`).
+These methods estimate a local metric coordinate system. The result can be either "universal" (zone of the Universal
+Transverse Mercator or Universal Polar Stereographic system), or "custom"
+(Mercator or Polar projection centered on the {class}`Raster<geoutils.Raster>`, {class}`Vector<geoutils.Vector>` or
+{class}`PointCloud<geoutils.PointCloud>`).
 
 ```{code-cell} ipython3
 # Get local metric CRS
-rast.get_metric_crs()
+ds.rst.get_metric_crs()
 ```
 
-### Re-set georeferencing metadata
+### Edit raster metadata
 
-The georeferencing metadata of an object can be re-set (overwritten) by setting the corresponding attribute such as {func}`geoutils.Vector.crs` or
-{func}`geoutils.Raster.transform`. When specific options might be useful during setting, a set function exists,
-such as for {func}`geoutils.Raster.set_area_or_point`.
+{meth}`ds.rst.edit() or Raster.edit() <RasterBase.edit>`
+
+This method returns a copy with several metadata fields changed together, while keeping the source and its pixel
+values unchanged. Omitted fields keep their current values, explicit `None` values clear optional metadata, and new
+tags are merged with the existing tags.
 
 ```{warning}
-Re-setting should only be used if the **data was erroneously defined and needs to be corrected in-place**.
-To create geospatial data from its attributes, use the construction functions such as {func}`~geoutils.Raster.from_array`.
+Editing or resetting georeferencing metadata should only be used if the **data was erroneously defined and needs to be
+corrected**. To create geospatial data from its attributes, use construction methods such as
+{meth}`from_array() <RasterBase.from_array>`.
 ```
 
 ```{code-cell} ipython3
-# Re-set CRS
-import pyproj
-rast.crs = pyproj.CRS(4326)
-rast.crs
+# Correct several metadata fields on a new raster
+edited_ds = ds.rst.edit(tags={"purpose": "corrected metadata"}, area_or_point="Point")
+(edited_ds.rst.tags, edited_ds.rst.area_or_point)
 ```
 
+### Set individual raster metadata
+
+{meth}`ds.rst.set_crs() or Raster.set_crs() <RasterBase.set_crs>`<br>
+{meth}`ds.rst.set_transform() or Raster.set_transform() <RasterBase.set_transform>`<br>
+{meth}`ds.rst.set_nodata() or Raster.set_nodata() <RasterBase.set_nodata>`<br>
+{meth}`ds.rst.set_area_or_point() or Raster.set_area_or_point() <RasterBase.set_area_or_point>`
+
+These methods update one field in place and provide field-specific options when needed. Assigning the corresponding
+attribute, such as {attr}`~RasterBase.crs` or {attr}`~RasterBase.transform`, uses the setter's default options.
+
 ```{code-cell} ipython3
-# Re-set pixel interpretation
-rast.set_area_or_point("Point")
-rast.area_or_point
+# Correct one metadata field in place
+edited_ds.rst.set_area_or_point("Area")
+edited_ds.rst.area_or_point
 ```
 
 
 ### Coordinates to indexes (only for rasters)
 
+{meth}`ds.rst.xy2ij() or Raster.xy2ij() <RasterBase.xy2ij>`<br>
+{meth}`ds.rst.ij2xy() or Raster.ij2xy() <RasterBase.ij2xy>`<br>
+{meth}`ds.rst.coords() or Raster.coords() <RasterBase.coords>`
+
 Raster grids are notoriously unintuitive to manipulate on their own due to the Y axis being inverted and stored as first axis.
 GeoUtils' features account for this under-the-hood when plotting, interpolating, gridding, or performing any other operation involving the raster coordinates.
 
-Three functions facilitate the manipulation of coordinates, while respecting any {ref}`Pixel interpretation<pixel-interpretation>`:
-
-1. {func}`~geoutils.Raster.xy2ij` to convert array indices to coordinates,
-2. {func}`~geoutils.Raster.ij2xy` to convert coordinates to array indices (reversible with {func}`~geoutils.Raster.xy2ij` for any pixel interpretation),
-3. {func}`~geoutils.Raster.coords` to directly obtain coordinates in order corresponding to the data array axes, possibly as a meshgrid.
+These methods convert between coordinates and array indices, or return coordinates in the order of the data array
+axes, possibly as a meshgrid. They respect any {ref}`Pixel interpretation<pixel-interpretation>`.
 
 ```{code-cell} ipython3
 # Get coordinates from row/columns indices
-x, y = rast.ij2xy(i=[0, 1], j=[2, 3])
+x, y = ds.rst.ij2xy(i=[0, 1], j=[2, 3])
 (x, y)
 ```
 
 ```{code-cell} ipython3
 # Get indices from coordinates
-i, j = rast.xy2ij(x=x, y=y)
+i, j = ds.rst.xy2ij(x=x, y=y)
 (i, j)
 ```
 
 ```{code-cell} ipython3
 :tags: [hide-output]
 # Get vector X/Y coordinates corresponding to data array
-rast.coords(grid=False)
+ds.rst.coords(grid=False)
 ```

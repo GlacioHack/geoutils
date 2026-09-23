@@ -6,10 +6,9 @@ Prefer to learn by running examples? Explore our example galleries on {ref}`exam
 ```{toctree}
 :maxdepth: 2
 
-core_composition
+core_data_structures
+core_object_behaviour
 core_match_ref
-core_py_ops
-core_array_funcs
+core_downsampling
 core_parsing
-core_inheritance
 ```
