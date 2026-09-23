@@ -26,7 +26,7 @@ import os
 import warnings
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
-from typing import TYPE_CHECKING, Any, Callable, Literal
+from typing import TYPE_CHECKING, Any, Callable, Literal, cast
 
 import affine
 import numpy as np
@@ -39,9 +39,15 @@ from shapely.geometry import box
 from shapely.strtree import STRtree
 
 from geoutils._config import config
-from geoutils._dispatch import _check_match_bbox, _check_match_grid, _clip_geometry
+from geoutils._dispatch import _check_match_bbox, _check_match_grid, _clip_geodataframe
 from geoutils._misc import import_optional, silence_rasterio_message
 from geoutils._typing import DTypeLike, MArrayNum, NDArrayBool, NDArrayNum
+from geoutils.interface.rasterization import (
+    _normalize_burn_values,
+    _partition_burn_by_geogrids,
+    _rasterize_selected_on_geogrid,
+    _VectorBurnSpec,
+)
 from geoutils.multiproc.chunked import (
     ChunkedGeoGrid,
     GeoGrid,
@@ -51,7 +57,6 @@ from geoutils.multiproc.mparray import (
     MultiprocConfig,
     _split_chunk_size,
     _write_multiproc_result,
-    map_overlap,
 )
 from geoutils.raster.referencing import (
     _default_nodata,
@@ -1037,19 +1042,88 @@ def _apply_clip_geometry(
 
 
 def _multiproc_clip_block(
-    block: Raster,
-    clipping_vector: Vector,
+    source_raster: Raster,
+    block_id: dict[str, Any],
+    burn: _VectorBurnSpec,
     all_touched: bool,
     output_nodata: int | float | None,
-) -> Raster:
-    """Clip one raster block in an importable multiprocessing worker callback."""
+) -> tuple[Raster, tuple[int, int, int, int]]:
+    """Read and clip one raster block with its preselected geometries."""
 
-    # Create the mask on this block's exact grid through the shared vector-raster interface
-    inside = clipping_vector.create_mask(ref=block, all_touched=all_touched, as_array=True)
+    # Read only this block and rasterize the features selected by the parent spatial index
+    pixel_bounds = (block_id["xs"], block_id["ys"], block_id["xe"], block_id["ye"])
+    block = source_raster.icrop(bbox=pixel_bounds)
+    block_geogrid = GeoGrid(transform=block.transform, shape=block.shape, crs=block.crs)
+    inside = _rasterize_selected_on_geogrid(
+        block_geogrid,
+        burn,
+        out_value=0,
+        out_dtype=np.uint8,
+        all_touched=all_touched,
+    ).view(np.bool_)
+
+    # Apply the mask without changing the source grid, values or existing missing cells
     clipped = _apply_clip_geometry(block.data, inside=inside, nodata=output_nodata)
     output = block.copy(new_array=clipped)
     if output.nodata != output_nodata:
         output.set_nodata(output_nodata, update_array=False, update_mask=False)
+    if output.is_mask:
+        output.astype("uint8", inplace=True)
+        output.set_nodata(255)
+
+    # Return the unchanged destination positions for the shared output writer
+    destination = (block_id["ys"], block_id["ye"], block_id["xs"], block_id["xe"])
+    return output, destination
+
+
+def _multiproc_clip(
+    source_raster: Raster,
+    clipping_vector: Vector,
+    all_touched: bool,
+    output_nodata: int | float | None,
+    mp_config: MultiprocConfig,
+) -> Raster:
+    """Partition clipping geometries, process raster blocks, and write their completed output."""
+
+    # Build one spatial index in the parent and select only the geometries needed by each block
+    grid = GeoGrid(transform=source_raster.transform, shape=source_raster.shape, crs=source_raster.crs)
+    chunks = normalize_chunks(chunks=_split_chunk_size(mp_config.chunks), shape=source_raster.shape)
+    tiling = ChunkedGeoGrid(grid=grid, chunks=chunks)
+    block_ids = tiling.get_block_locations()
+    block_geogrids = tiling.get_blocks_as_geogrids()
+    burn = _normalize_burn_values(clipping_vector.ds.geometry.values, in_value=1)
+    block_burns = _partition_burn_by_geogrids(burn, block_geogrids)
+
+    # Send each worker its source window and the much smaller matching geometry subset
+    tasks = [
+        mp_config.cluster.submit(
+            _multiproc_clip_block,
+            source_raster,
+            block_id,
+            block_burn,
+            all_touched,
+            output_nodata,
+        )
+        for block_id, block_burn in zip(block_ids, block_burns)
+    ]
+
+    # Write completed blocks with the same metadata and logical mask representation as the source
+    source_is_mask = source_raster.is_mask
+    file_metadata = {
+        "width": source_raster.width,
+        "height": source_raster.height,
+        "count": source_raster.count,
+        "crs": source_raster.crs,
+        "transform": source_raster.transform,
+        "dtype": np.dtype("uint8") if source_is_mask else source_raster.dtype,
+        "nodata": 255 if source_is_mask else output_nodata,
+    }
+    output = _write_multiproc_result(tasks, mp_config, file_metadata, tags=dict(source_raster.tags))
+    if output._is_bigtiff():
+        warnings.warn(
+            "Due to the size of the output raster, it has been saved with a BigTIFF format.",
+            category=UserWarning,
+        )
     return output
 
 
@@ -1062,8 +1136,9 @@ def _clip(
     """
     Clip raster cells outside a geometry using eager, Dask or multiprocessing execution.
 
-    _clip_geometry() normalizes the mask in the raster CRS. create_mask() then builds the matching eager or Dask
-    mask, while multiprocessing creates the same mask on each block through _multiproc_clip_block().
+    _clip_geodataframe() normalizes mask features in the raster CRS without dissolving them. create_mask() partitions
+    those features for eager or Dask masking, while _multiproc_clip() selects the matching features before dispatching
+    each raster block.
     """
 
     from geoutils.vector.vector import Vector
@@ -1074,12 +1149,9 @@ def _clip(
             "Cannot use Multiprocessing and Dask simultaneously. To use Dask, remove mp_config from clip()."
         )
 
-    # Normalize and reproject the clipping geometry once before dispatching block work
+    # Normalize and reproject clipping features once while keeping them separate for block selection
     target_crs = None if source_raster.crs is None else CRS.from_user_input(source_raster.crs)
-    geometry = _clip_geometry(mask, target_crs=target_crs)
-    clipping_vector = Vector(geometry)
-    if target_crs is not None:
-        clipping_vector.ds = clipping_vector.ds.set_crs(target_crs)
+    clipping_vector = Vector(_clip_geodataframe(mask, target_crs=target_crs))
 
     if mp_config is not None:
         if source_raster._is_xr:
@@ -1090,14 +1162,12 @@ def _clip(
         if output_nodata is None and not source_raster.is_mask:
             output_nodata = _default_nodata(source_raster.dtype)
             warnings.warn(f"No nodata value is defined; multiprocessing clip() will use the default {output_nodata}.")
-        return map_overlap(
-            _multiproc_clip_block,
-            source_raster,
-            mp_config,
+        return _multiproc_clip(
+            cast("Raster", source_raster),
             clipping_vector,
             all_touched,
             output_nodata,
-            depth=0,
+            mp_config,
         )
 
     # Match the source grid and let create_mask() choose eager or Dask execution from the reference

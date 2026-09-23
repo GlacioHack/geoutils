@@ -9,6 +9,7 @@ from typing import Literal
 
 import numpy as np
 import pytest
+import rasterio as rio
 import xarray as xr
 
 from benchmarks.asv_suite import parameter_sweeps as benchmark_parameter_sweeps
@@ -22,6 +23,8 @@ from benchmarks.asv_suite.render_results import (
     COMPARISON_REPORT_DIRECTORY,
     DOCUMENTATION_DATA,
     DOCUMENTATION_MEMORY_PLOT,
+    DOCUMENTATION_MEMORY_SCALING_PLOT,
+    DOCUMENTATION_PDAL_PLOT,
     DOCUMENTATION_TIME_PLOT,
     PERFORMANCE_CHANGE_REPORT,
     SCALING_REPORT_PAGE,
@@ -32,6 +35,7 @@ from benchmarks.asv_suite.render_results import (
 )
 from benchmarks.gdal_comparison.commands import (
     COMPARISON_OPERATIONS,
+    _warp_memory_limit_mb,
     build_gdal_command,
 )
 from benchmarks.pdal_comparison.commands import (
@@ -48,7 +52,7 @@ from benchmarks.workflows.variography import (
     prepare_pair_raster,
     prepare_variogram_pairs,
 )
-from geoutils import Variogram
+from geoutils import Variogram, _misc
 
 
 class TestComparisonReport:
@@ -114,18 +118,109 @@ class TestComparisonReport:
         assert _select_complete_result((complete, incomplete)) is complete
 
     def test_render_documentation_snapshot__essential_files(self, tmp_path: Path) -> None:
-        """Checks that documentation rendering writes its two plots and numeric data."""
+        """Checks that documentation rendering writes its summary plots and numeric data."""
 
         pytest.importorskip("matplotlib")
 
         # Render the documentation files from the same small result used by preview mode
         records = render_documentation_snapshot(_PreviewResult(), tmp_path)
 
-        # Both graphics and their JSON source are needed when benchmark results are updated in the docs
+        # All graphics and their JSON source are needed when benchmark results are updated in the docs
         assert records
         assert (tmp_path / DOCUMENTATION_TIME_PLOT).is_file()
         assert (tmp_path / DOCUMENTATION_MEMORY_PLOT).is_file()
+        assert (tmp_path / DOCUMENTATION_MEMORY_SCALING_PLOT).is_file()
+        assert (tmp_path / DOCUMENTATION_PDAL_PLOT).is_file()
         assert (tmp_path / DOCUMENTATION_DATA).is_file()
+
+
+class TestBenchmarkScenarios:
+    """Test module for full scheduled inputs and reduced pull-request benchmark configurations."""
+
+    @pytest.mark.parametrize(
+        ("comparison_group", "parameters", "expected_shape", "expected_chunks"),
+        (
+            ("clip-raster-size", [2048, 4096, 8192], (8192, 8192), (2048, 2048)),
+            ("reprojection-raster-size", [2048, 4096, 8192], (8192, 8192), (2048, 2048)),
+            ("polygonization-raster-size", [2048, 4096, 8192], (8192, 8192), (2048, 2048)),
+            ("rasterization-raster-size", [2048, 4096, 8192], (8192, 8192), (2048, 2048)),
+            ("subsample-size", [16_384, 262_144, 1_048_576], (2048, 2048), (1024, 1024)),
+            ("to-pointcloud-raster-size", [512, 1024, 2048], (2048, 2048), (1024, 1024)),
+            ("gridding-raster-size", [2048, 4096, 8192], (8192, 8192), (2048, 2048)),
+        ),
+    )
+    def test_external_comparison__scheduled_workloads(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        comparison_group: str,
+        parameters: list[int],
+        expected_shape: tuple[int, int],
+        expected_chunks: tuple[int, int],
+    ) -> None:
+        """Checks that scheduled GDAL and PDAL comparisons use large inputs split into few large chunks."""
+
+        # Select one generated GeoUtils class for the comparison and force the full scheduled profile
+        monkeypatch.delenv("GEOUTILS_ASV_PR_CHECK", raising=False)
+        case = next(case for case in BENCHMARK_CASES if case.comparison_group == comparison_group)
+        benchmark = getattr(benchmark_parameter_sweeps, case.benchmark_class)()
+        benchmark.operation_method = case.method
+
+        # Build the largest configured workload and check both its input axis and bounded chunk layout
+        config = benchmark.make_config(parameters[-1])
+        assert benchmark.params == [parameters]
+        assert config.shape == expected_shape
+        assert config.chunks == expected_chunks
+
+    @pytest.mark.parametrize(
+        ("comparison_group", "parameter", "expected_shape", "expected_chunks"),
+        (
+            ("clip-raster-size", 1024, (1024, 1024), (1024, 1024)),
+            ("reprojection-raster-size", 1024, (1024, 1024), (1024, 1024)),
+            ("polygonization-raster-size", 1024, (1024, 1024), (1024, 1024)),
+            ("rasterization-raster-size", 1024, (1024, 1024), (1024, 1024)),
+            ("subsample-size", 256, (512, 512), (256, 256)),
+            ("to-pointcloud-raster-size", 256, (256, 256), (256, 256)),
+            ("gridding-raster-size", 512, (512, 512), (512, 512)),
+        ),
+    )
+    def test_external_comparison__pull_request_workloads(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        comparison_group: str,
+        parameter: int,
+        expected_shape: tuple[int, int],
+        expected_chunks: tuple[int, int],
+    ) -> None:
+        """Checks that pull-request GDAL and PDAL cases keep small inputs for fast smoke testing."""
+
+        # Select the same generated classes while enabling the lightweight pull-request configuration
+        monkeypatch.setenv("GEOUTILS_ASV_PR_CHECK", "1")
+        case = next(case for case in BENCHMARK_CASES if case.comparison_group == comparison_group)
+        benchmark = getattr(benchmark_parameter_sweeps, case.benchmark_class)()
+        benchmark.operation_method = case.method
+
+        # The single pull-request parameter should build a much smaller source and execution chunk
+        config = benchmark.make_config(parameter)
+        assert config.shape == expected_shape
+        assert config.chunks == expected_chunks
+
+
+class TestBenchmarkProcess:
+    """Test module for cache configuration applied inside benchmark worker processes."""
+
+    def test_prepare_benchmark_process__gdal_cache_units(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Checks that the worker config converts the benchmark's MiB cache size to Rasterio's byte value."""
+
+        # Capture the live GDAL setting without changing the cache used by the test process
+        configured_values: list[tuple[str, int]] = []
+        monkeypatch.setattr(rio.env, "set_gdal_config", lambda name, value: configured_values.append((name, value)))
+        monkeypatch.setattr(_misc, "_trim_process_memory", lambda: None)
+
+        # Configure the same 64 MiB cache used by the benchmark workers
+        _misc._prepare_benchmark_process(64)
+
+        # Rasterio receives integer cache sizes in bytes rather than the MiB string accepted by GDAL commands
+        assert configured_values == [("GDAL_CACHEMAX", 64 * 1024**2)]
 
 
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
@@ -155,6 +250,38 @@ class TestBenchmarkRunner:
 
         # The constant raster gives the same compact correctness value through both backends
         assert result.value == config.raster_value
+
+    @pytest.mark.parametrize("execution_mode", ["eager", "dask", "multiprocessing"])
+    def test_clip__masks_outside_fixture_polygons(
+        self,
+        execution_mode: Literal["eager", "dask", "multiprocessing"],
+        tmp_path: Path,
+    ) -> None:
+        """Checks that the clipping benchmark keeps polygon interiors and masks the surrounding raster."""
+
+        if execution_mode == "dask":
+            pytest.importorskip("distributed")
+
+        # Use several polygons across multiple chunks so worker modes process inside and outside cells
+        config = BenchmarkConfig(
+            shape=(64, 64),
+            chunks=(32, 32),
+            vector_features_per_axis=3,
+            directory=str(tmp_path / execution_mode),
+        )
+
+        # Run the complete benchmark workflow and inspect one kept center cell and one clipped corner
+        with BenchmarkRunner(execution_mode, config) as runner:
+            result = runner.run("clip", profile=False)
+        assert result.output_file is not None
+        with rio.open(result.output_file) as dataset:
+            values = dataset.read(1)
+            nodata = dataset.nodata
+
+        # The odd polygon grid covers the raster center, while every fixture polygon stays away from the corners
+        assert result.value == config.raster_value
+        assert values[values.shape[0] // 2, values.shape[1] // 2] == config.raster_value
+        assert not np.isfinite(values[0, 0]) or values[0, 0] == nodata
 
 
 @pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
@@ -284,12 +411,14 @@ class TestGdalCommands:
 
         # These fields are enough to catch a command wired to the wrong tool, source, output or cache setting
         expected_executable = {
+            "clip": "gdalwarp",
             "reproject": "gdalwarp",
             "polygonize": "gdal_polygonize.py",
             "rasterize": "gdal_rasterize",
             "grid": "gdal_grid",
         }[operation]
         expected_source = {
+            "clip": "source-raster.tif",
             "reproject": "source-raster.tif",
             "polygonize": "source-raster.tif",
             "rasterize": "source-vector.gpkg",
@@ -298,6 +427,11 @@ class TestGdalCommands:
         cache_index = command.index("GDAL_CACHEMAX")
         assert command[0] == expected_executable
         assert expected_source in command
+        if operation == "clip":
+            assert "source-vector.gpkg" in command
+        if operation in ("clip", "reproject"):
+            warp_memory_index = command.index("-wm")
+            assert command[warp_memory_index + 1] == str(_warp_memory_limit_mb(config))
         assert comparison.output_file in command
         assert command[cache_index + 1] == str(config.gdal_cachemax_mb)
 

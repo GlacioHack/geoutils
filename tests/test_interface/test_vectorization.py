@@ -4,6 +4,7 @@ Test module for vectorization (polygonize, etc).
 
 from __future__ import annotations
 
+import inspect
 import os
 import warnings
 from typing import Any, Literal
