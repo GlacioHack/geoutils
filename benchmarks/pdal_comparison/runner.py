@@ -15,7 +15,9 @@ from benchmarks.pdal_comparison.commands import (
     PdalComparisonOperation,
     build_pdal_command,
 )
-from benchmarks.workflows.runner import BenchmarkConfig, BenchmarkRunner, ProfiledResult
+from benchmarks.workflows.config import BenchmarkConfig, ProfiledResult
+from benchmarks.workflows.fixtures import read_point_file_sample
+from benchmarks.workflows.runner import BenchmarkRunner
 from geoutils.profiler import ProfileMetrics, profile_call
 
 
@@ -37,8 +39,6 @@ def read_comparison_value(
     """Validate one complete PDAL point output and read one band value."""
 
     if pathlib.Path(output_file).suffix.lower() in (".las", ".laz"):
-        from benchmarks.workflows.runner import read_point_file_sample
-
         count, value = read_point_file_sample(output_file, "Z")
         expected_count = config.subsample_size if operation == "subsample" else config.shape[0] * config.shape[1]
         if count != expected_count:

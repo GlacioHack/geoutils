@@ -10,16 +10,20 @@ Mainly, it contains tools for running:
 
 ## Organization
 
-- `workflows/` defines deterministic inputs (e.g. raster/point-cloud data), operations (e.g. ``reproject()``, ``grid()``),
-  methods (e.g. ``resampling="linear"``), calculation engines (e.g., SciPy, Numba), chunk strategies (e.g., "dense" or
-  "sparse" for grouped stats), and execution modes (eager, Dask, multiprocessing),
-  to setup all possible computations that can be run by a given suite (ASV benchmark + large data tests),
+- `workflows/config.py` defines the shared benchmark configuration, parameter ranges and compact cases/sweeps,
+- `workflows/fixtures.py` defines deterministic inputs (e.g. raster/point-cloud data),
+- `workflows/operations/` defines operations (e.g. ``reproject()``, ``grid()``), methods (e.g. ``resampling="linear"``),
+  calculation engines (e.g., SciPy, Numba), chunk strategies (e.g., "dense" or "sparse" for grouped stats), and
+  execution modes (eager, Dask, multiprocessing), beside the code that runs each operation,
+- `workflows/runner.py` sets up the shared inputs, workers, profiling and result computation,
 - `asv_suite/operations.py` sets up ASV to measure individual operations at one fixed configuration,
 - `asv_suite/parameter_sweeps.py` sets up ASV to measure operations across one-dimensional parameter ranges (e.g., raster input size, or method type),
 - `asv_suite/render_results.py` renders the raw measurements into comparisons and graphics used by the GitHub pages and documentation,
+- `dask_comparison/` contains direct Dask equivalent operations for internal performance comparison,
+- `flox_comparison/` contains direct Flox grouped statistics for performance comparison,
 - `gdal_comparison/` contains GDAL CLI equivalent operations for performance comparison,
 - `pdal_comparison/` contains PDAL pipelines equivalent operations for performance comparison,
-- `test_large_data.py` is a Pytest module to verify that every supported Dask/Multiprocessingoperation computes correctly without
+- `test_large_data.py` is a Pytest module to verify that every supported Dask/Multiprocessing operation computes correctly without
   loading the complete raster into memory.
 
 When running ASV, local outputs are generated under the gitignored `results/` directory:

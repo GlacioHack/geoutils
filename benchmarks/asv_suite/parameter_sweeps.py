@@ -1,1001 +1,50 @@
-"""Generate ASV cases that measure time and RAM across one-dimensional parameter ranges."""
+"""Generate ASV classes from operation-local one-dimensional parameter sweeps."""
 
 from __future__ import annotations
 
 import tempfile
 import time
-from dataclasses import dataclass, replace
-from typing import Literal, cast
+from typing import cast
 
-from benchmarks.asv_suite import asv_parameter_values, asv_pr_check_enabled
+from benchmarks.asv_suite import asv_pr_check_enabled
 from benchmarks.gdal_comparison.commands import ComparisonOperation
 from benchmarks.gdal_comparison.runner import GdalRunner
 from benchmarks.pdal_comparison.commands import PdalComparisonOperation
 from benchmarks.pdal_comparison.runner import PdalRunner
-from benchmarks.workflows.grouped_reference import (
-    compute_grouped_reference,
-    prepare_grouped_reference,
-)
-from benchmarks.workflows.registry import (
-    OPERATION_METHODS,
-    OPERATION_STRATEGIES,
+from benchmarks.workflows.config import (
+    BenchmarkCase,
+    BenchmarkConfig,
     CalculationEngine,
     ExecutionMode,
+    ExternalReference,
+    ExternalReferenceCase,
     OperationName,
     OperationStrategyName,
+    Parameter,
+    Sweep,
 )
-from benchmarks.workflows.runner import BenchmarkConfig, BenchmarkRunner
-from geoutils._misc import import_optional
-from geoutils.multiproc import MultiprocConfig
-from geoutils.multiproc.cluster import MpCluster
-from geoutils.profiler import profile_call
-
-#########################################
-# Comparison dimensions and case helpers #
-#########################################
-
-# Comparisons vary one choice at a time: method, calculation engine, chunk strategy, execution mode or output format
-# The label dictionaries give the stored values readable names in plots
-ComparisonDimension = Literal["method", "calculation_engine", "strategy", "execution_mode", "output_format"]
-ExternalReference = Literal["gdal_cli", "pdal_cli", "flox"]
-GDAL_CLI_LABEL = "GDAL CLI"
-PDAL_CLI_LABEL = "PDAL CLI"
-
-EXECUTION_MODE_LABELS: dict[ExecutionMode, str] = {
-    "eager": "Eager",
-    "dask": "Dask",
-    "multiprocessing": "Multiprocessing",
-}
-CALCULATION_ENGINE_LABELS: dict[CalculationEngine, str] = {
-    "scipy": "SciPy",
-    "numba": "Numba",
-    "rasterio": "Rasterio/GDAL",
-    "numpy": "NumPy",
-}
-METHOD_LABELS = {
-    "nearest": "Nearest",
-    "linear": "Linear (Delaunay)",
-    "idw": "Inverse-distance",
-    "mean": "Circular mean",
-}
-STRATEGY_LABELS: dict[OperationStrategyName, str] = {
-    "sequential": "Sequential",
-    "topk": "Top-k",
-    "label_union": "Label union",
-    "label_stitch": "Label stitch",
-    "geometry_stitch": "Geometry stitch",
-    "auto": "Automatic",
-    "dense": "Dense summaries",
-    "sparse": "Sparse summaries",
-    "groupwise": "Complete groups",
-}
-
-
-def _class_token(value: str) -> str:
-    """Convert one stable dimension value to part of an ASV class name."""
-
-    return "".join(token.capitalize() for token in value.replace("_", "-").split("-"))
-
-
-# Store one concrete combination, such as eager IDW gridding with Numba, before creating its ASV class
-@dataclass(frozen=True)
-class BenchmarkCase:
-    """Identify one valid GeoUtils method, engine, strategy and execution-mode case."""
-
-    comparison_group: str
-    operation: OperationName
-    method: str | None
-    calculation_engine: CalculationEngine | None
-    strategy: OperationStrategyName | None
-    execution_mode: ExecutionMode
-    output_driver: Literal["GPKG", "LAS", "LAZ"] = "GPKG"
-    pr_check: bool = False
-
-    @property
-    def benchmark_class(self) -> str:
-        """Return the generated public ASV class name for this case."""
-
-        values = (
-            self.execution_mode,
-            None if self.output_driver == "GPKG" else self.output_driver,
-            self.method,
-            self.calculation_engine,
-            self.strategy,
-            self.comparison_group,
-        )
-        return "".join(_class_token(value) for value in values if value is not None)
-
-
-@dataclass(frozen=True)
-class ExternalReferenceCase:
-    """Identify one external reference without treating it as an engine or execution mode."""
-
-    comparison_group: str
-    operation: OperationName
-    method: str | None
-    external_reference: ExternalReference
-    output_driver: Literal["GPKG", "LAS", "LAZ"] = "GPKG"
-    pr_check: bool = False
-    strategy: None = None
-    execution_mode: ExecutionMode | None = None
-
-    @property
-    def benchmark_class(self) -> str:
-        """Return the generated public ASV class name for this reference."""
-
-        values = (
-            self.external_reference,
-            None if self.output_driver == "GPKG" else self.output_driver,
-            self.execution_mode,
-            self.method,
-            self.comparison_group,
-        )
-        return "".join(_class_token(value) for value in values if value is not None)
-
-
-def _execution_cases(
-    comparison_group: str,
-    operation: OperationName,
-    method: str | None,
-    calculation_engine: CalculationEngine | None,
-    *,
-    strategy: OperationStrategyName | None = None,
-    execution_modes: tuple[ExecutionMode, ...] = ("eager", "dask", "multiprocessing"),
-    pr_modes: tuple[ExecutionMode, ...] = (),
-    output_driver: Literal["GPKG", "LAS", "LAZ"] = "GPKG",
-) -> tuple[BenchmarkCase, ...]:
-    """Generate an execution-mode comparison around fixed numerical dimensions."""
-
-    return tuple(
-        BenchmarkCase(
-            comparison_group,
-            operation,
-            method,
-            calculation_engine,
-            strategy if execution_mode != "eager" else None,
-            execution_mode,
-            output_driver=output_driver,
-            pr_check=execution_mode in pr_modes,
-        )
-        for execution_mode in execution_modes
-    )
-
-
-def _engine_cases(
-    comparison_group: str,
-    operation: OperationName,
-    method: str | None,
-    *,
-    execution_mode: ExecutionMode = "eager",
-    strategy: OperationStrategyName | None = None,
-    pr_engines: tuple[CalculationEngine, ...] = (),
-) -> tuple[BenchmarkCase, ...]:
-    """Generate an engine comparison for one method and execution mode."""
-
-    if execution_mode == "eager" and strategy is not None:
-        raise ValueError("Chunk strategies cannot be fixed for an eager engine comparison")
-    specification = next(item for item in OPERATION_METHODS if item.operation == operation and item.method == method)
-    return tuple(
-        BenchmarkCase(
-            comparison_group,
-            operation,
-            method,
-            calculation_engine,
-            strategy,
-            execution_mode,
-            pr_check=calculation_engine in pr_engines,
-        )
-        for calculation_engine in specification.calculation_engines
-    )
-
-
-def _method_cases(
-    comparison_group: str,
-    operation: OperationName,
-    methods: tuple[str, ...],
-    calculation_engine: CalculationEngine,
-    *,
-    execution_mode: ExecutionMode = "eager",
-    strategy: OperationStrategyName | None = None,
-) -> tuple[BenchmarkCase, ...]:
-    """Generate a method comparison for one engine, strategy and execution mode."""
-
-    if execution_mode == "eager" and strategy is not None:
-        raise ValueError("Chunk strategies cannot be fixed for an eager method comparison")
-    supported = {item.method: item.calculation_engines for item in OPERATION_METHODS if item.operation == operation}
-    if any(calculation_engine not in supported.get(method, ()) for method in methods):
-        raise ValueError(f"Engine {calculation_engine!r} does not support every requested {operation!r} method")
-    return tuple(
-        BenchmarkCase(
-            comparison_group,
-            operation,
-            method,
-            calculation_engine,
-            strategy,
-            execution_mode,
-        )
-        for method in methods
-    )
-
-
-def _strategy_cases(
-    comparison_group: str,
-    operation: OperationName,
-    method: str | None,
-    calculation_engine: CalculationEngine | None,
-    *,
-    execution_mode: Literal["dask", "multiprocessing"],
-) -> tuple[BenchmarkCase, ...]:
-    """Generate a comparison of approaches for coordinating one chunked operation."""
-
-    strategies = tuple(item.strategy for item in OPERATION_STRATEGIES if item.operation == operation)
-    return tuple(
-        BenchmarkCase(
-            comparison_group,
-            operation,
-            method,
-            calculation_engine,
-            strategy,
-            execution_mode,
-        )
-        for strategy in strategies
-    )
-
-
-def _merge_cases(*groups: tuple[BenchmarkCase, ...]) -> tuple[BenchmarkCase, ...]:
-    """Deduplicate cases reused by several plots while retaining pull-request selection."""
-
-    cases: dict[tuple[object, ...], BenchmarkCase] = {}
-    for group in groups:
-        for case in group:
-            key = (
-                case.comparison_group,
-                case.operation,
-                case.method,
-                case.calculation_engine,
-                case.strategy,
-                case.execution_mode,
-                case.output_driver,
-            )
-            existing = cases.get(key)
-            cases[key] = replace(case, pr_check=True) if existing is not None and case.pr_check else existing or case
-    return tuple(cases.values())
-
-
-def _external_case(
-    comparison_group: str,
-    operation: OperationName,
-    method: str | None,
-    *,
-    external_reference: Literal["gdal_cli", "pdal_cli"] = "gdal_cli",
-    pr_check: bool = False,
-    output_driver: Literal["GPKG", "LAS", "LAZ"] = "GPKG",
-) -> ExternalReferenceCase:
-    """Define one external CLI reference equivalent to a GeoUtils operation."""
-
-    return ExternalReferenceCase(
-        comparison_group,
-        operation,
-        method,
-        external_reference,
-        output_driver=output_driver,
-        pr_check=pr_check,
-    )
-
-
-##############################
-# Registered operation cases #
-##############################
-
-# Define the cases needed to compare each operation across execution modes, calculation engines, methods or strategies
-# Each helper changes only that choice and keeps the other operation settings fixed
-_INTERPOLATION_MODES = _execution_cases("interpolation-point-count", "interp_points", "linear", "scipy")
-_REPROJECTION_MODES = _execution_cases("reprojection-raster-size", "reproject", "nearest", "rasterio")
-_FILTER_MODES = _execution_cases(
-    "filter-chunk-size",
-    "filter",
-    "mean",
-    "scipy",
-    execution_modes=("dask", "multiprocessing"),
+from benchmarks.workflows.operations import (
+    SWEEPS,
+    format_api_label,
 )
-_POLYGONIZATION_MODES = _execution_cases(
-    "polygonization-raster-size", "polygonize", None, "rasterio", strategy="label_stitch"
-)
-_POLYGONIZATION_STRATEGIES = _strategy_cases(
-    "polygonization-raster-size", "polygonize", None, "rasterio", execution_mode="dask"
-)
-_RASTERIZATION_MODES = _execution_cases("rasterization-raster-size", "rasterize", None, "rasterio")
-_SUBSAMPLE_MODES = _execution_cases(
-    "subsample-size",
-    "subsample",
-    None,
-    None,
-    execution_modes=("dask", "multiprocessing"),
-)
-_TO_POINTCLOUD_MODES = _execution_cases(
-    "to-pointcloud-raster-size", "to_pointcloud", None, None, execution_modes=("dask", "multiprocessing")
-)
-_POINT_OUTPUT_DRIVERS: tuple[Literal["LAS", "LAZ"], ...] = ("LAS", "LAZ")
-_LAS_SUBSAMPLE_MODES = tuple(
-    _execution_cases(
-        "subsample-las-laz-size",
-        "subsample",
-        None,
-        None,
-        execution_modes=("multiprocessing",),
-        output_driver=driver,
-    )[0]
-    for driver in _POINT_OUTPUT_DRIVERS
-)
-_LAS_TO_POINTCLOUD_MODES = tuple(
-    _execution_cases(
-        "to-pointcloud-las-laz-size",
-        "to_pointcloud",
-        None,
-        None,
-        execution_modes=("multiprocessing",),
-        output_driver=driver,
-    )[0]
-    for driver in _POINT_OUTPUT_DRIVERS
-)
-
-# Isolate input size, chunk size, membership layout and group count for shared grouped-statistic kernels
-_GROUPED_MODES = _execution_cases(
-    "grouped-stats-raster-size",
-    "grouped_stats",
-    "moments",
-    "numpy",
-    strategy="dense",
-    pr_modes=("eager", "dask", "multiprocessing"),
-)
-_GROUPED_STRATEGIES = {
-    scenario: _strategy_cases(scenario, "grouped_stats", "moments", "numpy", execution_mode="dask")
-    for scenario in (
-        "grouped-stats-raster-size",
-        "grouped-stats-chunk-size",
-        "grouped-stats-interleaved-chunks",
-        "grouped-stats-group-count",
-    )
-}
-_GROUPED_ROBUST_MODES = _execution_cases(
-    "grouped-stats-robust-size",
-    "grouped_stats",
-    "robust",
-    "numpy",
-    strategy="groupwise",
-    pr_modes=("dask", "multiprocessing"),
-)
-
-# Compare the same prepared arrays with an optional external library, across input size and group count
-_GROUPED_FLOX_MODES = {
-    scenario: _execution_cases(
-        scenario,
-        "grouped_stats",
-        "moments",
-        "numpy",
-        strategy="auto",
-        execution_modes=("eager", "dask", "multiprocessing"),
-        pr_modes=("eager", "dask", "multiprocessing"),
-    )
-    for scenario in ("grouped-flox-raster-size", "grouped-flox-group-count")
-}
-_GROUPED_FLOX_REFERENCES = tuple(
-    ExternalReferenceCase(
-        scenario,
-        "grouped_stats",
-        "moments",
-        "flox",
-        pr_check=True,
-        execution_mode=cast(ExecutionMode, execution_mode),
-    )
-    for scenario in _GROUPED_FLOX_MODES
-    for execution_mode in ("eager", "dask")
-)
-
-# Check each distinct layout and the automatic sparse threshold with a bounded pull-request workload
-for _scenario, _strategies in _GROUPED_STRATEGIES.items():
-    _GROUPED_STRATEGIES[_scenario] = tuple(
-        (
-            replace(case, pr_check=True)
-            if (_scenario, case.strategy)
-            in {
-                ("grouped-stats-chunk-size", "dense"),
-                ("grouped-stats-interleaved-chunks", "groupwise"),
-                ("grouped-stats-group-count", "sparse"),
-                ("grouped-stats-group-count", "auto"),
-            }
-            else case
-        )
-        for case in _strategies
-    )
-
-# Compare all four gridding methods across execution modes while keeping SciPy as the calculation engine
-_GRID_METHODS = ("nearest", "linear", "idw", "mean")
-_GRID_MODE_CASES = {
-    method: _execution_cases(
-        "gridding-raster-size",
-        "grid",
-        method,
-        "scipy",
-        pr_modes=("eager", "dask", "multiprocessing") if method == "nearest" else (),
-    )
-    for method in _GRID_METHODS
-}
-
-# Reuse the eager SciPy cases in one plot that isolates the choice of gridding method
-_GRID_METHOD_CASES = _method_cases("gridding-raster-size", "grid", _GRID_METHODS, "scipy")
-
-# Compare SciPy and Numba in eager mode for the methods supported by both calculation engines
-_GRID_ENGINE_CASES = {
-    method: _engine_cases(
-        "gridding-raster-size",
-        "grid",
-        method,
-        pr_engines=("numba",) if method == "nearest" else (),
-    )
-    for method in ("nearest", "idw", "mean")
-}
-
-# Repeat the nearest engine comparison while varying source point count instead of raster size
-_GRID_POINT_ENGINE_CASES = _engine_cases("gridding-point-count", "grid", "nearest")
-
-# Add one fixed-size run per Numba method and worker execution mode to check that compiled kernels work there
-# The eager engine comparisons already measure how these methods scale with raster size
-_WORKER_EXECUTION_MODES: tuple[ExecutionMode, ...] = ("dask", "multiprocessing")
-_NUMBA_WORKER_CASES = tuple(
-    BenchmarkCase(
-        "worker-integration",
-        "grid",
-        method,
-        "numba",
-        None,
-        execution_mode,
-        pr_check=(method, execution_mode) in (("idw", "dask"), ("mean", "multiprocessing")),
-    )
-    for method in ("nearest", "idw", "mean")
-    for execution_mode in _WORKER_EXECUTION_MODES
-)
-
-# Combine every GeoUtils case and remove duplicates when the same combination appears in several comparisons
-BENCHMARK_CASES = _merge_cases(
-    _GROUPED_MODES,
-    *tuple(_GROUPED_STRATEGIES.values()),
-    _GROUPED_ROBUST_MODES,
-    *tuple(_GROUPED_FLOX_MODES.values()),
-    _INTERPOLATION_MODES,
-    _REPROJECTION_MODES,
-    _FILTER_MODES,
-    _POLYGONIZATION_MODES,
-    _POLYGONIZATION_STRATEGIES,
-    _RASTERIZATION_MODES,
-    _SUBSAMPLE_MODES,
-    _TO_POINTCLOUD_MODES,
-    _LAS_SUBSAMPLE_MODES,
-    _LAS_TO_POINTCLOUD_MODES,
-    *tuple(_GRID_MODE_CASES.values()),
-    _GRID_METHOD_CASES,
-    *tuple(_GRID_ENGINE_CASES.values()),
-    _GRID_POINT_ENGINE_CASES,
-    _NUMBA_WORKER_CASES,
-)
-
-# Define matching GDAL CLI runs for operations that have a direct external reference
-_REPROJECTION_REFERENCE = _external_case("reprojection-raster-size", "reproject", "nearest")
-_POLYGONIZATION_REFERENCE = _external_case("polygonization-raster-size", "polygonize", None)
-_RASTERIZATION_REFERENCE = _external_case("rasterization-raster-size", "rasterize", None)
-_GRID_REFERENCES = {
-    method: _external_case(
-        "gridding-raster-size",
-        "grid",
-        method,
-        pr_check=method == "nearest",
-    )
-    for method in _GRID_METHODS
-}
-_GRID_POINT_REFERENCE = _external_case("gridding-point-count", "grid", "nearest")
-_SUBSAMPLE_REFERENCE = _external_case(
-    "subsample-size",
-    "subsample",
-    None,
-    external_reference="pdal_cli",
-    pr_check=True,
-)
-_TO_POINTCLOUD_REFERENCE = _external_case(
-    "to-pointcloud-raster-size",
-    "to_pointcloud",
-    None,
-    external_reference="pdal_cli",
-    pr_check=True,
-)
-_LAS_SUBSAMPLE_REFERENCES = tuple(
-    _external_case(
-        "subsample-las-laz-size",
-        "subsample",
-        None,
-        external_reference="pdal_cli",
-        output_driver=driver,
-    )
-    for driver in _POINT_OUTPUT_DRIVERS
-)
-_LAS_TO_POINTCLOUD_REFERENCES = tuple(
-    _external_case(
-        "to-pointcloud-las-laz-size",
-        "to_pointcloud",
-        None,
-        external_reference="pdal_cli",
-        output_driver=driver,
-    )
-    for driver in _POINT_OUTPUT_DRIVERS
-)
-
-# Collect external runs separately because they are neither GeoUtils engines nor execution modes
-EXTERNAL_REFERENCE_CASES = (
-    _REPROJECTION_REFERENCE,
-    _POLYGONIZATION_REFERENCE,
-    _RASTERIZATION_REFERENCE,
-    *_GRID_REFERENCES.values(),
-    _GRID_POINT_REFERENCE,
-    _SUBSAMPLE_REFERENCE,
-    _TO_POINTCLOUD_REFERENCE,
-    *_LAS_SUBSAMPLE_REFERENCES,
-    *_LAS_TO_POINTCLOUD_REFERENCES,
-    *_GROUPED_FLOX_REFERENCES,
-)
-
-# Map each generated ASV class name back to the operation settings needed during setup
-BENCHMARK_CASE_BY_CLASS = {case.benchmark_class: case for case in BENCHMARK_CASES}
-EXTERNAL_REFERENCE_CASE_BY_CLASS = {case.benchmark_class: case for case in EXTERNAL_REFERENCE_CASES}
-
-
-##############################
-# Report labels and plots    #
-##############################
-
-
-def _series_label(case: BenchmarkCase, dimension: ComparisonDimension) -> str:
-    """Return the plot label for the dimension varied by one GeoUtils case."""
-
-    if dimension == "execution_mode":
-        return EXECUTION_MODE_LABELS[case.execution_mode]
-    if dimension == "calculation_engine":
-        assert case.calculation_engine is not None
-        return CALCULATION_ENGINE_LABELS[case.calculation_engine]
-    if dimension == "strategy":
-        assert case.strategy is not None
-        return STRATEGY_LABELS[case.strategy]
-    assert case.method is not None
-    return METHOD_LABELS.get(case.method, case.method.replace("_", " ").title())
-
-
-def _comparison_series(
-    cases: tuple[BenchmarkCase, ...],
-    dimension: ComparisonDimension,
-    external_reference: ExternalReferenceCase | None = None,
-) -> tuple[tuple[str, str], ...]:
-    """Return labelled ASV classes for one plot, optionally followed by an external CLI."""
-
-    series = tuple((_series_label(case, dimension), case.benchmark_class) for case in cases)
-    if external_reference is not None:
-        external_label = {
-            "gdal_cli": GDAL_CLI_LABEL,
-            "pdal_cli": PDAL_CLI_LABEL,
-        }[external_reference.external_reference]
-        return (*series, (external_label, external_reference.benchmark_class))
-    return series
-
-
-def _point_output_series(
-    cases: tuple[BenchmarkCase, ...], references: tuple[ExternalReferenceCase, ...]
-) -> tuple[tuple[str, str], ...]:
-    """Return GeoUtils and PDAL series for each registered LAS/LAZ output format."""
-
-    series = []
-    for driver in _POINT_OUTPUT_DRIVERS:
-        case = next(item for item in cases if item.output_driver == driver)
-        reference = next(item for item in references if item.output_driver == driver)
-        series.extend(
-            (
-                (f"GeoUtils {driver}", case.benchmark_class),
-                (f"PDAL {driver}", reference.benchmark_class),
-            )
-        )
-    return tuple(series)
-
-
-@dataclass(frozen=True)
-class Comparison:
-    """Describe one parameter plot while varying exactly one categorical dimension."""
-
-    slug: str
-    title: str
-    description: str
-    parameter_label: str
-    series: tuple[tuple[str, str], ...]
-    operation: OperationName
-    method: str | None
-    workload_template: str
-    logarithmic_x: bool = False
-    documentation: bool = True
-    summary: bool = True
-    series_dimension: ComparisonDimension = "execution_mode"
-    calculation_engine: CalculationEngine | None = None
-    strategy: OperationStrategyName | None = None
-    execution_mode: ExecutionMode | None = None
-
-
-# Concisely identify the shared input and support chosen for each gridding method
-_GRID_FIXTURE_DESCRIPTIONS = {
-    "nearest": "Grids a 17 × 17 regular WGS84 point set with unlimited nearest-neighbor support onto a square WGS84 raster.",
-    "linear": "Grids a 17 × 17 regular WGS84 point set with Delaunay linear interpolation onto a square WGS84 raster.",
-    "idw": "Grids a 17 × 17 regular WGS84 point set with inverse-distance weighting and 16-pixel support onto a square WGS84 raster.",
-    "mean": "Grids a 17 × 17 regular WGS84 point set with a circular mean and 16-pixel support onto a square WGS84 raster.",
-}
-_GRID_POINTS_PER_AXIS = {"nearest": 17, "linear": 17, "idw": 17, "mean": 17}
-
-
-# Define the report plots, including their displayed series and the operation settings held fixed
-COMPARISONS: tuple[Comparison, ...] = (
-    *tuple(
-        Comparison(
-            slug=scenario,
-            title=title,
-            description=(
-                "Compares GeoUtils stats() with Flox on two prebuilt float64 arrays, the same boolean mask and "
-                "declared categories. Both return finite count, mean and population standard deviation (ddof=0), "
-                "including completed Dask results and dataframe construction. Dask uses one threaded worker; "
-                "GeoUtils multiprocessing uses one persistent process initialized before the arrays. Both use "
-                "256 × 256 tiles. Worker startup is excluded, while tile serialization and merging are timed. "
-                "Flox uses its default engine and map-reduce for lazy group labels."
-            ),
-            parameter_label=parameter_label,
-            series=(
-                *_comparison_series(_GROUPED_FLOX_MODES[scenario], "execution_mode"),
-                *tuple(
-                    (f"Flox ({EXECUTION_MODE_LABELS[case.execution_mode]})", case.benchmark_class)
-                    for case in _GROUPED_FLOX_REFERENCES
-                    if case.comparison_group == scenario and case.execution_mode is not None
-                ),
-            ),
-            operation="grouped_stats",
-            method="moments",
-            calculation_engine="numpy",
-            strategy="auto",
-            workload_template=workload,
-            documentation=False,
-            summary=False,
-        )
-        for scenario, title, parameter_label, workload in (
-            (
-                "grouped-flox-raster-size",
-                "GeoUtils and Flox grouped statistics by raster size",
-                "Size of raster (pixels per side)",
-                "{parameter} × {parameter} raster; 256 local groups; two masked float64 values",
-            ),
-            (
-                "grouped-flox-group-count",
-                "GeoUtils and Flox grouped statistics by group count",
-                "Number of groups per axis",
-                "1,024 × 1,024 raster; {parameter} × {parameter} interleaved groups; two masked float64 values",
-            ),
-        )
-    ),
-    Comparison(
-        slug="grouped-stats-execution-size",
-        title="Grouped moments by raster size and execution mode",
-        description=(
-            "Computes count, mean, standard deviation and extrema for two values with independent missing data "
-            "in 64 rectangular groups. Dask reads chunks lazily; multiprocessing loads the input in the client."
-        ),
-        parameter_label="Size of raster (pixels per side)",
-        series=_comparison_series(_GROUPED_MODES, "execution_mode"),
-        operation="grouped_stats",
-        method="moments",
-        calculation_engine="numpy",
-        strategy="dense",
-        workload_template="{parameter} × {parameter} raster; 256 × 256 chunks; 64 local groups; two values",
-        documentation=False,
-    ),
-    *tuple(
-        Comparison(
-            slug=scenario,
-            title=title,
-            description=(
-                "Computes count, mean, standard deviation and extrema for two values with independent gaps. "
-                "Dense summaries allocate every declared group per chunk; sparse summaries retain encountered "
-                "groups; groupwise gathers complete observations. Automatic uses the declared group count."
-            ),
-            parameter_label=parameter_label,
-            series=_comparison_series(_GROUPED_STRATEGIES[scenario], "strategy"),
-            operation="grouped_stats",
-            method="moments",
-            calculation_engine="numpy",
-            execution_mode="dask",
-            series_dimension="strategy",
-            documentation=False,
-            workload_template=workload,
-        )
-        for scenario, title, parameter_label, workload in (
-            (
-                "grouped-stats-raster-size",
-                "Grouped reduction strategies by raster size",
-                "Size of raster (pixels per side)",
-                "{parameter} × {parameter} raster; 256 × 256 chunks; 64 local groups; two values",
-            ),
-            (
-                "grouped-stats-chunk-size",
-                "Grouped reduction strategies by chunk size (local groups)",
-                "Size of chunks (pixels per side)",
-                "1,024 × 1,024 raster; {parameter} × {parameter} chunks; 64 local groups; two values",
-            ),
-            (
-                "grouped-stats-interleaved-chunks",
-                "Grouped reduction strategies by chunk size (interleaved groups)",
-                "Size of chunks (pixels per side)",
-                "1,024 × 1,024 raster; {parameter} × {parameter} chunks; 64 interleaved groups; two values",
-            ),
-            (
-                "grouped-stats-group-count",
-                "Grouped reduction strategies by declared group count",
-                "Number of groups per axis",
-                "1,024 × 1,024 raster; 128 × 128 chunks; {parameter} × {parameter} local groups; two values",
-            ),
-        )
-    ),
-    Comparison(
-        slug="grouped-stats-robust-size",
-        title="Exact grouped median and NMAD by raster size",
-        description=(
-            "Gathers complete observations in 64 rectangular groups to calculate exact medians and NMAD for "
-            "two values with independent missing data. Memory depends on the largest complete group."
-        ),
-        parameter_label="Size of raster (pixels per side)",
-        series=_comparison_series(_GROUPED_ROBUST_MODES, "execution_mode"),
-        operation="grouped_stats",
-        method="robust",
-        calculation_engine="numpy",
-        strategy="groupwise",
-        workload_template="{parameter} × {parameter} raster; 256 × 256 chunks; 64 local groups; two values",
-        documentation=False,
-    ),
-    Comparison(
-        slug="interpolation-point-count",
-        title="Linear interpolation by number of points (SciPy engine)",
-        description=("Interpolates deterministic WGS84 points from a 2048 × 2048 WGS84 raster with 512 × 512 chunks."),
-        parameter_label="Number of interpolated points",
-        series=_comparison_series(_INTERPOLATION_MODES, "execution_mode"),
-        operation="interp_points",
-        method="linear",
-        workload_template=("2,048 × 2,048 source raster; {parameter} interpolated points; 512 × 512 chunks"),
-        calculation_engine="scipy",
-        logarithmic_x=True,
-    ),
-    Comparison(
-        slug="reprojection-raster-size",
-        title="Nearest reprojection by raster size (Rasterio/GDAL engine)",
-        description=(
-            "Reprojects a WGS84 (EPSG:4326) raster to UTM zone 32N (EPSG:32632) with nearest-neighbor "
-            "resampling while preserving the selected output dimensions."
-        ),
-        parameter_label="Size of raster (pixels per side)",
-        series=_comparison_series(_REPROJECTION_MODES, "execution_mode", _REPROJECTION_REFERENCE),
-        operation="reproject",
-        method="nearest",
-        workload_template="{parameter} × {parameter} input/output raster; 512 × 512 chunks",
-        calculation_engine="rasterio",
-    ),
-    Comparison(
-        slug="filter-chunk-size",
-        title="Mean filter by chunk size (SciPy engine)",
-        description="Applies a 5 × 5 mean filter to a 2048 × 2048 WGS84 raster while varying square chunk size.",
-        parameter_label="Size of chunks (pixels per side)",
-        series=_comparison_series(_FILTER_MODES, "execution_mode"),
-        operation="filter",
-        method="mean",
-        workload_template="2,048 × 2,048 raster; {parameter} × {parameter} chunks; 5 × 5 filter",
-        calculation_engine="scipy",
-    ),
-    Comparison(
-        slug="polygonization-raster-size",
-        title="Label-stitch polygonization by raster size (Rasterio/GDAL engine)",
-        description=(
-            "Polygonizes value-1 pixels in a WGS84 raster containing 21 × 21 disconnected rectangles while "
-            "varying raster size."
-        ),
-        parameter_label="Size of raster (pixels per side)",
-        series=_comparison_series(_POLYGONIZATION_MODES, "execution_mode", _POLYGONIZATION_REFERENCE),
-        operation="polygonize",
-        method=None,
-        workload_template=("{parameter} × {parameter} raster; 441 disconnected raster regions; 512 × 512 chunks"),
-        calculation_engine="rasterio",
-        strategy="label_stitch",
-    ),
-    Comparison(
-        slug="polygonization-strategy-raster-size",
-        title="Polygonization chunk strategy (Dask execution)",
-        description=(
-            "Polygonizes the same 21 × 21 disconnected rectangles with Dask while comparing how polygons "
-            "crossing chunk boundaries are reconciled."
-        ),
-        parameter_label="Size of raster (pixels per side)",
-        series=_comparison_series(_POLYGONIZATION_STRATEGIES, "strategy"),
-        operation="polygonize",
-        method=None,
-        workload_template=("{parameter} × {parameter} raster; 441 disconnected raster regions; 512 × 512 chunks"),
-        calculation_engine="rasterio",
-        execution_mode="dask",
-        series_dimension="strategy",
-        documentation=False,
-    ),
-    Comparison(
-        slug="rasterization-raster-size",
-        title="Rasterization by raster size (Rasterio/GDAL engine)",
-        description=("Burns 51 × 51 regularly spaced WGS84 polygons as value 1 into a byte raster with background 0."),
-        parameter_label="Size of raster (pixels per side)",
-        series=_comparison_series(_RASTERIZATION_MODES, "execution_mode", _RASTERIZATION_REFERENCE),
-        operation="rasterize",
-        method=None,
-        workload_template=("2,601 source polygon features; {parameter} × {parameter} output raster; 512 × 512 chunks"),
-        calculation_engine="rasterio",
-    ),
-    Comparison(
-        slug="subsample-size",
-        title="Raster subsampling by execution mode",
-        description=(
-            "Selects a fixed number of cells, calculates their center coordinates and band values, and completes "
-            "the Dask dataframe or GeoPackage output. Both GeoUtils and PDAL use random seed 42 before keeping "
-            "the requested count."
-        ),
-        parameter_label="Number of output points",
-        series=_comparison_series(_SUBSAMPLE_MODES, "execution_mode", _SUBSAMPLE_REFERENCE),
-        operation="subsample",
-        method=None,
-        workload_template=("2,048 × 2,048 source raster; {parameter} output points; 512 × 512 chunks"),
-        series_dimension="execution_mode",
-        logarithmic_x=True,
-        documentation=False,
-    ),
-    Comparison(
-        slug="to-pointcloud-raster-size",
-        title="Raster to point cloud by raster size",
-        description=(
-            "Converts every raster cell to its center coordinate and band value, then completes the Dask dataframe "
-            "or GeoPackage output."
-        ),
-        parameter_label="Size of raster (pixels per side)",
-        series=_comparison_series(_TO_POINTCLOUD_MODES, "execution_mode", _TO_POINTCLOUD_REFERENCE),
-        operation="to_pointcloud",
-        method=None,
-        workload_template=("{parameter} × {parameter} source raster; one output point per cell; 512 × 512 chunks"),
-        series_dimension="execution_mode",
-        documentation=False,
-    ),
-    Comparison(
-        slug="subsample-las-laz-size",
-        title="LAS/LAZ raster subsampling compared with PDAL",
-        description=(
-            "Selects a fixed number of raster cells and writes their center coordinates with the raster value as "
-            "native elevation. GeoUtils multiprocessing and PDAL CLI each write both LAS and LAZ."
-        ),
-        parameter_label="Number of output points",
-        series=_point_output_series(_LAS_SUBSAMPLE_MODES, _LAS_SUBSAMPLE_REFERENCES),
-        operation="subsample",
-        method=None,
-        workload_template=("2,048 × 2,048 source raster; {parameter} output points; 512 × 512 chunks"),
-        series_dimension="output_format",
-        execution_mode="multiprocessing",
-        logarithmic_x=True,
-        documentation=False,
-        summary=False,
-    ),
-    Comparison(
-        slug="to-pointcloud-las-laz-size",
-        title="LAS/LAZ raster to point cloud conversion compared with PDAL",
-        description=(
-            "Converts every raster cell to its center coordinate and writes the raster value as native elevation. "
-            "GeoUtils multiprocessing and PDAL CLI each write both LAS and LAZ."
-        ),
-        parameter_label="Size of raster (pixels per side)",
-        series=_point_output_series(_LAS_TO_POINTCLOUD_MODES, _LAS_TO_POINTCLOUD_REFERENCES),
-        operation="to_pointcloud",
-        method=None,
-        workload_template=("{parameter} × {parameter} source raster; one output point per cell; 512 × 512 chunks"),
-        series_dimension="output_format",
-        execution_mode="multiprocessing",
-        documentation=False,
-        summary=False,
-    ),
-    *tuple(
-        Comparison(
-            slug="gridding-raster-size" if method == "nearest" else f"{method}-gridding-raster-size",
-            title=f"{METHOD_LABELS[method]} gridding execution mode (SciPy engine)",
-            description=_GRID_FIXTURE_DESCRIPTIONS[method],
-            parameter_label="Size of raster (pixels per side)",
-            series=_comparison_series(_GRID_MODE_CASES[method], "execution_mode", _GRID_REFERENCES[method]),
-            operation="grid",
-            method=method,
-            workload_template=(
-                f"{{parameter}} × {{parameter}} output raster; "
-                f"{_GRID_POINTS_PER_AXIS[method]} × {_GRID_POINTS_PER_AXIS[method]} source points; "
-                "512 × 512 chunks"
-            ),
-            calculation_engine="scipy",
-            documentation=method == "nearest",
-        )
-        for method in _GRID_METHODS
-    ),
-    Comparison(
-        slug="gridding-method-raster-size",
-        title="Gridding method (SciPy engine, eager execution)",
-        description=(
-            "Grids regular WGS84 point sets onto square WGS84 rasters using the fixture and support selected for "
-            "each numerical method."
-        ),
-        parameter_label="Size of raster (pixels per side)",
-        series=_comparison_series(_GRID_METHOD_CASES, "method"),
-        operation="grid",
-        method=None,
-        workload_template=(
-            "{parameter} × {parameter} output raster; method-specific source point set; 512 × 512 chunks"
-        ),
-        calculation_engine="scipy",
-        execution_mode="eager",
-        series_dimension="method",
-        documentation=False,
-    ),
-    *tuple(
-        Comparison(
-            slug=f"{method}-gridding-engine-raster-size",
-            title=f"{METHOD_LABELS[method]} gridding calculation engine (eager execution)",
-            description=_GRID_FIXTURE_DESCRIPTIONS[method],
-            parameter_label="Size of raster (pixels per side)",
-            series=_comparison_series(_GRID_ENGINE_CASES[method], "calculation_engine", _GRID_REFERENCES[method]),
-            operation="grid",
-            method=method,
-            workload_template=(
-                f"{{parameter}} × {{parameter}} output raster; "
-                f"{_GRID_POINTS_PER_AXIS[method]} × {_GRID_POINTS_PER_AXIS[method]} source points; "
-                "512 × 512 chunks"
-            ),
-            execution_mode="eager",
-            series_dimension="calculation_engine",
-            documentation=False,
-        )
-        for method in ("nearest", "idw", "mean")
-    ),
-    Comparison(
-        slug="nearest-gridding-engine-point-count",
-        title="Nearest gridding by number of source points (eager execution)",
-        description=(
-            "Grids a regular WGS84 point set with unlimited nearest-neighbor support onto a fixed 1024 × 1024 "
-            "WGS84 raster."
-        ),
-        parameter_label="Number of source points per axis",
-        series=_comparison_series(_GRID_POINT_ENGINE_CASES, "calculation_engine", _GRID_POINT_REFERENCE),
-        operation="grid",
-        method="nearest",
-        workload_template=("1,024 × 1,024 output raster; {parameter} × {parameter} source points; 512 × 512 chunks"),
-        execution_mode="eager",
-        series_dimension="calculation_engine",
-        documentation=False,
-    ),
-)
-
+from benchmarks.workflows.runner import BenchmarkRunner
 
 #####################################
-# ASV measurements and input sizes  #
+# ASV measurements and input sizes
 #####################################
 
 
-# The classes below define which numeric input changes, such as raster size, chunk size or point count
-# Generated subclasses later combine that input axis with one concrete operation configuration
+# Numeric input ranges and configuration changes live in operation modules; this class keeps measurements shared
 class _ComparisonBenchmark:
-    """Share ASV settings, dimensional metadata and complete result computation."""
+    """Share ASV settings and complete result computation across operation sweeps."""
 
     timeout = 900
     number = 1
     repeat = 2
     rounds = 1
     warmup_time = 0
+    sweep: Sweep
+    case: BenchmarkCase | ExternalReferenceCase
     operation: OperationName
     operation_method: str | None
     calculation_engine: CalculationEngine | None
@@ -1003,22 +52,17 @@ class _ComparisonBenchmark:
     execution_mode: ExecutionMode | None
     external_reference: ExternalReference | None
 
-    def make_config(self, parameter: int) -> BenchmarkConfig:
-        """Build the fixed configuration around one selected numeric parameter."""
+    def make_config(self, parameter: Parameter) -> BenchmarkConfig:
+        """Build one configuration from the operation-local sweep."""
 
-        raise NotImplementedError
+        return self.sweep.make_config(parameter, self.case, asv_pr_check_enabled())
 
-    def setup(self, parameter: int) -> None:
+    def setup(self, parameter: Parameter) -> None:
         """Prepare deterministic files and initialize one execution case."""
 
-        benchmark_class = type(self).__name__
-        case = BENCHMARK_CASE_BY_CLASS.get(benchmark_class)
-        reference_case = EXTERNAL_REFERENCE_CASE_BY_CLASS.get(benchmark_class)
-        if (case is None) == (reference_case is None):
-            raise ValueError(f"Expected exactly one registered benchmark case for {benchmark_class}")
-
-        selected_case = case or reference_case
-        assert selected_case is not None
+        selected_case = self.case
+        case = selected_case if isinstance(selected_case, BenchmarkCase) else None
+        reference_case = selected_case if isinstance(selected_case, ExternalReferenceCase) else None
         if asv_pr_check_enabled() and not selected_case.pr_check:
             raise NotImplementedError("Benchmark case omitted from the pull-request sample")
 
@@ -1026,8 +70,8 @@ class _ComparisonBenchmark:
         self.operation = selected_case.operation
         self.operation_method = selected_case.method
         self.operation_strategy = selected_case.strategy
-        self.calculation_engine = case.calculation_engine if case is not None else None
-        self.execution_mode = case.execution_mode if case is not None else None
+        self.calculation_engine = case.engine if case is not None else None
+        self.execution_mode = case.execution if case is not None else None
         self.external_reference = reference_case.external_reference if reference_case is not None else None
 
         # Input generation remains outside all three measured boundaries
@@ -1052,7 +96,7 @@ class _ComparisonBenchmark:
             assert self.execution_mode is not None
             self.runner = BenchmarkRunner(self.execution_mode, self.config).start()
 
-    def teardown(self, parameter: int) -> None:
+    def teardown(self, parameter: Parameter) -> None:
         """Stop workers and remove generated source, output and spill files."""
 
         if not hasattr(self, "runner"):
@@ -1062,7 +106,7 @@ class _ComparisonBenchmark:
             self.sources.close()
         self._tmpdir.cleanup()
 
-    def time_operation(self, parameter: int) -> None:
+    def time_operation(self, parameter: Parameter) -> None:
         """Measure a complete operation after execution-mode initialization."""
 
         if isinstance(self.runner, (GdalRunner, PdalRunner)):
@@ -1070,7 +114,7 @@ class _ComparisonBenchmark:
         else:
             self.runner._execute(self.operation)
 
-    def track_end_to_end_time_s(self, parameter: int) -> float:
+    def track_end_to_end_time_s(self, parameter: Parameter) -> float:
         """Measure execution-mode initialization followed by one complete operation."""
 
         if self.external_reference is not None:
@@ -1092,346 +136,44 @@ class _ComparisonBenchmark:
         self.runner = fresh_runner
         return elapsed_time_s
 
-    def track_peak_process_tree_mem_mb(self, parameter: int) -> float:
-        """Measure peak memory for the benchmark process and execution-mode children."""
+    def track_process_tree_mem_increase_mb(self, parameter: Parameter) -> float:
+        """Measure peak memory increase above the initialized process-tree baseline."""
 
         if isinstance(self.runner, (GdalRunner, PdalRunner)):
-            return self.runner.run().peak_process_tree_mem_mb
-        return self.runner.run(self.operation).peak_process_tree_mem_mb
+            return self.runner.run().process_tree_mem_increase_mb
+        return self.runner.run(self.operation).process_tree_mem_increase_mb
 
 
 # ASV reads tracker units from method attributes when labelling stored values
 setattr(_ComparisonBenchmark.track_end_to_end_time_s, "unit", "seconds")
-setattr(_ComparisonBenchmark.track_peak_process_tree_mem_mb, "unit", "MB")
-
-
-class _InterpolationPointCount(_ComparisonBenchmark):
-    """Keep raster and chunk sizes fixed while varying interpolated points."""
-
-    param_names = ["interpolated_points"]
-    params = [asv_parameter_values([256, 2048, 16384], pr_check_value=256)]
-
-    def make_config(self, parameter: int) -> BenchmarkConfig:
-        """Place the selected point count in an otherwise fixed configuration."""
-
-        return BenchmarkConfig(shape=(2048, 2048), chunks=(512, 512), ninterp=parameter)
-
-
-class _ReprojectionRasterSize(_ComparisonBenchmark):
-    """Keep chunk size fixed while varying input and output raster size."""
-
-    param_names = ["raster_size"]
-    params = [asv_parameter_values([1024, 2048, 4096], pr_check_value=1024)]
-
-    def make_config(self, parameter: int) -> BenchmarkConfig:
-        """Place the selected raster size in an otherwise fixed configuration."""
-
-        return BenchmarkConfig(shape=(parameter, parameter), chunks=(512, 512))
-
-
-class _FilterChunkSize(_ComparisonBenchmark):
-    """Keep raster size and filter window fixed while varying square chunks."""
-
-    param_names = ["chunk_size"]
-    params = [asv_parameter_values([256, 512, 1024], pr_check_value=1024)]
-
-    def make_config(self, parameter: int) -> BenchmarkConfig:
-        """Place the selected chunk size in an otherwise fixed configuration."""
-
-        return BenchmarkConfig(shape=(2048, 2048), chunks=(parameter, parameter))
-
-
-class _PolygonizationRasterSize(_ComparisonBenchmark):
-    """Keep connected-region count fixed while varying raster size."""
-
-    param_names = ["raster_size"]
-    params = [asv_parameter_values([1024, 2048, 4096], pr_check_value=1024)]
-
-    def make_config(self, parameter: int) -> BenchmarkConfig:
-        """Place the selected raster size around a fixed set of regions."""
-
-        return BenchmarkConfig(
-            shape=(parameter, parameter),
-            chunks=(512, 512),
-            polygon_regions_per_axis=21,
-        )
-
-
-class _RasterizationRasterSize(_ComparisonBenchmark):
-    """Keep vector complexity fixed while varying output raster size."""
-
-    param_names = ["raster_size"]
-    params = [asv_parameter_values([1024, 2048, 4096], pr_check_value=1024)]
-
-    def make_config(self, parameter: int) -> BenchmarkConfig:
-        """Place the selected raster size around a fixed vector input."""
-
-        return BenchmarkConfig(
-            shape=(parameter, parameter),
-            chunks=(512, 512),
-            vector_features_per_axis=51,
-        )
-
-
-class _SubsampleSize(_ComparisonBenchmark):
-    """Keep raster and chunks fixed while varying the number of output points."""
-
-    param_names = ["subsample_size"]
-    params = [asv_parameter_values([256, 16384, 524288], pr_check_value=256)]
-
-    def make_config(self, parameter: int) -> BenchmarkConfig:
-        """Select enough points to cover both compact and tile-sized selection paths."""
-
-        return BenchmarkConfig(shape=(2048, 2048), chunks=(512, 512), subsample_size=parameter)
-
-
-class _PointcloudRasterSize(_ComparisonBenchmark):
-    """Keep chunk size fixed while converting every cell from rasters of varying size."""
-
-    param_names = ["raster_size"]
-    params = [asv_parameter_values([256, 512, 1024], pr_check_value=256)]
-
-    def make_config(self, parameter: int) -> BenchmarkConfig:
-        """Place the selected raster size around the complete point conversion."""
-
-        return BenchmarkConfig(shape=(parameter, parameter), chunks=(512, 512))
-
-
-class _GriddingRasterSize(_ComparisonBenchmark):
-    """Keep one gridding method and point count fixed while varying raster size."""
-
-    param_names = ["raster_size"]
-    params = [asv_parameter_values([512, 1024, 2048], pr_check_value=512)]
-
-    def make_config(self, parameter: int) -> BenchmarkConfig:
-        """Place the selected raster size around the common source point input."""
-
-        # Keep the point count fixed so only the method and its required support distance differ
-        method_distances = {
-            "nearest": float("inf"),
-            "linear": float("inf"),
-            "idw": 16.0,
-            "mean": 16.0,
-        }
-        if self.operation_method not in method_distances:
-            raise ValueError(f"No gridding fixture is defined for method {self.operation_method!r}")
-        return BenchmarkConfig(
-            shape=(parameter, parameter),
-            chunks=(512, 512),
-            point_features_per_axis=_GRID_POINTS_PER_AXIS[self.operation_method],
-            grid_dist_nodata_pixel=method_distances[self.operation_method],
-        )
-
-
-class _NearestGriddingPointCount(_ComparisonBenchmark):
-    """Keep raster size fixed while varying source points for nearest gridding."""
-
-    param_names = ["points_per_axis"]
-    params = [asv_parameter_values([3, 9, 33], pr_check_value=3)]
-
-    def make_config(self, parameter: int) -> BenchmarkConfig:
-        """Place the selected point count in an otherwise fixed configuration."""
-
-        return BenchmarkConfig(
-            shape=(1024, 1024),
-            chunks=(512, 512),
-            point_features_per_axis=parameter,
-            grid_dist_nodata_pixel=float("inf"),
-        )
-
-
-class _GroupedStatsRasterSize(_ComparisonBenchmark):
-    """Vary raster size around fixed chunks and localized groups."""
-
-    param_names = ["raster_size"]
-    params = [asv_parameter_values([512, 1024, 2048], pr_check_value=256)]
-
-    def make_config(self, parameter: int) -> BenchmarkConfig:
-        """Prepare two values and 64 spatial groups on the selected raster size."""
-
-        return BenchmarkConfig(shape=(parameter, parameter), chunks=(256, 256))
-
-
-class _GroupedStatsChunkSize(_ComparisonBenchmark):
-    """Vary chunk size while keeping the raster and group boundaries fixed."""
-
-    param_names = ["chunk_size"]
-    params = [asv_parameter_values([64, 193, 512], pr_check_value=97)]
-
-    def make_config(self, parameter: int) -> BenchmarkConfig:
-        """Include uneven edge chunks and groups crossing partition boundaries."""
-
-        size = 256 if asv_pr_check_enabled() else 1024
-        return BenchmarkConfig(shape=(size, size), chunks=(parameter, parameter))
-
-
-class _GroupedStatsInterleavedChunks(_GroupedStatsChunkSize):
-    """Repeat every group throughout the raster while varying chunk size."""
-
-    def make_config(self, parameter: int) -> BenchmarkConfig:
-        """Keep observations interleaved across all chunks for each tested partition size."""
-
-        return replace(super().make_config(parameter), grouped_layout="interleaved")
-
-
-class _GroupedStatsGroupCount(_ComparisonBenchmark):
-    """Vary declared groups across the automatic dense-to-sparse selection threshold."""
-
-    param_names = ["groups_per_axis"]
-    params = [asv_parameter_values([4, 16, 65], pr_check_value=65)]
-
-    def make_config(self, parameter: int) -> BenchmarkConfig:
-        """Include 4225 groups so automatic reduction exercises its sparse branch."""
-
-        size = 256 if asv_pr_check_enabled() else 1024
-        return BenchmarkConfig(shape=(size, size), chunks=(128, 128), grouped_regions_per_axis=parameter)
-
-
-class _GroupedFloxRasterSize(_ComparisonBenchmark):
-    """Compare complete grouped results after preparing identical in-memory NumPy or Dask inputs."""
-
-    param_names = ["raster_size"]
-    params = [asv_parameter_values([256, 1024, 4096], pr_check_value=256)]
-
-    def make_config(self, parameter: int) -> BenchmarkConfig:
-        """Vary raster size around 256 local groups and fixed spatial chunks."""
-
-        return BenchmarkConfig(shape=(parameter, parameter), chunks=(256, 256), grouped_regions_per_axis=16)
-
-    def setup(self, parameter: int) -> None:
-        """Prepare common arrays and load optional libraries outside the measurement."""
-
-        # Select the same execution mode for GeoUtils and its corresponding Flox reference
-        benchmark_class = type(self).__name__
-        case = BENCHMARK_CASE_BY_CLASS.get(benchmark_class)
-        reference = EXTERNAL_REFERENCE_CASE_BY_CLASS.get(benchmark_class)
-        selected = case or reference
-        assert selected is not None and selected.execution_mode is not None
-        self.implementation: Literal["geoutils", "flox"] = "geoutils" if reference is None else "flox"
-        if reference is not None:
-            try:
-                import_optional("flox", extra_name="benchmark")
-            except ImportError as exc:
-                raise NotImplementedError("Install optional flox to run this comparison") from exc
-
-        # Fix the scheduler for both libraries and construct all observations before timing starts
-        self.dask = import_optional("dask", extra_name="benchmark")
-        config = self.make_config(parameter)
-
-        # Start one persistent worker before building arrays so it receives only serialized tiles
-        self.mp_cluster: MpCluster | None = None
-        self.mp_config: MultiprocConfig | None = None
-        if selected.execution_mode == "multiprocessing":
-            self.mp_cluster = MpCluster({"nb_workers": 1, "max_tasks_per_child": None})
-            self.mp_config = MultiprocConfig(chunks=config.chunks, cluster=self.mp_cluster)
-
-        # Keep complete prepared inputs in the client, with identical logical tiles for both worker backends
-        self.inputs = prepare_grouped_reference(
-            config.shape[0],
-            config.grouped_regions_per_axis,
-            config.grouped_layout,
-            selected.execution_mode,
-        )
-
-    def teardown(self, parameter: int) -> None:
-        """Stop worker processes and release arrays after each independent ASV measurement."""
-
-        cluster = getattr(self, "mp_cluster", None)
-        if cluster is not None:
-            cluster.close()
-        if hasattr(self, "inputs"):
-            del self.inputs
-
-    def time_operation(self, parameter: int) -> None:
-        """Compute every requested result with one threaded or multiprocessing worker."""
-
-        with self.dask.config.set(scheduler="threads", num_workers=1):
-            compute_grouped_reference(*self.inputs, implementation=self.implementation, mp_config=self.mp_config)
-
-    def track_end_to_end_time_s(self, parameter: int) -> float:
-        """Measure masking, grouping and complete output construction from prepared inputs."""
-
-        start = time.perf_counter()
-        self.time_operation(parameter)
-        return time.perf_counter() - start
-
-    def track_peak_process_tree_mem_mb(self, parameter: int) -> float:
-        """Measure peak process memory while the complete grouped result is calculated."""
-
-        _, metrics = profile_call(self.time_operation, parameter, dask=False, include_children=True)
-        assert metrics.peak_process_tree_mem_mb is not None
-        return metrics.peak_process_tree_mem_mb
-
-
-class _GroupedFloxGroupCount(_GroupedFloxRasterSize):
-    """Compare grouped reductions as interleaved group count crosses the sparse threshold."""
-
-    param_names = ["groups_per_axis"]
-    params = [asv_parameter_values([4, 16, 65], pr_check_value=65)]
-
-    def make_config(self, parameter: int) -> BenchmarkConfig:
-        """Vary declared groups on a fixed raster with membership repeated across chunks."""
-
-        size = 256 if asv_pr_check_enabled() else 1024
-        return BenchmarkConfig(
-            shape=(size, size), chunks=(256, 256), grouped_regions_per_axis=parameter, grouped_layout="interleaved"
-        )
-
-
-setattr(_GroupedFloxRasterSize.track_end_to_end_time_s, "unit", "seconds")
-setattr(_GroupedFloxRasterSize.track_peak_process_tree_mem_mb, "unit", "MB")
-
-
-class _NumbaWorkerIntegration(_GriddingRasterSize):
-    """Exercise each Numba kernel once in Dask and multiprocessing workers."""
-
-    params = [asv_parameter_values([1024], pr_check_value=512)]
+setattr(_ComparisonBenchmark.track_process_tree_mem_increase_mb, "unit", "MB")
 
 
 #####################################
-# Public ASV class registration     #
+# Public ASV class registration
 #####################################
-
-# Select the input axis and fixture configuration used by each named comparison group
-_SCENARIO_BASES: dict[str, type[_ComparisonBenchmark]] = {
-    "grouped-flox-raster-size": _GroupedFloxRasterSize,
-    "grouped-flox-group-count": _GroupedFloxGroupCount,
-    "grouped-stats-raster-size": _GroupedStatsRasterSize,
-    "grouped-stats-chunk-size": _GroupedStatsChunkSize,
-    "grouped-stats-interleaved-chunks": _GroupedStatsInterleavedChunks,
-    "grouped-stats-group-count": _GroupedStatsGroupCount,
-    "grouped-stats-robust-size": _GroupedStatsRasterSize,
-    "interpolation-point-count": _InterpolationPointCount,
-    "reprojection-raster-size": _ReprojectionRasterSize,
-    "filter-chunk-size": _FilterChunkSize,
-    "polygonization-raster-size": _PolygonizationRasterSize,
-    "rasterization-raster-size": _RasterizationRasterSize,
-    "subsample-size": _SubsampleSize,
-    "subsample-las-laz-size": _SubsampleSize,
-    "to-pointcloud-raster-size": _PointcloudRasterSize,
-    "to-pointcloud-las-laz-size": _PointcloudRasterSize,
-    "gridding-raster-size": _GriddingRasterSize,
-    "gridding-point-count": _NearestGriddingPointCount,
-    "worker-integration": _NumbaWorkerIntegration,
-}
 
 
 def _register_asv_classes() -> None:
-    """Create stable public ASV classes from the deduplicated case registry."""
+    """Create stable public ASV classes from discovered cases and sweeps."""
 
-    for case in (*BENCHMARK_CASES, *EXTERNAL_REFERENCE_CASES):
-        class_name = case.benchmark_class
-        if class_name in globals():
-            raise ValueError(f"Duplicate generated ASV benchmark class: {class_name}")
-        base = _SCENARIO_BASES[case.comparison_group]
-        globals()[class_name] = type(
-            class_name,
-            (base,),
-            {
+    for sweep in SWEEPS:
+        base = sweep.harness or _ComparisonBenchmark
+        for case in (*sweep.cases, *sweep.references):
+            class_name = case.benchmark_class
+            if class_name in globals():
+                raise ValueError(f"Duplicate generated ASV benchmark class: {class_name}")
+            attributes = {
                 "__module__": __name__,
                 "__doc__": f"Measure the registered {case.operation} benchmark case.",
-            },
-        )
+                "sweep": sweep,
+                "case": case,
+                "param_names": [sweep.param_name],
+                "params": [list(sweep.parameters(asv_pr_check_enabled()))],
+            }
+            if isinstance(case, BenchmarkCase):
+                attributes["pretty_name"] = format_api_label(case.operation, case)
+            globals()[class_name] = type(class_name, (base,), attributes)
 
 
 # ASV discovers public module classes, so create one class for every registered case after defining the bases

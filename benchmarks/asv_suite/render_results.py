@@ -15,24 +15,25 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from benchmarks.asv_suite.parameter_sweeps import (
-    BENCHMARK_CASE_BY_CLASS,
+from benchmarks.workflows.config import (
     CALCULATION_ENGINE_LABELS,
-    COMPARISONS,
-    EXTERNAL_REFERENCE_CASE_BY_CLASS,
     GDAL_CLI_LABEL,
     METHOD_LABELS,
+    OPERATION_LABELS,
     PDAL_CLI_LABEL,
     STRATEGY_LABELS,
+    CalculationEngine,
     Comparison,
     ComparisonDimension,
-    ExternalReference,
-)
-from benchmarks.workflows.registry import (
-    CalculationEngine,
     ExecutionMode,
+    ExternalReference,
     OperationName,
     OperationStrategyName,
+)
+from benchmarks.workflows.operations import (
+    BENCHMARK_CASE_BY_CLASS,
+    COMPARISONS,
+    EXTERNAL_REFERENCE_CASE_BY_CLASS,
 )
 
 # Name the files written by this renderer and linked from the benchmark website and documentation
@@ -41,7 +42,9 @@ COMPARISON_REPORT_DIRECTORY = "comparisons"
 SCALING_REPORT_PAGE = "scaling.html"
 HISTORY_REPORT_PAGE = "history.html"
 DOCUMENTATION_TIME_PLOT = "time_relative_to_gdal.svg"
-DOCUMENTATION_MEMORY_PLOT = "peak_ram_by_raster_size.svg"
+DOCUMENTATION_MEMORY_PLOT = "memory_increase_by_operation.svg"
+DOCUMENTATION_MEMORY_SCALING_PLOT = "memory_increase_by_raster_size.svg"
+DOCUMENTATION_PDAL_PLOT = "time_relative_to_pdal.svg"
 DOCUMENTATION_DATA = "benchmark_snapshot.json"
 PERFORMANCE_CHANGE_REPORT = "performance-change.md"
 PREVIEW_WEBSITE_DIRECTORY = Path("benchmarks/results/asv/preview")
@@ -112,24 +115,6 @@ SCALING_SECTION_DETAILS = {
     ),
 }
 
-OPERATION_LABELS: dict[OperationName, str] = {
-    "crop": "Cropping",
-    "translate": "Translation",
-    "copy": "Copying",
-    "filter": "Filtering",
-    "reproject": "Reprojection",
-    "statistics": "Statistics",
-    "grouped_stats": "Grouped statistics",
-    "subsample": "Subsampling",
-    "to_pointcloud": "Point cloud conversion",
-    "interp_points": "Point interpolation",
-    "polygonize": "Polygonization",
-    "write": "Writing",
-    "rasterize": "Rasterization",
-    "create_mask": "Mask creation",
-    "grid": "Gridding",
-}
-
 # Group operations by input and output type, using the same data-flow labels as the scalability documentation
 OPERATION_GROUP_ORDER = (
     "Raster ⟶ Raster",
@@ -142,6 +127,7 @@ OPERATION_GROUP_ORDER = (
 )
 OPERATION_GROUPS: dict[OperationName, str] = {
     "crop": "Raster ⟶ Raster",
+    "clip": "Raster ⟶ Raster",
     "translate": "Raster ⟶ Raster",
     "copy": "Raster ⟶ Raster",
     "filter": "Raster ⟶ Raster",
@@ -177,7 +163,7 @@ class ComparisonMeasurement:
     parameter: int
     operation_time_s: float
     end_to_end_time_s: float
-    peak_process_tree_mem_mb: float
+    process_tree_mem_increase_mb: float
 
 
 class _PreviewResult:
@@ -196,43 +182,25 @@ class _PreviewResult:
 
         # Create all keys normally read from saved ASV results so every report section can render
         for comparison in COMPARISONS:
-            if comparison.parameter_label == "Number of interpolated points":
-                parameter_values = (256, 2048, 16384)
-            elif comparison.parameter_label == "Number of source points per axis":
-                parameter_values = (3, 9, 33)
-            elif comparison.parameter_label == "Number of sampled values":
-                parameter_values = (256, 2048, 16384)
-            elif comparison.parameter_label == "Number of output points":
-                parameter_values = (256, 16384, 524288)
-            elif comparison.parameter_label == "Number of groups per axis":
-                parameter_values = (4, 16, 65)
-            elif comparison.parameter_label == "Size of chunks (pixels per side)":
-                parameter_values = (64, 193, 512) if comparison.operation == "grouped_stats" else (256, 512, 1024)
-            elif comparison.slug == "grouped-flox-raster-size":
-                parameter_values = (256, 1024, 4096)
-            elif comparison.operation == "to_pointcloud":
-                parameter_values = (256, 512, 1024)
-            elif comparison.operation in {"grid", "grouped_stats"}:
-                parameter_values = (512, 1024, 2048)
-            else:
-                parameter_values = (1024, 2048, 4096)
+            parameter_values = comparison.sweep.values
 
             for series_index, (_, class_name) in enumerate(comparison.series, start=1):
                 prefix = f"{COMPARISON_BENCHMARK_MODULE}.{class_name}"
                 if f"{prefix}.time_operation" in self.values:
                     continue
 
-                # Scale GeoUtils values between fake revisions while leaving the GDAL reference stable
-                scale = geoutils_scale if class_name in BENCHMARK_CASE_BY_CLASS else 1.0
+                # Scale GeoUtils values between fake revisions while leaving optional and CLI references stable
+                benchmark_case = BENCHMARK_CASE_BY_CLASS.get(class_name)
+                scale = geoutils_scale if benchmark_case is not None else 1.0
                 parameters = [[repr(value) for value in parameter_values]]
                 self.parameters[f"{prefix}.time_operation"] = parameters
                 self.parameters[f"{prefix}.track_end_to_end_time_s"] = parameters
-                self.parameters[f"{prefix}.track_peak_process_tree_mem_mb"] = parameters
+                self.parameters[f"{prefix}.track_process_tree_mem_increase_mb"] = parameters
                 self.values[f"{prefix}.time_operation"] = [scale * series_index * value for value in (0.05, 0.10, 0.20)]
                 self.values[f"{prefix}.track_end_to_end_time_s"] = [
                     scale * series_index * value for value in (0.10, 0.20, 0.40)
                 ]
-                self.values[f"{prefix}.track_peak_process_tree_mem_mb"] = [
+                self.values[f"{prefix}.track_process_tree_mem_increase_mb"] = [
                     scale * series_index * value for value in (100.0, 140.0, 200.0)
                 ]
 
@@ -275,7 +243,7 @@ def _required_benchmark_keys(comparisons: Iterable[Comparison] = COMPARISONS) ->
     """Return every saved result needed to render the selected comparisons."""
 
     # A partially interrupted ASV run must not replace the latest complete documentation result
-    methods = ("time_operation", "track_end_to_end_time_s", "track_peak_process_tree_mem_mb")
+    methods = ("time_operation", "track_end_to_end_time_s", "track_process_tree_mem_increase_mb")
     return {
         _benchmark_key(class_name, method)
         for comparison in comparisons
@@ -406,7 +374,7 @@ def collect_comparison_measurements(
             keys = {
                 "operation": _benchmark_key(class_name, "time_operation"),
                 "end_to_end": _benchmark_key(class_name, "track_end_to_end_time_s"),
-                "memory": _benchmark_key(class_name, "track_peak_process_tree_mem_mb"),
+                "memory": _benchmark_key(class_name, "track_process_tree_mem_increase_mb"),
             }
             missing = set(keys.values()) - available
             if missing:
@@ -434,7 +402,7 @@ def collect_comparison_measurements(
                     parameter=parameter,
                     operation_time_s=operation_time,
                     end_to_end_time_s=end_to_end_time,
-                    peak_process_tree_mem_mb=memory,
+                    process_tree_mem_increase_mb=memory,
                 )
                 for parameter, operation_time, end_to_end_time, memory in zip(
                     operation_params,
@@ -476,7 +444,7 @@ def _plot_comparison(
         axes[1].plot(parameters, [record.end_to_end_time_s for record in selected], marker="o", label=series_label)
         axes[2].plot(
             parameters,
-            [record.peak_process_tree_mem_mb for record in selected],
+            [record.process_tree_mem_increase_mb for record in selected],
             marker="o",
             label=series_label,
         )
@@ -485,7 +453,7 @@ def _plot_comparison(
     axes[0].set_title(comparison.title)
     axes[0].set_ylabel("Operation only (s)")
     axes[1].set_ylabel("Elapsed time (s)")
-    axes[2].set_ylabel("Peak combined memory (MB)")
+    axes[2].set_ylabel("Additional combined memory (MB)")
     axes[2].set_xlabel(comparison.parameter_label)
     for axis in axes:
         axis.grid(True, alpha=0.3)
@@ -508,13 +476,23 @@ def _gdal_comparisons() -> tuple[Comparison, ...]:
     )
 
 
+def _pdal_comparisons() -> tuple[Comparison, ...]:
+    """Return documentation comparisons that provide a PDAL CLI reference line."""
+
+    return tuple(
+        comparison
+        for comparison in COMPARISONS
+        if comparison.documentation and any(label == PDAL_CLI_LABEL for label, _ in comparison.series)
+    )
+
+
 def _largest_shared_parameter(
     comparison: Comparison,
     records: list[ComparisonMeasurement],
 ) -> int:
     """Return the largest parameter measured by every series in one comparison."""
 
-    # Shared parameters keep the normalized time bars based on exactly the same input size
+    # Shared parameters keep summary bars based on exactly the same input size
     parameters_by_series = []
     for series_label, class_name in comparison.series:
         parameters = {
@@ -522,7 +500,7 @@ def _largest_shared_parameter(
             for record in records
             if record.comparison == comparison.slug and record.series_label == series_label
         }
-        # Optional Flox references may be skipped while all GeoUtils measurements remain available
+        # Optional Flox references may be skipped while the GeoUtils measurements remain available
         reference = EXTERNAL_REFERENCE_CASE_BY_CLASS.get(class_name)
         if not parameters and reference is not None and reference.external_reference == "flox":
             continue
@@ -558,10 +536,13 @@ def _documentation_operation_name(comparison: Comparison) -> str:
 
     # Convert registry names such as "reproject" to the titles shown in public plots and tables
     operation_labels = {
+        "clip": "Clipping",
         "reproject": "Reprojection",
         "polygonize": "Polygonization",
         "rasterize": "Rasterization",
         "grid": "Nearest gridding",
+        "subsample": "Subsampling",
+        "to_pointcloud": "Point cloud conversion",
     }
     return operation_labels[comparison.operation]
 
@@ -752,17 +733,66 @@ def _plot_time_relative_to_gdal(
     plt.close(figure)
 
 
-def _plot_peak_ram_by_raster_size(
+def _plot_memory_increase_by_operation(
     records: list[ComparisonMeasurement],
     output: Path,
 ) -> None:
-    """Compare peak combined memory as the raster size increases."""
+    """Compare additional process-tree memory on the largest shared GDAL workload."""
 
     # Import plotting only for an explicit rendering command
     import matplotlib.pyplot as plt
 
     comparisons = _gdal_comparisons()
-    figure, axes = plt.subplots(2, 2, figsize=(9, 7), layout="constrained")
+    series_labels = ("Eager", "Dask", "Multiprocessing", GDAL_CLI_LABEL)
+    bar_width = 0.2
+    positions = list(range(len(comparisons)))
+    figure, axis = plt.subplots(figsize=(10, 4.8), layout="constrained")
+
+    for series_index, series_label in enumerate(series_labels):
+        memory_increases = []
+        for comparison in comparisons:
+            parameter = _largest_shared_parameter(comparison, records)
+            measurement = _measurement_at(records, comparison.slug, series_label, parameter)
+            memory_increases.append(measurement.process_tree_mem_increase_mb)
+
+        # Show every implementation directly because each value already excludes its initialized baseline
+        offset = (series_index - (len(series_labels) - 1) / 2) * bar_width
+        bars = axis.bar(
+            [position + offset for position in positions],
+            memory_increases,
+            width=bar_width,
+            label=series_label,
+            color=SERIES_COLORS[series_label],
+        )
+        axis.bar_label(bars, fmt="%.0f", padding=3, fontsize=8)
+
+    axis.set_xticks(positions, [_documentation_operation_name(comparison) for comparison in comparisons])
+    axis.set_ylabel("Additional combined memory (MB)")
+    axis.grid(axis="y", alpha=0.3)
+    axis.legend(ncol=4)
+    figure.savefig(output, format="svg")
+    plt.close(figure)
+
+
+def _plot_memory_increase_by_raster_size(
+    records: list[ComparisonMeasurement],
+    output: Path,
+) -> None:
+    """Compare additional process-tree memory as the raster size increases."""
+
+    # Import plotting only for an explicit rendering command
+    import matplotlib.pyplot as plt
+
+    comparisons = _gdal_comparisons()
+    column_count = 3
+    row_count = math.ceil(len(comparisons) / column_count)
+    figure, axes = plt.subplots(
+        row_count,
+        column_count,
+        figsize=(10.5, 3.4 * row_count),
+        layout="constrained",
+        squeeze=False,
+    )
     for axis, comparison in zip(axes.flat, comparisons):
         for series_label, _ in comparison.series:
             # Sorting protects the displayed dependency from ASV storage order
@@ -776,7 +806,7 @@ def _plot_peak_ram_by_raster_size(
             )
             axis.plot(
                 [record.parameter for record in selected],
-                [record.peak_process_tree_mem_mb for record in selected],
+                [record.process_tree_mem_increase_mb for record in selected],
                 marker="o",
                 label=series_label,
                 color=SERIES_COLORS[series_label],
@@ -784,13 +814,72 @@ def _plot_peak_ram_by_raster_size(
 
         axis.set_title(_documentation_operation_name(comparison))
         axis.set_xlabel("Size of raster (pixels per side)")
-        axis.set_ylabel("Peak combined memory (MB)")
+        axis.set_ylabel("Additional combined memory (MB)")
         axis.grid(alpha=0.3)
+
+    # Hide unused panels when the number of documented operations does not fill the final row
+    for axis in axes.flat[len(comparisons) :]:
+        axis.set_visible(False)
 
     # One legend applies to every panel and leaves the operation curves uncluttered
     handles, labels = axes.flat[0].get_legend_handles_labels()
     figure.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, -0.02), ncol=4)
     figure.savefig(output, format="svg", bbox_inches="tight")
+    plt.close(figure)
+
+
+def _plot_time_relative_to_pdal(
+    records: list[ComparisonMeasurement],
+    output: Path,
+) -> None:
+    """Compare GeoUtils elapsed time with PDAL CLI on the largest shared point workload."""
+
+    # Import plotting only for an explicit rendering command
+    import matplotlib.pyplot as plt
+
+    comparisons = _pdal_comparisons()
+    execution_modes = ("Dask", "Multiprocessing")
+    bar_width = 0.32
+    positions = list(range(len(comparisons)))
+    figure, axis = plt.subplots(figsize=(7, 4.8), layout="constrained")
+
+    for execution_mode_index, execution_mode in enumerate(execution_modes):
+        ratios = []
+        for comparison in comparisons:
+            parameter = _largest_shared_parameter(comparison, records)
+            pdal_time = _measurement_at(records, comparison.slug, PDAL_CLI_LABEL, parameter).end_to_end_time_s
+            geoutils_time = _measurement_at(
+                records,
+                comparison.slug,
+                execution_mode,
+                parameter,
+            ).end_to_end_time_s
+            ratios.append(geoutils_time / pdal_time)
+
+        # Center both GeoUtils modes around each raster-to-point operation
+        offset = (execution_mode_index - 0.5) * bar_width
+        bars = axis.bar(
+            [position + offset for position in positions],
+            ratios,
+            width=bar_width,
+            label=execution_mode,
+            color=SERIES_COLORS[execution_mode],
+        )
+        axis.bar_label(bars, fmt="%.1f×", padding=3, fontsize=8)
+
+    # PDAL equals one by definition and gives both GeoUtils ratios a common reference
+    axis.axhline(
+        1.0,
+        color=SERIES_COLORS[PDAL_CLI_LABEL],
+        linestyle="--",
+        linewidth=1.2,
+        label=PDAL_CLI_LABEL,
+    )
+    axis.set_xticks(positions, [_documentation_operation_name(comparison) for comparison in comparisons])
+    axis.set_ylabel("Elapsed time relative to PDAL CLI")
+    axis.grid(axis="y", alpha=0.3)
+    axis.legend(ncol=3)
+    figure.savefig(output, format="svg")
     plt.close(figure)
 
 
@@ -805,7 +894,7 @@ def _result_payload(result: Any, records: list[ComparisonMeasurement]) -> dict[s
             "machine": result.params,
             "operation_time": "wall-clock time after execution-mode initialization",
             "end_to_end_time": "elapsed wall-clock time from prepared inputs through completed output",
-            "memory": "peak combined memory of the benchmark process and its child workers",
+            "memory": "peak process-tree memory minus its initialized baseline",
         },
         "measurements": [asdict(record) for record in records],
     }
@@ -815,16 +904,18 @@ def render_documentation_snapshot(
     result: Any,
     output_directory: Path,
 ) -> list[ComparisonMeasurement]:
-    """Write the two documentation graphics and their complete numeric source."""
+    """Write the documentation graphics and their complete numeric source."""
 
     # Keep Matplotlib caches in a writable disposable location under sandboxed runs
     os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "geoutils-matplotlib-cache"))
     output_directory.mkdir(parents=True, exist_ok=True)
     records = collect_comparison_measurements(result)
 
-    # Documentation uses two broad summaries while the ASV site retains every detailed panel
+    # Documentation uses concise summaries while the ASV site retains every detailed panel
     _plot_time_relative_to_gdal(records, output_directory / DOCUMENTATION_TIME_PLOT)
-    _plot_peak_ram_by_raster_size(records, output_directory / DOCUMENTATION_MEMORY_PLOT)
+    _plot_memory_increase_by_operation(records, output_directory / DOCUMENTATION_MEMORY_PLOT)
+    _plot_memory_increase_by_raster_size(records, output_directory / DOCUMENTATION_MEMORY_SCALING_PLOT)
+    _plot_time_relative_to_pdal(records, output_directory / DOCUMENTATION_PDAL_PLOT)
     (output_directory / DOCUMENTATION_DATA).write_text(
         json.dumps(_result_payload(result, records), indent=2) + "\n",
         encoding="utf-8",
@@ -851,7 +942,7 @@ def _operation_and_method_label(comparison: Comparison) -> str:
 def _workload_label(comparison: Comparison, parameter: int) -> str:
     """Describe every input size that identifies one representative benchmark workload."""
 
-    return comparison.workload_template.format(parameter=f"{parameter:,}")
+    return comparison.workload(parameter)
 
 
 def _workload_html(comparison: Comparison, parameter: int) -> str:
@@ -911,14 +1002,14 @@ def _format_measurement_cell(
     best_time: float | None,
     lowest_memory: float | None,
 ) -> str:
-    """Render elapsed time and peak memory with optional relative values."""
+    """Render elapsed time and additional memory with optional relative values."""
 
     if measurement is None:
         return '<span class="unavailable" aria-label="Not supported">—</span>'
     time_class = " best" if best_time is not None and math.isclose(measurement.end_to_end_time_s, best_time) else ""
     memory_class = (
         " best"
-        if lowest_memory is not None and math.isclose(measurement.peak_process_tree_mem_mb, lowest_memory)
+        if lowest_memory is not None and math.isclose(measurement.process_tree_mem_increase_mb, lowest_memory)
         else ""
     )
     time_relative = ""
@@ -928,16 +1019,18 @@ def _format_measurement_cell(
             f'<span class="ratio">{measurement.end_to_end_time_s / reference.end_to_end_time_s:.2f}× '
             f"{reference_label}</span>"
         )
-        memory_relative = (
-            f'<span class="ratio">{measurement.peak_process_tree_mem_mb / reference.peak_process_tree_mem_mb:.2f}× '
-            f"{reference_label}</span>"
-        )
+        if reference.process_tree_mem_increase_mb > 0:
+            memory_relative = (
+                f'<span class="ratio">'
+                f"{measurement.process_tree_mem_increase_mb / reference.process_tree_mem_increase_mb:.2f}× "
+                f"{reference_label}</span>"
+            )
     return "".join(
         [
             f'<span class="metric{time_class}"><span class="metric-label">Time</span>'
             f"{measurement.end_to_end_time_s:.3g} s{time_relative}</span>",
             f'<span class="metric{memory_class}"><span class="metric-label">Memory</span>'
-            f"{measurement.peak_process_tree_mem_mb:.3g} MB{memory_relative}</span>",
+            f"{measurement.process_tree_mem_increase_mb:.3g} MB{memory_relative}</span>",
         ]
     )
 
@@ -1030,7 +1123,7 @@ def _engine_summary_table(records: list[ComparisonMeasurement]) -> str:
         _, by_implementation = _eager_implementation_measurements(comparison, records, parameter)
         gdal = by_implementation.get("gdal_cli")
         best_time = min(measurement.end_to_end_time_s for measurement in by_implementation.values())
-        lowest_memory = min(measurement.peak_process_tree_mem_mb for measurement in by_implementation.values())
+        lowest_memory = min(measurement.process_tree_mem_increase_mb for measurement in by_implementation.values())
         cells = [
             _format_measurement_cell(
                 by_implementation.get(column),
@@ -1087,7 +1180,7 @@ def _execution_summary_table(records: list[ComparisonMeasurement]) -> str:
         _, by_mode = _execution_mode_measurements(comparison, records, parameter)
         eager = by_mode.get("eager")
         best_time = min(measurement.end_to_end_time_s for measurement in by_mode.values())
-        lowest_memory = min(measurement.peak_process_tree_mem_mb for measurement in by_mode.values())
+        lowest_memory = min(measurement.process_tree_mem_increase_mb for measurement in by_mode.values())
         cells = [
             _format_measurement_cell(
                 by_mode.get(column),
@@ -1265,7 +1358,7 @@ def _choice_tables(
         )
         articles.append(
             '<article class="choice-card">'
-            f"<h3>{html.escape(comparison.title)}</h3><p>{html.escape(comparison.description)}</p>"
+            f"<h3>{html.escape(comparison.title)}</h3>"
             f'<p class="workload"><strong>Reference workload:</strong> '
             f"{_workload_html(comparison, parameter)}</p>"
             '<div class="table-wrap"><table class="choice-table"><thead>'
@@ -1288,7 +1381,7 @@ def _markdown_report(result: Any, *, includes_performance_change: bool = False) 
         "",
         "Operation-only time starts after execution-mode initialization. Elapsed time runs from prepared inputs "
         "through completed output and is the comparable boundary for GeoUtils versus external CLIs. "
-        "Peak memory combines the benchmark process and all child workers.",
+        "Additional memory is the process-tree peak minus its initialized baseline.",
         "",
         "Raw values: [CSV](comparisons.csv) · [JSON](comparisons.json)",
     ]
@@ -1300,16 +1393,8 @@ def _markdown_report(result: Any, *, includes_performance_change: bool = False) 
             continue
         lines.extend(["", f"## {section_title}", "", section_description])
         for comparison in comparisons:
-            lines.extend(
-                [
-                    "",
-                    f"### {comparison.title}",
-                    "",
-                    comparison.description,
-                    "",
-                    f"![{comparison.title}]({comparison.slug}.svg)",
-                ]
-            )
+            lines.extend(["", f"### {comparison.title}", ""])
+            lines.append(f"![{comparison.title}]({comparison.slug}.svg)")
     return "\n".join(lines) + "\n"
 
 
@@ -1510,8 +1595,8 @@ def _metric_guide(*, include_operation: bool = False, include_ratios: bool = Tru
         [
             "<span><strong>Elapsed time</strong> Prepared inputs through completed output, including worker or CLI "
             "startup.</span>",
-            "<span><strong>Peak memory</strong> Highest combined memory of the benchmark process and its child "
-            "workers.</span>",
+            "<span><strong>Additional memory</strong> Combined process-tree peak minus its initialized baseline."
+            "</span>",
         ]
     )
     if include_ratios:
@@ -1680,7 +1765,7 @@ def _scaling_html(
             title = html.escape(comparison.title)
             plots.append(
                 f'<details class="plot-card" id="{slug}"><summary><span><strong>{title}</strong>'
-                f"<small>{html.escape(comparison.description)}</small></span>"
+                "</span>"
                 f'<span class="chip plot-kind">{dimension_labels[comparison.series_dimension]}</span></summary>'
                 f'<div class="plot-content"><img loading="lazy" src="{slug}.svg" alt="{title}"></div></details>'
             )
@@ -1758,7 +1843,8 @@ def _site_index(
         '<a class="page-card" href="comparisons/index.html"><strong>Compare options</strong>'
         "<span>Isolate execution modes, calculation engines, methods and chunk strategies at one workload.</span></a>",
         f'<a class="page-card" href="comparisons/{SCALING_REPORT_PAGE}"><strong>Scaling</strong>'
-        "<span>See how elapsed time and peak memory change as raster, chunk, point or sample size grows.</span></a>",
+        "<span>See how elapsed time and additional memory change as raster, chunk, point or sample size grows."
+        "</span></a>",
     ]
     if include_asv_history:
         cards.append(
@@ -1784,7 +1870,7 @@ def _site_index(
             _concept_map(),
             "</section>",
             "<section><h2>Performance table</h2>",
-            '<p class="section-intro">Each row shows elapsed time and peak memory for a fixed workload (operation '
+            '<p class="section-intro">Each row shows elapsed time and additional memory for a fixed workload (operation '
             "parameters and input size). All options run without parallelism: one computational process using one "
             "thread.</p>",
             _gdal_reference_note(),

@@ -61,6 +61,8 @@ Conceptually, the methods differ in how cross-chunk regions are reconstructed:
 - **`label_stitch`** labels values as in **`label_union`**, then polygonizes each chunk independently and **stitches polygons afterward in vector space**, avoiding the need for a union–find structure,
 - **`geometry_stitch`** bypasses labeling entirely by performing **polygonization on halo-expanded chunks** (1-pixel overlap), then stitches polygons similarly as in **`label_stitch`** after clipping.
 
+GeoUtils uses **`label_stitch`** by default because it scales best in the {ref}`benchmarking-performance`.
+
 Connectivity assumptions influence how many neighboring chunks must be used in memory, which remains small and bounded:
 
 - **4-connectivity** (4 cardinal directions): typically 2–4 chunks,

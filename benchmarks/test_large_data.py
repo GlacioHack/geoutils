@@ -33,19 +33,14 @@ from multiprocessing.connection import Connection
 import numpy as np
 import pytest
 
-from benchmarks.workflows.registry import (
+from benchmarks.workflows.config import BenchmarkConfig, BenchmarkResult, OperationStrategyName
+from benchmarks.workflows.fixtures import logical_raster_size_mb, memory_limit_mb
+from benchmarks.workflows.operations import (
     OPERATION_BENCHMARK_CASES,
-    OPERATION_BY_NAME,
-    OperationStrategyName,
+    OPERATION_COVERAGE_BY_NAME,
     split_operation_case,
 )
-from benchmarks.workflows.runner import (
-    BenchmarkConfig,
-    BenchmarkResult,
-    BenchmarkRunner,
-    logical_raster_size_mb,
-    memory_limit_mb,
-)
+from benchmarks.workflows.runner import BenchmarkRunner
 from geoutils.interface.gridding import GriddingMethod
 
 # Mark every test in this module as opt-in, memory-sensitive and allowed to emit expected worker warnings
@@ -193,7 +188,7 @@ class TestLargeData:
         result = _run_isolated(case_name, large_data_config)
 
         # Validate the small fingerprint and any large file produced by the operation
-        expected_value = OPERATION_BY_NAME[operation].expected_value
+        expected_value = OPERATION_COVERAGE_BY_NAME[operation].expected_value
         assert np.isclose(result.value, expected_value, equal_nan=True)
         if result.output_file is not None:
             assert os.path.exists(result.output_file)

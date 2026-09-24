@@ -13,12 +13,9 @@ from benchmarks.gdal_comparison.commands import (
     GdalCommand,
     build_gdal_command,
 )
-from benchmarks.workflows.runner import (
-    BenchmarkConfig,
-    BenchmarkRunner,
-    ProfiledResult,
-    read_raster_center,
-)
+from benchmarks.workflows.config import BenchmarkConfig, ProfiledResult
+from benchmarks.workflows.fixtures import read_raster_center
+from benchmarks.workflows.runner import BenchmarkRunner
 from geoutils.profiler import ProfileMetrics, profile_call
 
 

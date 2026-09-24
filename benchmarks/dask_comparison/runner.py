@@ -1,4 +1,4 @@
-"""Compare GeoUtils top-k sampling with Dask's native reduction."""
+"""Run GeoUtils components beside independent native Dask references."""
 
 from __future__ import annotations
 
@@ -8,11 +8,62 @@ import numpy as np
 from rasterio.transform import from_origin
 
 import geoutils as gu
-from benchmarks.asv_suite import asv_parameter_values
+from benchmarks.asv_suite import asv_pr_check_enabled
+from benchmarks.dask_comparison.reference import global_statistics, topk_indices, topk_keys
+from benchmarks.workflows.config import DASK_CUTOFF_AXIS, POINT_COUNT_AXIS, RASTER_AXIS
 from geoutils._misc import import_optional
 from geoutils.profiler import profile_call
-from geoutils.sampling.subsampling import _splitmix64
 from geoutils.sampling.subsampling import _subsample as _subsample_values
+from geoutils.stats.reduction import (
+    _normalize_statistics,
+    _reduce_values,
+)
+
+
+class GlobalDaskReduction:
+    """Measure the shared GeoUtils reducer and native Dask reductions on the same prepared array."""
+
+    number = 1
+    repeat = 3
+    rounds = 1
+    warmup_time = 0
+    timeout = 300
+    param_names = ["implementation", "raster_size"]
+    params = [["geoutils", "native_dask"], list(RASTER_AXIS.parameters(asv_pr_check_enabled()))]
+
+    def setup(self, implementation: Literal["geoutils", "native_dask"], raster_size: int) -> None:
+        """Prepare one finite Dask raster and the same mergeable statistic request for both implementations."""
+
+        import_optional("dask", extra_name="benchmark")
+        import dask.array as da
+
+        del implementation
+        generator = np.random.default_rng(42)
+        values = generator.normal(size=(raster_size, raster_size))
+        values[::97, ::89] = np.nan
+        self.values = da.from_array(values, chunks=(500, 500))
+        self.aliases = {"mean", "min", "max", "sum", "sumofsquares", "rmse", "std"}
+        self.statistics = _normalize_statistics(sorted(self.aliases), grouped=False)
+
+    def time_reduction(self, implementation: Literal["geoutils", "native_dask"], raster_size: int) -> None:
+        """Compute the requested global estimates with the selected Dask reduction implementation."""
+
+        import dask
+
+        del raster_size
+        with dask.config.set(scheduler="threads", num_workers=1):
+            if implementation == "geoutils":
+                _reduce_values([self.values], self.statistics)
+            else:
+                global_statistics(self.values)
+
+
+# Keep the stored identifier while locating this internal comparison outside the public ASV modules
+setattr(
+    GlobalDaskReduction.time_reduction,
+    "benchmark_name",
+    "asv_suite.global_stats.GlobalDaskReduction.time_reduction",
+)
 
 
 class DaskTopkComparison:
@@ -27,7 +78,7 @@ class DaskTopkComparison:
     param_names = ["implementation", "subsample_size"]
     params = [
         ["geoutils", "dask_argtopk"],
-        asv_parameter_values([256, 2048, 16384], pr_check_value=256),
+        list(POINT_COUNT_AXIS.parameters(asv_pr_check_enabled())),
     ]
 
     def setup(self, implementation: Literal["geoutils", "dask_argtopk"], subsample_size: int) -> None:
@@ -37,8 +88,8 @@ class DaskTopkComparison:
         import dask.array as da
 
         shape = (2048, 2048)
-        rows = da.arange(shape[0], chunks=512)[:, None]
-        columns = da.arange(shape[1], chunks=512)[None, :]
+        rows = da.arange(shape[0], chunks=500)[:, None]
+        columns = da.arange(shape[1], chunks=500)[None, :]
         positions = rows * shape[1] + columns
         values = da.where(positions % 19 == 0, np.nan, 1.0).astype(np.float32)
         self.raster = gu.RasterAccessor.from_array(values, from_origin(0, shape[0], 1, 1), 32633)
@@ -47,7 +98,6 @@ class DaskTopkComparison:
         """Compute selected cell numbers through one top-k implementation."""
 
         import dask
-        import dask.array as da
 
         with dask.config.set(scheduler="threads", num_workers=1):
             if implementation == "geoutils":
@@ -61,16 +111,8 @@ class DaskTopkComparison:
                 dask.compute(rows, columns)
                 return
 
-            # Apply Dask's reduction to the same valid cells and SplitMix64 keys used by GeoUtils
-            values = self.raster.data.reshape(-1)
-            valid = da.isfinite(values)
-            valid_count = int(valid.sum().compute())
-            count = min(subsample_size, valid_count)
-            cell_numbers = da.arange(values.size, chunks=values.chunks, dtype=np.int64)
-            key_input = np.uint64(42) ^ cell_numbers.astype(np.uint64)
-            keys = key_input.map_blocks(_splitmix64, dtype=np.uint64)
-            eligible_keys = da.where(valid, keys, np.iinfo(np.uint64).max)
-            da.argtopk(eligible_keys, -count, split_every=8).compute()
+            # Apply the independent native Dask reduction to the same prepared values
+            topk_indices(self.raster.data, subsample_size)
 
     def time_topk(self, implementation: Literal["geoutils", "dask_argtopk"], subsample_size: int) -> None:
         """Measure complete deterministic selection after preparing the lazy raster."""
@@ -87,6 +129,16 @@ class DaskTopkComparison:
 
 
 setattr(DaskTopkComparison.track_peak_client_mem_mb, "unit", "MB")
+setattr(
+    DaskTopkComparison.time_topk,
+    "benchmark_name",
+    "asv_suite.subsampling.DaskTopkComparison.time_topk",
+)
+setattr(
+    DaskTopkComparison.track_peak_client_mem_mb,
+    "benchmark_name",
+    "asv_suite.subsampling.DaskTopkComparison.track_peak_client_mem_mb",
+)
 
 
 class DaskCutoffComparison:
@@ -101,7 +153,7 @@ class DaskCutoffComparison:
     param_names = ["implementation", "subsample_size"]
     params = [
         ["geoutils_cutoff", "dask_topk"],
-        asv_parameter_values([262_145, 524_288, 1_048_576], pr_check_value=262_145),
+        list(DASK_CUTOFF_AXIS.parameters(asv_pr_check_enabled())),
     ]
 
     def setup(self, implementation: Literal["geoutils_cutoff", "dask_topk"], subsample_size: int) -> None:
@@ -111,8 +163,8 @@ class DaskCutoffComparison:
         import dask.array as da
 
         shape = (2048, 2048)
-        rows = da.arange(shape[0], chunks=512)[:, None]
-        columns = da.arange(shape[1], chunks=512)[None, :]
+        rows = da.arange(shape[0], chunks=500)[:, None]
+        columns = da.arange(shape[1], chunks=500)[None, :]
         positions = rows * shape[1] + columns
         self.values = da.where(positions % 19 == 0, np.nan, 1.0).astype(np.float32)
         self.shape = shape
@@ -144,7 +196,6 @@ class DaskCutoffComparison:
         """Find the exact selection boundary with GeoUtils or Dask's native reduction."""
 
         import dask
-        import dask.array as da
 
         with dask.config.set(scheduler="threads", num_workers=1):
             if implementation == "geoutils_cutoff":
@@ -167,13 +218,7 @@ class DaskCutoffComparison:
                     raise AssertionError("The cutoff search did not find the requested selection boundary.")
                 return
 
-            values = self.values.reshape(-1)
-            valid = da.isfinite(values)
-            cell_numbers = da.arange(values.size, chunks=values.chunks, dtype=np.int64)
-            key_input = np.uint64(42) ^ cell_numbers.astype(np.uint64)
-            keys = key_input.map_blocks(_splitmix64, dtype=np.uint64)
-            eligible_keys = da.where(valid, keys, np.iinfo(np.uint64).max)
-            da.topk(eligible_keys, -subsample_size, split_every=8).compute()
+            topk_keys(self.values, subsample_size)
 
     def time_cutoff(self, implementation: Literal["geoutils_cutoff", "dask_topk"], subsample_size: int) -> None:
         """Measure exact selection above the largest raster chunk."""
@@ -190,3 +235,13 @@ class DaskCutoffComparison:
 
 
 setattr(DaskCutoffComparison.track_peak_client_mem_mb, "unit", "MB")
+setattr(
+    DaskCutoffComparison.time_cutoff,
+    "benchmark_name",
+    "asv_suite.subsampling.DaskCutoffComparison.time_cutoff",
+)
+setattr(
+    DaskCutoffComparison.track_peak_client_mem_mb,
+    "benchmark_name",
+    "asv_suite.subsampling.DaskCutoffComparison.track_peak_client_mem_mb",
+)

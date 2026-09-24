@@ -3,24 +3,16 @@
 from __future__ import annotations
 
 from benchmarks.asv_suite import asv_pr_check_enabled
-from benchmarks.workflows.registry import (
+from benchmarks.workflows.config import BenchmarkConfig
+from benchmarks.workflows.operations import (
     OPERATION_BENCHMARK_CASES,
+    SWEEPS,
     split_operation_case,
 )
-from benchmarks.workflows.runner import BenchmarkConfig, BenchmarkRunner
+from benchmarks.workflows.runner import BenchmarkRunner
 
-# Scaling comparisons already cover these operations at three input values
-_SCALING_OPERATIONS = {
-    "filter",
-    "reproject",
-    "interp_points",
-    "polygonize",
-    "rasterize",
-    "grid",
-    "grouped_stats",
-    "subsample",
-    "to_pointcloud",
-}
+# Scaling comparisons already cover these operations at several input values
+_SCALING_OPERATIONS = {case.operation for sweep in SWEEPS for case in sweep.cases}
 
 # Remove operations already measured while varying raster, chunk or point count
 # The remaining operation/execution-mode pairs are measured once with a fixed input configuration
@@ -82,14 +74,14 @@ class OperationBenchmarks:
         # Every large output is written before the measured method returns
         self.runner._execute(self.operation)
 
-    def track_peak_process_tree_mem_mb(self, case: str) -> float:
-        """Measure aggregate peak RAM for the client and all backend processes."""
+    def track_process_tree_mem_increase_mb(self, case: str) -> float:
+        """Measure peak RAM increase above the initialized process-tree baseline."""
 
         # The track_ prefix tells ASV to record the returned numeric measurement
         # Profiling repeats the same complete operation with process-tree sampling enabled
         result = self.runner.run(self.operation)
-        return result.peak_process_tree_mem_mb
+        return result.process_tree_mem_increase_mb
 
 
 # ASV reads this unit attribute when labelling the stored tracker values
-setattr(OperationBenchmarks.track_peak_process_tree_mem_mb, "unit", "MB")
+setattr(OperationBenchmarks.track_process_tree_mem_increase_mb, "unit", "MB")

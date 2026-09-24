@@ -15,318 +15,54 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Prepare and compute deterministic operations shared by every benchmark suite."""
+"""Prepare shared benchmark infrastructure and run operation-local handlers."""
 
 from __future__ import annotations
 
 import os
-import pathlib
 import tempfile
-from dataclasses import dataclass, field
-from typing import Any, Literal, cast
+from typing import Any
 
-import geopandas as gpd
 import numpy as np
 import rasterio as rio
-from shapely.geometry import box
 
-from benchmarks.workflows.registry import (
-    CalculationEngine,
+from benchmarks.workflows.config import (
+    BenchmarkConfig,
+    BenchmarkResult,
     ExecutionMode,
     OperationName,
-    OperationStrategyName,
-    resolve_operation_parameters,
+    ProfiledResult,
+    process_tree_memory_increase_mb,
 )
-from geoutils._dispatch import is_dask_dataframe
+from benchmarks.workflows.fixtures import (
+    read_raster_center,
+)
+from benchmarks.workflows.fixtures import (
+    tiff_block_size as _tiff_block_size,
+)
+from benchmarks.workflows.fixtures import (
+    write_constant_raster as _write_constant_raster,
+)
+from benchmarks.workflows.fixtures import (
+    write_point_source as _write_point_source,
+)
+from benchmarks.workflows.fixtures import (
+    write_polygon_raster as _write_polygon_raster,
+)
+from benchmarks.workflows.fixtures import (
+    write_vector_source as _write_vector_source,
+)
+from benchmarks.workflows.operations import OPERATION_BY_NAME
 from geoutils._misc import (
     _get_process_mem_mb,
     _prepare_benchmark_process,
     _trim_process_memory,
     import_optional,
 )
-from geoutils.interface.gridding import GriddingEngine, GriddingMethod
-from geoutils.profiler import ProfileMetrics, profile_call
-
-###################################
-# Configuration and measurements  #
-###################################
-
-
-# Keep input sizes, worker settings and measured results consistent across ASV, external CLIs and large-data tests
-@dataclass
-class BenchmarkConfig:
-    """Collect deterministic data, chunk, worker and profiling settings."""
-
-    shape: tuple[int, int] = (2048, 2048)
-    chunks: tuple[int, int] = (512, 512)
-    memory_limit: str = "1GB"
-    n_workers: int = 1
-    threads_per_worker: int = 1
-    gdal_cachemax_mb: int = 64
-    profile_interval: float = 0.05
-    raster_value: float = 1.0
-    subsample_size: int = 2048
-    pointcloud_subsample_size: int | None = None
-    ninterp: int = 2048
-    point_partition_size: int = 16
-    polygon_regions_per_axis: int = 1
-    vector_features_per_axis: int = 1
-    point_features_per_axis: int = 5
-    grouped_regions_per_axis: int = 8
-    grouped_layout: Literal["local", "interleaved"] = "local"
-    operation_method: str | None = None
-    calculation_engine: CalculationEngine | None = None
-    operation_strategy: OperationStrategyName | None = None
-    grid_dist_nodata_pixel: float = float("inf")
-    dask_write_batch_size: int = 4
-    trim_dask_memory: bool = False
-    point_output_driver: Literal["GPKG", "LAS", "LAZ"] = "GPKG"
-    directory: str | None = None
-
-
-class ProfiledResult:
-    """Expose complete-process memory measurements shared by all benchmark implementations."""
-
-    metrics: ProfileMetrics
-
-    @property
-    def peak_process_tree_mem_mb(self) -> float:
-        """Return peak aggregate memory for the measured process and its children."""
-
-        peak = self.metrics.peak_process_tree_mem_mb
-        if peak is None:
-            raise RuntimeError("Process-tree memory was not collected for this benchmark result")
-        return peak
-
-    @property
-    def process_tree_mem_increase_mb(self) -> float:
-        """Return peak memory above the initialized process-tree baseline."""
-
-        if not self.metrics.process_tree_mem_mb:
-            raise RuntimeError("Process-tree memory was not collected for this benchmark result")
-        baseline = self.metrics.process_tree_mem_mb[0][1]
-        return max(0.0, self.peak_process_tree_mem_mb - baseline)
-
-
-@dataclass
-class BenchmarkResult(ProfiledResult):
-    """Store one computed result together with memory and worker-health measurements."""
-
-    value: float
-    metrics: ProfileMetrics
-    worker_pids_before: tuple[int, ...] | dict[str, int] = field(default_factory=tuple)
-    worker_pids_after: tuple[int, ...] | dict[str, int] = field(default_factory=tuple)
-    dask_worker_baseline_mem_mb: float | None = None
-    output_file: str | None = None
-
-    @property
-    def worker_restarted(self) -> bool:
-        """Whether the backend replaced a worker during the operation."""
-
-        return self.worker_pids_before != self.worker_pids_after
-
-
-##############################
-# Size and output helpers    #
-##############################
-
-
-# Calculate memory limits and read one output pixel without loading a complete raster
-def logical_raster_size_mb(config: BenchmarkConfig) -> float:
-    """Return the uncompressed float32 raster size in decimal megabytes."""
-
-    return config.shape[0] * config.shape[1] * np.dtype("float32").itemsize / 1_000_000
-
-
-def memory_limit_mb(memory_limit: str) -> float:
-    """Convert the worker-memory formats used by the benchmark suite to decimal megabytes."""
-
-    # Match the common decimal and binary units accepted by Dask
-    value = memory_limit.strip().lower()
-    if value.endswith("gib"):
-        return float(value[:-3]) * 1024**3 / 1_000_000
-    if value.endswith("gb"):
-        return float(value[:-2]) * 1000
-    if value.endswith("mib"):
-        return float(value[:-3]) * 1024**2 / 1_000_000
-    if value.endswith("mb"):
-        return float(value[:-2])
-    return float(value) / 1_000_000
-
-
-def _tiff_block_size(size: int, requested: int) -> int:
-    """Return a valid tiled-GeoTIFF block size no larger than one raster axis."""
-
-    # GeoTIFF tile dimensions must be divisible by sixteen
-    block_size = min(size, requested, 512)
-    return max(16, block_size // 16 * 16)
-
-
-def read_raster_center(filename: str) -> float:
-    """Read one central output pixel without loading the complete raster."""
-
-    with rio.open(filename) as dataset:
-        row = dataset.height // 2
-        col = dataset.width // 2
-        return float(dataset.read(1, window=rio.windows.Window(col, row, 1, 1))[0, 0])
-
-
-def read_point_file_sample(filename: str, column: str) -> tuple[int, float]:
-    """Read the feature count and one value without loading a complete point file."""
-
-    if pathlib.Path(filename).suffix.lower() in (".las", ".laz"):
-        laspy = import_optional("laspy")
-        with laspy.open(filename) as reader:
-            count = int(reader.header.point_count)
-            sample = reader.read_points(1)
-        return count, float(sample.z[0])
-
-    import pyogrio
-
-    # Use file metadata for the complete row count and read only one feature for the constant-value check
-    info = pyogrio.read_info(filename, force_feature_count=True)
-    sample = pyogrio.read_dataframe(filename, columns=[column], max_features=1)
-    return int(info["features"]), float(sample[column].iloc[0])
-
-
-##############################
-# Deterministic source files #
-##############################
-
-
-# Write deterministic test rasters, polygons and points without allocating the complete raster in memory
-def _write_constant_raster(filename: str, config: BenchmarkConfig) -> None:
-    """Write a deterministic constant raster one storage block at a time."""
-
-    if os.path.exists(filename):
-        return
-
-    # Use a real WGS84 extent so reprojection exercises a coordinate transform
-    height, width = config.shape
-    transform = rio.transform.from_bounds(7.0, 45.0, 8.0, 46.0, width=width, height=height)
-    block_y = _tiff_block_size(height, config.chunks[0])
-    block_x = _tiff_block_size(width, config.chunks[1])
-
-    # Compression keeps the deterministic constant fixture compact on disk
-    with rio.open(
-        filename,
-        "w",
-        driver="GTiff",
-        height=height,
-        width=width,
-        count=1,
-        dtype="float32",
-        crs=4326,
-        transform=transform,
-        nodata=-99999,
-        tiled=True,
-        blockxsize=block_x,
-        blockysize=block_y,
-        compress="DEFLATE",
-        BIGTIFF="IF_NEEDED",
-    ) as dst:
-        # Allocate only the current storage block instead of the complete raster
-        for _, window in dst.block_windows(1):
-            block = np.full((int(window.height), int(window.width)), config.raster_value, dtype=np.float32)
-            dst.write(block, indexes=1, window=window)
-
-
-def _write_polygon_raster(filename: str, config: BenchmarkConfig) -> None:
-    """Write regularly spaced connected regions for polygonization scenarios."""
-
-    if os.path.exists(filename):
-        return
-    if config.polygon_regions_per_axis < 1:
-        raise ValueError("Polygon regions per axis must be strictly positive")
-
-    # Separate value-one rectangles with nodata so every rectangle is one region
-    height, width = config.shape
-    transform = rio.transform.from_bounds(7.0, 45.0, 8.0, 46.0, width=width, height=height)
-    block_y = _tiff_block_size(height, config.chunks[0])
-    block_x = _tiff_block_size(width, config.chunks[1])
-
-    # Stream the patterned raster without allocating the complete benchmark input
-    with rio.open(
-        filename,
-        "w",
-        driver="GTiff",
-        height=height,
-        width=width,
-        count=1,
-        dtype="float32",
-        crs=4326,
-        transform=transform,
-        nodata=-99999,
-        tiled=True,
-        blockxsize=block_x,
-        blockysize=block_y,
-        compress="DEFLATE",
-        BIGTIFF="IF_NEEDED",
-    ) as dst:
-        regions = config.polygon_regions_per_axis
-        for _, window in dst.block_windows(1):
-            # Pixel phases locate the inner half of every regular grid cell
-            row_start = int(window.row_off)
-            col_start = int(window.col_off)
-            rows = np.arange(row_start, row_start + int(window.height))
-            cols = np.arange(col_start, col_start + int(window.width))
-            row_phase = ((rows + 0.5) * regions / height) % 1
-            col_phase = ((cols + 0.5) * regions / width) % 1
-            inside_rows = (row_phase >= 0.25) & (row_phase <= 0.75)
-            inside_cols = (col_phase >= 0.25) & (col_phase <= 0.75)
-            inside = inside_rows[:, None] & inside_cols[None, :]
-
-            # Nodata gaps keep neighboring rectangles disconnected for both engines
-            block = np.full(inside.shape, -99999, dtype=np.float32)
-            block[inside] = config.raster_value
-            dst.write(block, indexes=1, window=window)
-
-
-def _write_vector_source(filename: str, features_per_axis: int = 1) -> None:
-    """Write regularly spaced polygons used by rasterization and mask scenarios."""
-
-    if os.path.exists(filename):
-        return
-    if features_per_axis < 1:
-        raise ValueError("Vector features per axis must be strictly positive")
-
-    # Leave a regular gap around every feature while retaining one central feature
-    x_edges = np.linspace(7.05, 7.95, features_per_axis + 1)
-    y_edges = np.linspace(45.05, 45.95, features_per_axis + 1)
-    geometries = []
-    for x_start, x_stop in zip(x_edges[:-1], x_edges[1:]):
-        for y_start, y_stop in zip(y_edges[:-1], y_edges[1:]):
-            x_margin = (x_stop - x_start) * 0.2
-            y_margin = (y_stop - y_start) * 0.2
-            geometries.append(box(x_start + x_margin, y_start + y_margin, x_stop - x_margin, y_stop - y_margin))
-
-    # Constant burn values give every engine the same binary output
-    vector = gpd.GeoDataFrame({"value": np.ones(len(geometries), dtype=np.uint8)}, geometry=geometries, crs=4326)
-    vector.to_file(filename, driver="GPKG")
-
-
-def _write_point_source(filename: str, points_per_axis: int = 5) -> None:
-    """Write a regular constant-valued point cloud for gridding scenarios."""
-
-    if os.path.exists(filename):
-        return
-    if points_per_axis < 1:
-        raise ValueError("Points per axis must be strictly positive")
-
-    # Keep points away from the exact border so every geometry is unambiguous
-    coords_x = np.linspace(7.05, 7.95, points_per_axis)
-    coords_y = np.linspace(45.05, 45.95, points_per_axis)
-    xx, yy = np.meshgrid(coords_x, coords_y)
-    points = gpd.GeoDataFrame(
-        {"z": np.ones(xx.size, dtype=np.float64)},
-        geometry=gpd.points_from_xy(xx.ravel(), yy.ravel()),
-        crs=4326,
-    )
-    points.to_file(filename, driver="GPKG")
-
+from geoutils.profiler import profile_call
 
 ############################################
-# Worker lifecycle and complete operations #
+# Worker lifecycle and complete operations
 ############################################
 
 
@@ -465,7 +201,8 @@ class BenchmarkRunner:
         os.environ["GDAL_CACHEMAX"] = str(self.config.gdal_cachemax_mb)
         try:
             # Rasterio has already initialized GDAL, so set its live cache while workers fork
-            with rio.Env(GDAL_CACHEMAX=self.config.gdal_cachemax_mb):
+            # Rasterio's integer option is measured in bytes; worker environment strings remain measured in MiB
+            with rio.Env(GDAL_CACHEMAX=self.config.gdal_cachemax_mb * 1024**2):
                 # Default recycling bounds allocator and native-library caches in long jobs
                 self.mp_cluster = MpCluster(conf={"nb_workers": self.config.n_workers})
 
@@ -700,332 +437,12 @@ class BenchmarkRunner:
             )
         return read_raster_center(self._last_output_file)
 
-    def _interpolation_points(self) -> tuple[np.ndarray[Any, Any], np.ndarray[Any, Any]]:
-        """Create deterministic point coordinates spread across the source raster."""
-
-        # A uniform distribution touches many chunks and avoids incomplete edge support
-        rng = np.random.default_rng(42)
-        x = rng.uniform(7.01, 7.99, size=self.config.ninterp)
-        y = rng.uniform(45.01, 45.99, size=self.config.ninterp)
-        return x, y
-
-    def _grouped_statistics(self, raster: Any, method: str, strategy: str | None) -> float:
-        """Compute grouped moments or exact robust estimates on deterministic values with independent gaps.
-
-        Local groups occupy rectangular regions; interleaved groups span the entire input. Dask builds all value
-        and membership arrays lazily. Multiprocessing benchmarks the current array interface, which loads values
-        in the client before tiling them for workers. The returned fingerprint checks complete finite counts.
-        """
-
-        # Generate coordinates with the same execution backend as the input raster
-        height, width = self.config.shape
-        if self.backend == "dask":
-            import_optional("dask", extra_name="benchmark")
-            import dask.array as da
-
-            rows = da.arange(height, chunks=self.config.chunks[0])[:, None]
-            columns = da.arange(width, chunks=self.config.chunks[1])[None, :]
-        else:
-            rows = np.arange(height)[:, None]
-            columns = np.arange(width)[None, :]
-        regions = self.config.grouped_regions_per_axis
-        if regions < 1 or regions > min(height, width):
-            raise ValueError("Grouped regions per axis must fit within the raster dimensions.")
-
-        # Separate localized membership from groups repeated through every chunk
-        if self.config.grouped_layout == "local":
-            groups = (rows * regions // height) * regions + columns * regions // width
-        else:
-            groups = (rows % regions) * regions + columns % regions
-        positions = rows * width + columns
-        base = raster.data.squeeze()
-        signal = base + (rows % 97) * 0.125 + (columns % 53) * 0.25
-        values = {
-            "signal": np.where(positions % 17 != 0, signal, np.nan),
-            "offset": np.where(positions % 29 != 0, 2 * signal + 10, np.nan),
-        }
-
-        # Measure the complete public calculation, including exact group gathering when requested
-        from geoutils.stats import stats
-
-        statistics = ["mean", "std", "min", "max"] if method == "moments" else ["median", "nmad"]
-        config = self._multiproc_config("grouped_stats") if self.backend == "multiprocessing" else None
-        result = stats(
-            values,
-            by={"zone": groups},
-            categories={"zone": range(regions**2)},
-            statistics=statistics,
-            strategy=cast(Literal["auto", "dense", "sparse", "groupwise"], strategy or "auto"),
-            mp_config=config,
-        )
-
-        # Every pixel belongs to a group; missing values follow independent, analytically known periods
-        count = height * width
-        for name, period in (("signal", 17), ("offset", 29)):
-            expected = count - (count + period - 1) // period
-            if result[(name, "count")].sum() != expected:
-                raise AssertionError(f"Grouped benchmark lost finite observations in {name!r}.")
-            if not np.isfinite(result[name].to_numpy()).all():
-                raise AssertionError(f"Grouped benchmark returned invalid estimates in {name!r}.")
-        return 1.0
-
     def _execute(self, operation: OperationName) -> float:
-        """Build and fully compute one named benchmark operation."""
+        """Resolve and fully compute one operation through its local handler."""
 
         self._last_output_file = None
-        operation_method, calculation_engine, operation_strategy = resolve_operation_parameters(
-            operation,
-            self.config.operation_method,
-            self.config.calculation_engine,
-            self.config.operation_strategy,
-            self.backend,
-        )
-
-        # Open a raster only for operations that use one as their source
-        raster: Any = None
-        if operation not in ("rasterize", "create_mask", "grid"):
-            source_file = self.polygon_raster_file if operation == "polygonize" else self.raster_file
-            raster = self.make_raster(source_file)
-
-        if operation == "crop":
-            if self.backend != "dask":
-                raise ValueError("Deferred raster cropping is only registered for Dask")
-
-            # Crop metadata and array indexes lazily before writing the selected region
-            output = raster.rst.crop((7.1, 45.1, 7.9, 45.9))
-            return self._compute_raster(output, operation)
-
-        if operation == "translate":
-            if self.backend != "dask":
-                raise ValueError("Deferred raster translation is only registered for Dask")
-
-            # Translation changes georeferencing while leaving every value chunk deferred
-            output = raster.rst.translate(xoff=0.1, yoff=0.1)
-            return self._compute_raster(output, operation)
-
-        if operation == "copy":
-            if self.backend != "dask":
-                raise ValueError("Lazy raster copying is only registered for Dask")
-
-            # A shallow accessor copy duplicates metadata without evaluating the graph
-            output = raster.rst.copy(deep=False)
-            return self._compute_raster(output, operation)
-
-        if operation == "filter":
-            # Apply a local operation before writing its complete large output
-            mp_config = self._multiproc_config(operation) if self.backend == "multiprocessing" else None
-            filter_kwargs: dict[str, Any] = {
-                "method": operation_method,
-                "engine": calculation_engine,
-                "size": 5,
-            }
-            output = (
-                raster.rst.filter(**filter_kwargs)
-                if self.backend == "dask"
-                else raster.filter(**filter_kwargs, mp_config=mp_config)
-            )
-            return self._compute_raster(output, operation)
-
-        if operation == "reproject":
-            # Fix the target size so GeoUtils and GDAL references write the same pixel count
-            mp_config = self._multiproc_config(operation) if self.backend == "multiprocessing" else None
-            kwargs = {
-                "crs": 32632,
-                "grid_size": self.config.shape[::-1],
-                "resampling": operation_method,
-                "nodata": -99999,
-                "n_threads": 1,
-                "memory_limit": 64,
-            }
-            output = (
-                raster.rst.reproject(**kwargs)
-                if self.backend == "dask"
-                else raster.reproject(**kwargs, mp_config=mp_config)
-            )
-            return self._compute_raster(output, operation)
-
-        if operation == "statistics":
-            if self.backend != "dask":
-                raise ValueError("Raster statistics are only registered for Dask")
-
-            # Compute selected reductions without evaluating unrelated quantiles
-            import_optional("dask", extra_name="benchmark")
-            import dask
-
-            statistics = raster.rst.stats(["mean", "std", "valid count"])
-            mean, _, _ = dask.compute(*statistics.values())
-            return float(mean)
-
-        if operation == "grouped_stats":
-            assert operation_method is not None
-            return self._grouped_statistics(raster, operation_method, operation_strategy)
-
-        if operation == "subsample":
-            # Build a fixed-size point result while the source remains larger than worker memory
-            options = {
-                "subsample": self.config.subsample_size,
-                "random_state": 42,
-                "force_pixel_offset": "center",
-            }
-            if self.backend == "dask":
-                points = raster.rst.subsample(**options)
-                if not is_dask_dataframe(points) or points.pc.is_loaded:
-                    raise AssertionError("Dask subsample() output must remain lazy before computation.")
-                dataframe = points.compute()
-                if points.pc.is_loaded:
-                    raise AssertionError("Computing a Dask result must not load its original point cloud wrapper.")
-                if raster._in_memory:
-                    raise AssertionError("Computing a Dask subsample must not load its source raster.")
-                output_count = len(dataframe)
-                value = float(dataframe["b1"].iloc[0])
-            else:
-                points = raster.subsample(**options, mp_config=self._multiproc_config(operation))
-                if points.is_loaded:
-                    raise AssertionError("Multiprocessing subsample() output must remain unloaded.")
-                self._last_output_file = str(points.name)
-                output_count, value = read_point_file_sample(self._last_output_file, "b1")
-                if points.is_loaded:
-                    raise AssertionError("Reading the output file must not load its PointCloud wrapper.")
-                if raster.is_loaded:
-                    raise AssertionError("Multiprocessing subsample() must not load its source raster.")
-
-            # Check the requested count and constant source values without retaining the complete raster
-            if output_count != self.config.subsample_size:
-                raise AssertionError("Subsampling returned an unexpected number of rows.")
-            return value
-
-        if operation == "to_pointcloud":
-            # Convert every cell by default, or use a bounded sample for the larger-than-memory contract
-            point_count = self.config.pointcloud_subsample_size
-            options = {
-                "subsample": 1 if point_count is None else point_count,
-                "random_state": 42,
-                "force_pixel_offset": "center",
-            }
-            expected_count = self.config.shape[0] * self.config.shape[1] if point_count is None else point_count
-            if self.backend == "dask":
-                points = raster.rst.to_pointcloud(**options)
-                if not is_dask_dataframe(points) or points.pc.is_loaded:
-                    raise AssertionError("Dask to_pointcloud() output must remain lazy before computation.")
-                dataframe = points.compute()
-                if points.pc.is_loaded:
-                    raise AssertionError("Computing a Dask result must not load its original point cloud wrapper.")
-                if raster._in_memory:
-                    raise AssertionError("Computing a Dask point cloud must not load its source raster.")
-                output_count = len(dataframe)
-                value = float(dataframe["b1"].iloc[0])
-            else:
-                points = raster.to_pointcloud(**options, mp_config=self._multiproc_config(operation))
-                if points.is_loaded:
-                    raise AssertionError("Multiprocessing to_pointcloud() output must remain unloaded.")
-                self._last_output_file = str(points.name)
-                output_count, value = read_point_file_sample(self._last_output_file, "b1")
-                if points.is_loaded:
-                    raise AssertionError("Reading the output file must not load its PointCloud wrapper.")
-                if raster.is_loaded:
-                    raise AssertionError("Multiprocessing point conversion must not load its source raster.")
-
-            # Check the requested count and constant source values without retaining the complete raster
-            if output_count != expected_count:
-                raise AssertionError("Point conversion returned an unexpected number of rows.")
-            return value
-
-        if operation == "interp_points":
-            # Interpolate only requested positions while source chunks stay file-backed
-            points = self._interpolation_points()
-            mp_config = self._multiproc_config(operation) if self.backend == "multiprocessing" else None
-            values = (
-                raster.rst.interp_points(points, method=operation_method, as_array=True)
-                if self.backend == "dask"
-                else raster.interp_points(points, method=operation_method, as_array=True, mp_config=mp_config)
-            )
-            if hasattr(values, "compute"):
-                values = values.compute()
-            return float(np.nanmean(values))
-
-        if operation == "polygonize":
-            # The selected chunk strategy reconciles polygons that cross output tiles
-            mp_config = self._multiproc_config(operation) if self.backend == "multiprocessing" else None
-            polygonize_kwargs: dict[str, Any] = {"target_values": 1}
-            if operation_strategy is not None:
-                polygonize_kwargs["strategy"] = operation_strategy
-            polygons = (
-                raster.rst.polygonize(**polygonize_kwargs)
-                if self.backend == "dask"
-                else raster.polygonize(**polygonize_kwargs, mp_config=mp_config)
-            )
-            self._last_output_file = self._output_path(operation, suffix=".gpkg")
-            polygon_data = polygons if isinstance(polygons, gpd.GeoDataFrame) else polygons.ds
-            polygon_data.to_file(self._last_output_file)
-            return float(len(polygon_data))
-
-        if operation == "write":
-            if self.backend != "dask":
-                raise ValueError("Direct lazy writing is only registered for Dask")
-
-            # Write the unchanged lazy source to isolate the storage path
-            self._last_output_file = self._write_dask_raster(raster, operation)
-            return read_raster_center(self._last_output_file)
-
-        if operation in ("rasterize", "create_mask"):
-            from geoutils import Vector
-
-            # Vector input is small while the produced raster is larger than memory
-            vector = Vector(self.vector_file)
-            mp_config = self._multiproc_config(operation) if self.backend == "multiprocessing" else None
-            kwargs = {
-                "shape": self.config.shape,
-                "bounds": (7.0, 45.0, 8.0, 46.0),
-                "crs": 4326,
-                "chunksizes": self.config.chunks,
-            }
-            if operation == "rasterize":
-                # Binary burn values need one byte per pixel and match the GDAL Byte reference
-                output = vector.rasterize(
-                    in_value=1,
-                    out_value=0,
-                    out_dtype=np.uint8,
-                    dask=self.backend == "dask",
-                    mp_config=mp_config,
-                    **kwargs,
-                )
-            else:
-                output = vector.create_mask(
-                    dask=self.backend == "dask",
-                    mp_config=mp_config,
-                    **kwargs,
-                )
-            return self._compute_raster(output, operation)
-
-        if operation == "grid":
-            import geoutils as gu
-
-            # Point input and raster output both remain partitioned for their backend
-            mp_config = self._multiproc_config(operation) if self.backend == "multiprocessing" else None
-            pointcloud = (
-                gu.open_pointcloud(
-                    self.point_file,
-                    data_column="z",
-                    chunks=self.config.point_partition_size,
-                )
-                if self.backend == "dask"
-                else gu.PointCloud(self.point_file, data_column="z")
-            )
-            grid_kwargs = {
-                "shape": self.config.shape,
-                "bounds": (7.0, 45.0, 8.0, 46.0),
-                "resampling": cast(GriddingMethod, operation_method),
-                "dist_nodata_pixel": self.config.grid_dist_nodata_pixel,
-                "engine": cast(GriddingEngine, calculation_engine),
-                "chunksizes": self.config.chunks,
-                # One SciPy thread keeps backend and GDAL comparisons repeatable
-                "n_threads": 1,
-            }
-            output = (
-                pointcloud.pc.grid(**grid_kwargs)
-                if self.backend == "dask"
-                else pointcloud.grid(**grid_kwargs, mp_config=mp_config)
-            )
-            return self._compute_raster(output, operation)
-
-        raise ValueError(f"Unsupported benchmark operation: {operation}")
+        specification = OPERATION_BY_NAME.get(operation)
+        if specification is None:
+            raise ValueError(f"Unsupported benchmark operation: {operation}")
+        case = specification.resolve_case(self.backend, self.config)
+        return specification.handler(self, case)

@@ -8,7 +8,7 @@ import shutil
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from benchmarks.workflows.runner import BenchmarkConfig
+from benchmarks.workflows.config import BenchmarkConfig
 
 # Only these raster point operations have an equivalent PDAL pipeline for the external comparison
 PdalComparisonOperation = Literal["subsample", "to_pointcloud"]

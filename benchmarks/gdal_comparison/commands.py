@@ -8,12 +8,12 @@ import shutil
 from dataclasses import dataclass
 from typing import Literal
 
-from benchmarks.workflows.registry import resolve_operation_parameters
-from benchmarks.workflows.runner import BenchmarkConfig
+from benchmarks.workflows.config import BenchmarkConfig
+from benchmarks.workflows.operations import resolve_operation_parameters
 
 # Only these GeoUtils operations have an equivalent GDAL CLI command for the external comparison
-ComparisonOperation = Literal["reproject", "polygonize", "rasterize", "grid"]
-COMPARISON_OPERATIONS: tuple[ComparisonOperation, ...] = ("reproject", "polygonize", "rasterize", "grid")
+ComparisonOperation = Literal["clip", "reproject", "polygonize", "rasterize", "grid"]
+COMPARISON_OPERATIONS: tuple[ComparisonOperation, ...] = ("clip", "reproject", "polygonize", "rasterize", "grid")
 
 # List the GDAL gridding algorithms that the command builder can use for matching GeoUtils methods
 GdalGridAlgorithm = Literal[
@@ -164,6 +164,49 @@ def build_gdal_command(
     height, width = config.shape
     common_config = ["--config", "GDAL_CACHEMAX", str(config.gdal_cachemax_mb)]
     common_creation = ["-co", "TILED=YES", "-co", "BLOCKXSIZE=512", "-co", "BLOCKYSIZE=512"]
+
+    if operation == "clip":
+        # Keep the source extent and mask cells outside the cutline, matching Raster.clip()
+        output_file = os.path.join(config.directory, "output-gdal-clip.tif")
+        command = [
+            _require_command("gdalwarp"),
+            *common_config,
+            "-overwrite",
+            "-cutline",
+            vector_file,
+            "-cl",
+            "source-vector",
+            "-te",
+            "7",
+            "45",
+            "8",
+            "46",
+            "-te_srs",
+            "EPSG:4326",
+            "-ts",
+            str(width),
+            str(height),
+            "-r",
+            "near",
+            "-ot",
+            "Float32",
+            "-dstnodata",
+            "-99999",
+            "-et",
+            "0",
+            "-wm",
+            str(_warp_memory_limit_mb(config)),
+            "-wo",
+            "NUM_THREADS=1",
+            "-wo",
+            "XSCALE=1",
+            "-wo",
+            "YSCALE=1",
+            *common_creation,
+            raster_file,
+            output_file,
+        ]
+        return GdalCommand(command, output_file)
 
     if operation == "reproject":
         # Match the GeoUtils WGS84 to UTM zone 32N nearest-neighbor workflow
