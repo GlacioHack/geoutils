@@ -10,11 +10,11 @@ Mainly, it contains tools for running:
 
 ## Organization
 
-- `workflows/config.py` defines the shared benchmark configuration, parameter ranges and compact cases/sweeps,
-- `workflows/fixtures.py` defines deterministic inputs (e.g. raster/point-cloud data),
+- `workflows/config.py` defines the shared benchmark configuration, parameter ranges and parameter sweeps,
+- `workflows/fixtures.py` defines inputs used by benchmarks (e.g. synthetic raster/point-cloud data),
 - `workflows/operations/` defines operations (e.g. ``reproject()``, ``grid()``), methods (e.g. ``resampling="linear"``),
   calculation engines (e.g., SciPy, Numba), chunk strategies (e.g., "dense" or "sparse" for grouped stats), and
-  execution modes (eager, Dask, multiprocessing), beside the code that runs each operation,
+  execution modes (in-memory, Dask, multiprocessing), beside the code that runs each operation,
 - `workflows/runner.py` sets up the shared inputs, workers, profiling and result computation,
 - `asv_suite/operations.py` sets up ASV to measure individual operations at one fixed configuration,
 - `asv_suite/parameter_sweeps.py` sets up ASV to measure operations across one-dimensional parameter ranges (e.g., raster input size, or method type),
@@ -25,6 +25,32 @@ Mainly, it contains tools for running:
 - `pdal_comparison/` contains PDAL pipelines equivalent operations for performance comparison,
 - `test_large_data.py` is a Pytest module to verify that every supported Dask/Multiprocessing operation computes correctly without
   loading the complete raster into memory.
+
+## Adding a benchmark
+
+Benchmarks are defined in `workflows/operations/`, with one file per functionality (e.g., ``reprojection.py`` or ``filters.py``).
+Each file describes which GeoUtils function to call (e.g., ``reproject()``), which cases to compare (e.g., Dask/Multiproc), which
+parameter sweep to perform (e.g., varying raster input size) and finally if/how to compare to external references (e.g., GDAL/PDAL).
+
+The benchmarks rely on five small objects:
+
+- An `Operation` stores the functions that prepare and run one GeoUtils operation.
+- A `BenchmarkCase` stores a fixed implementation, such as a method + engine + execution mode. It is returned by
+  `execution_cases()`, `strategy_cases()` or `external_case()`, and each becomes one ASV benchmark.
+- A `ParameterAxis` stores the name and values of one changing input, such as raster size or chunk size.
+- A `Sweep` combines an axis, the function that applies its values and the cases to measure at every value.
+- A `Comparison`, returned by `comparison()`, selects saved result series for one report plot. It can combine GeoUtils
+  results with equivalent GDAL, PDAL or Flox results and does not run additional benchmarks.
+
+To add a new benchmark, follow these steps:
+
+1. Choose the file in `workflows/operations/` to add your new benchmark of a functionality, or create a new one.
+2. Write the setup functions then register them with `Operation(...)`  (see examples in existing files).
+3. Use `execution_cases()` or `strategy_cases()` to define the implementations to compare.
+4. Choose or define a `ParameterAxis`, write the function that applies its values to `BenchmarkConfig`, then add
+   `Sweep(axis, update, cases)` to the module's `SWEEPS`.
+5. If you want to add an external implementation, add a `<name>_comparison/` directory, and attach it to the sweep with
+   `external_case(...)`. Then, use `comparison(...)` in the functionality file to select the sweep  to compare with.
 
 When running ASV, local outputs are generated under the gitignored `results/` directory:
 
@@ -49,18 +75,19 @@ To run a benchmark while developing:
 asv run --quick --show-stderr -E existing --bench <benchmark-regex>
 ```
 
-For example, `<benchmark-regex>` can be `EagerIdwNumbaGriddingRasterSize.time_operation` to benchmark ``grid(resampling="idw", engine="numba")``.
+For example, `<benchmark-regex>` can be `grid_idw_numba_inmem__rastersize.time_operation` to benchmark ``grid(resampling="idw", engine="numba")``.
+We use `_` between function parameters, and `__` before a varied input size.
 
 To compare the performance a new implementation with that of the `main` branch: commit current changes, then use:
 
 ```bash
-asv continuous main HEAD -b 'EagerIdwNumbaGriddingRasterSize.time_operation'
+asv continuous main HEAD -b 'grid_idw_numba_inmem__rastersize.time_operation'
 ```
 
 To save the results and generate the HTML report locally:
 
 ```bash
-asv run --show-stderr -E existing --bench 'EagerIdwNumbaGriddingRasterSize.time_operation'
+asv run --show-stderr -E existing --bench 'grid_idw_numba_inmem__rastersize.time_operation'
 asv publish
 python -m benchmarks.asv_suite.render_results
 ```
@@ -75,7 +102,7 @@ asv preview --browser --html-dir benchmarks/results/asv/preview
 ```
 
 Pass `--baseline-commit <commit>` to the renderer to add `comparisons/performance-change.md`, an before/after
-table for eager, Dask and Multiprocessing end-to-end time normalized to the GDAL CLI on the same revision.
+table for in-memory, Dask and Multiprocessing end-to-end time normalized to the GDAL CLI on the same revision.
 
 To generate the benchmarking figures used both on the benchmarking webpage + linked in the RTD documentation, run:
 

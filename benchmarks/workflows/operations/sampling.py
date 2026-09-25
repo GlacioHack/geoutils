@@ -6,8 +6,8 @@ from collections.abc import Mapping
 from typing import Any
 
 from benchmarks.workflows.config import (
-    POINT_COUNT_AXIS,
     RASTER_AXIS,
+    SUBSAMPLE_AXIS,
     BenchmarkCase,
     BenchmarkConfig,
     Operation,
@@ -17,12 +17,13 @@ from benchmarks.workflows.config import (
     comparison,
     execution_cases,
     external_case,
+    raster_size_config,
 )
 from benchmarks.workflows.fixtures import read_point_file_sample
 from geoutils._dispatch import is_dask_dataframe
 
 ORDER = 80
-_POINT_OUTPUT_DRIVERS = ("LAS", "LAZ")
+POINT_OUTPUT_DRIVERS = ("LAS", "LAZ")
 
 ############################
 # Operation execution
@@ -82,12 +83,8 @@ def run_sampling(runner: Any, case: BenchmarkCase) -> float:
 
 
 OPERATIONS = (
-    Operation("subsample", run_sampling, sampling_options),
-    Operation("to_pointcloud", run_sampling, sampling_options),
-)
-COVERAGE = (
-    OperationCoverage("subsample", ("dask", "multiprocessing"), 1, 8),
-    OperationCoverage("to_pointcloud", ("dask", "multiprocessing"), 1, 9),
+    Operation("subsample", run_sampling, sampling_options, coverage=OperationCoverage(8)),
+    Operation("to_pointcloud", run_sampling, sampling_options, coverage=OperationCoverage(9)),
 )
 
 
@@ -96,91 +93,64 @@ COVERAGE = (
 ############################
 
 
-def _subsample_config(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
+def subsample_config(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
     """Set the source layout and requested output count."""
 
     size = 1_000 if pr_check else 2_000
     return {"shape": (size, size), "chunks": (1_000, 1_000), "subsample_size": int(parameter)}
 
 
-def _pointcloud_config(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
-    """Set the source raster and chunks for complete point conversion."""
-
-    size = int(parameter)
-    return {"shape": (size, size), "chunks": (1_000, 1_000)}
-
-
-_SUBSAMPLE_CASES = execution_cases("subsample-size", "subsample", None, None, executions=("dask", "multiprocessing"))
-_POINTCLOUD_CASES = execution_cases(
-    "to-pointcloud-raster-size", "to_pointcloud", None, None, executions=("dask", "multiprocessing")
+# Each case fixes one execution mode and output format for one ASV result series; its sweep owns the changing input
+SUBSAMPLE_CASES = execution_cases("subsample", None, None, executions=("dask", "multiprocessing"))
+POINTCLOUD_CASES = execution_cases(
+    "to_pointcloud",
+    None,
+    None,
+    executions=("dask", "multiprocessing"),
 )
-_LAS_SUBSAMPLE_CASES = tuple(
-    execution_cases(
-        "subsample-las-laz-size",
+LAS_SUBSAMPLE_CASES = tuple(
+    BenchmarkCase(
         "subsample",
-        None,
-        None,
-        executions=("multiprocessing",),
+        execution="multiprocessing",
         output_driver=driver,
-    )[0]
-    for driver in _POINT_OUTPUT_DRIVERS
+    )
+    for driver in POINT_OUTPUT_DRIVERS
 )
-_LAS_POINTCLOUD_CASES = tuple(
-    execution_cases(
-        "to-pointcloud-las-laz-size",
+LAS_POINTCLOUD_CASES = tuple(
+    BenchmarkCase(
         "to_pointcloud",
-        None,
-        None,
-        executions=("multiprocessing",),
+        execution="multiprocessing",
         output_driver=driver,
-    )[0]
-    for driver in _POINT_OUTPUT_DRIVERS
-)
-_SUBSAMPLE_REFERENCE = external_case(_SUBSAMPLE_CASES, reference="pdal_cli", pr_check=True)
-_POINTCLOUD_REFERENCE = external_case(_POINTCLOUD_CASES, reference="pdal_cli", pr_check=True)
-_LAS_SUBSAMPLE_REFERENCES = tuple(
-    external_case(
-        next(case for case in _LAS_SUBSAMPLE_CASES if case.output_driver == driver),
-        reference="pdal_cli",
     )
-    for driver in _POINT_OUTPUT_DRIVERS
+    for driver in POINT_OUTPUT_DRIVERS
 )
-_LAS_POINTCLOUD_REFERENCES = tuple(
-    external_case(
-        next(case for case in _LAS_POINTCLOUD_CASES if case.output_driver == driver),
-        reference="pdal_cli",
-    )
-    for driver in _POINT_OUTPUT_DRIVERS
-)
+SUBSAMPLE_REFERENCE = external_case(SUBSAMPLE_CASES, reference="pdal_cli", pr_check=True)
+POINTCLOUD_REFERENCE = external_case(POINTCLOUD_CASES, reference="pdal_cli", pr_check=True)
+LAS_SUBSAMPLE_REFERENCES = tuple(external_case(case, reference="pdal_cli") for case in LAS_SUBSAMPLE_CASES)
+LAS_POINTCLOUD_REFERENCES = tuple(external_case(case, reference="pdal_cli") for case in LAS_POINTCLOUD_CASES)
 
+# Measure every GeoUtils case and matching PDAL reference over output count or raster size
 SWEEPS = (
+    Sweep(SUBSAMPLE_AXIS, subsample_config, SUBSAMPLE_CASES, (SUBSAMPLE_REFERENCE,)),
     Sweep(
-        "subsample_size",
-        POINT_COUNT_AXIS,
-        _subsample_config,
-        _SUBSAMPLE_CASES,
-        (_SUBSAMPLE_REFERENCE,),
+        SUBSAMPLE_AXIS,
+        subsample_config,
+        LAS_SUBSAMPLE_CASES,
+        LAS_SUBSAMPLE_REFERENCES,
+        name="subsample-las-laz",
     ),
     Sweep(
-        "subsample_size",
-        POINT_COUNT_AXIS,
-        _subsample_config,
-        _LAS_SUBSAMPLE_CASES,
-        _LAS_SUBSAMPLE_REFERENCES,
-    ),
-    Sweep(
-        "raster_size",
         RASTER_AXIS,
-        _pointcloud_config,
-        _POINTCLOUD_CASES,
-        (_POINTCLOUD_REFERENCE,),
+        raster_size_config,
+        POINTCLOUD_CASES,
+        (POINTCLOUD_REFERENCE,),
     ),
     Sweep(
-        "raster_size",
         RASTER_AXIS,
-        _pointcloud_config,
-        _LAS_POINTCLOUD_CASES,
-        _LAS_POINTCLOUD_REFERENCES,
+        raster_size_config,
+        LAS_POINTCLOUD_CASES,
+        LAS_POINTCLOUD_REFERENCES,
+        name="to-pointcloud-las-laz",
     ),
 )
 
@@ -188,6 +158,7 @@ SWEEPS = (
 # Report comparisons
 ############################
 
+# Comparisons select saved GeoUtils and PDAL series for plots by operation and format; they run no new measurements
 COMPARISONS = (
     comparison(SWEEPS[0], logarithmic_x=True),
     comparison(SWEEPS[2]),

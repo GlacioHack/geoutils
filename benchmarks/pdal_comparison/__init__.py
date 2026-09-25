@@ -1,1 +1,1 @@
-"""Provide equivalent PDAL pipelines and measurements to the ASV comparisons."""
+"""Comparison with equivalent PDAL pipelines."""

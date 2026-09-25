@@ -16,7 +16,6 @@ from benchmarks.workflows.config import (
     BenchmarkCase,
     BenchmarkConfig,
     ExecutionMode,
-    ExternalReferenceCase,
     Parameter,
     Sweep,
     process_tree_memory_increase_mb,
@@ -34,7 +33,7 @@ def prepare_grouped_inputs(
     execution_mode: ExecutionMode,
     chunks: tuple[int, int] = (1_000, 1_000),
 ) -> tuple[Any, Any, Any, NDArrayNum]:
-    """Create equivalent eager or Dask values, groups, categories and selection for both implementations."""
+    """Create equivalent in-memory or Dask values, groups, categories and selection for both implementations."""
 
     # Prepare two bounded signals with different missing observations
     positions = np.arange(size * size).reshape(size, size)
@@ -108,7 +107,7 @@ class _GroupedFloxBenchmark:
     rounds = 1
     warmup_time = 0
     sweep: Sweep
-    case: BenchmarkCase | ExternalReferenceCase
+    case: BenchmarkCase
 
     def make_config(self, parameter: Parameter) -> BenchmarkConfig:
         """Build one configuration from the operation-local sweep."""
@@ -120,8 +119,8 @@ class _GroupedFloxBenchmark:
 
         if asv_pr_check_enabled() and not self.case.pr_check:
             raise NotImplementedError("Benchmark case omitted from the pull-request sample")
-        self.external = isinstance(self.case, ExternalReferenceCase)
-        execution_mode = self.case.execution_mode
+        self.external = self.case.external_reference is not None
+        execution_mode = self.case.execution
         assert execution_mode is not None
         if self.external:
             try:

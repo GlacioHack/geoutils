@@ -1,4 +1,4 @@
-"""Define raster filtering benchmarks."""
+"""Define filtering benchmarks."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ from benchmarks.workflows.config import (
     OperationCoverage,
     Parameter,
     Sweep,
-    comparison,
     execution_cases,
 )
 
@@ -46,26 +45,19 @@ OPERATIONS = (
         ("method", "engine"),
         {"mean": ("scipy",)},
         "mean",
+        coverage=OperationCoverage(4),
     ),
 )
-COVERAGE = (OperationCoverage("filter", ("dask", "multiprocessing"), 1, 4),)
 
 
-def _chunk_size(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
-    """Set the selected square chunk size."""
-
+def chunk_size(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
     size = int(parameter)
     return {"chunks": (size, size)}
 
 
-_CASES = execution_cases("filter-chunk-size", "filter", "mean", "scipy", executions=("dask", "multiprocessing"))
-SWEEPS = (
-    Sweep(
-        "chunk_size",
-        RASTER_CHUNK_AXIS,
-        _chunk_size,
-        _CASES,
-        base={"shape": (2_000, 2_000)},
-    ),
-)
-COMPARISONS = (comparison(SWEEPS[0]),)
+########################################
+# Cases, sweeps and report comparisons
+########################################
+
+CASES = execution_cases("filter", "mean", "scipy", executions=("dask", "multiprocessing"))
+SWEEPS = (Sweep(RASTER_CHUNK_AXIS, chunk_size, CASES),)

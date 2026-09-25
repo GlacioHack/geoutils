@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Prepare shared benchmark infrastructure and run operation-local handlers."""
+"""Shared benchmark runner infrastructure."""
 
 from __future__ import annotations
 
@@ -246,7 +246,7 @@ class BenchmarkRunner:
             if self.client is None:
                 return {}
             return {str(address): int(pid) for address, pid in self.client.run(os.getpid).items()}
-        if self.backend == "eager" or self.mp_cluster is None:
+        if self.backend == "inmem" or self.mp_cluster is None:
             return ()
         return self.mp_cluster.worker_pids()
 
@@ -264,8 +264,8 @@ class BenchmarkRunner:
 
         from geoutils import Raster
 
-        # Eager comparisons load the complete input while multiprocessing reads windows
-        return Raster(source_file, load_data=self.backend == "eager")
+        # In-memory comparisons load the complete input while multiprocessing reads windows
+        return Raster(source_file, load_data=self.backend == "inmem")
 
     def run(self, operation: OperationName, *, profile: bool = True) -> BenchmarkResult:
         """Compute one operation while measuring its complete backend."""
@@ -274,7 +274,7 @@ class BenchmarkRunner:
             raise RuntimeError("BenchmarkRunner must be started before running operations")
         if self.backend == "multiprocessing" and self.mp_cluster is None:
             raise RuntimeError("BenchmarkRunner must be started before running operations")
-        if self.backend == "eager" and self._directory is None:
+        if self.backend == "inmem" and self._directory is None:
             raise RuntimeError("BenchmarkRunner must be started before running operations")
 
         # Worker identities reveal failures hidden by automatic replacement
@@ -422,7 +422,7 @@ class BenchmarkRunner:
             # Multiprocessing operations already wrote their returned Raster to disk
             self._last_output_file = str(raster.name)
         else:
-            # Eager results are already in memory and use the same tiled output contract
+            # In-memory results use the same tiled output contract
             self._last_output_file = self._output_path(operation)
             block_y = _tiff_block_size(self.config.shape[0], self.config.chunks[0])
             block_x = _tiff_block_size(self.config.shape[1], self.config.chunks[1])

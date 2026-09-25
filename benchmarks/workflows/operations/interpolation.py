@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 
 from benchmarks.workflows.config import (
-    POINT_COUNT_AXIS,
+    INTERPOLATED_POINT_AXIS,
     BenchmarkCase,
     BenchmarkConfig,
     Operation,
@@ -59,25 +59,25 @@ OPERATIONS = (
         ("method",),
         {"linear": ("scipy",)},
         "linear",
+        coverage=OperationCoverage(10),
     ),
 )
-COVERAGE = (OperationCoverage("interp_points", ("dask", "multiprocessing"), 1, 10),)
 
 
-def _point_count(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
+def point_count(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
     """Set the number of interpolation coordinates."""
 
     return {"ninterp": int(parameter)}
 
 
-_CASES = execution_cases("interpolation-point-count", "interp_points", "linear", "scipy")
-SWEEPS = (
-    Sweep(
-        "interpolated_points",
-        POINT_COUNT_AXIS,
-        _point_count,
-        _CASES,
-        base={"shape": (2_000, 2_000), "chunks": (1_000, 1_000)},
-    ),
-)
+########################################
+# Cases, sweeps and report comparisons
+########################################
+
+
+# Each case fixes one execution mode for one ASV result series; the sweep owns the changing point count
+CASES = execution_cases("interp_points", "linear", "scipy")
+SWEEPS = (Sweep(INTERPOLATED_POINT_AXIS, point_count, CASES),)
+
+# The comparison selects the saved execution-mode series for one report plot; it runs no additional benchmark
 COMPARISONS = (comparison(SWEEPS[0], logarithmic_x=True),)

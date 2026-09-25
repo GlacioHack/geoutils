@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -15,7 +14,6 @@ from benchmarks.workflows.config import (
     RASTER_CHUNK_AXIS,
     BenchmarkCase,
     BenchmarkConfig,
-    ExternalReferenceCase,
     Operation,
     OperationCoverage,
     Parameter,
@@ -24,12 +22,13 @@ from benchmarks.workflows.config import (
     execution_cases,
     external_case,
     merge_cases,
+    raster_size_config,
     strategy_cases,
 )
 from geoutils._misc import import_optional
 
 ORDER = 10
-_STRATEGIES = ("auto", "dense", "sparse", "groupwise")
+STRATEGIES = ("auto", "dense", "sparse", "groupwise")
 
 ############################
 # Operation execution
@@ -61,10 +60,10 @@ def run_statistics(runner: Any, case: BenchmarkCase) -> float:
         mean, _, _ = dask.compute(*statistics.values())
         return float(mean)
 
-    return _grouped_statistics(runner, raster, case)
+    return grouped_statistics(runner, raster, case)
 
 
-def _grouped_statistics(runner: Any, raster: Any, case: BenchmarkCase) -> float:
+def grouped_statistics(runner: Any, raster: Any, case: BenchmarkCase) -> float:
     """Compute grouped moments or exact robust estimates with independent gaps.
 
     Local groups occupy rectangular regions; interleaved groups span the entire input. Dask builds all value
@@ -124,8 +123,15 @@ def _grouped_statistics(runner: Any, raster: Any, case: BenchmarkCase) -> float:
     return 1.0
 
 
+# Multiprocessing currently tiles arrays already resident in the client, so only Dask is out of core
 OPERATIONS = (
-    Operation("statistics", run_statistics, statistics_options, call_name=".stats"),
+    Operation(
+        "statistics",
+        run_statistics,
+        statistics_options,
+        call_name=".stats",
+        coverage=OperationCoverage(6, ("dask",)),
+    ),
     Operation(
         "grouped_stats",
         run_statistics,
@@ -133,16 +139,11 @@ OPERATIONS = (
         ("statistics", "strategy"),
         {"moments": ("numpy",), "robust": ("numpy",)},
         "moments",
-        _STRATEGIES,
+        STRATEGIES,
         "auto",
         call_name="stats",
+        coverage=OperationCoverage(7, ("dask",)),
     ),
-)
-
-# Multiprocessing currently tiles arrays already resident in the client, so only Dask is out of core
-COVERAGE = (
-    OperationCoverage("statistics", ("dask",), 1, 6),
-    OperationCoverage("grouped_stats", ("dask",), 1, 7),
 )
 
 
@@ -151,23 +152,30 @@ COVERAGE = (
 ############################
 
 
-# Isolate input size, chunk size, membership layout and group count for shared grouped-statistic kernels
-_EXECUTION_CASES = execution_cases(
-    "grouped-stats-raster-size",
+# Each case fixes one method, strategy and execution mode for one ASV result series; its sweep owns the changing input
+# The sweeps isolate input size, chunk size, membership layout and group count for shared grouped-statistic kernels
+EXECUTION_CASES = execution_cases(
     "grouped_stats",
     "moments",
     "numpy",
     strategy="dense",
-    pr_executions=("eager", "dask", "multiprocessing"),
+    pr_executions=("inmem", "dask", "multiprocessing"),
 )
-_STRATEGY_CASES = {
+# Check each distinct layout and the automatic sparse threshold with a bounded pull-request workload
+PR_STRATEGIES = {
+    "grouped-stats-chunk-size": ("dense",),
+    "grouped-stats-interleaved-chunks": ("groupwise",),
+    "grouped-stats-group-count": ("sparse", "auto"),
+}
+STRATEGY_CASES = {
     sweep_id: strategy_cases(
-        sweep_id,
         "grouped_stats",
         "moments",
         "numpy",
-        _STRATEGIES,
+        STRATEGIES,
         execution="dask",
+        pr_strategies=PR_STRATEGIES.get(sweep_id, ()),
+        variant="interleaved" if sweep_id == "grouped-stats-interleaved-chunks" else None,
     )
     for sweep_id in (
         "grouped-stats-raster-size",
@@ -176,8 +184,7 @@ _STRATEGY_CASES = {
         "grouped-stats-group-count",
     )
 }
-_ROBUST_CASES = execution_cases(
-    "grouped-stats-robust-size",
+ROBUST_CASES = execution_cases(
     "grouped_stats",
     "robust",
     "numpy",
@@ -185,55 +192,33 @@ _ROBUST_CASES = execution_cases(
     pr_executions=("dask", "multiprocessing"),
 )
 
-# Check each distinct layout and the automatic sparse threshold with a bounded pull-request workload
-for _sweep_id, _cases in _STRATEGY_CASES.items():
-    _STRATEGY_CASES[_sweep_id] = tuple(
-        replace(case, pr_check=True)
-        if (_sweep_id, case.strategy)
-        in {
-            ("grouped-stats-chunk-size", "dense"),
-            ("grouped-stats-interleaved-chunks", "groupwise"),
-            ("grouped-stats-group-count", "sparse"),
-            ("grouped-stats-group-count", "auto"),
-        }
-        else case
-        for case in _cases
-    )
-
 # Compare public GeoUtils stats() with direct Flox reductions on the same prepared arrays
-_FLOX_CASES = {
+FLOX_CASES = {
     sweep_id: execution_cases(
-        sweep_id,
         "grouped_stats",
         "moments",
         "numpy",
         strategy="auto",
-        pr_executions=("eager", "dask", "multiprocessing"),
+        pr_executions=("inmem", "dask", "multiprocessing"),
+        variant="flox",
     )
     for sweep_id in ("grouped-flox-raster-size", "grouped-flox-group-count")
 }
-_FLOX_REFERENCES = {
+FLOX_REFERENCES = {
     sweep_id: tuple(
         external_case(
-            _FLOX_CASES[sweep_id],
+            FLOX_CASES[sweep_id],
             reference="flox",
             pr_check=True,
             execution=execution,
         )
-        for execution in ("eager", "dask")
+        for execution in ("inmem", "dask")
     )
-    for sweep_id in _FLOX_CASES
+    for sweep_id in FLOX_CASES
 }
 
 
-def _raster_size(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
-    """Prepare two values and 64 spatial groups on the selected raster size."""
-
-    size = int(parameter)
-    return {"shape": (size, size), "chunks": (1_000, 1_000)}
-
-
-def _chunk_size(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
+def chunk_size(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
     """Include uneven edge chunks and groups crossing partition boundaries."""
 
     size = 1_000 if pr_check else 2_000
@@ -241,31 +226,27 @@ def _chunk_size(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Ma
     return {"shape": (size, size), "chunks": (chunk_size, chunk_size)}
 
 
-def _interleaved_chunk_size(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
+def interleaved_chunk_size(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
     """Keep observations interleaved across all chunks for each tested partition size."""
 
-    return {**_chunk_size(parameter, case, pr_check), "grouped_layout": "interleaved"}
+    return {**chunk_size(parameter, case, pr_check), "grouped_layout": "interleaved"}
 
 
-def _group_count(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
+def group_count(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
     """Include 4225 groups so automatic reduction exercises its sparse branch."""
 
     size = 1_000 if pr_check else 2_000
     return {"shape": (size, size), "chunks": (500, 500), "grouped_regions_per_axis": int(parameter)}
 
 
-def _flox_raster_size(
-    parameter: Parameter, case: BenchmarkCase | ExternalReferenceCase, pr_check: bool
-) -> Mapping[str, Any]:
+def flox_raster_size(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
     """Vary raster size around 256 local groups and fixed spatial chunks."""
 
     size = int(parameter)
     return {"shape": (size, size), "chunks": (1_000, 1_000), "grouped_regions_per_axis": 20}
 
 
-def _flox_group_count(
-    parameter: Parameter, case: BenchmarkCase | ExternalReferenceCase, pr_check: bool
-) -> Mapping[str, Any]:
+def flox_group_count(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
     """Vary declared groups on a fixed raster with membership repeated across chunks."""
 
     size = 1_000 if pr_check else 2_000
@@ -277,53 +258,46 @@ def _flox_group_count(
     }
 
 
+# Measure the selected cases over each numeric axis, including matched Flox cases for the first two sweeps
 SWEEPS = (
     Sweep(
-        "raster_size",
         RASTER_AXIS,
-        _flox_raster_size,
-        _FLOX_CASES["grouped-flox-raster-size"],
-        _FLOX_REFERENCES["grouped-flox-raster-size"],
+        flox_raster_size,
+        FLOX_CASES["grouped-flox-raster-size"],
+        FLOX_REFERENCES["grouped-flox-raster-size"],
         harness=_GroupedFloxBenchmark,
+        name="grouped-flox",
     ),
     Sweep(
-        "groups_per_axis",
         GROUP_COUNT_AXIS,
-        _flox_group_count,
-        _FLOX_CASES["grouped-flox-group-count"],
-        _FLOX_REFERENCES["grouped-flox-group-count"],
+        flox_group_count,
+        FLOX_CASES["grouped-flox-group-count"],
+        FLOX_REFERENCES["grouped-flox-group-count"],
         harness=_GroupedFloxBenchmark,
+        name="grouped-flox",
     ),
     Sweep(
-        "raster_size",
         RASTER_AXIS,
-        _raster_size,
-        merge_cases(_EXECUTION_CASES, _STRATEGY_CASES["grouped-stats-raster-size"]),
+        raster_size_config,
+        merge_cases(EXECUTION_CASES, STRATEGY_CASES["grouped-stats-raster-size"]),
     ),
     Sweep(
-        "chunk_size",
         RASTER_CHUNK_AXIS,
-        _chunk_size,
-        _STRATEGY_CASES["grouped-stats-chunk-size"],
+        chunk_size,
+        STRATEGY_CASES["grouped-stats-chunk-size"],
     ),
     Sweep(
-        "chunk_size",
         RASTER_CHUNK_AXIS,
-        _interleaved_chunk_size,
-        _STRATEGY_CASES["grouped-stats-interleaved-chunks"],
+        interleaved_chunk_size,
+        STRATEGY_CASES["grouped-stats-interleaved-chunks"],
+        name="grouped-stats-interleaved",
     ),
     Sweep(
-        "groups_per_axis",
         GROUP_COUNT_AXIS,
-        _group_count,
-        _STRATEGY_CASES["grouped-stats-group-count"],
+        group_count,
+        STRATEGY_CASES["grouped-stats-group-count"],
     ),
-    Sweep(
-        "raster_size",
-        RASTER_AXIS,
-        _raster_size,
-        _ROBUST_CASES,
-    ),
+    Sweep(RASTER_AXIS, raster_size_config, ROBUST_CASES, name="grouped-stats-robust"),
 )
 
 
@@ -331,31 +305,31 @@ SWEEPS = (
 # Report comparisons
 ############################
 
-_SWEEP_BY_ID = {sweep.id: sweep for sweep in SWEEPS}
-
+# Comparisons select saved GeoUtils and Flox series for external plots, then GeoUtils series for internal strategy plots
 COMPARISONS = (
-    *tuple(
-        comparison(_SWEEP_BY_ID[sweep_id], documentation=False, summary=False)
-        for sweep_id in ("grouped-flox-raster-size", "grouped-flox-group-count")
-    ),
+    *tuple(comparison(sweep, documentation=False, summary=False) for sweep in SWEEPS[:2]),
     comparison(
-        _SWEEP_BY_ID["grouped-stats-raster-size"],
-        cases=_EXECUTION_CASES,
+        SWEEPS[2],
+        cases=EXECUTION_CASES,
         slug="grouped-stats-execution-size",
         documentation=False,
     ),
     *tuple(
         comparison(
-            _SWEEP_BY_ID[sweep_id],
-            cases=_STRATEGY_CASES[sweep_id],
+            sweep,
+            cases=STRATEGY_CASES[sweep_id],
             documentation=False,
         )
-        for sweep_id in (
-            "grouped-stats-raster-size",
-            "grouped-stats-chunk-size",
-            "grouped-stats-interleaved-chunks",
-            "grouped-stats-group-count",
+        for sweep, sweep_id in zip(
+            SWEEPS[2:6],
+            (
+                "grouped-stats-raster-size",
+                "grouped-stats-chunk-size",
+                "grouped-stats-interleaved-chunks",
+                "grouped-stats-group-count",
+            ),
+            strict=True,
         )
     ),
-    comparison(_SWEEP_BY_ID["grouped-stats-robust-size"], documentation=False),
+    comparison(SWEEPS[6], documentation=False),
 )

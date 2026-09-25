@@ -46,7 +46,7 @@ def prepare_variogram_pairs(n_pairs: int) -> xr.Dataset:
     )
 
 
-def prepare_pair_raster(size: int, execution_mode: Literal["eager", "dask"]) -> Any:
+def prepare_pair_raster(size: int, execution_mode: Literal["inmem", "dask"]) -> Any:
     """Create a smooth projected raster with scattered missing cells and 256 by 256 Dask chunks.
 
     Both modes start from the same prepared float32 values. Dask measures selected chunk reads and task scheduling
@@ -79,84 +79,6 @@ def prepare_pair_pointcloud(n_points: int) -> gu.PointCloud:
     values = np.sin(x / 31) + np.cos(y / 53)
     return gu.PointCloud.from_xyz(x, y, values, crs=32633)
 
-
-############################
-# Public variogram workflow
-############################
-
-
-def _prepare_estimator(estimator: str) -> None:
-    """Load and warm the optional estimator before timing variogram()."""
-
-    # ASV records an unavailable optional package as a skipped case, and compilation stays outside timing
-    try:
-        import_optional("skgstat", package_name="scikit-gstat", extra_name="geostat")
-    except ImportError as exc:
-        raise NotImplementedError("Install geoutils[geostat] to measure variogram estimators") from exc
-    Variogram.from_pairs(prepare_variogram_pairs(64), estimator=estimator, n_lags=4)
-
-
-class RasterVariogramSize:
-    """Measure public variogram() while varying raster size and eager or Dask execution."""
-
-    number = 1
-    repeat = 3
-    rounds = 1
-    warmup_time = 0
-    timeout = 300
-    param_names = ["raster_size", "execution_mode"]
-    params = [list(RASTER_AXIS.parameters(asv_pr_check_enabled())), ["eager", "dask"]]
-
-    def setup(self, raster_size: int, execution_mode: Literal["eager", "dask"]) -> None:
-        """Prepare the raster and estimator while leaving sampling and reduction inside timing."""
-
-        # Keep the same values and sampling request while changing the source size and loading mode
-        self.source = prepare_pair_raster(raster_size, execution_mode)
-        self.dask = import_optional("dask", extra_name="benchmark")
-        n_pairs = 1_000 if asv_pr_check_enabled() else 10_000
-        self.pair_kwargs: dict[str, Any] = {
-            "n_pairs": n_pairs,
-            "sampling": "loglag",
-            "strategy": "chunk_anchors",
-            "min_distance": 1,
-            "max_distance": raster_size / 2,
-            "batch_pairs": 100_000,
-            "anchors_per_round": 2_000,
-            "random_state": 42,
-        }
-        _prepare_estimator("dowd")
-
-    def _execute(self) -> Variogram:
-        """Sample and reduce pairs through public variogram() with one Dask thread."""
-
-        with self.dask.config.set(scheduler="threads", num_workers=1):
-            return variogram(self.source, estimator="dowd", n_lags=24, **self.pair_kwargs)
-
-    def time_operation(self, raster_size: int, execution_mode: Literal["eager", "dask"]) -> None:
-        """Compute the complete variogram from the prepared raster."""
-
-        self._execute()
-
-    def track_process_tree_mem_increase_mb(self, raster_size: int, execution_mode: Literal["eager", "dask"]) -> float:
-        """Measure peak memory increase while computing the complete variogram."""
-
-        _, metrics = profile_call(self._execute, dask=False, include_children=True)
-        return process_tree_memory_increase_mb(metrics)
-
-
-# Keep the stored ASV history while locating the benchmark beside its public operation
-setattr(
-    RasterVariogramSize.time_operation,
-    "benchmark_name",
-    "asv_suite.variography.RasterVariogramSize.time_operation",
-)
-setattr(
-    RasterVariogramSize.track_process_tree_mem_increase_mb,
-    "benchmark_name",
-    "asv_suite.variography.RasterVariogramSize.track_process_tree_mem_increase_mb",
-)
-setattr(RasterVariogramSize.track_process_tree_mem_increase_mb, "unit", "MB")
-from geoutils.stats import Variogram
 
 ############################
 # Shared measurement setup
@@ -192,6 +114,54 @@ class _VariographyBenchmark:
 setattr(_VariographyBenchmark.track_process_tree_mem_increase_mb, "unit", "MB")
 
 
+############################
+# Public variogram workflow
+############################
+
+
+def prepare_estimator(estimator: str) -> None:
+    """Load and warm the optional estimator before timing variogram()."""
+
+    # ASV records an unavailable optional package as a skipped case, and compilation stays outside timing
+    try:
+        import_optional("skgstat", package_name="scikit-gstat", extra_name="geostat")
+    except ImportError as exc:
+        raise NotImplementedError("Install geoutils[geostat] to measure variogram estimators") from exc
+    Variogram.from_pairs(prepare_variogram_pairs(64), estimator=estimator, n_lags=4)
+
+
+class RasterVariogramSize(_VariographyBenchmark):
+    """Measure public variogram() while varying raster size and in-memory or Dask execution."""
+
+    param_names = ["raster_size", "execution_mode"]
+    params = [list(RASTER_AXIS.parameters(asv_pr_check_enabled())), ["inmem", "dask"]]
+
+    def setup(self, raster_size: int, execution_mode: Literal["inmem", "dask"]) -> None:
+        """Prepare the raster and estimator while leaving sampling and reduction inside timing."""
+
+        # Keep the same values and sampling request while changing the source size and loading mode
+        self.source = prepare_pair_raster(raster_size, execution_mode)
+        self.dask = import_optional("dask", extra_name="benchmark")
+        n_pairs = 1_000 if asv_pr_check_enabled() else 10_000
+        self.pair_kwargs: dict[str, Any] = {
+            "n_pairs": n_pairs,
+            "sampling": "loglag",
+            "strategy": "chunk_anchors",
+            "min_distance": 1,
+            "max_distance": raster_size / 2,
+            "batch_pairs": 100_000,
+            "anchors_per_round": 2_000,
+            "random_state": 42,
+        }
+        prepare_estimator("dowd")
+
+    def _execute(self) -> Variogram:
+        """Sample and reduce pairs through public variogram() with one Dask thread."""
+
+        with self.dask.config.set(scheduler="threads", num_workers=1):
+            return variogram(self.source, estimator="dowd", n_lags=24, **self.pair_kwargs)
+
+
 #########################################
 # Reduction of already sampled pairs
 #########################################
@@ -206,7 +176,7 @@ class VariogramPairCount(_VariographyBenchmark):
     def setup(self, n_pairs: int, estimator: str) -> None:
         """Prepare the same finite pairs for both estimators outside the measured call."""
 
-        _prepare_estimator(estimator)
+        prepare_estimator(estimator)
         self.pairs = prepare_variogram_pairs(n_pairs)
         self.estimator = estimator
         self.n_lags = 24
@@ -238,7 +208,7 @@ class VariogramLagCount(VariogramPairCount):
 class _RasterPairSamplingBenchmark(_VariographyBenchmark):
     """Share prepared raster sampling and execution between the two component benchmarks."""
 
-    def _prepare(self, size: int, n_pairs: int, execution_mode: Literal["eager", "dask"], sampling_method: str) -> None:
+    def _prepare(self, size: int, n_pairs: int, execution_mode: Literal["inmem", "dask"], sampling_method: str) -> None:
         """Share the source and sampling settings between pair-count and raster-size comparisons."""
 
         # Keep the same source values and worker count for every sampling method
@@ -265,17 +235,17 @@ class _RasterPairSamplingBenchmark(_VariographyBenchmark):
 
 
 class RasterPairSampling(_RasterPairSamplingBenchmark):
-    """Compare all regular-grid sampling methods on prepared eager and Dask rasters."""
+    """Compare all regular-grid sampling methods on prepared in-memory and Dask rasters."""
 
     param_names = ["n_pairs", "execution_mode", "sampling_method"]
     sampling_methods = ["independent", "anchors", "chunk_anchors", "anchor_batched", "random_xy"]
     params = [
         list(POINT_COUNT_AXIS.parameters(asv_pr_check_enabled())),
-        ["eager", "dask"],
+        ["inmem", "dask"],
         ["chunk_anchors", "random_xy"] if asv_pr_check_enabled() else sampling_methods,
     ]
 
-    def setup(self, n_pairs: int, execution_mode: Literal["eager", "dask"], sampling_method: str) -> None:
+    def setup(self, n_pairs: int, execution_mode: Literal["inmem", "dask"], sampling_method: str) -> None:
         """Prepare one raster and fix batching, distance limits and the random seed for every method."""
 
         size = 256 if asv_pr_check_enabled() else 1024
@@ -286,9 +256,9 @@ class RasterPairSamplingSize(_RasterPairSamplingBenchmark):
     """Vary source raster size around a fixed pair count and the default chunk-anchor strategy."""
 
     param_names = ["raster_size", "execution_mode"]
-    params = [list(RASTER_AXIS.parameters(asv_pr_check_enabled())), ["eager", "dask"]]
+    params = [list(RASTER_AXIS.parameters(asv_pr_check_enabled())), ["inmem", "dask"]]
 
-    def setup(self, raster_size: int, execution_mode: Literal["eager", "dask"]) -> None:
+    def setup(self, raster_size: int, execution_mode: Literal["inmem", "dask"]) -> None:
         """Keep 10,000 requested pairs while increasing the number of source chunks."""
 
         n_pairs = 1_000 if asv_pr_check_enabled() else 10_000
@@ -329,7 +299,7 @@ class PointPairSamplingSize(_VariographyBenchmark):
 #########################################
 
 
-def _named_method(method: Any, benchmark_name: str) -> Any:
+def named_method(method: Any, benchmark_name: str) -> Any:
     """Copy one inherited measurement method with its existing ASV identifier."""
 
     @wraps(method)
@@ -340,15 +310,16 @@ def _named_method(method: Any, benchmark_name: str) -> Any:
     return measured
 
 
-# Keep existing ASV history while locating component measurements outside the public operation modules
-for _benchmark_class in (
+# Keep existing ASV history while locating measurements beside their public operation
+for benchmark_class in (
+    RasterVariogramSize,
     VariogramPairCount,
     VariogramLagCount,
     RasterPairSampling,
     RasterPairSamplingSize,
     PointPairSamplingSize,
 ):
-    for _method_name in ("time_operation", "track_process_tree_mem_increase_mb"):
-        _method = getattr(_benchmark_class, _method_name)
-        _benchmark_name = f"asv_suite.variography.{_benchmark_class.__name__}.{_method_name}"
-        setattr(_benchmark_class, _method_name, _named_method(_method, _benchmark_name))
+    for method_name in ("time_operation", "track_process_tree_mem_increase_mb"):
+        method = getattr(benchmark_class, method_name)
+        benchmark_name = f"asv_suite.variography.{benchmark_class.__name__}.{method_name}"
+        setattr(benchmark_class, method_name, named_method(method, benchmark_name))

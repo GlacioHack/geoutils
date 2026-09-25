@@ -9,15 +9,15 @@ import numpy as np
 
 from benchmarks.workflows.config import (
     RASTER_AXIS,
+    VECTOR_COMPARISON_OPTIONS,
     BenchmarkCase,
     BenchmarkConfig,
     Operation,
     OperationCoverage,
-    Parameter,
     Sweep,
-    comparison,
     execution_cases,
     external_case,
+    raster_size_config,
 )
 
 ORDER = 70
@@ -55,32 +55,29 @@ def run_rasterize(runner: Any, case: BenchmarkCase) -> float:
 
 
 OPERATIONS = (
-    Operation("rasterize", run_rasterize, rasterize_options, method_engines={None: ("rasterio",)}),
-    Operation("create_mask", run_rasterize, rasterize_options),
-)
-COVERAGE = (
-    OperationCoverage("rasterize", ("dask", "multiprocessing"), 1, 13),
-    OperationCoverage("create_mask", ("dask", "multiprocessing"), 1, 14),
-)
-
-
-def _raster_size(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
-    """Set the output raster and chunk sizes around a fixed vector input."""
-
-    size = int(parameter)
-    return {"shape": (size, size), "chunks": (1_000, 1_000)}
-
-
-_CASES = execution_cases("rasterization-raster-size", "rasterize", None, "rasterio")
-_REFERENCE = external_case(_CASES)
-SWEEPS = (
-    Sweep(
-        "raster_size",
-        RASTER_AXIS,
-        _raster_size,
-        _CASES,
-        (_REFERENCE,),
-        base={"vector_features_per_axis": 51, "dask_write_batch_size": 4},
+    Operation(
+        "rasterize",
+        run_rasterize,
+        rasterize_options,
+        method_engines={None: ("rasterio",)},
+        coverage=OperationCoverage(13),
     ),
+    Operation("create_mask", run_rasterize, rasterize_options, coverage=OperationCoverage(14)),
 )
-COMPARISONS = (comparison(SWEEPS[0]),)
+
+
+########################################
+# Cases, sweeps and report comparisons
+########################################
+
+
+# Each case fixes one GeoUtils execution mode for one ASV result series; the sweep owns the changing raster size
+# The external case identifies the matching GDAL series, which the default comparison plots with the GeoUtils series
+CASES = execution_cases(
+    "rasterize",
+    None,
+    "rasterio",
+    options=VECTOR_COMPARISON_OPTIONS,
+)
+REFERENCE = external_case(CASES)
+SWEEPS = (Sweep(RASTER_AXIS, raster_size_config, CASES, (REFERENCE,)),)

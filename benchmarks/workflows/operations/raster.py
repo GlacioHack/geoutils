@@ -7,15 +7,15 @@ from typing import Any
 
 from benchmarks.workflows.config import (
     RASTER_AXIS,
+    VECTOR_COMPARISON_OPTIONS,
     BenchmarkCase,
     BenchmarkConfig,
     Operation,
     OperationCoverage,
-    Parameter,
     Sweep,
-    comparison,
     execution_cases,
     external_case,
+    raster_size_config,
 )
 from benchmarks.workflows.fixtures import read_raster_center
 
@@ -80,48 +80,31 @@ def run_raster_operation(runner: Any, case: BenchmarkCase) -> float:
     return runner._compute_raster(output, case.operation)
 
 
-OPERATIONS = tuple(
-    Operation(name, run_raster_operation, raster_options, ("deep",) if name == "copy" else ())
-    for name in ("crop", "clip", "translate", "copy", "write")
-)
-
-
 # List each operation tested out of core, its supported execution modes and its expected result value
 # Both the fixed ASV benchmarks and large-data tests use this coverage list
-COVERAGE = (
-    OperationCoverage("crop", ("dask",), 1, 0),
-    OperationCoverage("clip", ("dask", "multiprocessing"), 1, 1),
-    OperationCoverage("translate", ("dask",), 1, 2),
-    OperationCoverage("copy", ("dask",), 1, 3),
-    OperationCoverage("write", ("dask",), 1, 12),
+OPERATIONS = (
+    Operation("crop", run_raster_operation, raster_options, coverage=OperationCoverage(0, ("dask",))),
+    Operation("clip", run_raster_operation, raster_options, coverage=OperationCoverage(1)),
+    Operation("translate", run_raster_operation, raster_options, coverage=OperationCoverage(2, ("dask",))),
+    Operation("copy", run_raster_operation, raster_options, ("deep",), coverage=OperationCoverage(3, ("dask",))),
+    Operation("write", run_raster_operation, raster_options, coverage=OperationCoverage(12, ("dask",))),
 )
 
 
-def _clip_config(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
-    """Set the raster and chunk sizes used by the clipping comparison."""
-
-    size = int(parameter)
-    return {"shape": (size, size), "chunks": (1_000, 1_000)}
+########################################
+# Cases, sweeps and report comparisons
+########################################
 
 
-_CLIP_CASES = execution_cases(
-    "clip-raster-size",
+# Each case fixes one GeoUtils execution mode for one ASV result series; the sweep owns the changing raster size
+# The external case identifies the matching GDAL series, which the default comparison plots with the GeoUtils series
+CLIP_CASES = execution_cases(
     "clip",
     None,
     None,
-    pr_executions=("eager", "dask", "multiprocessing"),
+    pr_executions=("inmem", "dask", "multiprocessing"),
+    options=VECTOR_COMPARISON_OPTIONS,
 )
-_CLIP_REFERENCE = external_case(_CLIP_CASES, pr_check=True)
+CLIP_REFERENCE = external_case(CLIP_CASES, pr_check=True)
 
-SWEEPS = (
-    Sweep(
-        "raster_size",
-        RASTER_AXIS,
-        _clip_config,
-        _CLIP_CASES,
-        (_CLIP_REFERENCE,),
-        base={"vector_features_per_axis": 51, "dask_write_batch_size": 4},
-    ),
-)
-
-COMPARISONS = (comparison(SWEEPS[0]),)
+SWEEPS = (Sweep(RASTER_AXIS, raster_size_config, CLIP_CASES, (CLIP_REFERENCE,)),)

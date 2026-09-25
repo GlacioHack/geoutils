@@ -124,13 +124,13 @@ def write_polygon_raster(filename: str, config: BenchmarkConfig) -> None:
     if config.polygon_regions_per_axis < 1:
         raise ValueError("Polygon regions per axis must be strictly positive")
 
-    # Separate value-one rectangles with nodata so every rectangle is one region
+    # Separate rectangles with value of 1 with nodata so every rectangle is one region
     height, width = config.shape
     transform = rio.transform.from_bounds(7.0, 45.0, 8.0, 46.0, width=width, height=height)
     block_y = tiff_block_size(height, config.chunks[0])
     block_x = tiff_block_size(width, config.chunks[1])
 
-    # Stream the patterned raster without allocating the complete benchmark input
+    # Write per block
     with rio.open(
         filename,
         "w",
@@ -191,7 +191,7 @@ def write_vector_source(filename: str, features_per_axis: int = 1) -> None:
 
 
 def write_point_source(filename: str, points_per_axis: int = 5) -> None:
-    """Write a regular constant-valued point cloud for gridding scenarios."""
+    """Write a regular constant point cloud for gridding scenarios."""
 
     if os.path.exists(filename):
         return

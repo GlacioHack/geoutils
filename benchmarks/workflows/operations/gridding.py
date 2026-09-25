@@ -23,8 +23,8 @@ from benchmarks.workflows.config import (
 )
 
 ORDER = 90
-_METHODS = ("nearest", "linear", "idw", "mean")
-_POINTS_PER_AXIS = {method: 17 for method in _METHODS}
+METHODS = ("nearest", "linear", "idw", "mean")
+POINTS_PER_AXIS = {method: 17 for method in METHODS}
 
 ############################
 # Operation execution
@@ -82,9 +82,9 @@ OPERATIONS = (
             "mean": ("scipy", "numba"),
         },
         "nearest",
+        coverage=OperationCoverage(15),
     ),
 )
-COVERAGE = (OperationCoverage("grid", ("dask", "multiprocessing"), 1, 15),)
 
 
 ############################
@@ -92,67 +92,74 @@ COVERAGE = (OperationCoverage("grid", ("dask", "multiprocessing"), 1, 15),)
 ############################
 
 
-def _case(
-    sweep_id: str,
+# Each case fixes one method, engine and execution mode for one ASV result series; its sweep owns the changing input
+def benchmark_case(
     method: str,
     engine: CalculationEngine,
     execution: ExecutionMode,
     *,
     pr_check: bool = False,
+    variant: str | None = None,
 ) -> BenchmarkCase:
     """Build one gridding case while keeping its declaration compact."""
 
-    return BenchmarkCase(sweep_id, "grid", method, engine, execution, pr_check=pr_check)
+    return BenchmarkCase(
+        "grid",
+        method,
+        engine,
+        execution,
+        pr_check=pr_check,
+        variant=variant,
+    )
 
 
 # Compare all four gridding methods across execution modes while keeping SciPy as the calculation engine
-_MODE_CASES = {
+MODE_CASES = {
     method: tuple(
-        _case(
-            "gridding-raster-size",
+        benchmark_case(
             method,
             "scipy",
             execution,
             pr_check=method == "nearest",
         )
-        for execution in ("eager", "dask", "multiprocessing")
+        for execution in ("inmem", "dask", "multiprocessing")
     )
-    for method in _METHODS
+    for method in METHODS
 }
 
-# Reuse the eager SciPy cases in one plot that isolates the choice of gridding method
-_METHOD_CASES = tuple(_MODE_CASES[method][0] for method in _METHODS)
+# Reuse the in-memory SciPy cases in one plot that isolates the choice of gridding method
+METHOD_CASES = tuple(MODE_CASES[method][0] for method in METHODS)
 
-# Compare SciPy and Numba in eager mode for the methods supported by both calculation engines
-_ENGINE_CASES = {
+# Compare SciPy and Numba in memory for the methods supported by both calculation engines
+ENGINE_CASES = {
     method: (
-        _MODE_CASES[method][0],
-        _case("gridding-raster-size", method, "numba", "eager", pr_check=method == "nearest"),
+        MODE_CASES[method][0],
+        benchmark_case(method, "numba", "inmem", pr_check=method == "nearest"),
     )
     for method in ("nearest", "idw", "mean")
 }
 
 # Repeat the nearest engine comparison while varying source point count instead of raster size
-_POINT_ENGINE_CASES = tuple(_case("gridding-point-count", "nearest", engine, "eager") for engine in ("scipy", "numba"))
+POINT_ENGINE_CASES = tuple(benchmark_case("nearest", engine, "inmem") for engine in ("scipy", "numba"))
 
 # Add one fixed-size run per Numba method and worker execution mode to check that compiled kernels work there
-# The eager engine comparisons already measure how these methods scale with raster size
-_WORKER_CASES = tuple(
-    _case(
-        "worker-integration",
+# The in-memory engine comparisons already measure how these methods scale with raster size
+WORKER_CASES = tuple(
+    benchmark_case(
         method,
         "numba",
         execution,
         pr_check=(method, execution) in (("idw", "dask"), ("mean", "multiprocessing")),
+        variant="worker",
     )
     for method in ("nearest", "idw", "mean")
     for execution in ("dask", "multiprocessing")
 )
-_REFERENCES = {method: external_case(_MODE_CASES[method], pr_check=method == "nearest") for method in _METHODS}
-_POINT_REFERENCE = external_case(_POINT_ENGINE_CASES)
+REFERENCES = {method: external_case(MODE_CASES[method], pr_check=method == "nearest") for method in METHODS}
+POINT_REFERENCE = external_case(POINT_ENGINE_CASES)
 
 
-def _raster_size(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
+def raster_size(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
     """Place the selected raster size around the common source point input."""
 
     # Keep the point count fixed so only the method and its required support distance differ
@@ -163,35 +170,24 @@ def _raster_size(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> M
     return {
         "shape": (size, size),
         "chunks": (1_000, 1_000),
-        "point_features_per_axis": _POINTS_PER_AXIS[case.method],
+        "point_features_per_axis": POINTS_PER_AXIS[case.method],
         "grid_dist_nodata_pixel": method_distances[case.method],
     }
 
 
-def _point_count(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
+def point_count(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
     """Place the selected point count in an otherwise fixed configuration."""
 
     return {"point_features_per_axis": int(parameter)}
 
 
-_RASTER_CASES = merge_cases(*_MODE_CASES.values(), *_ENGINE_CASES.values())
+RASTER_CASES = merge_cases(*MODE_CASES.values(), *ENGINE_CASES.values())
+
+# Measure the selected cases and matching GDAL references over raster size, point count or the fixed worker check
 SWEEPS = (
-    Sweep(
-        "raster_size",
-        RASTER_AXIS,
-        _raster_size,
-        _RASTER_CASES,
-        tuple(_REFERENCES.values()),
-    ),
-    Sweep(
-        "points_per_axis",
-        GRID_POINT_AXIS,
-        _point_count,
-        _POINT_ENGINE_CASES,
-        (_POINT_REFERENCE,),
-        base={"shape": (2_000, 2_000), "chunks": (1_000, 1_000), "grid_dist_nodata_pixel": float("inf")},
-    ),
-    Sweep("raster_size", WORKER_INTEGRATION_AXIS, _raster_size, _WORKER_CASES),
+    Sweep(RASTER_AXIS, raster_size, RASTER_CASES, tuple(REFERENCES.values())),
+    Sweep(GRID_POINT_AXIS, point_count, POINT_ENGINE_CASES, (POINT_REFERENCE,)),
+    Sweep(WORKER_INTEGRATION_AXIS, raster_size, WORKER_CASES, name="grid-worker"),
 )
 
 
@@ -199,20 +195,21 @@ SWEEPS = (
 # Report comparisons
 ############################
 
+# Comparisons select saved series for method, engine and execution plots, adding matching GDAL series where available
 COMPARISONS = (
     *tuple(
         comparison(
             SWEEPS[0],
-            cases=_MODE_CASES[method],
-            references=(_REFERENCES[method],),
+            cases=MODE_CASES[method],
+            references=(REFERENCES[method],),
             slug="gridding-raster-size" if method == "nearest" else f"{method}-gridding-raster-size",
             documentation=method == "nearest",
         )
-        for method in _METHODS
+        for method in METHODS
     ),
     comparison(
         SWEEPS[0],
-        cases=_METHOD_CASES,
+        cases=METHOD_CASES,
         references=(),
         slug="gridding-method-raster-size",
         documentation=False,
@@ -220,8 +217,8 @@ COMPARISONS = (
     *tuple(
         comparison(
             SWEEPS[0],
-            cases=_ENGINE_CASES[method],
-            references=(_REFERENCES[method],),
+            cases=ENGINE_CASES[method],
+            references=(REFERENCES[method],),
             slug=f"{method}-gridding-engine-raster-size",
             documentation=False,
         )

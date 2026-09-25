@@ -1,1 +1,1 @@
-"""Keep comparisons between public GeoUtils and Flox statistics backends."""
+"""Comparison between GeoUtils and Flox for grouped statistics."""

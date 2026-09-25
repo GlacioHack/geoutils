@@ -66,7 +66,7 @@ class TestComparisonReport:
     Even if ASV runs quick checks of the benchmarking setup through CI, it's easier to have a detailed traceback here
     through Pytest for some aspects.
     We especially tests our custom routines/rendering for the benchmark webpage, comparisons to external refs (e.g.
-    GDAL CLI), and across variables (raster/point size, chunk size, etc) and categories (e.g. eager/Dask/MP, method,
+    GDAL CLI), and across variables (raster/point size, chunk size, etc) and categories (e.g. in-memory/Dask/MP, method,
     etc) of interest.
     """
 
@@ -82,15 +82,15 @@ class TestComparisonReport:
         assert plotted <= registered
         assert all(hasattr(benchmark_parameter_sweeps, class_name) for class_name in registered)
 
-    def test_benchmark_registry__generated_class_names_unchanged(self) -> None:
-        """Checks that the complete generated ASV identifier set matches the pre-refactor benchmark state."""
+    def test_benchmark_registry__generated_class_names_stable(self) -> None:
+        """Checks that generated ASV identifiers keep function fields separate from their varying input."""
 
-        # Hash the sorted names to keep the exact 97-class compatibility check compact and order independent
+        # Hash the sorted names to keep the exact 97-class identifier check compact and order independent
         class_names = sorted(set(BENCHMARK_CASE_BY_CLASS) | set(EXTERNAL_REFERENCE_CASE_BY_CLASS))
         digest = hashlib.sha256("\n".join(class_names).encode()).hexdigest()
 
         # A changed name would split ASV history even when the underlying operation remained the same
-        assert digest == "e20bc01f51c20363b19464d4129f428aa42a0ed713c1fcafa6a075dcb21291ea"
+        assert digest == "81852da46b60d8b0f177d92ef685036225f0f80d72316663bc8600896b34edaf"
 
     def test_operation_discovery__deterministic_modules(self) -> None:
         """Checks that operation discovery returns the same modules in their stable report order."""
@@ -166,9 +166,9 @@ class TestBenchmarkScenarios:
         """Checks representative updates for strategy, grouped, point and PR-check sweeps."""
 
         # Select cases whose configuration depends on their method, layout or lightweight PR profile
-        gridding = SWEEP_BY_ID["gridding-raster-size"]
-        idw_case = next(case for case in gridding.cases if case.method == "idw" and case.execution == "eager")
-        interleaved = SWEEP_BY_ID["grouped-stats-interleaved-chunks"]
+        gridding = SWEEP_BY_ID["grid-raster-size"]
+        idw_case = next(case for case in gridding.cases if case.method == "idw" and case.execution == "inmem")
+        interleaved = SWEEP_BY_ID["grouped-stats-interleaved-chunk-size"]
         grouped_case = interleaved.cases[0]
         pointcloud = SWEEP_BY_ID["to-pointcloud-raster-size"]
         point_case = pointcloud.cases[0]
@@ -195,8 +195,8 @@ class TestBenchmarkScenarios:
         # Select a comparison with raster, chunk and vector fixture dimensions
         comparison = next(item for item in COMPARISONS if item.slug == "clip-raster-size")
 
-        # The case ID names the sweep, while the resolved config supplies every displayed workload value
-        assert comparison.sweep.id == comparison.sweep.cases[0].id
+        # The operation and parameter axis name the sweep, while its config supplies every displayed workload value
+        assert comparison.sweep.id == "clip-raster-size"
         assert comparison.operation == "clip"
         assert comparison.series_dimension == "execution_mode"
         assert comparison.workload(8_000) == ("8,000 × 8,000 raster; 1,000 × 1,000 chunks; 51 × 51 vector features")
@@ -204,10 +204,10 @@ class TestBenchmarkScenarios:
     @pytest.mark.parametrize(
         ("class_name", "expected_label"),
         (
-            ("EagerNearestRasterioReprojectionRasterSize", ".reproject(resampling='nearest')"),
-            ("DaskRasterioLabelStitchPolygonizationRasterSize", ".polygonize(strategy='label_stitch')"),
+            ("reproject_nearest_rasterio_inmem__rastersize", ".reproject(resampling='nearest')"),
+            ("polygonize_rasterio_labelstitch_dask__rastersize", ".polygonize(strategy='label_stitch')"),
             (
-                "DaskMomentsNumpyDenseGroupedStatsRasterSize",
+                "stats_moments_numpy_dense_dask__rastersize",
                 "stats(statistics=['mean', 'std', 'min', 'max'], strategy='dense')",
             ),
         ),
@@ -219,7 +219,7 @@ class TestBenchmarkScenarios:
         case = BENCHMARK_CASE_BY_CLASS[class_name]
 
         # Execution mode stays separate from the public call while method, engine and strategy remain visible
-        assert format_api_label(case.operation, case) == expected_label
+        assert format_api_label(case) == expected_label
         assert getattr(benchmark_parameter_sweeps, class_name).pretty_name == expected_label
 
     def test_comparison_harnesses__remain_distinct(self) -> None:
@@ -227,7 +227,7 @@ class TestBenchmarkScenarios:
 
         # Flox measures prepared arrays directly; GDAL and PDAL execute through their command runners
         flox_sweep = SWEEP_BY_ID["grouped-flox-raster-size"]
-        gdal_sweep = SWEEP_BY_ID["rasterization-raster-size"]
+        gdal_sweep = SWEEP_BY_ID["rasterize-raster-size"]
         pdal_sweep = SWEEP_BY_ID["to-pointcloud-raster-size"]
 
         # Flox is a public stats() backend, while GDAL and PDAL remain external command references
@@ -241,10 +241,10 @@ class TestBenchmarkScenarios:
 class TestBenchmarkRunner:
     """Test module for bounded operation outputs produced by BenchmarkRunner."""
 
-    @pytest.mark.parametrize("execution_mode", ["eager", "dask", "multiprocessing"])
+    @pytest.mark.parametrize("execution_mode", ["inmem", "dask", "multiprocessing"])
     def test_clip__masks_outside_fixture_polygons(
         self,
-        execution_mode: Literal["eager", "dask", "multiprocessing"],
+        execution_mode: Literal["inmem", "dask", "multiprocessing"],
         tmp_path: Path,
     ) -> None:
         """Checks that the clipping benchmark keeps polygon interiors and masks the surrounding raster."""
@@ -275,12 +275,12 @@ class TestBenchmarkRunner:
 
 
 def test_grouped_reference__matches_geoutils() -> None:
-    """Checks that direct Flox and public GeoUtils grouped statistics return the same eager table."""
+    """Checks that direct Flox and public GeoUtils grouped statistics return the same in-memory table."""
 
     pytest.importorskip("flox")
 
     # Prepare one small shared input and run each implementation directly
-    inputs = prepare_grouped_inputs(16, 2, "interleaved", "eager")
+    inputs = prepare_grouped_inputs(16, 2, "interleaved", "inmem")
     expected = compute_geoutils_grouped_stats(*inputs)
     result = flox_grouped_stats(*inputs, use_dask=False)
 

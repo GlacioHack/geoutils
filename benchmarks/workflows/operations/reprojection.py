@@ -11,11 +11,10 @@ from benchmarks.workflows.config import (
     BenchmarkConfig,
     Operation,
     OperationCoverage,
-    Parameter,
     Sweep,
-    comparison,
     execution_cases,
     external_case,
+    raster_size_config,
 )
 
 ORDER = 40
@@ -58,27 +57,18 @@ OPERATIONS = (
         ("resampling",),
         {"nearest": ("rasterio",)},
         "nearest",
+        coverage=OperationCoverage(5),
     ),
 )
-COVERAGE = (OperationCoverage("reproject", ("dask", "multiprocessing"), 1, 5),)
 
 
-def _raster_size(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
-    """Set the selected square raster around the scheduled chunk size."""
-
-    size = int(parameter)
-    return {"shape": (size, size), "chunks": (1_000, 1_000)}
+########################################
+# Cases, sweeps and report comparisons
+########################################
 
 
-_CASES = execution_cases("reprojection-raster-size", "reproject", "nearest", "rasterio")
-_REFERENCE = external_case(_CASES)
-SWEEPS = (
-    Sweep(
-        "raster_size",
-        RASTER_AXIS,
-        _raster_size,
-        _CASES,
-        (_REFERENCE,),
-    ),
-)
-COMPARISONS = (comparison(SWEEPS[0]),)
+# Each case fixes one GeoUtils execution mode for one ASV result series; the sweep owns the changing raster size
+# The external case identifies the matching GDAL series, which the default comparison plots with the GeoUtils series
+CASES = execution_cases("reproject", "nearest", "rasterio")
+REFERENCE = external_case(CASES)
+SWEEPS = (Sweep(RASTER_AXIS, raster_size_config, CASES, (REFERENCE,)),)

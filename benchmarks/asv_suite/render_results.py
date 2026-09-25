@@ -51,7 +51,7 @@ PREVIEW_WEBSITE_DIRECTORY = Path("benchmarks/results/asv/preview")
 
 # Colors stay consistent between the detailed ASV plots and the concise documentation snapshot
 SERIES_COLORS = {
-    "Eager": "#0072B2",
+    "In memory": "#0072B2",
     "Dask": "#E69F00",
     "Multiprocessing": "#009E73",
     GDAL_CLI_LABEL: "#6C6C6C",
@@ -62,12 +62,12 @@ SERIES_COLORS = {
 COMPARISON_SECTION_DETAILS: dict[ComparisonDimension, tuple[str, str]] = {
     "execution_mode": (
         "Execution modes",
-        "Compare Eager, Dask and Multiprocessing with one worker, showing coordination costs without parallel "
+        "Compare in-memory, Dask and Multiprocessing with one worker, showing coordination costs without parallel "
         "speed-up.",
     ),
     "calculation_engine": (
         "Calculation engines",
-        "Compare numerical libraries during eager execution, so scheduling remains fixed.",
+        "Compare numerical libraries during in-memory execution, so scheduling remains fixed.",
     ),
     "method": (
         "Operation methods",
@@ -182,7 +182,7 @@ class _PreviewResult:
 
         # Create all keys normally read from saved ASV results so every report section can render
         for comparison in COMPARISONS:
-            parameter_values = comparison.sweep.values
+            parameter_values = comparison.sweep.axis.values
 
             for series_index, (_, class_name) in enumerate(comparison.series, start=1):
                 prefix = f"{COMPARISON_BENCHMARK_MODULE}.{class_name}"
@@ -358,15 +358,15 @@ def collect_comparison_measurements(
             if benchmark_case is not None:
                 if (
                     comparison.series_dimension != "calculation_engine"
-                    and benchmark_case.calculation_engine != comparison.calculation_engine
+                    and benchmark_case.engine != comparison.calculation_engine
                 ):
                     raise ValueError(f"Comparison engine does not match registered case {class_name}")
                 if (
                     comparison.series_dimension != "execution_mode"
-                    and benchmark_case.execution_mode != comparison.execution_mode
+                    and benchmark_case.execution != comparison.execution_mode
                 ):
                     raise ValueError(f"Comparison execution mode does not match registered case {class_name}")
-                expected_strategy = comparison.strategy if benchmark_case.execution_mode != "eager" else None
+                expected_strategy = comparison.strategy if benchmark_case.execution != "inmem" else None
                 if comparison.series_dimension != "strategy" and benchmark_case.strategy != expected_strategy:
                     raise ValueError(f"Comparison strategy does not match registered case {class_name}")
 
@@ -393,9 +393,9 @@ def collect_comparison_measurements(
                     series_label=series_label,
                     operation=selected_case.operation,
                     method=selected_case.method,
-                    calculation_engine=(benchmark_case.calculation_engine if benchmark_case is not None else None),
+                    calculation_engine=(benchmark_case.engine if benchmark_case is not None else None),
                     strategy=benchmark_case.strategy if benchmark_case is not None else None,
-                    execution_mode=selected_case.execution_mode,
+                    execution_mode=selected_case.execution,
                     external_reference=(reference_case.external_reference if reference_case is not None else None),
                     output_driver=selected_case.output_driver,
                     series_dimension=comparison.series_dimension,
@@ -555,7 +555,7 @@ def _shared_change_parameter(
     """Return the largest parameter shared by every requested series in both results."""
 
     # Compare only input sizes measured for all three GeoUtils execution modes and the GDAL CLI on both revisions
-    series_labels = ("Eager", "Dask", "Multiprocessing", GDAL_CLI_LABEL)
+    series_labels = ("In memory", "Dask", "Multiprocessing", GDAL_CLI_LABEL)
     parameters = []
     for records in (baseline_records, current_records):
         for series_label in series_labels:
@@ -610,7 +610,7 @@ def performance_change_markdown(baseline_result: Any, current_result: Any) -> st
         current_records.extend(current_comparison)
 
     # Group GDAL-normalized timings by execution mode before summarizing across operations
-    execution_modes = ("Eager", "Dask", "Multiprocessing")
+    execution_modes = ("In memory", "Dask", "Multiprocessing")
     ratios: dict[str, list[tuple[Comparison, int, float, float]]] = {name: [] for name in execution_modes}
     for comparison in shared_comparisons:
         parameter = _shared_change_parameter(comparison, baseline_records, current_records)
@@ -688,7 +688,7 @@ def _plot_time_relative_to_gdal(
     import matplotlib.pyplot as plt
 
     comparisons = _gdal_comparisons()
-    execution_modes = ("Eager", "Dask", "Multiprocessing")
+    execution_modes = ("In memory", "Dask", "Multiprocessing")
     bar_width = 0.24
     positions = list(range(len(comparisons)))
     figure, axis = plt.subplots(figsize=(9, 4.8), layout="constrained")
@@ -743,7 +743,7 @@ def _plot_memory_increase_by_operation(
     import matplotlib.pyplot as plt
 
     comparisons = _gdal_comparisons()
-    series_labels = ("Eager", "Dask", "Multiprocessing", GDAL_CLI_LABEL)
+    series_labels = ("In memory", "Dask", "Multiprocessing", GDAL_CLI_LABEL)
     bar_width = 0.2
     positions = list(range(len(comparisons)))
     figure, axis = plt.subplots(figsize=(10, 4.8), layout="constrained")
@@ -1035,17 +1035,17 @@ def _format_measurement_cell(
     )
 
 
-def _eager_implementation_measurements(
+def _inmem_implementation_measurements(
     comparison: Comparison,
     records: list[ComparisonMeasurement],
     parameter: int | None = None,
 ) -> tuple[int, dict[CalculationEngine | ExternalReference, ComparisonMeasurement]]:
-    """Return eager GeoUtils engines and any external GDAL result at one shared workload."""
+    """Return in-memory GeoUtils engines and any external GDAL result at one shared workload."""
 
     selected_labels = [
         label
         for label, _ in comparison.series
-        if label == GDAL_CLI_LABEL or comparison.series_dimension == "calculation_engine" or label == "Eager"
+        if label == GDAL_CLI_LABEL or comparison.series_dimension == "calculation_engine" or label == "In memory"
     ]
     if parameter is None:
         parameter = _largest_parameter_for_series(comparison, records, selected_labels)
@@ -1090,9 +1090,9 @@ def _execution_mode_measurements(
 
 
 def _engine_summary_comparisons() -> tuple[Comparison, ...]:
-    """Select one representative input axis for every eager operation and method."""
+    """Select one representative input axis for every in-memory operation and method."""
 
-    # Prefer a direct engine comparison, then fall back to an execution comparison containing Eager
+    # Prefer a direct engine comparison, then fall back to an execution comparison containing in-memory execution
     selected: dict[tuple[OperationName, str | None], tuple[int, Comparison]] = {}
     for comparison in COMPARISONS:
         if not comparison.summary:
@@ -1101,7 +1101,7 @@ def _engine_summary_comparisons() -> tuple[Comparison, ...]:
         if comparison.series_dimension == "calculation_engine":
             priority = 2 if comparison.parameter_label == "Size of raster (pixels per side)" else 1
         elif comparison.series_dimension == "execution_mode" and any(
-            label == "Eager" for label, _ in comparison.series
+            label == "In memory" for label, _ in comparison.series
         ):
             priority = 1
         if priority == 0:
@@ -1114,13 +1114,13 @@ def _engine_summary_comparisons() -> tuple[Comparison, ...]:
 
 
 def _engine_summary_table(records: list[ComparisonMeasurement]) -> str:
-    """Compare eager GeoUtils calculation engines with the external GDAL CLI."""
+    """Compare in-memory GeoUtils calculation engines with the external GDAL CLI."""
 
     rows: list[tuple[Comparison, str]] = []
     columns: tuple[CalculationEngine | ExternalReference, ...] = ("rasterio", "scipy", "numba", "numpy", "gdal_cli")
     for comparison in _engine_summary_comparisons():
         parameter = _summary_reference_parameter(comparison, records)
-        _, by_implementation = _eager_implementation_measurements(comparison, records, parameter)
+        _, by_implementation = _inmem_implementation_measurements(comparison, records, parameter)
         gdal = by_implementation.get("gdal_cli")
         best_time = min(measurement.end_to_end_time_s for measurement in by_implementation.values())
         lowest_memory = min(measurement.process_tree_mem_increase_mb for measurement in by_implementation.values())
@@ -1171,21 +1171,21 @@ def _execution_summary_comparisons() -> tuple[Comparison, ...]:
 
 
 def _execution_summary_table(records: list[ComparisonMeasurement]) -> str:
-    """Compare Eager, Dask and Multiprocessing with one fixed calculation engine."""
+    """Compare in-memory, Dask and Multiprocessing with one fixed calculation engine."""
 
     rows: list[tuple[Comparison, str]] = []
-    columns: tuple[ExecutionMode, ...] = ("eager", "dask", "multiprocessing")
+    columns: tuple[ExecutionMode, ...] = ("inmem", "dask", "multiprocessing")
     for comparison in _execution_summary_comparisons():
         parameter = _summary_reference_parameter(comparison, records)
         _, by_mode = _execution_mode_measurements(comparison, records, parameter)
-        eager = by_mode.get("eager")
+        inmem = by_mode.get("inmem")
         best_time = min(measurement.end_to_end_time_s for measurement in by_mode.values())
         lowest_memory = min(measurement.process_tree_mem_increase_mb for measurement in by_mode.values())
         cells = [
             _format_measurement_cell(
                 by_mode.get(column),
-                reference=eager,
-                reference_label="Eager",
+                reference=inmem,
+                reference_label="In memory",
                 best_time=best_time,
                 lowest_memory=lowest_memory,
             )
@@ -1214,7 +1214,7 @@ def _execution_summary_table(records: list[ComparisonMeasurement]) -> str:
             '<th rowspan="2" scope="col">Engine</th>',
             '<th class="workload-heading" rowspan="2" scope="col">Reference workload</th>',
             '<th class="group-heading" colspan="3" scope="colgroup">GeoUtils execution mode</th></tr>',
-            '<tr><th scope="col">Eager</th><th scope="col">Dask</th><th scope="col">Multiprocessing</th>',
+            '<tr><th scope="col">In memory</th><th scope="col">Dask</th><th scope="col">Multiprocessing</th>',
             "</tr></thead>",
             _group_operation_rows(rows, column_count=6),
             "</table></div>",
@@ -1240,7 +1240,7 @@ def _headline_summary_table(records: list[ComparisonMeasurement]) -> str:
     """List engines and execution modes in separate columns beside the external GDAL CLI."""
 
     engine_order: tuple[CalculationEngine, ...] = ("rasterio", "scipy", "numba", "numpy")
-    mode_order: tuple[ExecutionMode, ...] = ("eager", "dask", "multiprocessing")
+    mode_order: tuple[ExecutionMode, ...] = ("inmem", "dask", "multiprocessing")
     engine_comparisons = {
         (comparison.operation, comparison.method): comparison for comparison in _engine_summary_comparisons()
     }
@@ -1266,7 +1266,7 @@ def _headline_summary_table(records: list[ComparisonMeasurement]) -> str:
         if engine_comparison is None:
             implementations: dict[CalculationEngine | ExternalReference, ComparisonMeasurement] = {}
         else:
-            _, implementations = _eager_implementation_measurements(engine_comparison, records, parameter)
+            _, implementations = _inmem_implementation_measurements(engine_comparison, records, parameter)
 
         if execution_comparison is None:
             modes: dict[ExecutionMode, ComparisonMeasurement] = {}
@@ -1322,7 +1322,7 @@ def _headline_summary_table(records: list[ComparisonMeasurement]) -> str:
             '<th class="external-heading group-heading" scope="colgroup">External reference</th></tr>',
             '<tr><th scope="col">Rasterio/GDAL</th><th scope="col">SciPy</th><th scope="col">Numba</th>',
             '<th scope="col">NumPy</th>',
-            '<th scope="col">Eager</th><th scope="col">Dask</th><th scope="col">Multiprocessing</th>',
+            '<th scope="col">In memory</th><th scope="col">Dask</th><th scope="col">Multiprocessing</th>',
             '<th class="external-heading" scope="col">GDAL CLI</th></tr></thead>',
             _group_operation_rows(rows, column_count=10),
             "</table></div>",
@@ -1654,7 +1654,7 @@ def _concept_map() -> str:
             '<span class="chip">SciPy</span><span class="chip">Numba</span><span class="chip">NumPy</span></div></div>',
             '<div class="concept-card mode"><strong>Execution mode</strong><span>How an operation runs: '
             "in-memory or chunked out-of-memory.</span>"
-            '<div class="chips"><span class="chip">Eager</span><span class="chip">Dask</span>'
+            '<div class="chips"><span class="chip">In memory</span><span class="chip">Dask</span>'
             '<span class="chip">Multiprocessing</span></div></div>',
             '<div class="concept-card"><strong>Chunk strategy</strong><span>How a chunked operation reconciles '
             'separate partial results.</span><div class="chips"><span class="chip">Subsampling — Sequential</span>'

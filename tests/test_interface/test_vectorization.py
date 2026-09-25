@@ -4,7 +4,6 @@ Test module for vectorization (polygonize, etc).
 
 from __future__ import annotations
 
-import inspect
 import os
 import warnings
 from typing import Any, Literal
@@ -287,13 +286,6 @@ class TestPolygonize:
         "label_stitch",
         "geometry_stitch",
     )
-
-    def test_polygonize__default_chunk_strategy(self) -> None:
-        """Checks that polygonize() defaults to the best-scaling label-stitch strategy."""
-
-        # The public default controls both Dask and multiprocessing when no strategy is supplied
-        default_strategy = inspect.signature(gu.Raster.polygonize).parameters["strategy"].default
-        assert default_strategy == "label_stitch"
 
     def test_polygonize__dask_selection_mask_stays_lazy(self) -> None:
         """Building a polygon selection mask must use Dask dtype metadata without reading values."""

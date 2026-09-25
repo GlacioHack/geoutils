@@ -1,4 +1,4 @@
-"""Define raster polygonization benchmarks."""
+"""Define polygonization benchmarks."""
 
 from __future__ import annotations
 
@@ -18,11 +18,13 @@ from benchmarks.workflows.config import (
     comparison,
     execution_cases,
     external_case,
+    raster_size_config,
     strategy_cases,
 )
 
 ORDER = 60
-_STRATEGIES = ("label_union", "label_stitch", "geometry_stitch")
+STRATEGIES = ("label_union", "label_stitch", "geometry_stitch")
+POLYGON_OPTIONS = {"polygon_regions_per_axis": 21}
 
 
 def polygonize_options(case: BenchmarkCase, config: BenchmarkConfig) -> Mapping[str, Any]:
@@ -60,57 +62,51 @@ OPERATIONS = (
         polygonize_options,
         ("strategy",),
         {None: ("rasterio",)},
-        strategies=_STRATEGIES,
+        strategies=STRATEGIES,
         default_strategy="label_stitch",
+        coverage=OperationCoverage(11),
     ),
 )
-COVERAGE = (OperationCoverage("polygonize", ("dask", "multiprocessing"), 1, 11),)
 
 
-def _execution_size(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
-    """Set the scheduled raster and chunk sizes for execution comparisons."""
-
-    size = int(parameter)
-    return {"shape": (size, size), "chunks": (1_000, 1_000)}
-
-
-def _strategy_size(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
+def strategy_size(parameter: Parameter, case: BenchmarkCase, pr_check: bool) -> Mapping[str, Any]:
     """Keep smaller chunks so every strategy crosses many block boundaries."""
 
     size = int(parameter)
     return {"shape": (size, size), "chunks": (500, 500)}
 
 
-_EXECUTION_CASES = execution_cases(
-    "polygonization-raster-size", "polygonize", None, "rasterio", strategy="label_stitch"
-)
-_STRATEGY_CASES = strategy_cases(
-    "polygonization-strategy-raster-size",
+########################################
+# Cases, sweeps and report comparisons
+########################################
+
+
+# Each case fixes one execution mode or strategy for one ASV result series; the sweep owns the changing raster size
+EXECUTION_CASES = execution_cases(
     "polygonize",
     None,
     "rasterio",
-    _STRATEGIES,
+    strategy="label_stitch",
+    options=POLYGON_OPTIONS,
+)
+STRATEGY_CASES = strategy_cases(
+    "polygonize",
+    None,
+    "rasterio",
+    STRATEGIES,
     execution="dask",
+    options=POLYGON_OPTIONS,
+    variant="strategy",
 )
-_REFERENCE = external_case(_EXECUTION_CASES)
+REFERENCE = external_case(EXECUTION_CASES)
 
+# Measure the execution cases with their GDAL reference and the strategy cases over the same raster-size axis
 SWEEPS = (
-    Sweep(
-        "raster_size",
-        RASTER_AXIS,
-        _execution_size,
-        _EXECUTION_CASES,
-        (_REFERENCE,),
-        base={"polygon_regions_per_axis": 21},
-    ),
-    Sweep(
-        "raster_size",
-        RASTER_AXIS,
-        _strategy_size,
-        _STRATEGY_CASES,
-        base={"polygon_regions_per_axis": 21},
-    ),
+    Sweep(RASTER_AXIS, raster_size_config, EXECUTION_CASES, (REFERENCE,)),
+    Sweep(RASTER_AXIS, strategy_size, STRATEGY_CASES, name="polygonize-strategy"),
 )
+
+# Comparisons select saved series for report plots: GeoUtils with GDAL, then the GeoUtils strategies by themselves
 COMPARISONS = (
     comparison(SWEEPS[0]),
     comparison(SWEEPS[1], documentation=False),
