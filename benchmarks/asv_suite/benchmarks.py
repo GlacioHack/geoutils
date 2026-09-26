@@ -125,10 +125,7 @@ def _register_asv_classes() -> None:
             by_module.setdefault(module, []).append((benchmark, case))
 
         # Deterministically vary the selected case instead of always taking the first.
-        registrations = [
-            candidates[i % len(candidates)]
-            for i, candidates in enumerate(by_module.values())
-        ]
+        registrations = [candidates[i % len(candidates)] for i, candidates in enumerate(by_module.values())]
 
     for benchmark, case in registrations:
         class_name = benchmark.benchmark_class(case)
