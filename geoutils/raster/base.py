@@ -2284,7 +2284,7 @@ class RasterBase(ABC):
         connectivity: Literal[4, 8] = 4,
         band: int = 1,
         data_column_name: str = "id",
-        strategy: Literal["label_union", "label_stitch", "geometry_stitch"] = "label_union",
+        strategy: Literal["label_union", "label_stitch", "geometry_stitch"] = "label_stitch",
         mp_config: MultiprocConfig | None = None,
     ) -> Vector:
         """
@@ -2294,6 +2294,8 @@ class RasterBase(ABC):
           create geometries (defaults to "all", for which all unique pixel values of the raster are used).
         :param data_column_name: Data column name to be associated with target values in the output vector
             (defaults to "id").
+        :param strategy: Strategy used to reconcile polygons across chunk boundaries. Defaults to ``"label_stitch"``
+            and has no effect for eager execution.
 
         :returns: Vector containing the polygonized geometries associated to target values.
         """

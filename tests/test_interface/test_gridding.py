@@ -12,7 +12,7 @@ import xarray as xr
 from shapely import geometry
 
 import geoutils as gu
-from benchmarks.gdal_comparison.commands import build_gdal_grid_command
+from benchmarks.comparisons.gdal import build_gdal_grid_command
 from geoutils import PointCloud, Raster
 from geoutils._typing import NDArrayNum
 from geoutils.interface.gridding import GriddingMethod, _grid_pointcloud

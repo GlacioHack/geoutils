@@ -2164,7 +2164,7 @@ def _polygonize(
     *,
     band: int = 1,
     connectivity: Literal[4, 8] = 4,
-    strategy: Literal["label_union", "label_stitch", "geometry_stitch"] = "label_union",
+    strategy: Literal["label_union", "label_stitch", "geometry_stitch"] = "label_stitch",
     mp_config: MultiprocConfig | None = None,
     float_tol: float = 0.1,
 ) -> Vector:
@@ -2177,7 +2177,7 @@ def _polygonize(
       - Dispatches to base, Dask, or Multiprocessing wrapper.
 
     :param connectivity: Pixel connectivity for label-based strategies (4 or 8).
-    :param strategy: Chunked strategy. Has no effect for base backend.
+    :param strategy: Chunked strategy. Defaults to ``"label_stitch"`` and has no effect for the eager backend.
     :param band: Raster band to polygonize.
     :param mp_config: Multiprocessing configuration.
     :param float_tol: Absolute tolerance to distinguish two classes for floating input.

@@ -93,7 +93,9 @@ def _prepare_benchmark_process(cachemax_mb: int) -> None:
 
     # Keep references explicit so static checks recognize the intentional warm-up imports
     _ = filters, gridding, interpolation, rasterization, vectorization, xr_accessor
-    rio.env.set_gdal_config("GDAL_CACHEMAX", cachemax_mb)
+
+    # Rasterio's integer setter expects bytes, unlike the GDAL configuration string used by CLI commands
+    rio.env.set_gdal_config("GDAL_CACHEMAX", cachemax_mb * 1024**2)
     _trim_process_memory()
 
 

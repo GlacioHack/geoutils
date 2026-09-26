@@ -2,53 +2,64 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from importlib.util import find_spec
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Literal
 
 import numpy as np
 import pytest
-import xarray as xr
+import rasterio as rio
 
-from benchmarks.asv_suite import parameter_sweeps as benchmark_parameter_sweeps
-from benchmarks.asv_suite.parameter_sweeps import (
-    BENCHMARK_CASE_BY_CLASS,
-    BENCHMARK_CASES,
-    COMPARISONS,
-    EXTERNAL_REFERENCE_CASE_BY_CLASS,
-)
+from benchmarks.asv_suite import benchmarks as generated_benchmarks
 from benchmarks.asv_suite.render_results import (
     COMPARISON_REPORT_DIRECTORY,
     DOCUMENTATION_DATA,
     DOCUMENTATION_MEMORY_PLOT,
+    DOCUMENTATION_MEMORY_SCALING_PLOT,
+    DOCUMENTATION_PDAL_PLOT,
     DOCUMENTATION_TIME_PLOT,
     PERFORMANCE_CHANGE_REPORT,
     SCALING_REPORT_PAGE,
     _PreviewResult,
     _render_preview,
-    _select_complete_result,
     render_documentation_snapshot,
 )
-from benchmarks.gdal_comparison.commands import (
+from benchmarks.comparisons.flox import (
+    compute_geoutils_grouped_stats,
+    prepare_grouped_inputs,
+)
+from benchmarks.comparisons.flox import (
+    grouped_stats as flox_grouped_stats,
+)
+from benchmarks.comparisons.gdal import (
     COMPARISON_OPERATIONS,
+    _warp_memory_limit_mb,
     build_gdal_command,
 )
-from benchmarks.pdal_comparison.commands import (
+from benchmarks.comparisons.pdal import (
     PDAL_COMPARISON_OPERATIONS,
+    PdalComparisonOperation,
     build_pdal_command,
 )
-from benchmarks.workflows.grouped_reference import (
-    compute_grouped_reference,
-    prepare_grouped_reference,
+from benchmarks.workflows.config import RuntimeConfig
+from benchmarks.workflows.core import Case
+from benchmarks.workflows.operations import (
+    BENCHMARK_BY_CLASS,
+    BENCHMARK_BY_ID,
+    BENCHMARK_CASE_BY_CLASS,
+    BENCHMARK_CASES,
+    BENCHMARKS,
+    COMPARISONS,
+    OPERATION_BY_NAME,
+    OPERATION_MODULES,
+    collect_operation_modules,
+    discover_operation_modules,
+    format_api_label,
 )
-from benchmarks.workflows.runner import BenchmarkConfig, BenchmarkRunner
-from benchmarks.workflows.variography import (
-    prepare_pair_pointcloud,
-    prepare_pair_raster,
-    prepare_variogram_pairs,
-)
-from geoutils import Variogram
+from benchmarks.workflows.runner import BenchmarkRunner
 
 
 class TestComparisonReport:
@@ -59,7 +70,7 @@ class TestComparisonReport:
     Even if ASV runs quick checks of the benchmarking setup through CI, it's easier to have a detailed traceback here
     through Pytest for some aspects.
     We especially tests our custom routines/rendering for the benchmark webpage, comparisons to external refs (e.g.
-    GDAL CLI), and across variables (raster/point size, chunk size, etc) and categories (e.g. eager/Dask/MP, method,
+    GDAL CLI), and across variables (raster/point size, chunk size, etc) and categories (e.g. in-memory/Dask/MP, method,
     etc) of interest.
     """
 
@@ -67,13 +78,50 @@ class TestComparisonReport:
         """Checks that every registered benchmark and plotted series has a generated ASV class."""
 
         # Gather the GeoUtils/external classes registered for ASV and the classes referenced by report plots
-        registered = set(BENCHMARK_CASE_BY_CLASS) | set(EXTERNAL_REFERENCE_CASE_BY_CLASS)
+        registered = set(BENCHMARK_CASE_BY_CLASS)
         plotted = {class_name for comparison in COMPARISONS for _, class_name in comparison.series}
 
-        # Importing parameter_sweeps.py should create every class needed by ASV and the report
+        # Importing benchmarks.py should create every class needed by ASV and the report
         assert BENCHMARK_CASES and COMPARISONS
         assert plotted <= registered
-        assert all(hasattr(benchmark_parameter_sweeps, class_name) for class_name in registered)
+        assert all(hasattr(generated_benchmarks, class_name) for class_name in registered)
+
+    def test_benchmark_registry__generated_class_names_stable(self) -> None:
+        """Checks that generated ASV identifiers keep function fields separate from their varying input."""
+
+        # Hash the sorted names to keep the exact 118-class identifier check compact and order independent
+        class_names = sorted(
+            benchmark.benchmark_class(case)
+            for benchmark in BENCHMARKS
+            if benchmark.parameter_name is not None
+            for case in benchmark.cases
+        )
+        digest = hashlib.sha256("\n".join(class_names).encode()).hexdigest()
+
+        # A changed name would split ASV history even when the underlying operation remained the same
+        assert digest == "608dbbf7be17dbd67d5b42e9953d1568e12281d06bd9bd3cf64959ba7517ba38"
+
+    def test_operation_discovery__deterministic_modules(self) -> None:
+        """Checks that operation discovery returns the same modules in their stable report order."""
+
+        # Repeat package discovery rather than reusing the modules collected during the first import
+        discovered = discover_operation_modules()
+
+        # Every run should return the same local modules in the order used for sweeps and comparison plots
+        assert tuple(module.__name__ for module in discovered) == tuple(module.__name__ for module in OPERATION_MODULES)
+        assert [getattr(module, "ORDER", 100) for module in discovered] == sorted(
+            getattr(module, "ORDER", 100) for module in discovered
+        )
+
+    def test_operation_discovery__error_duplicate_benchmark_id(self) -> None:
+        """Checks that two operation modules cannot register the same benchmark identifier."""
+
+        # Present one real sweep through two small module-like objects to isolate duplicate validation
+        duplicate_modules = (SimpleNamespace(BENCHMARKS=(BENCHMARKS[0],)),) * 2
+
+        # Reject the collision before generated classes or report mappings can silently replace each other
+        with pytest.raises(ValueError, match=f"Duplicate benchmark ID: {BENCHMARKS[0].id}"):
+            collect_operation_modules(duplicate_modules)
 
     def test_render_preview__essential_files(self, tmp_path: Path) -> None:
         """Checks that preview rendering writes the main pages, data exports and plots."""
@@ -100,163 +148,166 @@ class TestComparisonReport:
         payload = json.loads((report_directory / "comparisons.json").read_text(encoding="utf-8"))
         assert payload["measurements"]
 
-    def test_select_complete_result__skips_incomplete_latest_run(self) -> None:
-        """Checks that report selection falls back when the latest ASV result is incomplete."""
-
-        # Make the second result newer, then remove one measurement that the report needs
-        complete = _PreviewResult()
-        complete.started_at = {"benchmark": 1}
-        incomplete = _PreviewResult()
-        incomplete.started_at = {"benchmark": 2}
-        incomplete.values.pop(next(iter(incomplete.values)))
-
-        # The earlier complete result should still be usable for report generation
-        assert _select_complete_result((complete, incomplete)) is complete
-
     def test_render_documentation_snapshot__essential_files(self, tmp_path: Path) -> None:
-        """Checks that documentation rendering writes its two plots and numeric data."""
+        """Checks that documentation rendering writes its summary plots and numeric data."""
 
         pytest.importorskip("matplotlib")
 
         # Render the documentation files from the same small result used by preview mode
         records = render_documentation_snapshot(_PreviewResult(), tmp_path)
 
-        # Both graphics and their JSON source are needed when benchmark results are updated in the docs
+        # All graphics and their JSON source are needed when benchmark results are updated in the docs
         assert records
         assert (tmp_path / DOCUMENTATION_TIME_PLOT).is_file()
         assert (tmp_path / DOCUMENTATION_MEMORY_PLOT).is_file()
+        assert (tmp_path / DOCUMENTATION_MEMORY_SCALING_PLOT).is_file()
+        assert (tmp_path / DOCUMENTATION_PDAL_PLOT).is_file()
         assert (tmp_path / DOCUMENTATION_DATA).is_file()
+
+
+class TestBenchmarkScenarios:
+    """Test module for scheduled inputs and benchmark configurations."""
+
+    def test_sweeps__representative_configs(self) -> None:
+        """Checks representative updates for strategy, grouped and point sweeps."""
+
+        # Select cases whose configuration depends on their method, layout or point count
+        gridding = BENCHMARK_BY_ID["grid-raster-size"]
+        idw_case = next(case for case in gridding.cases if case.method == "idw" and case.execution == "inmem")
+        interleaved = BENCHMARK_BY_ID["grouped-stats-interleaved-chunk-size"]
+        grouped_case = interleaved.cases[0]
+        pointcloud = BENCHMARK_BY_ID["to-pointcloud-raster-size"]
+        point_case = pointcloud.cases[0]
+
+        # These values cover method-specific support, uneven chunks, repeated groups and point inputs
+        grid_config = gridding.make_config(8_000, idw_case)
+        grouped_config = interleaved.make_config(500, grouped_case)
+        point_config = pointcloud.make_config(1_000, point_case)
+        assert (grid_config.shape, grid_config.chunks, grid_config.value("grid_dist_nodata_pixel")) == (
+            (8_000, 8_000),
+            (1_000, 1_000),
+            16,
+        )
+        assert (grouped_config.shape, grouped_config.chunks, grouped_config.value("grouped_layout")) == (
+            (2_000, 2_000),
+            (500, 500),
+            "interleaved",
+        )
+        assert (point_config.shape, point_config.chunks) == ((1_000, 1_000), (1_000, 1_000))
+
+    def test_comparison__derived_identity_and_workload(self) -> None:
+        """Checks that sweep cases provide report metadata and workload sizes without duplicate text."""
+
+        # Select a comparison with raster, chunk and vector fixture dimensions
+        comparison = next(item for item in COMPARISONS if item.slug == "clip-raster-size")
+
+        # The operation and parameter axis name the sweep, while its config supplies every displayed workload value
+        assert comparison.benchmark.id == "clip-raster-size"
+        assert comparison.operation == "clip"
+        assert comparison.by == "execution"
+        assert comparison.workload(8_000) == ("8,000 × 8,000 raster; 1,000 × 1,000 chunks; 51 × 51 vector features")
+
+    def test_comparison__output_formats_group_matching_implementations(self) -> None:
+        """Checks that each GeoUtils point format stays beside the matching PDAL format in report series."""
+
+        # Select the output-format comparison whose benchmark stores GeoUtils cases before implementation cases
+        comparison = next(item for item in COMPARISONS if item.slug == "subsample-las-laz-size")
+
+        # Keep the established report order while treating every reference implementation as a normal case
+        assert tuple(label for label, _ in comparison.series) == (
+            "GeoUtils LAS",
+            "PDAL LAS",
+            "GeoUtils LAZ",
+            "PDAL LAZ",
+        )
+
+    @pytest.mark.parametrize(
+        ("class_name", "expected_label"),
+        (
+            ("reproject_nearest_rasterio_inmem__rastersize", ".reproject(resampling='nearest')"),
+            ("polygonize_rasterio_labelstitch_dask__rastersize", ".polygonize(strategy='label_stitch')"),
+            (
+                "stats_moments_numpy_dense_dask__rastersize",
+                "stats(statistics=['mean', 'std', 'min', 'max'], strategy='dense')",
+            ),
+        ),
+    )
+    def test_api_label__matches_execution_options(self, class_name: str, expected_label: str) -> None:
+        """Checks that generated labels use the public argument names passed by operation handlers."""
+
+        # Resolve the structured case instead of deriving options from its generated class name
+        case = BENCHMARK_CASE_BY_CLASS[class_name]
+        benchmark = BENCHMARK_BY_CLASS[class_name]
+
+        # Execution mode stays separate from the public call while method, engine and strategy remain visible
+        assert format_api_label(benchmark.operation, case) == expected_label
+        assert getattr(generated_benchmarks, class_name).pretty_name == expected_label
+
+    def test_comparison_references__use_normal_cases(self) -> None:
+        """Checks that Flox, GDAL and PDAL references are normal benchmark cases."""
+
+        # Flox measures prepared arrays directly; GDAL and PDAL execute through their command runners
+        flox_benchmark = BENCHMARK_BY_ID["grouped-flox-raster-size"]
+        gdal_benchmark = BENCHMARK_BY_ID["rasterize-raster-size"]
+        pdal_benchmark = BENCHMARK_BY_ID["to-pointcloud-raster-size"]
+
+        # Flox is a public stats() backend, while GDAL and PDAL remain external command references
+        assert {case.implementation for case in flox_benchmark.cases} == {"geoutils", "flox"}
+        assert {case.implementation for case in gdal_benchmark.cases} == {"geoutils", "gdal"}
+        assert {case.implementation for case in pdal_benchmark.cases} == {"geoutils", "pdal"}
 
 
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestBenchmarkRunner:
     """Test module for bounded operation outputs produced by BenchmarkRunner."""
 
-    @pytest.mark.parametrize("execution_mode", ["dask", "multiprocessing"])
-    def test_to_pointcloud__bounded_sample(
-        self, execution_mode: Literal["dask", "multiprocessing"], tmp_path: Path
+    @pytest.mark.parametrize("execution_mode", ["inmem", "dask", "multiprocessing"])
+    def test_clip__masks_outside_fixture_polygons(
+        self,
+        execution_mode: Literal["inmem", "dask", "multiprocessing"],
+        tmp_path: Path,
     ) -> None:
-        """Checks that the large-data point conversion can request a bounded sample from either backend."""
+        """Checks that the clipping benchmark keeps polygon interiors and masks the surrounding raster."""
 
         if execution_mode == "dask":
             pytest.importorskip("distributed")
 
-        # Request more point rows than one 3 x 4 raster chunk to use the bounded cutoff path
-        config = BenchmarkConfig(
-            shape=(8, 10),
-            chunks=(3, 4),
-            pointcloud_subsample_size=17,
+        # Use several polygons across multiple chunks so worker modes process inside and outside cells
+        config = RuntimeConfig(
+            shape=(64, 64),
+            chunks=(32, 32),
             directory=str(tmp_path / execution_mode),
+            workload={"vector_features_per_axis": 3, "operation": "clip"},
         )
 
-        # Run the shared workflow and let its internal count check validate all 17 output rows
-        with BenchmarkRunner(execution_mode, config) as runner:
-            result = runner.run("to_pointcloud", profile=False)
+        # Run the complete benchmark workflow and inspect one kept center cell and one clipped corner
+        operation = OPERATION_BY_NAME["clip"]
+        case = Case(execution=execution_mode, options={"operation": "clip"})
+        with BenchmarkRunner(operation, case, config) as runner:
+            result = runner.run(profile=False)
+        assert result.output_file is not None
+        with rio.open(result.output_file) as dataset:
+            values = dataset.read(1)
+            nodata = dataset.nodata
 
-        # The constant raster gives the same compact correctness value through both backends
+        # The odd polygon grid covers the raster center, while every fixture polygon stays away from the corners
         assert result.value == config.raster_value
+        assert values[values.shape[0] // 2, values.shape[1] // 2] == config.raster_value
+        assert not np.isfinite(values[0, 0]) or values[0, 0] == nodata
 
 
-@pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
-class TestGroupedReferenceChunked:
-    """Test module for running grouped benchmark workflows with each execution path."""
+def test_grouped_reference__matches_geoutils() -> None:
+    """Checks that direct Flox and public GeoUtils grouped statistics return the same in-memory table."""
 
-    @pytest.mark.parametrize("implementation", ["geoutils", "flox"])
-    @pytest.mark.parametrize("execution_mode", ["eager", "dask"])
-    def test_grouped_reference__runs(
-        self,
-        implementation: Literal["geoutils", "flox"],
-        execution_mode: Literal["eager", "dask"],
-    ) -> None:
-        """Checks that GeoUtils and Flox return a complete table from eager and Dask inputs."""
+    pytest.importorskip("flox")
 
-        # Flox is an optional benchmark reference, so leave its two cases out of the base test environment
-        if implementation == "flox":
-            pytest.importorskip("flox")
+    # Prepare one small shared input and run each implementation directly
+    inputs = prepare_grouped_inputs(16, 2, "interleaved", "inmem")
+    expected = compute_geoutils_grouped_stats(*inputs)
+    result = flox_grouped_stats(*inputs, use_dask=False)
 
-        # Prepare four groups from small arrays, then run the same entry point used by the benchmark classes
-        inputs = prepare_grouped_reference(16, 2, "interleaved", execution_mode)
-        result = compute_grouped_reference(*inputs, implementation=implementation)
-
-        # Four groups x two value arrays each contain count, mean and standard deviation
-        assert result.shape == (4, 6)
-        assert np.array_equal(result.index, np.arange(4))
-        assert np.isfinite(result.to_numpy()).all()
-
-    def test_grouped_reference__multiprocessing_benchmark_runs(self) -> None:
-        """Checks that one generated multiprocessing benchmark can set up, run and clean up."""
-
-        # Find the generated GeoUtils case used beside the Flox raster-size comparison
-        case = next(
-            case
-            for case in BENCHMARK_CASES
-            if case.comparison_group == "grouped-flox-raster-size" and case.execution_mode == "multiprocessing"
-        )
-        benchmark = getattr(benchmark_parameter_sweeps, case.benchmark_class)()
-
-        # Use a small raster but follow ASV's normal setup/run/teardown order, including its real worker process
-        parameter = 32
-        try:
-            benchmark.setup(parameter)
-            benchmark.time_operation(parameter)
-        finally:
-            benchmark.teardown(parameter)
-
-
-class TestVariographyWorkflows:
-    """Test module for running the pair and variogram benchmark workflows."""
-
-    def test_variogram_pairs__runs(self) -> None:
-        """Checks that prepared pairs can be reduced into populated variogram bins."""
-
-        # Prepare complete pairs across the same distance range used by the benchmark
-        pairs = prepare_variogram_pairs(200)
-        edges = np.geomspace(1, 1024, 9)
-
-        # Build a variogram through the public API and check that every prepared pair reaches one bin
-        result = Variogram.from_pairs(
-            pairs,
-            bins=edges,
-            estimator=lambda differences: float(np.mean(differences**2) / 2),
-        )
-        assert pairs.sizes["pair"] == 200
-        assert result.counts.sum() == 200
-        assert np.isfinite(result.semivariance).all()
-
-    def test_pair_pointcloud__runs(self) -> None:
-        """Checks that the point benchmark fixture produces the requested number of usable pairs."""
-
-        # Build a small irregular point cloud and draw pairs with the benchmark's fixed random seed
-        points = prepare_pair_pointcloud(200)
-        pairs = points.pairsample(n_pairs=20, min_distance=1, max_distance=10, random_state=42)
-
-        # Pair values have two endpoints and a finite distance for each requested pair
-        assert pairs.sizes == {"pair": 20, "endpoint": 2}
-        assert np.isfinite(pairs["value"]).all()
-        assert np.isfinite(pairs["distance"]).all()
-
-
-@pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
-class TestPairRasterChunked:
-    """Test module for running raster pair sampling with Dask input."""
-
-    def test_pair_raster__dask_matches_eager(self) -> None:
-        """Checks that the Dask fixture stays lazy and returns the same pairs as the eager fixture."""
-
-        import dask.array as da
-
-        # Prepare the same raster in memory and as Dask data without loading the Dask values
-        eager = prepare_pair_raster(32, "eager")
-        lazy = prepare_pair_raster(32, "dask")
-        assert isinstance(lazy.data, da.Array)
-        assert not lazy._obj._in_memory
-
-        # Draw the same 20 pairs from both inputs and compare the complete public pair datasets
-        options = {"n_pairs": 20, "min_distance": 1, "max_distance": 16, "random_state": 42}
-        expected = eager.pairsample(**options)
-        result = lazy.pairsample(**options)
-        assert not result.chunks
-        xr.testing.assert_equal(result, expected)
+    # Matching labelled tables establish that the external reference measures the same calculation
+    assert result.equals(expected)
 
 
 class TestGdalCommands:
@@ -269,12 +320,13 @@ class TestGdalCommands:
         """Checks that every GDAL comparison names its executable, input, output and cache size."""
 
         # Return command names directly because this smoke test builds arguments without running GDAL
-        monkeypatch.setattr("benchmarks.gdal_comparison.commands._require_command", lambda name: name)
-        config = BenchmarkConfig(shape=(64, 96), chunks=(32, 32), directory=str(tmp_path))
+        monkeypatch.setattr("benchmarks.comparisons.gdal._require_command", lambda name: name)
+        config = RuntimeConfig(shape=(64, 96), chunks=(32, 32), directory=str(tmp_path))
 
         # Build the command with one recognizable source path for each supported input type
         comparison = build_gdal_command(
             operation,  # type: ignore[arg-type]
+            Case(method="nearest" if operation in ("reproject", "grid") else None),
             config,
             raster_file="source-raster.tif",
             vector_file="source-vector.gpkg",
@@ -284,12 +336,14 @@ class TestGdalCommands:
 
         # These fields are enough to catch a command wired to the wrong tool, source, output or cache setting
         expected_executable = {
+            "clip": "gdalwarp",
             "reproject": "gdalwarp",
             "polygonize": "gdal_polygonize.py",
             "rasterize": "gdal_rasterize",
             "grid": "gdal_grid",
         }[operation]
         expected_source = {
+            "clip": "source-raster.tif",
             "reproject": "source-raster.tif",
             "polygonize": "source-raster.tif",
             "rasterize": "source-vector.gpkg",
@@ -298,6 +352,11 @@ class TestGdalCommands:
         cache_index = command.index("GDAL_CACHEMAX")
         assert command[0] == expected_executable
         assert expected_source in command
+        if operation == "clip":
+            assert "source-vector.gpkg" in command
+        if operation in ("clip", "reproject"):
+            warp_memory_index = command.index("-wm")
+            assert command[warp_memory_index + 1] == str(_warp_memory_limit_mb(config))
         assert comparison.output_file in command
         assert command[cache_index + 1] == str(config.gdal_cachemax_mb)
 
@@ -309,7 +368,7 @@ class TestPdalCommands:
     @pytest.mark.parametrize("driver", ["GPKG", "LAS", "LAZ"])
     def test_comparison_command__essential_stages(
         self,
-        operation: str,
+        operation: PdalComparisonOperation,
         driver: Literal["GPKG", "LAS", "LAZ"],
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
@@ -317,17 +376,21 @@ class TestPdalCommands:
         """Checks that each PDAL comparison reads the raster and writes the expected point output."""
 
         # Return the command name directly because this test checks the pipeline without running PDAL
-        monkeypatch.setattr("benchmarks.pdal_comparison.commands._require_command", lambda name: name)
-        config = BenchmarkConfig(
+        monkeypatch.setattr("benchmarks.comparisons.pdal._require_command", lambda name: name)
+        config = RuntimeConfig(
             shape=(64, 96),
             chunks=(32, 32),
-            subsample_size=17,
             directory=str(tmp_path),
-            point_output_driver=driver,
+            workload={"subsample_size": 17},
         )
 
         # Build the pipeline and read the JSON passed to the PDAL command
-        comparison = build_pdal_command(operation, config, raster_file="source-raster.tif")  # type: ignore[arg-type]
+        comparison = build_pdal_command(
+            operation,
+            Case(output_driver=driver),
+            config,
+            raster_file="source-raster.tif",
+        )
         pipeline = json.loads(Path(comparison.pipeline_file).read_text(encoding="utf-8"))["pipeline"]
         stage_types = [stage["type"] for stage in pipeline]
 
@@ -341,7 +404,7 @@ class TestPdalCommands:
         if operation == "subsample":
             expected_stages = [*point_stages, "filters.randomize", "filters.head", writer]
             assert pipeline[-3]["seed"] == 42
-            assert pipeline[-2]["count"] == config.subsample_size
+            assert pipeline[-2]["count"] == config.value("subsample_size")
         assert stage_types == expected_stages
 
         # Both paths use the configured cache, source raster and point output

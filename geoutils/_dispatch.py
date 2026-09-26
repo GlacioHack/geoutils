@@ -508,22 +508,22 @@ def _check_match_bbox(
     return xmin, ymin, xmax, ymax
 
 
-def _clip_geometry(mask: Any, target_crs: rio.crs.CRS | pyproj.CRS | None) -> BaseGeometry:
-    """Return an input clipping geometry normalized and in the target CRS."""
+def _clip_geodataframe(mask: Any, target_crs: rio.crs.CRS | pyproj.CRS | None) -> gpd.GeoDataFrame:
+    """Return clipping geometries as a concrete GeoDataFrame in the target CRS."""
 
+    # Wrap simple geometry inputs without combining their individual parts
     if isinstance(mask, BaseGeometry):
-        return mask
+        return gpd.GeoDataFrame(geometry=[mask], crs=target_crs)
 
-    # Extent as a clipping geometry
     if isinstance(mask, Sequence) and not isinstance(mask, (str, bytes)):
         xmin, ymin, xmax, ymax = _check_bounds(mask)
-        return box(xmin, ymin, xmax, ymax)
+        return gpd.GeoDataFrame(geometry=[box(xmin, ymin, xmax, ymax)], crs=target_crs)
 
-    # Direct geometries
+    # Extract tabular geometries without dissolving features that chunks can select independently
     if isinstance(mask, gpd.GeoSeries):
         dataframe = gpd.GeoDataFrame(geometry=mask)
     elif isinstance(mask, gpd.GeoDataFrame):
-        dataframe = mask
+        dataframe = gpd.GeoDataFrame(geometry=mask.geometry, crs=mask.crs)
     else:
         interface = get_geo_interface(mask, "ds", accessors=("vct", "pc"))
         if interface is not None:
@@ -536,9 +536,9 @@ def _clip_geometry(mask: Any, target_crs: rio.crs.CRS | pyproj.CRS | None) -> Ba
                     "Clipping geometry must be a vector, point cloud, raster, Shapely geometry, "
                     "GeoPandas object or bounding box."
                 )
-            return _clip_geometry(raster_interface.footprint, target_crs=target_crs)
+            return _clip_geodataframe(raster_interface.footprint, target_crs=target_crs)
 
-    # Combine mask once so every eager or lazy source block receives the same geometry
+    # Materialize optional Dask inputs once before checking or changing their CRS
     if is_dask_dataframe(dataframe):
         dataframe = dataframe.compute()
     if (
@@ -547,7 +547,16 @@ def _clip_geometry(mask: Any, target_crs: rio.crs.CRS | pyproj.CRS | None) -> Ba
         and pyproj.CRS.from_user_input(dataframe.crs) != pyproj.CRS.from_user_input(target_crs)
     ):
         dataframe = dataframe.to_crs(target_crs)
-    return dataframe.geometry.union_all()
+    elif dataframe.crs is None and target_crs is not None:
+        dataframe = dataframe.set_crs(target_crs)
+    return gpd.GeoDataFrame(geometry=dataframe.geometry, crs=dataframe.crs)
+
+
+def _clip_geometry(mask: Any, target_crs: rio.crs.CRS | pyproj.CRS | None) -> BaseGeometry:
+    """Return one clipping geometry normalized and in the target CRS."""
+
+    # Vector clipping needs one mask, while raster clipping can keep features separate for spatial partitioning
+    return _clip_geodataframe(mask, target_crs=target_crs).geometry.union_all()
 
 
 def _get_reproject_crs(

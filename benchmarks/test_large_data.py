@@ -33,19 +33,13 @@ from multiprocessing.connection import Connection
 import numpy as np
 import pytest
 
-from benchmarks.workflows.registry import (
-    OPERATION_BENCHMARK_CASES,
-    OPERATION_BY_NAME,
-    OperationStrategyName,
-    split_operation_case,
+from benchmarks.workflows.config import RuntimeConfig
+from benchmarks.workflows.core import Case
+from benchmarks.workflows.io import logical_raster_size_mb, memory_limit_mb
+from benchmarks.workflows.operations import (
+    LARGE_DATA_CASES,
 )
-from benchmarks.workflows.runner import (
-    BenchmarkConfig,
-    BenchmarkResult,
-    BenchmarkRunner,
-    logical_raster_size_mb,
-    memory_limit_mb,
-)
+from benchmarks.workflows.runner import BenchmarkResult, BenchmarkRunner
 from geoutils.interface.gridding import GriddingMethod
 
 # Mark every test in this module as opt-in, memory-sensitive and allowed to emit expected worker warnings
@@ -71,58 +65,66 @@ def _shape_from_env(name: str, default: tuple[int, int]) -> tuple[int, int]:
 
 
 @pytest.fixture(scope="module")
-def large_data_config(tmp_path_factory: pytest.TempPathFactory) -> BenchmarkConfig:
+def large_data_config(tmp_path_factory: pytest.TempPathFactory) -> RuntimeConfig:
     """Create one larger-than-memory fixture configuration shared by all operations."""
 
     # Reusing sources avoids writing the same large raster for every backend case
     directory = tmp_path_factory.mktemp("geoutils-large-data")
-    return BenchmarkConfig(
+    return RuntimeConfig(
         shape=_shape_from_env("GEOUTILS_LARGE_DATA_SHAPE", (12288, 12288)),
         # Larger chunks retain 144 tasks while keeping the canonical raster above memory
         chunks=_shape_from_env("GEOUTILS_LARGE_DATA_CHUNKS", (1024, 1024)),
         memory_limit=os.environ.get("GEOUTILS_LARGE_DATA_MEMORY_LIMIT", "512MB"),
         profile_interval=float(os.environ.get("GEOUTILS_LARGE_DATA_PROFILE_INTERVAL", "0.1")),
-        subsample_size=2048,
-        ninterp=2048,
-        point_partition_size=8,
         # Release native workspaces between bounded writes for the strict memory contract
         trim_dask_memory=True,
         directory=str(directory),
     )
 
 
-def _execute_operation(case_name: str, config: BenchmarkConfig) -> BenchmarkResult:
+def _execute_operation(case_name: str, config: RuntimeConfig, case: Case | None = None) -> BenchmarkResult:
     """Run one case in a fresh process and retain its laziness assertions and metrics."""
 
     # A fresh process prevents one backend's imports and allocators from changing the next baseline
-    backend, operation = split_operation_case(case_name)
-    with BenchmarkRunner(backend, config) as runner:
-        raster = runner.make_raster()
+    operation, registered_case = LARGE_DATA_CASES[case_name]
+    selected_case = registered_case if case is None else case
+    backend = selected_case.execution
+    assert backend is not None
+    with BenchmarkRunner(operation, selected_case, config) as runner:
+        source_file = next(
+            (
+                runner.path(filename)
+                for filename in ("source-raster.tif", "source-polygonize.tif")
+                if os.path.isfile(runner.path(filename))
+            ),
+            None,
+        )
+        raster = runner.make_raster(source_file) if source_file is not None else None
 
         # Inputs must point to chunks or their source file before any operation graph is built
-        if backend == "dask":
+        if backend == "dask" and raster is not None:
             assert raster.data.chunks is not None
             assert not raster._in_memory
-        else:
+        elif raster is not None:
             assert not raster.is_loaded
 
         # One execution provides correctness, worker health and memory metrics
-        result = runner.run(operation)
+        result = runner.run()
 
         # Input objects must still be lazy or file-backed after the operation completes
-        if backend == "dask":
+        if backend == "dask" and raster is not None:
             assert not raster._in_memory
-        else:
+        elif raster is not None:
             assert not raster.is_loaded
     return result
 
 
-def _operation_process(sender: Connection, case_name: str, config: BenchmarkConfig) -> None:
+def _operation_process(sender: Connection, case_name: str, config: RuntimeConfig, case: Case | None) -> None:
     """Send one isolated result or a complete traceback back to Pytest."""
 
     try:
         # Direct child processes may start their own Dask or multiprocessing workers
-        result = _execute_operation(case_name, config)
+        result = _execute_operation(case_name, config, case)
     except BaseException:  # noqa: B036
         sender.send((False, traceback.format_exc()))
     else:
@@ -131,13 +133,13 @@ def _operation_process(sender: Connection, case_name: str, config: BenchmarkConf
         sender.close()
 
 
-def _run_isolated(case_name: str, config: BenchmarkConfig) -> BenchmarkResult:
+def _run_isolated(case_name: str, config: RuntimeConfig, case: Case | None = None) -> BenchmarkResult:
     """Execute one large data case in a clean spawned process with a bounded timeout."""
 
     # Spawn avoids inheriting native caches retained by a previous backend operation
     context = multiprocessing.get_context("spawn")
     receiver, sender = context.Pipe(duplex=False)
-    process = context.Process(target=_operation_process, args=(sender, case_name, config))
+    process = context.Process(target=_operation_process, args=(sender, case_name, config, case))
     process.start()
     sender.close()
 
@@ -171,18 +173,21 @@ class TestLargeData:
     def _check_case(
         self,
         case_name: str,
-        large_data_config: BenchmarkConfig,
+        large_data_config: RuntimeConfig,
+        case: Case | None = None,
     ) -> None:
         """Run one operation and check its result, worker health and bounded memory."""
 
         # Every backend needs psutil and Dask additionally needs distributed workers
         pytest.importorskip("psutil")
-        backend, operation = split_operation_case(case_name)
+        operation, registered_case = LARGE_DATA_CASES[case_name]
+        selected_case = registered_case if case is None else case
+        backend = selected_case.execution
         if backend == "dask":
             pytest.importorskip("dask")
             pytest.importorskip("distributed")
-            if operation in ("grid", "subsample", "to_pointcloud"):
-                pytest.importorskip("dask_geopandas")
+            for dependency in operation.large_data_dependencies:
+                pytest.importorskip(dependency)
 
         # The uncompressed input must exceed the configured limit before claiming a large data test
         logical_mb = logical_raster_size_mb(large_data_config)
@@ -190,10 +195,10 @@ class TestLargeData:
         assert logical_mb > configured_limit_mb
 
         # Per-case process isolation makes memory independent of preceding parametrizations
-        result = _run_isolated(case_name, large_data_config)
+        result = _run_isolated(case_name, large_data_config, selected_case)
 
         # Validate the small fingerprint and any large file produced by the operation
-        expected_value = OPERATION_BY_NAME[operation].expected_value
+        expected_value = operation.expected_value
         assert np.isclose(result.value, expected_value, equal_nan=True)
         if result.output_file is not None:
             assert os.path.exists(result.output_file)
@@ -236,20 +241,24 @@ class TestLargeData:
             # Aggregate process-tree memory is retained for reports and diagnostics
             assert result.metrics.peak_process_tree_mem_mb is not None
 
-    @pytest.mark.parametrize("case_name", OPERATION_BENCHMARK_CASES)
-    def test_operation_stays_out_of_core(self, case_name: str, large_data_config: BenchmarkConfig) -> None:
+    @pytest.mark.parametrize("case_name", LARGE_DATA_CASES)
+    def test_operation_stays_out_of_core(self, case_name: str, large_data_config: RuntimeConfig) -> None:
         """Complete one larger-than-memory operation without loading its full raster."""
 
         # Request more point rows than one raster chunk so point operations check their bounded cutoff paths
         config = large_data_config
-        operation = split_operation_case(case_name)[1]
+        _, case = LARGE_DATA_CASES[case_name]
         sample_size = int(np.prod(large_data_config.chunks)) + 1
-        if operation == "subsample":
-            config = replace(large_data_config, subsample_size=sample_size)
-        elif operation == "to_pointcloud":
-            config = replace(large_data_config, pointcloud_subsample_size=sample_size)
+        workload = dict(large_data_config.workload)
+        point_count_option = next(
+            (name for name in ("subsample_size", "pointcloud_subsample_size") if name in case.options),
+            None,
+        )
+        if point_count_option is not None:
+            workload[point_count_option] = sample_size
+        config = replace(large_data_config, workload=workload)
 
-        self._check_case(case_name=case_name, large_data_config=config)
+        self._check_case(case_name=case_name, large_data_config=config, case=case)
 
     @pytest.mark.parametrize("case_name", ["dask-grid", "multiprocessing-grid"])
     @pytest.mark.parametrize("resampling", ["idw", "mean"])
@@ -257,37 +266,35 @@ class TestLargeData:
         self,
         case_name: str,
         resampling: GriddingMethod,
-        large_data_config: BenchmarkConfig,
+        large_data_config: RuntimeConfig,
     ) -> None:
         """Complete the IDW and circular-statistic execution paths through every out-of-core backend."""
 
         # A two-pixel support crosses chunk edges without creating unbounded point-cell pairs
-        config = replace(
-            large_data_config,
-            operation_method=resampling,
-            grid_dist_nodata_pixel=2,
-        )
+        _, case = LARGE_DATA_CASES[case_name]
+        config = replace(large_data_config, workload={**large_data_config.workload, "grid_dist_nodata_pixel": 2})
+        case = replace(case, method=resampling)
 
         # IDW has its own reduction, while mean represents the shared circular-statistic neighborhood path
-        self._check_case(case_name=case_name, large_data_config=config)
+        self._check_case(case_name=case_name, large_data_config=config, case=case)
 
     @pytest.mark.parametrize("strategy", ["dense", "sparse", "groupwise"])
     @pytest.mark.parametrize("chunk_scale", [1, 2])
     def test_grouped_stats_stays_out_of_core(
-        self, strategy: OperationStrategyName, chunk_scale: int, large_data_config: BenchmarkConfig
+        self, strategy: str, chunk_scale: int, large_data_config: RuntimeConfig
     ) -> None:
         """Checks that grouped summaries and exact local medians finish below full-raster worker memory."""
 
         # Keep regions fixed when changing chunks so group boundaries cross at least one tested partition layout
         # Sixty-four regions per axis bound each complete group needed for exact median and NMAD
         chunks = tuple(max(16, size // chunk_scale) for size in large_data_config.chunks)
+        _, case = LARGE_DATA_CASES["dask-grouped_stats"]
         config = replace(
             large_data_config,
             chunks=chunks,
-            grouped_regions_per_axis=64,
-            operation_strategy=strategy,
-            operation_method="robust" if strategy == "groupwise" else "moments",
+            workload={**large_data_config.workload, "grouped_regions_per_axis": 64},
         )
+        case = replace(case, strategy=strategy, method="robust" if strategy == "groupwise" else "moments")
 
         # Reuse the isolated-process contract for finite counts, worker health and measured memory growth
-        self._check_case(case_name="dask-grouped_stats", large_data_config=config)
+        self._check_case(case_name="dask-grouped_stats", large_data_config=config, case=case)

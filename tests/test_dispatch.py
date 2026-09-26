@@ -23,6 +23,7 @@ from geoutils._dispatch import (  # Level-1 checks (match reference object)
     _check_match_points,
     _check_resolution,
     _check_shape,
+    _clip_geodataframe,
     _grid_from_bounds_res,
     _grid_from_bounds_shape,
     _grid_from_coords,
@@ -60,6 +61,30 @@ class TestGeoInterface:
 
         # Plain arrays have no spatial interface and cannot supply a reference grid
         assert get_geo_interface(np.ones((3, 4)), "ij2xy", accessors=("rst",)) is None
+
+
+class TestClipGeometry:
+    """Test module for preserving clipping features and matching their coordinate reference system."""
+
+    def test_clip_geodataframe__keeps_features_in_target_crs(self) -> None:
+        """Checks that clipping normalization reprojects features without dissolving them."""
+
+        # Create two disconnected polygons whose separate rows can later be assigned to different raster chunks
+        source = gpd.GeoDataFrame(
+            geometry=[
+                Polygon([(0, 0), (1, 0), (1, 1), (0, 1)]),
+                Polygon([(2, 2), (3, 2), (3, 3), (2, 3)]),
+            ],
+            crs=4326,
+        )
+
+        # Normalize the mask to a different target CRS through the same helper used by raster clip()
+        normalized = _clip_geodataframe(source, target_crs=rio.crs.CRS.from_epsg(3857))
+
+        # Both rows remain available for spatial partitioning and their coordinates match an independent reprojection
+        assert len(normalized) == 2
+        assert normalized.crs == "EPSG:3857"
+        gpd.testing.assert_geodataframe_equal(normalized, source.to_crs(3857))
 
 
 class TestDispatchLevelZero:

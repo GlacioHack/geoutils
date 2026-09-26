@@ -1,4 +1,4 @@
-"""Build GDAL commands equivalent to selected GeoUtils operations."""
+"""Build, execute and validate GDAL CLI commands."""
 
 from __future__ import annotations
 
@@ -6,16 +6,20 @@ import math
 import os
 import shutil
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
-from benchmarks.workflows.registry import resolve_operation_parameters
-from benchmarks.workflows.runner import BenchmarkConfig
+import geopandas as gpd
+
+from benchmarks.comparisons.subprocess import execute_command
+from benchmarks.workflows.config import RuntimeConfig
+from benchmarks.workflows.core import Case
+from benchmarks.workflows.io import read_raster_center
 
 # Only these GeoUtils operations have an equivalent GDAL CLI command for the external comparison
-ComparisonOperation = Literal["reproject", "polygonize", "rasterize", "grid"]
-COMPARISON_OPERATIONS: tuple[ComparisonOperation, ...] = ("reproject", "polygonize", "rasterize", "grid")
+ComparisonOperation = Literal["clip", "reproject", "polygonize", "rasterize", "grid"]
+COMPARISON_OPERATIONS: tuple[ComparisonOperation, ...] = ("clip", "reproject", "polygonize", "rasterize", "grid")
 
-# List the GDAL gridding algorithms that the command builder can use for matching GeoUtils methods
+# We list the GDAL gridding algorithms that the command builder can use for matching GeoUtils methods
 GdalGridAlgorithm = Literal[
     "nearest",
     "linear",
@@ -38,10 +42,10 @@ class GdalCommand:
     output_file: str
 
 
-def _warp_memory_limit_mb(config: BenchmarkConfig) -> int:
+def _warp_memory_limit_mb(config: RuntimeConfig) -> int:
     """Return the GDAL warp memory closest to one GeoUtils execution chunk."""
 
-    # GDAL holds one Float32 source and destination buffer plus their one-bit nodata masks
+    # GDAL holds one Float32 source and destination buffer plus their 1-bit nodata masks
     chunk_height = min(config.shape[0], config.chunks[0])
     chunk_width = min(config.shape[1], config.chunks[1])
     working_bits = chunk_height * chunk_width * 2 * (32 + 1)
@@ -49,9 +53,8 @@ def _warp_memory_limit_mb(config: BenchmarkConfig) -> int:
 
 
 def _require_command(name: str) -> str:
-    """Return an installed GDAL executable or raise a clear environment error."""
+    """Return an installed GDAL or raise a clear error."""
 
-    # Resolve executables once so subprocess never depends on shell parsing
     executable = shutil.which(name)
     if executable is None:
         raise RuntimeError(f"Required GDAL command is not installed: {name}")
@@ -85,7 +88,7 @@ def build_gdal_grid_command(
     else:
         algorithm_options = [f"radius1={radius[0]}", f"radius2={radius[1]}", "angle=0"]
 
-        # GDAL gives inverse-distance weighting an additional power parameter
+        # GDAL gives IDW a additional power parameter
         if algorithm == "invdist":
             algorithm_options.insert(0, f"power={distance_power}")
             algorithm_options.append("smoothing=0")
@@ -143,7 +146,8 @@ def build_gdal_grid_command(
 
 def build_gdal_command(
     operation: ComparisonOperation,
-    config: BenchmarkConfig,
+    case: Case,
+    config: RuntimeConfig,
     raster_file: str,
     vector_file: str,
     point_file: str,
@@ -152,18 +156,56 @@ def build_gdal_command(
 
     if config.directory is None:
         raise ValueError("GDAL comparison commands require an explicit output directory")
-    operation_method, _, _ = resolve_operation_parameters(
-        operation,
-        config.operation_method,
-        config.calculation_engine,
-        config.operation_strategy,
-    )
+    operation_method = case.method
 
     # Match output storage tiles and the GDAL block cache used by GeoUtils
     # These settings control file access, not GDAL's internal processing chunks
     height, width = config.shape
     common_config = ["--config", "GDAL_CACHEMAX", str(config.gdal_cachemax_mb)]
     common_creation = ["-co", "TILED=YES", "-co", "BLOCKXSIZE=512", "-co", "BLOCKYSIZE=512"]
+
+    if operation == "clip":
+        # Keep the source extent and mask cells outside the cutline, matching Raster.clip()
+        output_file = os.path.join(config.directory, "output-gdal-clip.tif")
+        command = [
+            _require_command("gdalwarp"),
+            *common_config,
+            "-overwrite",
+            "-cutline",
+            vector_file,
+            "-cl",
+            "source-vector",
+            "-te",
+            "7",
+            "45",
+            "8",
+            "46",
+            "-te_srs",
+            "EPSG:4326",
+            "-ts",
+            str(width),
+            str(height),
+            "-r",
+            "near",
+            "-ot",
+            "Float32",
+            "-dstnodata",
+            "-99999",
+            "-et",
+            "0",
+            "-wm",
+            str(_warp_memory_limit_mb(config)),
+            "-wo",
+            "NUM_THREADS=1",
+            "-wo",
+            "XSCALE=1",
+            "-wo",
+            "YSCALE=1",
+            *common_creation,
+            raster_file,
+            output_file,
+        ]
+        return GdalCommand(command, output_file)
 
     if operation == "reproject":
         # Match the GeoUtils WGS84 to UTM zone 32N nearest-neighbor workflow
@@ -274,8 +316,8 @@ def build_gdal_command(
             pixel_width = 1 / width
             pixel_height = 1 / height
             radius = (
-                config.grid_dist_nodata_pixel * pixel_width,
-                config.grid_dist_nodata_pixel * pixel_height,
+                config.value("grid_dist_nodata_pixel", float("inf")) * pixel_width,
+                config.value("grid_dist_nodata_pixel", float("inf")) * pixel_height,
             )
         return build_gdal_grid_command(
             point_file,
@@ -292,3 +334,31 @@ def build_gdal_command(
         )
 
     raise ValueError(f"Unsupported GDAL comparison operation: {operation}")
+
+
+def execute_gdal(runner: Any, case: Case) -> float:
+    """Run and validate the GDAL command matching the selected operation."""
+
+    operation = runner.operation.name
+    raster_file = runner.path("source-polygonize.tif" if operation == "polygonize" else "source-raster.tif")
+    command = build_gdal_command(
+        operation,
+        case,
+        runner.config,
+        raster_file=raster_file,
+        vector_file=runner.path("source-vector.gpkg"),
+        point_file=runner.path("source-points.gpkg"),
+    )
+    execute_command("GDAL", command.command, command.output_file)
+    runner._last_output_file = command.output_file
+
+    # Feature count validates vector output, raster workflows use one deterministic central pixel
+    if operation == "polygonize":
+        value = float(len(gpd.read_file(command.output_file)))
+        expected = int(runner.config.value("polygon_regions_per_axis", 1)) ** 2
+    else:
+        value = read_raster_center(command.output_file)
+        expected = runner.config.raster_value
+    if value != expected:
+        raise RuntimeError(f"Unexpected GDAL {operation} validation value: {value}")
+    return value
