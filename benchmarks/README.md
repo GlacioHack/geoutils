@@ -51,6 +51,11 @@ To add a new benchmark, follow these steps:
 6. If you want to add an external implementation, add it under `comparisons/` and attach a normal case with
    `reference_case(...)`. Then use `comparison(..., by=...)` to select the cases and plotted attribute.
 
+
+## Performance benchmarks with ASV
+
+### Local outputs
+
 When running ASV, local outputs are generated under the gitignored `results/` directory:
 
 ```text
@@ -61,8 +66,6 @@ results/
 │   └── html/       # Combined website, starting at index.html
 └── documentation/  # Optional local preview of the documentation graphics
 ```
-
-## Performance benchmarks with ASV
 
 ### Working with our ASV benchmarks locally
 
