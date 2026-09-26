@@ -7,7 +7,7 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 
-from benchmarks.workflows.config import ExecutionMode
+from benchmarks.workflows.core import ExecutionMode
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
 

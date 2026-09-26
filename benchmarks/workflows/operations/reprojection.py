@@ -28,7 +28,7 @@ ORDER = 40
 
 
 def reproject_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
-    """Build the public reprojection options used for execution and labels."""
+    """Define reprojection options."""
 
     return {
         "crs": 32632,
@@ -41,13 +41,13 @@ def reproject_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
 
 
 def prepare_reproject(runner: Any, case: Case) -> None:
-    """Write the common raster reprojected by GeoUtils and GDAL."""
+    """Prepare the raster to be reprojected."""
 
     write_constant_raster(runner.path("source-raster.tif"), runner.config)
 
 
 def run_reproject(runner: Any, case: Case) -> float:
-    """Reproject the prepared raster and complete its output."""
+    """Run reprojection and ensure output computes (Dask/MP)."""
 
     if case.implementation == "gdal":
         from benchmarks.comparisons.gdal import execute_gdal
@@ -87,8 +87,6 @@ OPERATIONS = (REPROJECT,)
 #####################################
 
 
-# Each case fixes one GeoUtils execution mode for one ASV result series; the sweep owns the changing raster size
-# The external case identifies the matching GDAL series, which the default comparison plots with the GeoUtils series
 CASES = execution_cases(
     "nearest",
     "rasterio",

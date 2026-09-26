@@ -5,19 +5,19 @@ This directory contains benchmarking tools to assess, record, compare and publis
 Mainly, it contains tools for running:
 - Repeatable performance measurements (=benchmarking) that monitor and improve performance using [ASV](https://github.com/airspeed-velocity/asv),
   both to facilitate the check of a given functionality locally when developping, and to run a full benchmarking suite (~1h) that publishes
-  detailed performance results to a GitHub page (updates for every PR merged into main),
+  detailed performance results to a GitHub page (for every PR merged into main),
 - Large data tests for Pytest (pass or fail), which are less exhaustive but run faster (~10min) to quickly catch large regressions (runs every commit to a PR).
 
 ## Organization
 
-- `comparisons/` contains GDAL commands, PDAL pipelines to perform comparisons of equivalent operations that exist in GeoUtils,
-- `workflows/config.py` defines the configuration of parameters shared by all benchmarks,
+- `comparisons/` contains GDAL commands, PDAL pipelines, and more, to perform comparisons of external operations equivalent to those in GeoUtils,
+- `workflows/config.py` defines the configuration of input sizes and worker parameters shared by all benchmarks,
 - `workflows/io.py` defines low-level input opening, output writing and fixtures shared by most operations,
-- `workflows/operations/` contains individual files defining GeoUtils benchmarked **operations** (e.g. ``reproject()``, ``grid()``); then **cases** which are combinations of
+- `workflows/operations/` contains individual files defining GeoUtils benchmarked **operations** (e.g. ``reproject()``, ``grid()``); its **cases**, which are combinations of
   methods (e.g. ``resampling="linear"``), calculation engines (e.g., SciPy, Numba), chunk strategies (e.g., "dense" or "sparse" for grouped stats),
- execution modes (in-memory, Dask, multiprocessing), and input data ranges (e.g., raster or point size); and finally defines **comparisons**
-  which link a GeoUtils methods to an external implementation (GDAL, PDAL, etc),
-- `workflows/operations/__init__.py` automatically retrieves all operations, cases and comparisons defined in the ``operations/`` directory,
+  execution modes (in-memory, Dask, multiprocessing), and input data ranges (e.g., raster or point size); and finally defines **comparisons**,
+  which select benchmark cases for report plots, including comparisons with external implementations (GDAL, PDAL, etc),
+- `workflows/operations/__init__.py` automatically collects the operations, benchmarks and comparisons defined in the ``operations/`` directory,
 - `workflows/core.py` contains the `Operation`, `Case`, `Benchmark` and `Comparison` objects that facilitate the definition of operations above,
 - `workflows/runner.py` contains the logic about operation execution and profiling,
 - `asv_suite/benchmarks.py` defines a small class to register required ASV methods on all benchmarks,
@@ -31,26 +31,33 @@ Benchmarks are defined in `workflows/operations/`, with one file per functionali
 Each file describes which GeoUtils function to call (e.g., ``reproject()``), which cases to compare (e.g., Dask/Multiproc, varying raster
 input size) and finally if/how to compare to other implementations (e.g., GDAL/PDAL).
 
-The benchmarks rely on three execution objects and one reporting object:
+The benchmarks rely on four objects:
 
-- An `Operation` stores the functions that prepare and run the operation.
-- A `Case` stores one fixed implementation of its operation (method, engine, execution mode, etc). Each case becomes one ASV benchmark.
-- A `Benchmark` combines one operation with all its cases. It can also define one varied input parameter and its
+- An `Operation` stores the functions that prepare and run the **operation**.
+- A `Case` stores one fixed implementation **case** (method, engine, execution mode, etc) of its operation. Each case becomes one ASV benchmark.
+- A `Benchmark` combines one **operation with all its possible cases**. It can also define one varied input parameter and its
   values; without that parameter, it is a fixed benchmark.
-- A `Comparison`, returned by `comparison()`, selects defined cases to compare to external benchmarks.
+- A `Comparison`, returned by `comparison()`, selects the case series shown together in one report plot and the
+  `Case` attribute used to label them.
 
-To add a new benchmark, follow these steps:
+To add a new benchmark, follow these steps (the code in `operations/filters.py` is an easy example that illustrates them):
 
 1. Choose the file in `workflows/operations/` to add your new benchmark of a functionality, or create a new one.
-2. Write the preparation and execution functions then register them with `Operation(...)` (see simple example of setup in `filters.py`).
-3. Use `execution_cases()` or `strategy_cases()` to define the implementations to compare.
-4. To vary an input such as raster size or point count, define the values to test and a function that builds the
-   settings for each value. Use `parameter_config(...)` to combine them with the operation and cases, then add the
-   result to the module's `BENCHMARKS`.
-5. If no input varies, an operation with `large_data_cases` gets one fixed benchmark automatically.
-6. If you want to add an external implementation, add it under `comparisons/` and attach a normal case with
-   `reference_case(...)`. Then use `comparison(..., by=...)` to select the cases and plotted attribute.
+2. Write the preparation and execution functions for your operation then register them with `Operation(...)`.
+3. Define the cases to run with `Case(...)`, or use `execution_cases()` or `strategy_cases()` to generate common sets.
+4. **With a varying input range**, such as raster size or point count, define the values to test and a function that
+   builds the settings for each value. Use `parameter_config(...)` to combine the range, operation and cases, then add
+   the returned `Benchmark` to `BENCHMARKS`.
+5. **Without a varying input range**, pass the fixed cases to `Operation(..., large_data_cases=...)`. Discovery creates
+   one fixed `Benchmark` for the operation automatically, so it does not need an entry in `BENCHMARKS`.
+6. Add `Comparison` objects to `COMPARISONS` for the report plots you want. Use `comparison(..., by=...)` to select
+   cases and their attribute that will be plotted in the Benchmark webpage.
+7. To include an external implementation, define it under `comparisons/`, create its case with `reference_case(...)`,
+   and include that case in both the benchmark and the relevant comparison.
 
+Automatic discovery reads `OPERATIONS`, `BENCHMARKS` and `COMPARISONS` from each operation module. `CASES` is only a
+local naming convention: cases are discovered through `BENCHMARKS`, or through `Operation.large_data_cases` when a
+fixed benchmark is created automatically. `BENCHMARKS` and `COMPARISONS` may be omitted when the module has none.
 
 ## Performance benchmarks with ASV
 

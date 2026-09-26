@@ -1,4 +1,4 @@
-"""Define shared benchmark workload values and runtime configuration."""
+"""Configuration for benchmarking: input defaults, worker settings, and varying parameters."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 # Benchmark input sizes
 #########################
 
-# Default values for fixed benchmarks or when they vary a different input
+# Default values for fixed benchmark (not parameter varying), or for when we vary another input
 DEFAULT_RASTER_SIZE = 2_000
 DEFAULT_CHUNK_SIZE = 1_000
 DEFAULT_MEMORY_LIMIT = "1GB"
@@ -45,14 +45,6 @@ VARIOGRAM_LAG_PAIRS = 100_000
 VARIOGRAM_POINT_PAIRS = 2_000
 VARIOGRAM_N_LAGS = 24
 DASK_CUTOFF_SIZES = (262_145, 524_288, 1_048_576)
-
-
-############################
-# Shared runtime types
-############################
-
-ExecutionMode = Literal["inmem", "dask", "multiprocessing"]
-Parameter = int | float
 
 
 #########################
@@ -92,7 +84,7 @@ def runtime_config(values: Mapping[str, Any]) -> RuntimeConfig:
     return RuntimeConfig(**runtime, workload=workload)
 
 
-def fixed_config(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
+def fixed_config(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
     """Return the common fixed workload used when no input parameter varies."""
 
     return {
@@ -103,7 +95,7 @@ def fixed_config(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
     }
 
 
-def raster_size_config(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
+def raster_size_config(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
     """Set a square raster size around the shared scheduled chunk size."""
 
     assert parameter is not None

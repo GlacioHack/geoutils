@@ -40,7 +40,7 @@ def discover_operation_modules() -> tuple[ModuleType, ...]:
 
 
 def unique_by(values: Iterable[Any], attribute: str, kind: str) -> tuple[Any, ...]:
-    """Raise error on duplicate IDs, to facilitate debugging when adding new benchmarks."""
+    """Reject duplicate declaration IDs."""
 
     unique: dict[str, Any] = {}
     for value in values:
@@ -52,7 +52,7 @@ def unique_by(values: Iterable[Any], attribute: str, kind: str) -> tuple[Any, ..
 
 
 def unique_cases(benchmarks: tuple[Benchmark, ...]) -> tuple[Case, ...]:
-    """Raise error on duplicate names, also to facilitate debugging when adding new benchmarks."""
+    """Reject duplicate benchmark case IDs."""
 
     unique: dict[str, Case] = {}
     for benchmark in benchmarks:
@@ -65,7 +65,7 @@ def unique_cases(benchmarks: tuple[Benchmark, ...]) -> tuple[Case, ...]:
 
 
 def fixed_benchmarks(operations: tuple[Operation, ...], benchmarks: tuple[Benchmark, ...]) -> tuple[Benchmark, ...]:
-    """Return fixed benchmarks (single case) for operations without a parameter name to vary."""
+    """Define fixed benchmarks for operations without parameter sweeps."""
 
     parameterized = {benchmark.operation.name for benchmark in benchmarks if benchmark.parameter_name is not None}
     return tuple(
@@ -76,7 +76,7 @@ def fixed_benchmarks(operations: tuple[Operation, ...], benchmarks: tuple[Benchm
 
 
 def collect_operation_modules(modules: Iterable[Any]) -> OperationCatalog:
-    """Collect declarations from all operation modules (files in the directory)."""
+    """Collect declarations from the given operation modules."""
 
     # Freeze the discovered order before collecting each kind of declaration
     ordered_modules = cast(tuple[ModuleType, ...], tuple(modules))
@@ -133,7 +133,7 @@ LARGE_DATA_CASES = {
 
 
 def format_api_label(operation: Operation, case: Case) -> str:
-    """Format the call from the same options passed to its execution."""
+    """Format an operation call from its execution options."""
 
     # Build the public options once so labels remain aligned with the measured call
     values = {**case.options, "operation": operation.name}

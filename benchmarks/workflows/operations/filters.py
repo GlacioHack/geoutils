@@ -7,7 +7,6 @@ from typing import Any
 
 from benchmarks.workflows.config import (
     RASTER_CHUNK_SIZES,
-    Parameter,
     RuntimeConfig,
 )
 from benchmarks.workflows.core import (
@@ -27,23 +26,21 @@ ORDER = 50
 
 
 def filter_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
-    """Build the public filter options used for execution and labels."""
+    """Define filter options."""
 
     return {"method": case.method, "engine": case.engine, "size": 5}
 
 
 def prepare_filter(runner: Any, case: Case) -> None:
-    """Write the common raster filtered by every execution case."""
+    """Prepare the raster to be filtered."""
 
     write_constant_raster(runner.path("source-raster.tif"), runner.config)
 
 
 def run_filter(runner: Any, case: Case) -> float:
-    """Apply the selected local filter and complete its output."""
+    """Run the filter and ensure output computes (Dask/MP)."""
 
     raster = runner.make_raster()
-
-    # Apply a local operation before writing its complete large output
     mp_config = runner._multiproc_config() if runner.backend == "multiprocessing" else None
     options = filter_options(case, runner.config)
     output = raster.rst.filter(**options) if runner.backend == "dask" else raster.filter(**options, mp_config=mp_config)
@@ -69,7 +66,7 @@ OPERATIONS = (FILTER,)
 #####################################
 
 
-def chunk_size(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
+def chunk_size(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
     assert parameter is not None
     size = int(parameter)
     return {"chunks": (size, size)}

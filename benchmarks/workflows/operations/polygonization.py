@@ -12,7 +12,6 @@ import rasterio as rio
 
 from benchmarks.workflows.config import (
     RASTER_SIZES,
-    Parameter,
     RuntimeConfig,
     raster_size_config,
 )
@@ -42,7 +41,7 @@ POLYGON_OPTIONS = {"polygon_regions_per_axis": 21}
 
 
 def write_polygon_raster(filename: str, config: RuntimeConfig) -> None:
-    """Write regularly spaced connected regions for polygonization scenarios."""
+    """Prepare a raster of regularly spaced regions."""
 
     if os.path.exists(filename):
         return
@@ -93,7 +92,7 @@ def write_polygon_raster(filename: str, config: RuntimeConfig) -> None:
 
 
 def polygonize_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
-    """Build the public polygonization options used for execution and labels."""
+    """Define polygonization options."""
 
     options: dict[str, Any] = {"target_values": 1}
     if case.strategy is not None:
@@ -102,13 +101,13 @@ def polygonize_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
 
 
 def prepare_polygonize(runner: Any, case: Case) -> None:
-    """Write regularly spaced regions for GeoUtils and GDAL polygonization."""
+    """Prepare the raster to be polygonized."""
 
     write_polygon_raster(runner.path("source-polygonize.tif"), runner.config)
 
 
 def run_polygonize(runner: Any, case: Case) -> float:
-    """Polygonize the prepared regions and write the complete vector output."""
+    """Run polygonization and write output (Dask/MP)."""
 
     if case.implementation == "gdal":
         from benchmarks.comparisons.gdal import execute_gdal
@@ -147,8 +146,8 @@ POLYGONIZE = Operation(
 OPERATIONS = (POLYGONIZE,)
 
 
-def strategy_size(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
-    """Keep smaller chunks so every strategy crosses many block boundaries."""
+def strategy_size(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
+    """Define raster size with chunks crossed by every strategy."""
 
     assert parameter is not None
     size = int(parameter)
@@ -160,7 +159,6 @@ def strategy_size(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
 #####################################
 
 
-# Each case fixes one execution mode or strategy for one ASV result series; the sweep owns the changing raster size
 EXECUTION_CASES = execution_cases(
     None,
     "rasterio",
@@ -180,8 +178,8 @@ STRATEGY_CASES = strategy_cases(
 REFERENCE = reference_case(EXECUTION_CASES, implementation="gdal")
 
 
-def polygon_workload(parameter: Parameter, configs: tuple[RuntimeConfig, ...]) -> str:
-    """Describe the raster, chunks and regular regions used by polygonization."""
+def polygon_workload(parameter: int | float, configs: tuple[RuntimeConfig, ...]) -> str:
+    """Describe the raster, chunks and region grid."""
 
     config = configs[0]
     regions = int(config.value("polygon_regions_per_axis", 1))

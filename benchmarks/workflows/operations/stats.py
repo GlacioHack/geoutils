@@ -17,7 +17,6 @@ from benchmarks.workflows.config import (
     GROUP_COUNTS,
     RASTER_CHUNK_SIZES,
     RASTER_SIZES,
-    Parameter,
     RuntimeConfig,
     raster_size_config,
 )
@@ -53,7 +52,7 @@ STRATEGY_LABELS = {
 
 
 def statistics_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
-    """Build the public options for regular or grouped statistics."""
+    """Define statistics options."""
 
     if config.value("operation") == "statistics":
         return {"statistics": ["mean", "std", "valid count"]}
@@ -62,7 +61,7 @@ def statistics_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
 
 
 def prepare_statistics(runner: Any, case: Case) -> None:
-    """Prepare the raster or shared arrays used by one statistics case."""
+    """Prepare inputs for statistics."""
 
     if case.variant == "flox" or case.implementation == "flox":
         if case.implementation == "flox":
@@ -82,7 +81,7 @@ def prepare_statistics(runner: Any, case: Case) -> None:
 
 
 def run_statistics(runner: Any, case: Case) -> float:
-    """Compute regular reductions or grouped statistics on the prepared raster."""
+    """Run statistics and ensure output computes (Dask/MP)."""
 
     if case.variant == "flox" or case.implementation == "flox":
         if case.implementation == "flox":
@@ -114,12 +113,7 @@ def run_statistics(runner: Any, case: Case) -> float:
 
 
 def grouped_statistics(runner: Any, raster: Any, case: Case) -> float:
-    """Compute grouped moments or exact robust estimates with independent gaps.
-
-    Local groups occupy rectangular regions; interleaved groups span the entire input. Dask builds all value
-    and membership arrays lazily. Multiprocessing benchmarks the current array interface, which loads values
-    in the client before tiling them for workers. The returned fingerprint checks complete finite counts.
-    """
+    """Run grouped statistics on the prepared arrays."""
 
     # Generate coordinates with the same execution backend as the input raster
     height, width = runner.config.shape
@@ -213,8 +207,6 @@ OPERATIONS = (STATISTICS, GROUPED_STATS)
 ###################
 
 
-# Each case fixes one method, strategy and execution mode for one ASV result series; its sweep owns the changing input
-# The sweeps isolate input size, chunk size, membership layout and group count for shared grouped-statistic kernels
 EXECUTION_CASES = execution_cases(
     "moments",
     "numpy",
@@ -272,22 +264,22 @@ FLOX_REFERENCES = {
 }
 
 
-def chunk_size(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
-    """Include uneven edge chunks and groups crossing partition boundaries."""
+def chunk_size(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
+    """Define uneven chunks crossed by group boundaries."""
 
     assert parameter is not None
     chunk_size = int(parameter)
     return {"shape": (DEFAULT_RASTER_SIZE, DEFAULT_RASTER_SIZE), "chunks": (chunk_size, chunk_size)}
 
 
-def interleaved_chunk_size(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
-    """Keep observations interleaved across all chunks for each tested partition size."""
+def interleaved_chunk_size(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
+    """Define interleaved groups for each chunk size."""
 
     return {**chunk_size(parameter, case), "grouped_layout": "interleaved"}
 
 
-def group_count(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
-    """Include 4225 groups so automatic reduction exercises its sparse branch."""
+def group_count(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
+    """Define group count for sparse reduction."""
 
     assert parameter is not None
     return {
@@ -297,8 +289,8 @@ def group_count(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
     }
 
 
-def flox_raster_size(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
-    """Vary raster size around 256 local groups and fixed spatial chunks."""
+def flox_raster_size(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
+    """Define raster size with fixed groups and chunks."""
 
     assert parameter is not None
     size = int(parameter)
@@ -309,8 +301,8 @@ def flox_raster_size(parameter: Parameter | None, case: Case) -> Mapping[str, An
     }
 
 
-def flox_group_count(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
-    """Vary declared groups on a fixed raster with membership repeated across chunks."""
+def flox_group_count(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
+    """Define interleaved group count on a fixed raster."""
 
     assert parameter is not None
     return {
@@ -321,7 +313,7 @@ def flox_group_count(parameter: Parameter | None, case: Case) -> Mapping[str, An
     }
 
 
-def grouped_workload(parameter: Parameter, configs: tuple[RuntimeConfig, ...]) -> str:
+def grouped_workload(parameter: int | float, configs: tuple[RuntimeConfig, ...]) -> str:
     """Describe the raster, chunks and grouped membership layout."""
 
     config = configs[0]

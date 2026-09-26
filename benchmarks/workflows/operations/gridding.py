@@ -15,12 +15,11 @@ from benchmarks.workflows.config import (
     POINT_CHUNK_SIZE,
     RASTER_SIZES,
     WORKER_RASTER_SIZES,
-    ExecutionMode,
-    Parameter,
     RuntimeConfig,
 )
 from benchmarks.workflows.core import (
     Case,
+    ExecutionMode,
     Operation,
     comparison,
     merge_cases,
@@ -44,15 +43,33 @@ ENGINE_LABELS = {"scipy": "SciPy", "numba": "Numba"}
 ######################################
 
 
-def write_point_source(filename: str, points_per_axis: int = 5) -> None:
-    """Write a regular constant point cloud for gridding scenarios."""
+def grid_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
+    """Define gridding options."""
+
+    return {
+        "shape": config.shape,
+        "bounds": (7.0, 45.0, 8.0, 46.0),
+        "resampling": case.method,
+        "dist_nodata_pixel": config.value("grid_dist_nodata_pixel", float("inf")),
+        "engine": case.engine,
+        "chunksizes": config.chunks,
+        # One SciPy thread to compare fairly with GDAL
+        "n_threads": 1,
+    }
+
+
+def prepare_grid(runner: Any, case: Case) -> None:
+    """Prepare the point cloud to be gridded."""
+
+    filename = runner.path("source-points.gpkg")
+    points_per_axis = int(runner.config.value("point_features_per_axis", 5))
 
     if os.path.exists(filename):
         return
     if points_per_axis < 1:
         raise ValueError("Points per axis must be strictly positive")
 
-    # Keep points away from the exact border so every geometry is unambiguous
+    # We define only points away from the border so geometries are unambiguous
     coords_x = np.linspace(7.05, 7.95, points_per_axis)
     coords_y = np.linspace(45.05, 45.95, points_per_axis)
     xx, yy = np.meshgrid(coords_x, coords_y)
@@ -64,32 +81,8 @@ def write_point_source(filename: str, points_per_axis: int = 5) -> None:
     points.to_file(filename, driver="GPKG")
 
 
-def grid_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
-    """Build the public gridding options used for execution and labels."""
-
-    return {
-        "shape": config.shape,
-        "bounds": (7.0, 45.0, 8.0, 46.0),
-        "resampling": case.method,
-        "dist_nodata_pixel": config.value("grid_dist_nodata_pixel", float("inf")),
-        "engine": case.engine,
-        "chunksizes": config.chunks,
-        # One SciPy thread keeps backend and GDAL comparisons repeatable
-        "n_threads": 1,
-    }
-
-
-def prepare_grid(runner: Any, case: Case) -> None:
-    """Write the regular point cloud shared by GeoUtils and GDAL gridding."""
-
-    write_point_source(
-        runner.path("source-points.gpkg"),
-        int(runner.config.value("point_features_per_axis", 5)),
-    )
-
-
 def run_grid(runner: Any, case: Case) -> float:
-    """Grid the prepared point cloud and complete its raster output."""
+    """Run gridding and ensure output computes (Dask/MP)."""
 
     if case.implementation == "gdal":
         from benchmarks.comparisons.gdal import execute_gdal
@@ -138,7 +131,6 @@ OPERATIONS = (GRID,)
 ###################
 
 
-# Each case fixes one method, engine and execution mode for one ASV result series; its sweep owns the changing input
 def benchmark_case(
     method: str,
     engine: str,
@@ -146,7 +138,7 @@ def benchmark_case(
     *,
     variant: str | None = None,
 ) -> Case:
-    """Build one gridding case while keeping its declaration compact."""
+    """Define a gridding case."""
 
     return Case(
         method=method,
@@ -201,8 +193,8 @@ REFERENCES = {method: reference_case(MODE_CASES[method], implementation="gdal") 
 POINT_REFERENCE = reference_case(POINT_ENGINE_CASES, implementation="gdal")
 
 
-def raster_size(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
-    """Place the selected raster size around the common source point input."""
+def raster_size(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
+    """Define raster size and gridding support."""
 
     # Keep the point count fixed so only the method and its required support distance differ
     method_distances = {"nearest": float("inf"), "linear": float("inf"), "idw": 16.0, "mean": 16.0}
@@ -221,15 +213,15 @@ def raster_size(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
     return values
 
 
-def point_count(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
-    """Place the selected point count in an otherwise fixed configuration."""
+def point_count(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
+    """Define source point count."""
 
     assert parameter is not None
     return {"point_features_per_axis": int(parameter)}
 
 
-def grid_workload(parameter: Parameter, configs: tuple[RuntimeConfig, ...]) -> str:
-    """Describe the output raster, chunks and source point grid."""
+def grid_workload(parameter: int | float, configs: tuple[RuntimeConfig, ...]) -> str:
+    """Describe the raster, chunks and source point grid."""
 
     config = configs[0]
     points = int(config.value("point_features_per_axis", 5))
@@ -285,7 +277,6 @@ BENCHMARKS = (
 # Define report comparisons
 #############################
 
-# Comparisons select saved series for method, engine and execution plots, adding matching GDAL series where available
 COMPARISONS = (
     *tuple(
         comparison(

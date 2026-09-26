@@ -1,6 +1,6 @@
 """
-Prepare and calculate Dask equivalent to GeoUtils topk/reduction (required to support various sampling method and
-support Multiprocessing, not only Dask).
+Prepare and calculate Dask equivalent to GeoUtils topk/reduction (required to support various sampling/stats method
+while supporting them through the Multiprocessing backend).
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ def splitmix64(values: np.ndarray[Any, Any]) -> np.ndarray[Any, Any]:
 
 
 def global_statistics(values: Any) -> tuple[dict[str, Any], Any]:
-    """Compute the benchmark's finite count and global estimates through native Dask reductions."""
+    """Compute the benchmark finite count and global estimates through Dask reductions."""
 
     import dask
     import dask.array as da
@@ -46,7 +46,7 @@ def global_statistics(values: Any) -> tuple[dict[str, Any], Any]:
 
 
 def topk_indices(values: Any, sample_size: int) -> Any:
-    """Select deterministic finite-cell keys through Dask argtopk()."""
+    """Select deterministic valid cell keys through Dask argtopk()."""
 
     import dask.array as da
 
@@ -61,7 +61,7 @@ def topk_indices(values: Any, sample_size: int) -> Any:
 
 
 def topk_keys(values: Any, sample_size: int) -> Any:
-    """Select deterministic finite-cell keys through Dask topk()."""
+    """Select deterministic valid cell keys through Dask topk()."""
 
     import dask.array as da
 

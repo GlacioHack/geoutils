@@ -21,7 +21,6 @@ from benchmarks.workflows.config import (
     VARIOGRAM_RASTER_CHUNK_SIZE,
     VARIOGRAM_RASTER_SIZE,
     VARIOGRAM_SAMPLE_PAIRS,
-    Parameter,
     RuntimeConfig,
 )
 from benchmarks.workflows.core import (
@@ -43,11 +42,7 @@ ORDER = 100
 
 
 def prepare_variogram_pairs(n_pairs: int) -> xr.Dataset:
-    """Create complete endpoint values at log-uniform distances, independently of spatial pair sampling.
-
-    A fixed seed gives every estimator identical float64 inputs. The increasing difference amplitude creates a
-    nonconstant variogram, while random endpoint offsets avoid a special case with one constant endpoint.
-    """
+    """Prepare endpoint values at log-uniform distances."""
 
     # Spread observations across short and long distances without enumerating a spatial distance matrix
     rng = np.random.default_rng(42)
@@ -70,11 +65,7 @@ def prepare_pair_raster(
     execution_mode: Literal["inmem", "dask"],
     chunks: tuple[int, int],
 ) -> Any:
-    """Create a smooth projected raster with scattered missing cells and configured Dask chunks.
-
-    Both modes start from the same prepared float32 values. Dask measures selected chunk reads and task scheduling
-    from memory; this fixture does not measure disk throughput or claim a larger-than-memory contract.
-    """
+    """Prepare a raster with missing values and optional Dask chunks."""
 
     # Vary values in both directions and remove a known fraction of cells to require finite endpoint checks
     rows, columns = np.arange(size)[:, None], np.arange(size)[None, :]
@@ -93,7 +84,7 @@ def prepare_pair_raster(
 
 
 def prepare_pair_pointcloud(n_points: int) -> gu.PointCloud:
-    """Create irregular projected points at roughly unit spacing with finite, smoothly varying values."""
+    """Prepare an irregular point cloud with smoothly varying values."""
 
     # Keep average point density constant so increasing point count increases the search extent
     rng = np.random.default_rng(42)
@@ -104,7 +95,7 @@ def prepare_pair_pointcloud(n_points: int) -> gu.PointCloud:
 
 
 def prepare_estimator(estimator: str) -> None:
-    """Load and warm the optional estimator before timing variogram()."""
+    """Prepare the optional variogram estimator."""
 
     # ASV records an unavailable optional package as a skipped case, and compilation stays outside timing
     try:
@@ -115,13 +106,13 @@ def prepare_estimator(estimator: str) -> None:
 
 
 def variogram_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
-    """Build the public variogram estimator option used for execution."""
+    """Define variogram options."""
 
     return {"estimator": case.method}
 
 
 def pair_sampling_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
-    """Build the public sampling and strategy options used for execution."""
+    """Define pair sampling options."""
 
     if case.method == "random_xy":
         return {"sampling": "random_xy", "strategy": "chunk_anchors"}
@@ -129,7 +120,7 @@ def pair_sampling_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any
 
 
 def prepare_raster_variogram(runner: Any, case: Case) -> None:
-    """Prepare the raster and estimator while leaving sampling and reduction inside timing."""
+    """Prepare the raster and variogram estimator."""
 
     # Keep the same values and sampling request while changing the source size and loading mode
     assert case.method is not None
@@ -138,7 +129,7 @@ def prepare_raster_variogram(runner: Any, case: Case) -> None:
 
 
 def run_raster_variogram(runner: Any, case: Case) -> float:
-    """Sample and reduce pairs through public variogram()."""
+    """Run the raster variogram."""
 
     assert case.method is not None
     result = variogram(
@@ -158,7 +149,7 @@ def run_raster_variogram(runner: Any, case: Case) -> float:
 
 
 def prepare_pair_reduction(runner: Any, case: Case) -> None:
-    """Prepare the same finite pairs for both estimators outside the measured call."""
+    """Prepare variogram pairs and the estimator."""
 
     assert case.method is not None
     prepare_estimator(case.method)
@@ -166,7 +157,7 @@ def prepare_pair_reduction(runner: Any, case: Case) -> None:
 
 
 def run_pair_reduction(runner: Any, case: Case) -> float:
-    """Reduce all prepared pairs to their distance-bin estimates and counts."""
+    """Run variogram reduction on prepared pairs."""
 
     assert case.method is not None
     result = Variogram.from_pairs(
@@ -178,14 +169,14 @@ def run_pair_reduction(runner: Any, case: Case) -> float:
 
 
 def prepare_raster_pair_sampling(runner: Any, case: Case) -> None:
-    """Prepare one raster while leaving pair sampling inside timing."""
+    """Prepare the raster for pair sampling."""
 
     # Keep the same source values and worker count for every sampling method
     runner.variography_source = prepare_pair_raster(runner.config.shape[0], runner.backend, runner.config.chunks)
 
 
 def run_raster_pair_sampling(runner: Any, case: Case) -> float:
-    """Draw finite pairs and construct all endpoint values and coordinates."""
+    """Run raster pair sampling and ensure output computes (Dask)."""
 
     options = pair_sampling_options(case, runner.config)
 
@@ -204,13 +195,13 @@ def run_raster_pair_sampling(runner: Any, case: Case) -> float:
 
 
 def prepare_point_pair_sampling(runner: Any, case: Case) -> None:
-    """Prepare a constant-density point cloud outside the measured call."""
+    """Prepare the point cloud for pair sampling."""
 
     runner.variography_source = prepare_pair_pointcloud(int(runner.config.value("point_count")))
 
 
 def run_point_pair_sampling(runner: Any, case: Case) -> float:
-    """Build the spatial search, sample finite pairs and construct their complete labelled dataset."""
+    """Run point cloud pair sampling."""
 
     assert case.method is not None
     n_points = int(runner.config.value("point_count"))
@@ -275,7 +266,6 @@ OPERATIONS = (RASTER_VARIOGRAM, PAIR_REDUCTION, RASTER_PAIR_SAMPLING, POINT_PAIR
 ###################
 
 
-# Each case fixes one estimator, sampling method and execution mode; its sweep owns the changing input
 RASTER_VARIOGRAM_CASES = execution_cases(
     "dowd",
     None,
@@ -297,7 +287,7 @@ RASTER_PAIR_SIZE_CASES = execution_cases(
 POINT_PAIR_CASES = tuple(Case(method=strategy) for strategy in ("kdtree", "hashgrid", "nn_logvector"))
 
 
-def raster_variogram_size_config(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
+def raster_variogram_size_config(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
     """Vary raster size while fixing chunks, sampled pairs and distance bins."""
 
     assert parameter is not None
@@ -310,21 +300,21 @@ def raster_variogram_size_config(parameter: Parameter | None, case: Case) -> Map
     }
 
 
-def variogram_pair_count_config(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
+def variogram_pair_count_config(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
     """Vary complete input pairs while fixing the number of distance bins."""
 
     assert parameter is not None
     return {"n_pairs": int(parameter), "n_lags": VARIOGRAM_N_LAGS}
 
 
-def variogram_lag_count_config(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
+def variogram_lag_count_config(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
     """Vary distance bins while keeping the pair sample fixed."""
 
     assert parameter is not None
     return {"n_pairs": VARIOGRAM_LAG_PAIRS, "n_lags": int(parameter)}
 
 
-def raster_pair_count_config(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
+def raster_pair_count_config(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
     """Vary sampled pairs on one fixed raster layout."""
 
     assert parameter is not None
@@ -335,7 +325,7 @@ def raster_pair_count_config(parameter: Parameter | None, case: Case) -> Mapping
     }
 
 
-def raster_pair_size_config(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
+def raster_pair_size_config(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
     """Vary raster size while keeping the requested pair count fixed."""
 
     assert parameter is not None
@@ -347,7 +337,7 @@ def raster_pair_size_config(parameter: Parameter | None, case: Case) -> Mapping[
     }
 
 
-def point_pair_count_config(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
+def point_pair_count_config(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
     """Vary point count while keeping the requested pair count fixed."""
 
     assert parameter is not None

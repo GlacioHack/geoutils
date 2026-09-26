@@ -1,4 +1,4 @@
-"""Build, execute and validate PDAL reference pipelines."""
+"""Build, execute and validate PDAL pipelines."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from benchmarks.workflows.config import RuntimeConfig
 from benchmarks.workflows.core import Case
 from benchmarks.workflows.io import read_point_file_sample
 
-# Only these raster point operations have an equivalent PDAL pipeline for the external comparison
+# Only these GeoUtils operations have an equivalent PDAL pipeline
 PdalComparisonOperation = Literal["subsample", "to_pointcloud"]
 PDAL_COMPARISON_OPERATIONS: tuple[PdalComparisonOperation, ...] = ("subsample", "to_pointcloud")
 
@@ -34,7 +34,6 @@ class PdalCommand:
 def _require_command(name: str) -> str:
     """Return an installed PDAL executable or raise a clear environment error."""
 
-    # Resolve executables once so subprocess never depends on shell parsing
     executable = shutil.which(name)
     if executable is None:
         raise RuntimeError(f"Required PDAL command is not installed: {name}")
@@ -72,7 +71,7 @@ def build_pdal_command(
             )
         )
 
-    # Write the same file-backed point format used by GeoUtils multiprocessing
+    # Write using the same point format used by GeoUtils multiprocessing
     suffix = case.output_driver.lower()
     output_file = os.path.join(config.directory, f"output-pdal-{operation}.{suffix}")
     if case.output_driver == "GPKG":

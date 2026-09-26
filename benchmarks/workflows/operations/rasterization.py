@@ -31,7 +31,7 @@ ORDER = 70
 
 
 def rasterize_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
-    """Build the public rasterization options shared by both execution paths."""
+    """Define rasterization or mask options."""
 
     options: dict[str, Any] = {
         "shape": config.shape,
@@ -45,7 +45,7 @@ def rasterize_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
 
 
 def prepare_rasterize(runner: Any, case: Case) -> None:
-    """Write the polygons shared by rasterization and mask cases."""
+    """Prepare polygons for rasterization or masking."""
 
     write_vector_source(
         runner.path("source-vector.gpkg"),
@@ -54,7 +54,7 @@ def prepare_rasterize(runner: Any, case: Case) -> None:
 
 
 def run_rasterize(runner: Any, case: Case) -> float:
-    """Rasterize the prepared polygons or create their boolean mask."""
+    """Run rasterization or masking and ensure output computes (Dask/MP)."""
 
     if case.implementation == "gdal":
         from benchmarks.comparisons.gdal import execute_gdal
@@ -106,8 +106,6 @@ OPERATIONS = (RASTERIZE, CREATE_MASK)
 #####################################
 
 
-# Each case fixes one GeoUtils execution mode for one ASV result series; the sweep owns the changing raster size
-# The external case identifies the matching GDAL series, which the default comparison plots with the GeoUtils series
 CASES = execution_cases(
     None,
     "rasterio",

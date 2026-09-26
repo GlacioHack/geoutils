@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Shared benchmark runner infrastructure."""
+"""This module implements the benchmark runner infrastructure, which includes the call/storage of profiling."""
 
 from __future__ import annotations
 
@@ -26,8 +26,8 @@ from typing import Any
 
 import rasterio as rio
 
-from benchmarks.workflows.config import ExecutionMode, RuntimeConfig
-from benchmarks.workflows.core import Case, Operation
+from benchmarks.workflows.config import RuntimeConfig
+from benchmarks.workflows.core import Case, ExecutionMode, Operation
 from benchmarks.workflows.io import (
     materialize_raster_output,
     open_raster_input,
@@ -57,7 +57,7 @@ def process_tree_memory_increase_mb(metrics: ProfileMetrics) -> float:
 
 
 class ProfiledResult:
-    """Expose complete-process memory measurements shared by all benchmark implementations."""
+    """Store memory measurements for a benchmark implementation."""
 
     metrics: ProfileMetrics
 
@@ -79,7 +79,7 @@ class ProfiledResult:
 
 @dataclass
 class BenchmarkResult(ProfiledResult):
-    """Store one computed result together with memory and worker-health measurements."""
+    """Store one computed result including memory and worker "health" measurements."""
 
     value: float
     metrics: ProfileMetrics
@@ -100,12 +100,12 @@ class BenchmarkResult(ProfiledResult):
 ############################################
 
 
-# Prepare the shared inputs, start the selected execution mode and force each operation to produce a complete output
+# We prepare shared inputs, start an execution mode and ensure each operation produces a complete output
 class BenchmarkRunner:
-    """Manage runtime resources while executing one benchmark implementation."""
+    """This class manage runtime resources while executing a benchmark implementation."""
 
     def __init__(self, operation: Operation, case: Case, config: RuntimeConfig | None = None) -> None:
-        """Prepare runner state without starting worker processes."""
+        """Prepare runner state."""
 
         self.operation = operation
         self.case = case
@@ -123,14 +123,14 @@ class BenchmarkRunner:
 
     @property
     def directory(self) -> str:
-        """Return the directory containing sources, outputs and spill files."""
+        """Return the working directory containing sources and outputs."""
 
         if self._directory is None:
             raise RuntimeError("BenchmarkRunner has not been prepared")
         return self._directory
 
     def path(self, filename: str) -> str:
-        """Return a path inside the benchmark's working directory."""
+        """Return a path inside the benchmark directory."""
 
         return os.path.join(self.directory, filename)
 
@@ -173,7 +173,7 @@ class BenchmarkRunner:
     def _start_dask(self) -> None:
         """Start one local Dask cluster with early disk spilling."""
 
-        # Import benchmark-only packages at runtime to keep Dask optional
+        # Import benchmark packages at runtime to keep Dask optional
         dask = import_optional("dask", extra_name="benchmark")
         distributed = import_optional("distributed", extra_name="benchmark")
 
@@ -217,7 +217,7 @@ class BenchmarkRunner:
         os.environ["GDAL_CACHEMAX"] = str(self.config.gdal_cachemax_mb)
         try:
             # Rasterio has already initialized GDAL, so set its live cache while workers fork
-            # Rasterio's integer option is measured in bytes; worker environment strings remain measured in MiB
+            # Rasterio's integer option is measured in bytes, while worker environment strings are measured in MiB
             with rio.Env(GDAL_CACHEMAX=self.config.gdal_cachemax_mb * 1024**2):
                 # Default recycling bounds allocator and native-library caches in long jobs
                 self.mp_cluster = MpCluster(conf={"nb_workers": self.config.n_workers})

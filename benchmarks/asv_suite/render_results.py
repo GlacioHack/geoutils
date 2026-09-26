@@ -1,4 +1,4 @@
-"""Render the ASV measurements into a webpage + plots for user documentation."""
+"""Render a custom HTML webpage + plots for user documentation from the ASV measurements."""
 
 from __future__ import annotations
 
@@ -15,12 +15,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from benchmarks.workflows.config import ExecutionMode
-from benchmarks.workflows.core import (
-    IMPLEMENTATION_LABELS,
-    Comparison,
-    ComparisonDimension,
-)
+from benchmarks.workflows.core import IMPLEMENTATION_LABELS, Comparison, ComparisonDimension, ExecutionMode
 from benchmarks.workflows.operations import (
     BENCHMARK_BY_CLASS,
     BENCHMARK_CASE_BY_CLASS,

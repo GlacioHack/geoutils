@@ -18,7 +18,6 @@ from benchmarks.workflows.config import (
     DEFAULT_RASTER_SIZE,
     RASTER_SIZES,
     SUBSAMPLE_SIZES,
-    Parameter,
     RuntimeConfig,
     raster_size_config,
 )
@@ -45,7 +44,7 @@ POINT_OUTPUT_DRIVERS = ("LAS", "LAZ")
 
 
 def sampling_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
-    """Build the public sampling options used for execution."""
+    """Define sampling options."""
 
     if config.value("operation") == "subsample":
         sample_size = int(config.value("subsample_size", DEFAULT_POINT_COUNT))
@@ -56,13 +55,13 @@ def sampling_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
 
 
 def prepare_sampling(runner: Any, case: Case) -> None:
-    """Write the raster sampled by GeoUtils and PDAL cases."""
+    """Prepare the raster to be sampled."""
 
     write_constant_raster(runner.path("source-raster.tif"), runner.config)
 
 
 def run_sampling(runner: Any, case: Case) -> float:
-    """Compute one raster sample or complete point conversion."""
+    """Run sampling and ensure output computes (Dask/MP)."""
 
     if case.implementation == "pdal":
         from benchmarks.comparisons.pdal import execute_pdal
@@ -147,8 +146,8 @@ OPERATIONS = (SUBSAMPLE, TO_POINTCLOUD)
 ###################
 
 
-def subsample_config(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
-    """Set the source layout and requested output count."""
+def subsample_config(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
+    """Define raster layout and sample size."""
 
     assert parameter is not None
     return {
@@ -158,7 +157,6 @@ def subsample_config(parameter: Parameter | None, case: Case) -> Mapping[str, An
     }
 
 
-# Each case fixes one execution mode and output format for one ASV result series; its sweep owns the changing input
 SUBSAMPLE_CASES = execution_cases(
     None,
     None,
@@ -193,8 +191,8 @@ LAS_SUBSAMPLE_REFERENCES = tuple(reference_case(case, implementation="pdal") for
 LAS_POINTCLOUD_REFERENCES = tuple(reference_case(case, implementation="pdal") for case in LAS_POINTCLOUD_CASES)
 
 
-def sampling_workload(parameter: Parameter, configs: tuple[RuntimeConfig, ...]) -> str:
-    """Describe the raster, chunks and requested output point count."""
+def sampling_workload(parameter: int | float, configs: tuple[RuntimeConfig, ...]) -> str:
+    """Describe the raster, chunks and sample size."""
 
     config = configs[0]
     return (
@@ -251,7 +249,7 @@ BENCHMARKS = (
 # Define report comparisons
 #############################
 
-# Comparisons select saved GeoUtils and PDAL series for plots by operation and format; they run no new measurements
+# Comparisons select saved GeoUtils and PDAL series for plotting by operation and format (no new run is triggered)
 COMPARISONS = (
     comparison(BENCHMARKS[0], by="execution", logarithmic_x=True),
     comparison(BENCHMARKS[2], by="execution"),

@@ -1,4 +1,4 @@
-"""Build, execute and validate GDAL reference commands."""
+"""Build, execute and validate GDAL CLI commands."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from benchmarks.workflows.io import read_raster_center
 ComparisonOperation = Literal["clip", "reproject", "polygonize", "rasterize", "grid"]
 COMPARISON_OPERATIONS: tuple[ComparisonOperation, ...] = ("clip", "reproject", "polygonize", "rasterize", "grid")
 
-# List the GDAL gridding algorithms that the command builder can use for matching GeoUtils methods
+# We list the GDAL gridding algorithms that the command builder can use for matching GeoUtils methods
 GdalGridAlgorithm = Literal[
     "nearest",
     "linear",
@@ -45,7 +45,7 @@ class GdalCommand:
 def _warp_memory_limit_mb(config: RuntimeConfig) -> int:
     """Return the GDAL warp memory closest to one GeoUtils execution chunk."""
 
-    # GDAL holds one Float32 source and destination buffer plus their one-bit nodata masks
+    # GDAL holds one Float32 source and destination buffer plus their 1-bit nodata masks
     chunk_height = min(config.shape[0], config.chunks[0])
     chunk_width = min(config.shape[1], config.chunks[1])
     working_bits = chunk_height * chunk_width * 2 * (32 + 1)
@@ -53,9 +53,8 @@ def _warp_memory_limit_mb(config: RuntimeConfig) -> int:
 
 
 def _require_command(name: str) -> str:
-    """Return an installed GDAL executable or raise a clear environment error."""
+    """Return an installed GDAL or raise a clear error."""
 
-    # Resolve executables once so subprocess never depends on shell parsing
     executable = shutil.which(name)
     if executable is None:
         raise RuntimeError(f"Required GDAL command is not installed: {name}")
@@ -89,7 +88,7 @@ def build_gdal_grid_command(
     else:
         algorithm_options = [f"radius1={radius[0]}", f"radius2={radius[1]}", "angle=0"]
 
-        # GDAL gives inverse-distance weighting an additional power parameter
+        # GDAL gives IDW a additional power parameter
         if algorithm == "invdist":
             algorithm_options.insert(0, f"power={distance_power}")
             algorithm_options.append("smoothing=0")

@@ -10,7 +10,6 @@ import numpy as np
 from benchmarks.workflows.config import (
     DEFAULT_POINT_COUNT,
     INTERPOLATED_POINT_COUNTS,
-    Parameter,
     RuntimeConfig,
 )
 from benchmarks.workflows.core import (
@@ -30,23 +29,23 @@ ORDER = 20
 
 
 def interpolation_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
-    """Build the public interpolation options used for execution and labels."""
+    """Define interpolation options."""
 
     return {"method": case.method, "as_array": True}
 
 
 def prepare_interpolation(runner: Any, case: Case) -> None:
-    """Write the raster sampled by every interpolation case."""
+    """Prepare the raster to be interpolated."""
 
     write_constant_raster(runner.path("source-raster.tif"), runner.config)
 
 
 def run_interpolation(runner: Any, case: Case) -> float:
-    """Interpolate the prepared raster at deterministic point coordinates."""
+    """Run interpolation and ensure output computes (Dask/MP)."""
 
     raster = runner.make_raster()
 
-    # A uniform distribution touches many chunks and avoids incomplete edge support
+    # We use a uniform distribution to touch many chunks
     rng = np.random.default_rng(42)
     points = (
         rng.uniform(7.01, 7.99, size=runner.config.value("ninterp", DEFAULT_POINT_COUNT)),
@@ -80,15 +79,15 @@ INTERPOLATION = Operation(
 OPERATIONS = (INTERPOLATION,)
 
 
-def point_count(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
-    """Set the number of interpolation coordinates."""
+def point_count(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
+    """Define the number of interpolation points."""
 
     assert parameter is not None
     return {"ninterp": int(parameter)}
 
 
-def interpolation_workload(parameter: Parameter, configs: tuple[RuntimeConfig, ...]) -> str:
-    """Describe the raster and requested interpolation points."""
+def interpolation_workload(parameter: int | float, configs: tuple[RuntimeConfig, ...]) -> str:
+    """Describe the raster and interpolation point count."""
 
     config = configs[0]
     return (
@@ -102,7 +101,6 @@ def interpolation_workload(parameter: Parameter, configs: tuple[RuntimeConfig, .
 #####################################
 
 
-# Each case fixes one execution mode for one ASV result series; the sweep owns the changing point count
 CASES = execution_cases(
     "linear",
     "scipy",

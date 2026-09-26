@@ -30,7 +30,7 @@ ORDER = 30
 
 
 def raster_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
-    """Return the public options used by one basic raster operation."""
+    """Define raster operation options."""
 
     return {
         "crop": {"bbox": (7.1, 45.1, 7.9, 45.9)},
@@ -42,7 +42,7 @@ def raster_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
 
 
 def prepare_raster_operation(runner: Any, case: Case) -> None:
-    """Create the raster and any clipping vector needed by one basic operation."""
+    """Prepare inputs for the raster operation."""
 
     write_constant_raster(runner.path("source-raster.tif"), runner.config)
     if runner.operation.name == "clip":
@@ -53,7 +53,7 @@ def prepare_raster_operation(runner: Any, case: Case) -> None:
 
 
 def run_raster_operation(runner: Any, case: Case) -> float:
-    """Run one basic raster operation and complete its output."""
+    """Run the raster operation and ensure output computes (Dask/MP)."""
 
     if case.implementation == "gdal":
         from benchmarks.comparisons.gdal import execute_gdal
@@ -159,8 +159,6 @@ OPERATIONS = (CROP, CLIP, TRANSLATE, COPY, WRITE)
 #####################################
 
 
-# Each case fixes one GeoUtils execution mode for one ASV result series; the sweep owns the changing raster size
-# The external case identifies the matching GDAL series, which the default comparison plots with the GeoUtils series
 CLIP_CASES = execution_cases(
     None,
     None,

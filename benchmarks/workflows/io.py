@@ -1,4 +1,4 @@
-"""Open and write inputs and outputs (I/O) for benchmark tests."""
+"""Open and write the inputs and outputs (I/O) for benchmark tests."""
 
 from __future__ import annotations
 
@@ -11,7 +11,8 @@ import numpy as np
 import rasterio as rio
 from shapely.geometry import box
 
-from benchmarks.workflows.config import ExecutionMode, RuntimeConfig
+from benchmarks.workflows.config import RuntimeConfig
+from benchmarks.workflows.core import ExecutionMode
 from geoutils._misc import _trim_process_memory, import_optional
 
 ############################
@@ -20,13 +21,13 @@ from geoutils._misc import _trim_process_memory, import_optional
 
 
 def logical_raster_size_mb(config: RuntimeConfig) -> float:
-    """Return the uncompressed float32 raster size in decimal megabytes."""
+    """Return a float32 raster size in MBs."""
 
     return config.shape[0] * config.shape[1] * np.dtype("float32").itemsize / 1_000_000
 
 
 def memory_limit_mb(memory_limit: str) -> float:
-    """Convert the worker-memory formats used by the benchmark suite to decimal megabytes."""
+    """Convert the memory formats of workers (used by the benchmark suite) to MBs."""
 
     # Match the common decimal and binary units accepted by Dask
     value = memory_limit.strip().lower()
@@ -42,15 +43,15 @@ def memory_limit_mb(memory_limit: str) -> float:
 
 
 def tiff_block_size(size: int, requested: int) -> int:
-    """Return a valid tiled-GeoTIFF block size no larger than one raster axis."""
+    """Return a valid GeoTIFF block size to write with."""
 
-    # GeoTIFF tile dimensions must be divisible by sixteen
+    # The GeoTIFF tile must be divisible by 16 (to allow factors of 2), and smaller than raster size
     block_size = min(size, requested, 512)
     return max(16, block_size // 16 * 16)
 
 
 def read_raster_center(filename: str) -> float:
-    """Read one central output pixel without loading the complete raster."""
+    """Read one central output pixel without loading the complete raster, to validate outputs values without loading."""
 
     with rio.open(filename) as dataset:
         row = dataset.height // 2
@@ -59,7 +60,7 @@ def read_raster_center(filename: str) -> float:
 
 
 def read_point_file_sample(filename: str, column: str) -> tuple[int, float]:
-    """Read the feature count and one value without loading a complete point file."""
+    """Read the feature count and one value without loading a point file, again for validation."""
 
     if pathlib.Path(filename).suffix.lower() in (".las", ".laz"):
         laspy = import_optional("laspy")
@@ -70,14 +71,14 @@ def read_point_file_sample(filename: str, column: str) -> tuple[int, float]:
 
     import pyogrio
 
-    # Use file metadata for the complete row count and read only one feature for the constant-value check
+    # Use file metadata for the complete row count and read only one feature for the value check
     info = pyogrio.read_info(filename, force_feature_count=True)
     sample = pyogrio.read_dataframe(filename, columns=[column], max_features=1)
     return int(info["features"]), float(sample[column].iloc[0])
 
 
 def open_raster_input(filename: str, backend: ExecutionMode, config: RuntimeConfig) -> Any:
-    """Open one prepared raster through the interface used by an execution backend."""
+    """Open one raster through the interface used by an execution backend."""
 
     if backend == "dask":
         from geoutils.raster.xr_accessor import open_raster
@@ -97,7 +98,7 @@ def prepare_output_file(
     operation: str,
     suffix: str = ".tif",
 ) -> str:
-    """Return an empty reusable output path for one benchmark operation."""
+    """Return an output path that can be reused for one benchmark operation."""
 
     filename = os.path.join(directory, f"output-{backend}-{operation}{suffix}")
     if os.path.isfile(filename):

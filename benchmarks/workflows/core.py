@@ -1,4 +1,4 @@
-"""Define the core objects shared by benchmark operations, ASV and reports."""
+"""This module contains the core objects to facilitate defining benchmarks, shared by ASV and large data tests."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
-from benchmarks.workflows.config import ExecutionMode, Parameter, RuntimeConfig, runtime_config
+from benchmarks.workflows.config import RuntimeConfig, runtime_config
+
+ExecutionMode = Literal["inmem", "dask", "multiprocessing"]
 
 ComparisonDimension = Literal["method", "engine", "strategy", "execution", "output_driver"]
 
@@ -73,12 +75,12 @@ class Operation:
         return self.label or self.name.replace("_", " ").title()
 
 
-ConfigurationBuilder = Callable[[Parameter | None, Case], Mapping[str, Any]]
-WorkloadBuilder = Callable[[Parameter, tuple[RuntimeConfig, ...]], str]
+ConfigurationBuilder = Callable[[int | float | None, Case], Mapping[str, Any]]
+WorkloadBuilder = Callable[[int | float, tuple[RuntimeConfig, ...]], str]
 
 
 def _class_token(value: str) -> str:
-    """Convert one benchmark field to a compact lowercase ASV identifier token."""
+    """Convert one benchmark field to a lowercase ASV ID."""
 
     return value.replace("-", "").replace("_", "").lower()
 
@@ -93,7 +95,7 @@ class Benchmark:
     cases: tuple[Case, ...]
     configure: ConfigurationBuilder
     parameter_name: str | None = None
-    values: tuple[Parameter, ...] = ()
+    values: tuple[int | float, ...] = ()
     name: str | None = None
     parameter_label: str | None = None
     parameter_title: str | None = None
@@ -138,13 +140,13 @@ class Benchmark:
             return implementation_name
         return f"{implementation_name}__{_class_token(self.parameter_name)}"
 
-    def make_config(self, parameter: Parameter | None, case: Case) -> RuntimeConfig:
+    def make_config(self, parameter: int | float | None, case: Case) -> RuntimeConfig:
         """Build runtime and workload settings for one case."""
 
         values = {**case.options, **self.configure(parameter, case)}
         return runtime_config(values)
 
-    def workload(self, parameter: Parameter, cases: tuple[Case, ...] | None = None) -> str:
+    def workload(self, parameter: int | float, cases: tuple[Case, ...] | None = None) -> str:
         """Describe the fixture values shared by selected report series."""
 
         selected = self.cases if cases is None else cases
@@ -280,7 +282,7 @@ class Comparison:
             series.append((label, self.benchmark.benchmark_class(case)))
         return tuple(series)
 
-    def workload(self, parameter: Parameter) -> str:
+    def workload(self, parameter: int | float) -> str:
         """Describe the fixture values shared by every series at one parameter value."""
 
         return self.benchmark.workload(parameter, self.cases)
@@ -414,7 +416,7 @@ def merge_cases(*groups: tuple[Case, ...]) -> tuple[Case, ...]:
 
 def parameter_config(
     parameter_name: str,
-    values: tuple[Parameter, ...],
+    values: tuple[int | float, ...],
     operation: Operation,
     cases: tuple[Case, ...],
     configure: ConfigurationBuilder,
