@@ -1,14 +1,21 @@
-"""Build PDAL pipelines equivalent to raster point operations."""
+"""Build, execute and validate PDAL reference pipelines."""
 
 from __future__ import annotations
 
 import json
 import os
+import pathlib
 import shutil
+import warnings
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from benchmarks.workflows.config import BenchmarkConfig
+import pyogrio
+
+from benchmarks.comparisons.subprocess import execute_command
+from benchmarks.workflows.config import RuntimeConfig
+from benchmarks.workflows.core import Case
+from benchmarks.workflows.io import read_point_file_sample
 
 # Only these raster point operations have an equivalent PDAL pipeline for the external comparison
 PdalComparisonOperation = Literal["subsample", "to_pointcloud"]
@@ -36,7 +43,8 @@ def _require_command(name: str) -> str:
 
 def build_pdal_command(
     operation: PdalComparisonOperation,
-    config: BenchmarkConfig,
+    case: Case,
+    config: RuntimeConfig,
     raster_file: str,
 ) -> PdalCommand:
     """Build one PDAL raster-to-point pipeline and write its JSON definition."""
@@ -52,7 +60,7 @@ def build_pdal_command(
             "gdalopts": [f"GDAL_CACHEMAX={config.gdal_cachemax_mb}"],
         }
     ]
-    if config.point_output_driver in ("LAS", "LAZ"):
+    if case.output_driver in ("LAS", "LAZ"):
         # Store the first raster band in the native elevation dimension used by the GeoUtils output
         stages.append({"type": "filters.ferry", "dimensions": "band_1=>Z"})
     if operation == "subsample":
@@ -60,14 +68,14 @@ def build_pdal_command(
         stages.extend(
             (
                 {"type": "filters.randomize", "seed": 42},
-                {"type": "filters.head", "count": config.subsample_size},
+                {"type": "filters.head", "count": config.value("subsample_size", 2_048)},
             )
         )
 
     # Write the same file-backed point format used by GeoUtils multiprocessing
-    suffix = config.point_output_driver.lower()
+    suffix = case.output_driver.lower()
     output_file = os.path.join(config.directory, f"output-pdal-{operation}.{suffix}")
-    if config.point_output_driver == "GPKG":
+    if case.output_driver == "GPKG":
         stages.append(
             {
                 "type": "writers.ogr",
@@ -81,7 +89,7 @@ def build_pdal_command(
             {
                 "type": "writers.las",
                 "filename": output_file,
-                "compression": config.point_output_driver == "LAZ",
+                "compression": case.output_driver == "LAZ",
                 "extra_dims": "all",
             }
         )
@@ -92,3 +100,53 @@ def build_pdal_command(
 
     command = [_require_command("pdal"), "pipeline", pipeline_file]
     return PdalCommand(command=command, pipeline_file=pipeline_file, output_file=output_file)
+
+
+def _read_value(runner: Any, output_file: str) -> float:
+    """Validate one complete PDAL point output and read one band value."""
+
+    operation = runner.operation.name
+    expected_count = (
+        int(runner.config.value("subsample_size", 2_048))
+        if operation == "subsample"
+        else runner.config.shape[0] * runner.config.shape[1]
+    )
+    if pathlib.Path(output_file).suffix.lower() in (".las", ".laz"):
+        count, value = read_point_file_sample(output_file, "Z")
+        if count != expected_count:
+            raise RuntimeError(f"Unexpected PDAL {operation} output count: {count}")
+        return value
+
+    # Feature metadata verifies the complete output without loading every point back into memory
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=r"Measured \(M\) geometry types are not supported.*")
+        info = pyogrio.read_info(output_file, force_feature_count=True)
+    if info["features"] != expected_count:
+        raise RuntimeError(f"Unexpected PDAL {operation} output count: {info['features']}")
+
+    # The constant raster makes any band value sufficient regardless of randomized point order
+    fields = list(info.get("fields", []))
+    if not fields:
+        raise RuntimeError(f"PDAL {operation} output contains no raster band attribute")
+    field = fields[0]
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=r"Measured \(M\) geometry types are not supported.*")
+        sample = pyogrio.read_dataframe(output_file, columns=[field], read_geometry=False, max_features=1)
+    return float(sample[field].iloc[0])
+
+
+def execute_pdal(runner: Any, case: Case) -> float:
+    """Run and validate the PDAL pipeline matching the selected operation."""
+
+    command = build_pdal_command(
+        runner.operation.name,
+        case,
+        runner.config,
+        raster_file=runner.path("source-raster.tif"),
+    )
+    execute_command("PDAL", command.command, command.output_file)
+    runner._last_output_file = command.output_file
+    value = _read_value(runner, command.output_file)
+    if value != runner.config.raster_value:
+        raise RuntimeError(f"Unexpected PDAL {runner.operation.name} validation value: {value}")
+    return value

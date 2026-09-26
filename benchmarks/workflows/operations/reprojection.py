@@ -6,21 +6,28 @@ from collections.abc import Mapping
 from typing import Any
 
 from benchmarks.workflows.config import (
-    RASTER_AXIS,
-    BenchmarkCase,
-    BenchmarkConfig,
-    Operation,
-    OperationCoverage,
-    Sweep,
-    execution_cases,
-    external_case,
+    RASTER_SIZES,
+    RuntimeConfig,
     raster_size_config,
 )
+from benchmarks.workflows.core import (
+    Case,
+    Operation,
+    comparison,
+    execution_cases,
+    parameter_config,
+    reference_case,
+)
+from benchmarks.workflows.io import write_constant_raster
 
 ORDER = 40
 
+#########################################
+# Define setup for reprojection operation
+#########################################
 
-def reproject_options(case: BenchmarkCase, config: BenchmarkConfig) -> Mapping[str, Any]:
+
+def reproject_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
     """Build the public reprojection options used for execution and labels."""
 
     return {
@@ -33,42 +40,70 @@ def reproject_options(case: BenchmarkCase, config: BenchmarkConfig) -> Mapping[s
     }
 
 
-def run_reproject(runner: Any, case: BenchmarkCase) -> float:
+def prepare_reproject(runner: Any, case: Case) -> None:
+    """Write the common raster reprojected by GeoUtils and GDAL."""
+
+    write_constant_raster(runner.path("source-raster.tif"), runner.config)
+
+
+def run_reproject(runner: Any, case: Case) -> float:
     """Reproject the prepared raster and complete its output."""
+
+    if case.implementation == "gdal":
+        from benchmarks.comparisons.gdal import execute_gdal
+
+        return execute_gdal(runner, case)
 
     raster = runner.make_raster()
     options = reproject_options(case, runner.config)
 
     # Fix the target size so GeoUtils and GDAL references write the same pixel count
-    mp_config = runner._multiproc_config(case.operation) if runner.backend == "multiprocessing" else None
+    mp_config = runner._multiproc_config() if runner.backend == "multiprocessing" else None
     output = (
         raster.rst.reproject(**options)
         if runner.backend == "dask"
         else raster.reproject(**options, mp_config=mp_config)
     )
-    return runner._compute_raster(output, case.operation)
+    return runner._compute_raster(output)
 
 
-OPERATIONS = (
-    Operation(
-        "reproject",
-        run_reproject,
-        reproject_options,
-        ("resampling",),
-        {"nearest": ("rasterio",)},
-        "nearest",
-        coverage=OperationCoverage(5),
+REPROJECT = Operation(
+    "reproject",
+    prepare_reproject,
+    run_reproject,
+    reproject_options,
+    ("resampling",),
+    label="Reprojection",
+    order=5,
+    large_data_cases=tuple(
+        Case(method="nearest", engine="rasterio", execution=execution) for execution in ("dask", "multiprocessing")
     ),
 )
+OPERATIONS = (REPROJECT,)
 
 
-########################################
-# Cases, sweeps and report comparisons
-########################################
+#####################################
+# Define benchmarks and comparisons
+#####################################
 
 
 # Each case fixes one GeoUtils execution mode for one ASV result series; the sweep owns the changing raster size
 # The external case identifies the matching GDAL series, which the default comparison plots with the GeoUtils series
-CASES = execution_cases("reproject", "nearest", "rasterio")
-REFERENCE = external_case(CASES)
-SWEEPS = (Sweep(RASTER_AXIS, raster_size_config, CASES, (REFERENCE,)),)
+CASES = execution_cases(
+    "nearest",
+    "rasterio",
+    labels={"method": "Nearest", "engine": "Rasterio/GDAL"},
+)
+REFERENCE = reference_case(CASES, implementation="gdal")
+BENCHMARKS = (
+    parameter_config(
+        "raster_size",
+        RASTER_SIZES,
+        REPROJECT,
+        (*CASES, REFERENCE),
+        raster_size_config,
+        parameter_label="Size of raster (pixels per side)",
+        parameter_title="raster size",
+    ),
+)
+COMPARISONS = (comparison(BENCHMARKS[0], by="execution"),)

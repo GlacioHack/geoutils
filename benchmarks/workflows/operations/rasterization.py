@@ -8,22 +8,29 @@ from typing import Any
 import numpy as np
 
 from benchmarks.workflows.config import (
-    RASTER_AXIS,
+    RASTER_SIZES,
     VECTOR_COMPARISON_OPTIONS,
-    BenchmarkCase,
-    BenchmarkConfig,
-    Operation,
-    OperationCoverage,
-    Sweep,
-    execution_cases,
-    external_case,
+    RuntimeConfig,
     raster_size_config,
 )
+from benchmarks.workflows.core import (
+    Case,
+    Operation,
+    comparison,
+    execution_cases,
+    parameter_config,
+    reference_case,
+)
+from benchmarks.workflows.io import write_vector_source
 
 ORDER = 70
 
+############################################
+# Define setup for rasterization operations
+############################################
 
-def rasterize_options(case: BenchmarkCase, config: BenchmarkConfig) -> Mapping[str, Any]:
+
+def rasterize_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
     """Build the public rasterization options shared by both execution paths."""
 
     options: dict[str, Any] = {
@@ -32,52 +39,105 @@ def rasterize_options(case: BenchmarkCase, config: BenchmarkConfig) -> Mapping[s
         "crs": 4326,
         "chunksizes": config.chunks,
     }
-    if case.operation == "rasterize":
+    if config.value("operation") == "rasterize":
         options.update({"in_value": 1, "out_value": 0, "out_dtype": np.uint8})
     return options
 
 
-def run_rasterize(runner: Any, case: BenchmarkCase) -> float:
+def prepare_rasterize(runner: Any, case: Case) -> None:
+    """Write the polygons shared by rasterization and mask cases."""
+
+    write_vector_source(
+        runner.path("source-vector.gpkg"),
+        int(runner.config.value("vector_features_per_axis", 1)),
+    )
+
+
+def run_rasterize(runner: Any, case: Case) -> float:
     """Rasterize the prepared polygons or create their boolean mask."""
+
+    if case.implementation == "gdal":
+        from benchmarks.comparisons.gdal import execute_gdal
+
+        return execute_gdal(runner, case)
 
     from geoutils import Vector
 
     # Vector input is small while the produced raster is larger than memory
-    vector = Vector(runner.vector_file)
-    mp_config = runner._multiproc_config(case.operation) if runner.backend == "multiprocessing" else None
+    vector = Vector(runner.path("source-vector.gpkg"))
+    mp_config = runner._multiproc_config() if runner.backend == "multiprocessing" else None
     options = rasterize_options(case, runner.config)
-    output = getattr(vector, case.operation)(
+    output = getattr(vector, runner.operation.name)(
         dask=runner.backend == "dask",
         mp_config=mp_config,
         **options,
     )
-    return runner._compute_raster(output, case.operation)
+    return runner._compute_raster(output)
 
 
-OPERATIONS = (
-    Operation(
-        "rasterize",
-        run_rasterize,
-        rasterize_options,
-        method_engines={None: ("rasterio",)},
-        coverage=OperationCoverage(13),
+RASTERIZE = Operation(
+    "rasterize",
+    prepare_rasterize,
+    run_rasterize,
+    rasterize_options,
+    label="Rasterization",
+    order=13,
+    large_data_cases=tuple(
+        Case(engine="rasterio", execution=execution, options={"operation": "rasterize"})
+        for execution in ("dask", "multiprocessing")
     ),
-    Operation("create_mask", run_rasterize, rasterize_options, coverage=OperationCoverage(14)),
 )
+CREATE_MASK = Operation(
+    "create_mask",
+    prepare_rasterize,
+    run_rasterize,
+    rasterize_options,
+    label="Mask creation",
+    order=14,
+    large_data_cases=tuple(
+        Case(execution=execution, options={"operation": "create_mask"}) for execution in ("dask", "multiprocessing")
+    ),
+)
+OPERATIONS = (RASTERIZE, CREATE_MASK)
 
 
-########################################
-# Cases, sweeps and report comparisons
-########################################
+#####################################
+# Define benchmarks and comparisons
+#####################################
 
 
 # Each case fixes one GeoUtils execution mode for one ASV result series; the sweep owns the changing raster size
 # The external case identifies the matching GDAL series, which the default comparison plots with the GeoUtils series
 CASES = execution_cases(
-    "rasterize",
     None,
     "rasterio",
-    options=VECTOR_COMPARISON_OPTIONS,
+    options={**VECTOR_COMPARISON_OPTIONS, "operation": "rasterize"},
+    labels={"engine": "Rasterio/GDAL"},
 )
-REFERENCE = external_case(CASES)
-SWEEPS = (Sweep(RASTER_AXIS, raster_size_config, CASES, (REFERENCE,)),)
+REFERENCE = reference_case(CASES, implementation="gdal")
+
+
+def rasterize_workload(parameter: int | float, configs: tuple[RuntimeConfig, ...]) -> str:
+    """Describe the output raster, chunks and input polygon grid."""
+
+    config = configs[0]
+    features = int(config.value("vector_features_per_axis", 1))
+    return (
+        f"{config.shape[0]:,} × {config.shape[1]:,} raster; "
+        f"{config.chunks[0]:,} × {config.chunks[1]:,} chunks; {features:,} × {features:,} vector features"
+    )
+
+
+BENCHMARKS = (
+    parameter_config(
+        "raster_size",
+        RASTER_SIZES,
+        RASTERIZE,
+        (*CASES, REFERENCE),
+        raster_size_config,
+        parameter_label="Size of raster (pixels per side)",
+        parameter_title="raster size",
+        describe_workload=rasterize_workload,
+    ),
+)
+COMPARISONS = (comparison(BENCHMARKS[0], by="execution"),)

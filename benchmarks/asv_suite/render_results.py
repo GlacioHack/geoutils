@@ -1,4 +1,4 @@
-"""Render saved ASV measurements for the benchmark website and user documentation."""
+"""Render the ASV measurements into a webpage + plots for user documentation."""
 
 from __future__ import annotations
 
@@ -15,26 +15,20 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from benchmarks.workflows.config import (
-    CALCULATION_ENGINE_LABELS,
-    GDAL_CLI_LABEL,
-    METHOD_LABELS,
-    OPERATION_LABELS,
-    PDAL_CLI_LABEL,
-    STRATEGY_LABELS,
-    CalculationEngine,
+from benchmarks.workflows.config import ExecutionMode
+from benchmarks.workflows.core import (
+    IMPLEMENTATION_LABELS,
     Comparison,
     ComparisonDimension,
-    ExecutionMode,
-    ExternalReference,
-    OperationName,
-    OperationStrategyName,
 )
 from benchmarks.workflows.operations import (
+    BENCHMARK_BY_CLASS,
     BENCHMARK_CASE_BY_CLASS,
     COMPARISONS,
-    EXTERNAL_REFERENCE_CASE_BY_CLASS,
 )
+
+GDAL_CLI_LABEL = IMPLEMENTATION_LABELS["gdal"]
+PDAL_CLI_LABEL = IMPLEMENTATION_LABELS["pdal"]
 
 # Name the files written by this renderer and linked from the benchmark website and documentation
 COMPARISON_BENCHMARK_MODULE = "asv_suite.parameter_sweeps"
@@ -60,12 +54,12 @@ SERIES_COLORS = {
 
 # Group plots by the GeoUtils choice represented by their separate lines; every plot still scales a numeric input
 COMPARISON_SECTION_DETAILS: dict[ComparisonDimension, tuple[str, str]] = {
-    "execution_mode": (
+    "execution": (
         "Execution modes",
         "Compare in-memory, Dask and Multiprocessing with one worker, showing coordination costs without parallel "
         "speed-up.",
     ),
-    "calculation_engine": (
+    "engine": (
         "Calculation engines",
         "Compare numerical libraries during in-memory execution, so scheduling remains fixed.",
     ),
@@ -77,7 +71,7 @@ COMPARISON_SECTION_DETAILS: dict[ComparisonDimension, tuple[str, str]] = {
         "Chunk strategies",
         "Compare how chunked operations reconcile partial results at chunk boundaries.",
     ),
-    "output_format": (
+    "output_driver": (
         "Point output formats",
         "Compare file-to-file LAS and LAZ output from GeoUtils multiprocessing and PDAL CLI.",
     ),
@@ -125,7 +119,7 @@ OPERATION_GROUP_ORDER = (
     "Vector ⟶ Raster",
     "Raster ⟶ Other",
 )
-OPERATION_GROUPS: dict[OperationName, str] = {
+OPERATION_GROUPS: dict[str, str] = {
     "crop": "Raster ⟶ Raster",
     "clip": "Raster ⟶ Raster",
     "translate": "Raster ⟶ Raster",
@@ -152,14 +146,14 @@ class ComparisonMeasurement:
 
     comparison: str
     series_label: str
-    operation: OperationName
+    operation: str
     method: str | None
-    calculation_engine: CalculationEngine | None
-    strategy: OperationStrategyName | None
+    calculation_engine: str | None
+    strategy: str | None
     execution_mode: ExecutionMode | None
-    external_reference: ExternalReference | None
-    output_driver: Literal["GPKG", "LAS", "LAZ"]
-    series_dimension: ComparisonDimension
+    external_reference: str | None
+    output_driver: str
+    series_dimension: str
     parameter: int
     operation_time_s: float
     end_to_end_time_s: float
@@ -182,7 +176,7 @@ class _PreviewResult:
 
         # Create all keys normally read from saved ASV results so every report section can render
         for comparison in COMPARISONS:
-            parameter_values = comparison.sweep.axis.values
+            parameter_values = comparison.benchmark.values
 
             for series_index, (_, class_name) in enumerate(comparison.series, start=1):
                 prefix = f"{COMPARISON_BENCHMARK_MODULE}.{class_name}"
@@ -190,8 +184,8 @@ class _PreviewResult:
                     continue
 
                 # Scale GeoUtils values between fake revisions while leaving optional and CLI references stable
-                benchmark_case = BENCHMARK_CASE_BY_CLASS.get(class_name)
-                scale = geoutils_scale if benchmark_case is not None else 1.0
+                benchmark_case = BENCHMARK_CASE_BY_CLASS[class_name]
+                scale = geoutils_scale if benchmark_case.implementation == "geoutils" else 1.0
                 parameters = [[repr(value) for value in parameter_values]]
                 self.parameters[f"{prefix}.time_operation"] = parameters
                 self.parameters[f"{prefix}.track_end_to_end_time_s"] = parameters
@@ -345,30 +339,9 @@ def collect_comparison_measurements(
     available = set(result.get_all_result_keys())
     for comparison in comparisons:
         for series_label, class_name in comparison.series:
-            benchmark_case = BENCHMARK_CASE_BY_CLASS.get(class_name)
-            reference_case = EXTERNAL_REFERENCE_CASE_BY_CLASS.get(class_name)
-            if (benchmark_case is None) == (reference_case is None):
-                raise ValueError(f"Expected exactly one registered benchmark case for {class_name}")
-            selected_case = benchmark_case or reference_case
-            assert selected_case is not None
-            if selected_case.operation != comparison.operation:
-                raise ValueError(f"Comparison dimensions do not match registered case {class_name}")
-            if comparison.series_dimension != "method" and selected_case.method != comparison.method:
-                raise ValueError(f"Comparison method does not match registered case {class_name}")
-            if benchmark_case is not None:
-                if (
-                    comparison.series_dimension != "calculation_engine"
-                    and benchmark_case.engine != comparison.calculation_engine
-                ):
-                    raise ValueError(f"Comparison engine does not match registered case {class_name}")
-                if (
-                    comparison.series_dimension != "execution_mode"
-                    and benchmark_case.execution != comparison.execution_mode
-                ):
-                    raise ValueError(f"Comparison execution mode does not match registered case {class_name}")
-                expected_strategy = comparison.strategy if benchmark_case.execution != "inmem" else None
-                if comparison.series_dimension != "strategy" and benchmark_case.strategy != expected_strategy:
-                    raise ValueError(f"Comparison strategy does not match registered case {class_name}")
+            selected_case = BENCHMARK_CASE_BY_CLASS[class_name]
+            if BENCHMARK_BY_CLASS[class_name] != comparison.benchmark:
+                raise ValueError(f"Comparison benchmark does not match registered case {class_name}")
 
             # The three ASV methods share the same numeric parameter values
             keys = {
@@ -391,14 +364,20 @@ def collect_comparison_measurements(
                 ComparisonMeasurement(
                     comparison=comparison.slug,
                     series_label=series_label,
-                    operation=selected_case.operation,
+                    operation=comparison.operation,
                     method=selected_case.method,
-                    calculation_engine=(benchmark_case.engine if benchmark_case is not None else None),
-                    strategy=benchmark_case.strategy if benchmark_case is not None else None,
+                    calculation_engine=selected_case.engine if selected_case.implementation == "geoutils" else None,
+                    strategy=selected_case.strategy if selected_case.implementation == "geoutils" else None,
                     execution_mode=selected_case.execution,
-                    external_reference=(reference_case.external_reference if reference_case is not None else None),
+                    external_reference={"gdal": "gdal_cli", "pdal": "pdal_cli", "flox": "flox"}.get(
+                        selected_case.implementation
+                    ),
                     output_driver=selected_case.output_driver,
-                    series_dimension=comparison.series_dimension,
+                    series_dimension={
+                        "engine": "calculation_engine",
+                        "execution": "execution_mode",
+                        "output_driver": "output_format",
+                    }.get(comparison.by, comparison.by),
                     parameter=parameter,
                     operation_time_s=operation_time,
                     end_to_end_time_s=end_to_end_time,
@@ -501,8 +480,8 @@ def _largest_shared_parameter(
             if record.comparison == comparison.slug and record.series_label == series_label
         }
         # Optional Flox references may be skipped while the GeoUtils measurements remain available
-        reference = EXTERNAL_REFERENCE_CASE_BY_CLASS.get(class_name)
-        if not parameters and reference is not None and reference.external_reference == "flox":
+        case = BENCHMARK_CASE_BY_CLASS[class_name]
+        if not parameters and case.implementation == "flox":
             continue
         parameters_by_series.append(parameters)
     shared_parameters = set.intersection(*parameters_by_series)
@@ -926,16 +905,12 @@ def render_documentation_snapshot(
 def _operation_and_method_label(comparison: Comparison) -> str:
     """Return a concise operation label including its fixed method or strategy."""
 
-    label = OPERATION_LABELS[comparison.operation]
+    label = comparison.benchmark.operation.display_name
     if comparison.method is not None:
-        method = (
-            METHOD_LABELS.get(comparison.method, comparison.method.replace("_", " ").title())
-            if comparison.operation == "grid"
-            else comparison.method.replace("_", " ").title()
-        )
+        method = comparison.choice_label("method", comparison.method)
         label = f"{label} — {method}"
     if comparison.strategy is not None:
-        label = f"{label} — {STRATEGY_LABELS[comparison.strategy]}"
+        label = f"{label} — {comparison.choice_label('strategy', comparison.strategy)}"
     return label
 
 
@@ -1039,13 +1014,13 @@ def _inmem_implementation_measurements(
     comparison: Comparison,
     records: list[ComparisonMeasurement],
     parameter: int | None = None,
-) -> tuple[int, dict[CalculationEngine | ExternalReference, ComparisonMeasurement]]:
+) -> tuple[int, dict[str, ComparisonMeasurement]]:
     """Return in-memory GeoUtils engines and any external GDAL result at one shared workload."""
 
     selected_labels = [
         label
         for label, _ in comparison.series
-        if label == GDAL_CLI_LABEL or comparison.series_dimension == "calculation_engine" or label == "In memory"
+        if label == GDAL_CLI_LABEL or comparison.by == "engine" or label == "In memory"
     ]
     if parameter is None:
         parameter = _largest_parameter_for_series(comparison, records, selected_labels)
@@ -1056,7 +1031,7 @@ def _inmem_implementation_measurements(
         and record.parameter == parameter
         and record.series_label in selected_labels
     )
-    by_implementation: dict[CalculationEngine | ExternalReference, ComparisonMeasurement] = {}
+    by_implementation: dict[str, ComparisonMeasurement] = {}
     for measurement in selected:
         implementation = measurement.external_reference or measurement.calculation_engine
         if implementation is not None:
@@ -1071,7 +1046,11 @@ def _execution_mode_measurements(
 ) -> tuple[int, dict[ExecutionMode, ComparisonMeasurement]]:
     """Return GeoUtils execution modes at the largest workload shared by every mode."""
 
-    selected_labels = [label for label, class_name in comparison.series if class_name in BENCHMARK_CASE_BY_CLASS]
+    selected_labels = [
+        label
+        for label, class_name in comparison.series
+        if BENCHMARK_CASE_BY_CLASS[class_name].implementation == "geoutils"
+    ]
     if parameter is None:
         parameter = _largest_parameter_for_series(comparison, records, selected_labels)
     measurements = (
@@ -1093,16 +1072,14 @@ def _engine_summary_comparisons() -> tuple[Comparison, ...]:
     """Select one representative input axis for every in-memory operation and method."""
 
     # Prefer a direct engine comparison, then fall back to an execution comparison containing in-memory execution
-    selected: dict[tuple[OperationName, str | None], tuple[int, Comparison]] = {}
+    selected: dict[tuple[str, str | None], tuple[int, Comparison]] = {}
     for comparison in COMPARISONS:
         if not comparison.summary:
             continue
         priority = 0
-        if comparison.series_dimension == "calculation_engine":
+        if comparison.by == "engine":
             priority = 2 if comparison.parameter_label == "Size of raster (pixels per side)" else 1
-        elif comparison.series_dimension == "execution_mode" and any(
-            label == "In memory" for label, _ in comparison.series
-        ):
+        elif comparison.by == "execution" and any(label == "In memory" for label, _ in comparison.series):
             priority = 1
         if priority == 0:
             continue
@@ -1117,7 +1094,7 @@ def _engine_summary_table(records: list[ComparisonMeasurement]) -> str:
     """Compare in-memory GeoUtils calculation engines with the external GDAL CLI."""
 
     rows: list[tuple[Comparison, str]] = []
-    columns: tuple[CalculationEngine | ExternalReference, ...] = ("rasterio", "scipy", "numba", "numpy", "gdal_cli")
+    columns = ("rasterio", "scipy", "numba", "numpy", "gdal_cli")
     for comparison in _engine_summary_comparisons():
         parameter = _summary_reference_parameter(comparison, records)
         _, by_implementation = _inmem_implementation_measurements(comparison, records, parameter)
@@ -1163,11 +1140,7 @@ def _engine_summary_table(records: list[ComparisonMeasurement]) -> str:
 def _execution_summary_comparisons() -> tuple[Comparison, ...]:
     """Return every plot that directly compares GeoUtils execution modes."""
 
-    return tuple(
-        comparison
-        for comparison in COMPARISONS
-        if comparison.summary and comparison.series_dimension == "execution_mode"
-    )
+    return tuple(comparison for comparison in COMPARISONS if comparison.summary and comparison.by == "execution")
 
 
 def _execution_summary_table(records: list[ComparisonMeasurement]) -> str:
@@ -1192,7 +1165,7 @@ def _execution_summary_table(records: list[ComparisonMeasurement]) -> str:
             for column in columns
         ]
         engine = (
-            CALCULATION_ENGINE_LABELS[comparison.calculation_engine]
+            comparison.choice_label("engine", comparison.calculation_engine)
             if comparison.calculation_engine is not None
             else "No separate engine"
         )
@@ -1239,7 +1212,7 @@ def _summary_reference_parameter(comparison: Comparison, records: list[Compariso
 def _headline_summary_table(records: list[ComparisonMeasurement]) -> str:
     """List engines and execution modes in separate columns beside the external GDAL CLI."""
 
-    engine_order: tuple[CalculationEngine, ...] = ("rasterio", "scipy", "numba", "numpy")
+    engine_order = ("rasterio", "scipy", "numba", "numpy")
     mode_order: tuple[ExecutionMode, ...] = ("inmem", "dask", "multiprocessing")
     engine_comparisons = {
         (comparison.operation, comparison.method): comparison for comparison in _engine_summary_comparisons()
@@ -1264,7 +1237,7 @@ def _headline_summary_table(records: list[ComparisonMeasurement]) -> str:
         parameter = _summary_reference_parameter(comparison, records)
 
         if engine_comparison is None:
-            implementations: dict[CalculationEngine | ExternalReference, ComparisonMeasurement] = {}
+            implementations: dict[str, ComparisonMeasurement] = {}
         else:
             _, implementations = _inmem_implementation_measurements(engine_comparison, records, parameter)
 
@@ -1331,14 +1304,14 @@ def _headline_summary_table(records: list[ComparisonMeasurement]) -> str:
 
 
 def _choice_tables(
-    dimension: Literal["method", "strategy", "output_format"], records: list[ComparisonMeasurement]
+    dimension: Literal["method", "strategy", "output_driver"], records: list[ComparisonMeasurement]
 ) -> str:
     """Render representative time and memory for methods, strategies or point output formats."""
 
     articles = []
-    choice_name = {"method": "method", "strategy": "chunk strategy", "output_format": "output and writer"}[dimension]
-    choice_title = choice_name.title() if dimension == "output_format" else f"GeoUtils {choice_name}"
-    for comparison in (item for item in COMPARISONS if item.series_dimension == dimension):
+    choice_name = {"method": "method", "strategy": "chunk strategy", "output_driver": "output and writer"}[dimension]
+    choice_title = choice_name.title() if dimension == "output_driver" else f"GeoUtils {choice_name}"
+    for comparison in (item for item in COMPARISONS if item.by == dimension):
         parameter = _summary_reference_parameter(comparison, records)
         measurements = [
             _measurement_at(records, comparison.slug, series_label, parameter) for series_label, _ in comparison.series
@@ -1388,7 +1361,7 @@ def _markdown_report(result: Any, *, includes_performance_change: bool = False) 
     if includes_performance_change:
         lines.extend(["", f"Before/after summary: [{PERFORMANCE_CHANGE_REPORT}]({PERFORMANCE_CHANGE_REPORT})"])
     for dimension, (section_title, section_description) in COMPARISON_SECTION_DETAILS.items():
-        comparisons = tuple(comparison for comparison in COMPARISONS if comparison.series_dimension == dimension)
+        comparisons = tuple(comparison for comparison in COMPARISONS if comparison.by == dimension)
         if not comparisons:
             continue
         lines.extend(["", f"## {section_title}", "", section_description])
@@ -1696,13 +1669,13 @@ def _comparison_html(
             "</div></section>",
             _metric_guide(),
             '<section class="option-section" id="execution-modes">',
-            f"<h2>{html.escape(COMPARISON_SECTION_DETAILS['execution_mode'][0])}</h2>",
-            f'<p class="section-intro">{html.escape(COMPARISON_SECTION_DETAILS["execution_mode"][1])}</p>',
+            f"<h2>{html.escape(COMPARISON_SECTION_DETAILS['execution'][0])}</h2>",
+            f'<p class="section-intro">{html.escape(COMPARISON_SECTION_DETAILS["execution"][1])}</p>',
             _execution_summary_table(records),
             "</section>",
             '<section class="option-section" id="calculation-engines">',
-            f"<h2>{html.escape(COMPARISON_SECTION_DETAILS['calculation_engine'][0])}</h2>",
-            f'<p class="section-intro">{html.escape(COMPARISON_SECTION_DETAILS["calculation_engine"][1])} GDAL CLI '
+            f"<h2>{html.escape(COMPARISON_SECTION_DETAILS['engine'][0])}</h2>",
+            f'<p class="section-intro">{html.escape(COMPARISON_SECTION_DETAILS["engine"][1])} GDAL CLI '
             "is shown separately where an equivalent external command exists.</p>",
             _engine_summary_table(records),
             "</section>",
@@ -1716,9 +1689,9 @@ def _comparison_html(
             f'<p class="section-intro">{html.escape(COMPARISON_SECTION_DETAILS["strategy"][1])}</p>',
             f'<div class="choice-grid">{_choice_tables("strategy", records)}</div></section>',
             '<section class="option-section" id="point-output-formats">',
-            f"<h2>{html.escape(COMPARISON_SECTION_DETAILS['output_format'][0])}</h2>",
-            f'<p class="section-intro">{html.escape(COMPARISON_SECTION_DETAILS["output_format"][1])}</p>',
-            f'<div class="choice-grid">{_choice_tables("output_format", records)}</div></section>',
+            f"<h2>{html.escape(COMPARISON_SECTION_DETAILS['output_driver'][0])}</h2>",
+            f'<p class="section-intro">{html.escape(COMPARISON_SECTION_DETAILS["output_driver"][1])}</p>',
+            f'<div class="choice-grid">{_choice_tables("output_driver", records)}</div></section>',
             '<p class="footer-links">',
             change_link,
             '<a href="comparisons.csv">Download CSV</a> · <a href="comparisons.json">Download JSON</a></p>',
@@ -1741,11 +1714,11 @@ def _scaling_html(
     """Return collapsible plots grouped by the input quantity that grows."""
 
     dimension_labels = {
-        "execution_mode": "Execution modes",
-        "calculation_engine": "Calculation engines",
+        "execution": "Execution modes",
+        "engine": "Calculation engines",
         "method": "Methods",
         "strategy": "Chunk strategies",
-        "output_format": "Point output formats",
+        "output_driver": "Point output formats",
     }
     toc = []
     sections = []
@@ -1766,7 +1739,7 @@ def _scaling_html(
             plots.append(
                 f'<details class="plot-card" id="{slug}"><summary><span><strong>{title}</strong>'
                 "</span>"
-                f'<span class="chip plot-kind">{dimension_labels[comparison.series_dimension]}</span></summary>'
+                f'<span class="chip plot-kind">{dimension_labels[comparison.by]}</span></summary>'
                 f'<div class="plot-content"><img loading="lazy" src="{slug}.svg" alt="{title}"></div></details>'
             )
         sections.append(

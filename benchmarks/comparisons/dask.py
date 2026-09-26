@@ -1,4 +1,7 @@
-"""Provide native Dask calculations used as independent benchmark references."""
+"""
+Prepare and calculate Dask equivalent to GeoUtils topk/reduction (required to support various sampling method and
+support Multiprocessing, not only Dask).
+"""
 
 from __future__ import annotations
 

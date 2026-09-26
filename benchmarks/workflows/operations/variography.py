@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from functools import wraps
+from collections.abc import Mapping
 from typing import Any, Literal
 
 import numpy as np
@@ -10,17 +10,36 @@ import xarray as xr
 from rasterio.transform import from_origin
 
 import geoutils as gu
-from benchmarks.asv_suite import asv_pr_check_enabled
 from benchmarks.workflows.config import (
-    POINT_COUNT_AXIS,
-    RASTER_AXIS,
-    VARIOGRAM_LAG_AXIS,
-    VARIOGRAM_PAIR_AXIS,
-    process_tree_memory_increase_mb,
+    POINT_COUNTS,
+    RASTER_SIZES,
+    VARIOGRAM_LAG_COUNTS,
+    VARIOGRAM_LAG_PAIRS,
+    VARIOGRAM_N_LAGS,
+    VARIOGRAM_PAIR_COUNTS,
+    VARIOGRAM_POINT_PAIRS,
+    VARIOGRAM_RASTER_CHUNK_SIZE,
+    VARIOGRAM_RASTER_SIZE,
+    VARIOGRAM_SAMPLE_PAIRS,
+    Parameter,
+    RuntimeConfig,
+)
+from benchmarks.workflows.core import (
+    Benchmark,
+    Case,
+    Operation,
+    execution_cases,
+    parameter_config,
 )
 from geoutils._misc import import_optional
-from geoutils.profiler import profile_call
 from geoutils.stats import Variogram, variogram
+
+ORDER = 100
+
+
+###########################################
+# Define setup for variography operations
+###########################################
 
 
 def prepare_variogram_pairs(n_pairs: int) -> xr.Dataset:
@@ -46,8 +65,12 @@ def prepare_variogram_pairs(n_pairs: int) -> xr.Dataset:
     )
 
 
-def prepare_pair_raster(size: int, execution_mode: Literal["inmem", "dask"]) -> Any:
-    """Create a smooth projected raster with scattered missing cells and 256 by 256 Dask chunks.
+def prepare_pair_raster(
+    size: int,
+    execution_mode: Literal["inmem", "dask"],
+    chunks: tuple[int, int],
+) -> Any:
+    """Create a smooth projected raster with scattered missing cells and configured Dask chunks.
 
     Both modes start from the same prepared float32 values. Dask measures selected chunk reads and task scheduling
     from memory; this fixture does not measure disk throughput or claim a larger-than-memory contract.
@@ -64,7 +87,7 @@ def prepare_pair_raster(size: int, execution_mode: Literal["inmem", "dask"]) -> 
         import_optional("dask", extra_name="benchmark")
         import dask.array as da
 
-        array = da.from_array(values, chunks=(256, 256))
+        array = da.from_array(values, chunks=chunks)
         return gu.RasterAccessor.from_array(array, transform, 32633, nodata=-99999).rst
     return gu.Raster.from_array(values, transform, 32633, nodata=-99999)
 
@@ -80,45 +103,6 @@ def prepare_pair_pointcloud(n_points: int) -> gu.PointCloud:
     return gu.PointCloud.from_xyz(x, y, values, crs=32633)
 
 
-############################
-# Shared measurement setup
-############################
-
-
-class _VariographyBenchmark:
-    """Measure complete results after constructing inputs and importing optional estimators."""
-
-    number = 1
-    repeat = 3
-    rounds = 1
-    warmup_time = 0
-    timeout = 300
-
-    def time_operation(self, *parameters: Any) -> None:
-        """Compute the complete pair dataset or reduced variogram from prepared inputs."""
-
-        self._execute()
-
-    def track_process_tree_mem_increase_mb(self, *parameters: Any) -> float:
-        """Measure peak memory increase while producing the completed result."""
-
-        _, metrics = profile_call(self._execute, dask=False, include_children=True)
-        return process_tree_memory_increase_mb(metrics)
-
-    def _execute(self) -> Any:
-        """Compute the operation supplied by each concrete benchmark."""
-
-        raise NotImplementedError
-
-
-setattr(_VariographyBenchmark.track_process_tree_mem_increase_mb, "unit", "MB")
-
-
-############################
-# Public variogram workflow
-############################
-
-
 def prepare_estimator(estimator: str) -> None:
     """Load and warm the optional estimator before timing variogram()."""
 
@@ -130,196 +114,303 @@ def prepare_estimator(estimator: str) -> None:
     Variogram.from_pairs(prepare_variogram_pairs(64), estimator=estimator, n_lags=4)
 
 
-class RasterVariogramSize(_VariographyBenchmark):
-    """Measure public variogram() while varying raster size and in-memory or Dask execution."""
+def variogram_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
+    """Build the public variogram estimator option used for execution."""
 
-    param_names = ["raster_size", "execution_mode"]
-    params = [list(RASTER_AXIS.parameters(asv_pr_check_enabled())), ["inmem", "dask"]]
-
-    def setup(self, raster_size: int, execution_mode: Literal["inmem", "dask"]) -> None:
-        """Prepare the raster and estimator while leaving sampling and reduction inside timing."""
-
-        # Keep the same values and sampling request while changing the source size and loading mode
-        self.source = prepare_pair_raster(raster_size, execution_mode)
-        self.dask = import_optional("dask", extra_name="benchmark")
-        n_pairs = 1_000 if asv_pr_check_enabled() else 10_000
-        self.pair_kwargs: dict[str, Any] = {
-            "n_pairs": n_pairs,
-            "sampling": "loglag",
-            "strategy": "chunk_anchors",
-            "min_distance": 1,
-            "max_distance": raster_size / 2,
-            "batch_pairs": 100_000,
-            "anchors_per_round": 2_000,
-            "random_state": 42,
-        }
-        prepare_estimator("dowd")
-
-    def _execute(self) -> Variogram:
-        """Sample and reduce pairs through public variogram() with one Dask thread."""
-
-        with self.dask.config.set(scheduler="threads", num_workers=1):
-            return variogram(self.source, estimator="dowd", n_lags=24, **self.pair_kwargs)
+    return {"estimator": case.method}
 
 
-#########################################
-# Reduction of already sampled pairs
-#########################################
+def pair_sampling_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
+    """Build the public sampling and strategy options used for execution."""
+
+    if case.method == "random_xy":
+        return {"sampling": "random_xy", "strategy": "chunk_anchors"}
+    return {"sampling": "loglag", "strategy": case.method}
 
 
-class VariogramPairCount(_VariographyBenchmark):
-    """Vary pair count for the mean-square and robust median estimators at 24 fixed distance bins."""
+def prepare_raster_variogram(runner: Any, case: Case) -> None:
+    """Prepare the raster and estimator while leaving sampling and reduction inside timing."""
 
-    param_names = ["n_pairs", "estimator"]
-    params = [list(VARIOGRAM_PAIR_AXIS.parameters(asv_pr_check_enabled())), ["matheron", "dowd"]]
-
-    def setup(self, n_pairs: int, estimator: str) -> None:
-        """Prepare the same finite pairs for both estimators outside the measured call."""
-
-        prepare_estimator(estimator)
-        self.pairs = prepare_variogram_pairs(n_pairs)
-        self.estimator = estimator
-        self.n_lags = 24
-
-    def _execute(self) -> Variogram:
-        """Reduce all prepared pairs to their distance-bin estimates and counts."""
-
-        return Variogram.from_pairs(self.pairs, estimator=self.estimator, n_lags=self.n_lags)
+    # Keep the same values and sampling request while changing the source size and loading mode
+    assert case.method is not None
+    runner.variography_source = prepare_pair_raster(runner.config.shape[0], runner.backend, runner.config.chunks)
+    prepare_estimator(case.method)
 
 
-class VariogramLagCount(VariogramPairCount):
-    """Vary distance-bin count at 100,000 pairs to expose repeated full-input scans."""
+def run_raster_variogram(runner: Any, case: Case) -> float:
+    """Sample and reduce pairs through public variogram()."""
 
-    param_names = ["n_lags", "estimator"]
-    params = [list(VARIOGRAM_LAG_AXIS.parameters(asv_pr_check_enabled())), ["matheron", "dowd"]]
-
-    def setup(self, n_lags: int, estimator: str) -> None:
-        """Keep the pair sample fixed while changing only its number of distance bins."""
-
-        super().setup(1_000 if asv_pr_check_enabled() else 100_000, estimator)
-        self.n_lags = n_lags
-
-
-#########################################
-# Spatial pair sampling
-#########################################
-
-
-class _RasterPairSamplingBenchmark(_VariographyBenchmark):
-    """Share prepared raster sampling and execution between the two component benchmarks."""
-
-    def _prepare(self, size: int, n_pairs: int, execution_mode: Literal["inmem", "dask"], sampling_method: str) -> None:
-        """Share the source and sampling settings between pair-count and raster-size comparisons."""
-
-        # Keep the same source values and worker count for every sampling method
-        self.source = prepare_pair_raster(size, execution_mode)
-        self.dask = import_optional("dask", extra_name="benchmark")
-
-        # Bound candidate batches and reuse the same map-distance range and random seed
-        self.pair_kwargs = {
-            "n_pairs": n_pairs,
-            "sampling": "random_xy" if sampling_method == "random_xy" else "loglag",
-            "strategy": "chunk_anchors" if sampling_method == "random_xy" else sampling_method,
-            "min_distance": 1,
-            "max_distance": size / 2,
-            "batch_pairs": 100_000,
-            "anchors_per_round": 2_000,
-            "random_state": 42,
-        }
-
-    def _execute(self) -> Any:
-        """Draw finite pairs and construct all endpoint values and coordinates with one Dask thread."""
-
-        with self.dask.config.set(scheduler="threads", num_workers=1):
-            return self.source.pairsample(**self.pair_kwargs)
+    assert case.method is not None
+    result = variogram(
+        runner.variography_source,
+        estimator=case.method,
+        n_lags=int(runner.config.value("n_lags", VARIOGRAM_N_LAGS)),
+        n_pairs=int(runner.config.value("n_pairs", VARIOGRAM_SAMPLE_PAIRS)),
+        sampling="loglag",
+        strategy="chunk_anchors",
+        min_distance=1,
+        max_distance=runner.config.shape[0] / 2,
+        batch_pairs=100_000,
+        anchors_per_round=2_000,
+        random_state=42,
+    )
+    return float(np.sum(result.counts))
 
 
-class RasterPairSampling(_RasterPairSamplingBenchmark):
-    """Compare all regular-grid sampling methods on prepared in-memory and Dask rasters."""
+def prepare_pair_reduction(runner: Any, case: Case) -> None:
+    """Prepare the same finite pairs for both estimators outside the measured call."""
 
-    param_names = ["n_pairs", "execution_mode", "sampling_method"]
-    sampling_methods = ["independent", "anchors", "chunk_anchors", "anchor_batched", "random_xy"]
-    params = [
-        list(POINT_COUNT_AXIS.parameters(asv_pr_check_enabled())),
-        ["inmem", "dask"],
-        ["chunk_anchors", "random_xy"] if asv_pr_check_enabled() else sampling_methods,
-    ]
-
-    def setup(self, n_pairs: int, execution_mode: Literal["inmem", "dask"], sampling_method: str) -> None:
-        """Prepare one raster and fix batching, distance limits and the random seed for every method."""
-
-        size = 256 if asv_pr_check_enabled() else 1024
-        self._prepare(size, n_pairs, execution_mode, sampling_method)
+    assert case.method is not None
+    prepare_estimator(case.method)
+    runner.variography_pairs = prepare_variogram_pairs(int(runner.config.value("n_pairs")))
 
 
-class RasterPairSamplingSize(_RasterPairSamplingBenchmark):
-    """Vary source raster size around a fixed pair count and the default chunk-anchor strategy."""
+def run_pair_reduction(runner: Any, case: Case) -> float:
+    """Reduce all prepared pairs to their distance-bin estimates and counts."""
 
-    param_names = ["raster_size", "execution_mode"]
-    params = [list(RASTER_AXIS.parameters(asv_pr_check_enabled())), ["inmem", "dask"]]
-
-    def setup(self, raster_size: int, execution_mode: Literal["inmem", "dask"]) -> None:
-        """Keep 10,000 requested pairs while increasing the number of source chunks."""
-
-        n_pairs = 1_000 if asv_pr_check_enabled() else 10_000
-        self._prepare(raster_size, n_pairs, execution_mode, "chunk_anchors")
-
-
-class PointPairSamplingSize(_VariographyBenchmark):
-    """Compare exact ring searches and nearest-vector sampling as the irregular point set grows."""
-
-    param_names = ["n_points", "strategy"]
-    params = [
-        list(POINT_COUNT_AXIS.parameters(asv_pr_check_enabled())),
-        ["kdtree", "hashgrid", "nn_logvector"],
-    ]
-
-    def setup(self, n_points: int, strategy: str) -> None:
-        """Prepare a constant-density point cloud and enough nearby candidates for each search method."""
-
-        self.source = prepare_pair_pointcloud(n_points)
-        self.pair_kwargs = {
-            "n_pairs": 200 if asv_pr_check_enabled() else 2_000,
-            "strategy": strategy,
-            "min_distance": 1,
-            "max_distance": n_points**0.5 / 2,
-            "anchors_per_round": 2_000,
-            "nn_tolerance": 0.5,
-            "random_state": 42,
-        }
-
-    def _execute(self) -> Any:
-        """Build the spatial search, sample finite pairs and construct their complete labelled dataset."""
-
-        return self.source.pairsample(**self.pair_kwargs)
+    assert case.method is not None
+    result = Variogram.from_pairs(
+        runner.variography_pairs,
+        estimator=case.method,
+        n_lags=int(runner.config.value("n_lags", VARIOGRAM_N_LAGS)),
+    )
+    return float(np.sum(result.counts))
 
 
-#########################################
-# Stable internal benchmark identifiers
-#########################################
+def prepare_raster_pair_sampling(runner: Any, case: Case) -> None:
+    """Prepare one raster while leaving pair sampling inside timing."""
+
+    # Keep the same source values and worker count for every sampling method
+    runner.variography_source = prepare_pair_raster(runner.config.shape[0], runner.backend, runner.config.chunks)
 
 
-def named_method(method: Any, benchmark_name: str) -> Any:
-    """Copy one inherited measurement method with its existing ASV identifier."""
+def run_raster_pair_sampling(runner: Any, case: Case) -> float:
+    """Draw finite pairs and construct all endpoint values and coordinates."""
 
-    @wraps(method)
-    def measured(self: Any, *parameters: Any) -> Any:
-        return method(self, *parameters)
+    options = pair_sampling_options(case, runner.config)
 
-    setattr(measured, "benchmark_name", benchmark_name)
-    return measured
+    # Bound candidate batches and reuse the same map-distance range and random seed
+    pairs = runner.variography_source.pairsample(
+        n_pairs=int(runner.config.value("n_pairs", VARIOGRAM_SAMPLE_PAIRS)),
+        **options,
+        min_distance=1,
+        max_distance=runner.config.shape[0] / 2,
+        batch_pairs=100_000,
+        anchors_per_round=2_000,
+        random_state=42,
+    )
+    pairs.load()
+    return float(pairs.sizes["pair"])
 
 
-# Keep existing ASV history while locating measurements beside their public operation
-for benchmark_class in (
-    RasterVariogramSize,
-    VariogramPairCount,
-    VariogramLagCount,
-    RasterPairSampling,
-    RasterPairSamplingSize,
-    PointPairSamplingSize,
-):
-    for method_name in ("time_operation", "track_process_tree_mem_increase_mb"):
-        method = getattr(benchmark_class, method_name)
-        benchmark_name = f"asv_suite.variography.{benchmark_class.__name__}.{method_name}"
-        setattr(benchmark_class, method_name, named_method(method, benchmark_name))
+def prepare_point_pair_sampling(runner: Any, case: Case) -> None:
+    """Prepare a constant-density point cloud outside the measured call."""
+
+    runner.variography_source = prepare_pair_pointcloud(int(runner.config.value("point_count")))
+
+
+def run_point_pair_sampling(runner: Any, case: Case) -> float:
+    """Build the spatial search, sample finite pairs and construct their complete labelled dataset."""
+
+    assert case.method is not None
+    n_points = int(runner.config.value("point_count"))
+    pairs = runner.variography_source.pairsample(
+        n_pairs=int(runner.config.value("n_pairs", VARIOGRAM_POINT_PAIRS)),
+        strategy=case.method,
+        min_distance=1,
+        max_distance=n_points**0.5 / 2,
+        anchors_per_round=2_000,
+        nn_tolerance=0.5,
+        random_state=42,
+    )
+    pairs.load()
+    return float(pairs.sizes["pair"])
+
+
+RASTER_VARIOGRAM = Operation(
+    "raster_variogram",
+    prepare_raster_variogram,
+    run_raster_variogram,
+    variogram_options,
+    ("estimator",),
+    call_name="variogram",
+    label="Raster variogram",
+    benchmark_name="variogram",
+)
+PAIR_REDUCTION = Operation(
+    "variogram_from_pairs",
+    prepare_pair_reduction,
+    run_pair_reduction,
+    variogram_options,
+    ("estimator",),
+    call_name="Variogram.from_pairs",
+    label="Variogram pair reduction",
+    benchmark_name="variogrampairs",
+)
+RASTER_PAIR_SAMPLING = Operation(
+    "raster_pairsample",
+    prepare_raster_pair_sampling,
+    run_raster_pair_sampling,
+    pair_sampling_options,
+    ("sampling", "strategy"),
+    call_name=".pairsample",
+    label="Raster pair sampling",
+    benchmark_name="rasterpairsample",
+)
+POINT_PAIR_SAMPLING = Operation(
+    "point_pairsample",
+    prepare_point_pair_sampling,
+    run_point_pair_sampling,
+    pair_sampling_options,
+    ("strategy",),
+    call_name=".pairsample",
+    label="Point pair sampling",
+    benchmark_name="pointpairsample",
+)
+OPERATIONS = (RASTER_VARIOGRAM, PAIR_REDUCTION, RASTER_PAIR_SAMPLING, POINT_PAIR_SAMPLING)
+
+
+###################
+# Define benchmarks
+###################
+
+
+# Each case fixes one estimator, sampling method and execution mode; its sweep owns the changing input
+RASTER_VARIOGRAM_CASES = execution_cases(
+    "dowd",
+    None,
+    executions=("inmem", "dask"),
+    labels={"method": "Dowd"},
+)
+PAIR_REDUCTION_CASES = tuple(
+    Case(method=estimator, labels={"method": estimator.title()}) for estimator in ("matheron", "dowd")
+)
+RASTER_PAIR_METHODS = ("independent", "anchors", "chunk_anchors", "anchor_batched", "random_xy")
+RASTER_PAIR_CASES = tuple(
+    Case(method=method, execution=execution) for method in RASTER_PAIR_METHODS for execution in ("inmem", "dask")
+)
+RASTER_PAIR_SIZE_CASES = execution_cases(
+    "chunk_anchors",
+    None,
+    executions=("inmem", "dask"),
+)
+POINT_PAIR_CASES = tuple(Case(method=strategy) for strategy in ("kdtree", "hashgrid", "nn_logvector"))
+
+
+def raster_variogram_size_config(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
+    """Vary raster size while fixing chunks, sampled pairs and distance bins."""
+
+    assert parameter is not None
+    size = int(parameter)
+    return {
+        "shape": (size, size),
+        "chunks": (VARIOGRAM_RASTER_CHUNK_SIZE, VARIOGRAM_RASTER_CHUNK_SIZE),
+        "n_pairs": VARIOGRAM_SAMPLE_PAIRS,
+        "n_lags": VARIOGRAM_N_LAGS,
+    }
+
+
+def variogram_pair_count_config(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
+    """Vary complete input pairs while fixing the number of distance bins."""
+
+    assert parameter is not None
+    return {"n_pairs": int(parameter), "n_lags": VARIOGRAM_N_LAGS}
+
+
+def variogram_lag_count_config(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
+    """Vary distance bins while keeping the pair sample fixed."""
+
+    assert parameter is not None
+    return {"n_pairs": VARIOGRAM_LAG_PAIRS, "n_lags": int(parameter)}
+
+
+def raster_pair_count_config(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
+    """Vary sampled pairs on one fixed raster layout."""
+
+    assert parameter is not None
+    return {
+        "shape": (VARIOGRAM_RASTER_SIZE, VARIOGRAM_RASTER_SIZE),
+        "chunks": (VARIOGRAM_RASTER_CHUNK_SIZE, VARIOGRAM_RASTER_CHUNK_SIZE),
+        "n_pairs": int(parameter),
+    }
+
+
+def raster_pair_size_config(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
+    """Vary raster size while keeping the requested pair count fixed."""
+
+    assert parameter is not None
+    size = int(parameter)
+    return {
+        "shape": (size, size),
+        "chunks": (VARIOGRAM_RASTER_CHUNK_SIZE, VARIOGRAM_RASTER_CHUNK_SIZE),
+        "n_pairs": VARIOGRAM_SAMPLE_PAIRS,
+    }
+
+
+def point_pair_count_config(parameter: Parameter | None, case: Case) -> Mapping[str, Any]:
+    """Vary point count while keeping the requested pair count fixed."""
+
+    assert parameter is not None
+    return {"point_count": int(parameter), "n_pairs": VARIOGRAM_POINT_PAIRS}
+
+
+BENCHMARKS: tuple[Benchmark, ...] = (
+    parameter_config(
+        "raster_size",
+        RASTER_SIZES,
+        RASTER_VARIOGRAM,
+        RASTER_VARIOGRAM_CASES,
+        raster_variogram_size_config,
+        parameter_label="Size of raster (pixels per side)",
+        parameter_title="raster size",
+    ),
+    parameter_config(
+        "n_pairs",
+        VARIOGRAM_PAIR_COUNTS,
+        PAIR_REDUCTION,
+        PAIR_REDUCTION_CASES,
+        variogram_pair_count_config,
+        name="variogram-pair-count",
+        parameter_label="Number of sampled pairs",
+        parameter_title="pair count",
+    ),
+    parameter_config(
+        "n_lags",
+        VARIOGRAM_LAG_COUNTS,
+        PAIR_REDUCTION,
+        PAIR_REDUCTION_CASES,
+        variogram_lag_count_config,
+        name="variogram-lag-count",
+        parameter_label="Number of distance bins",
+        parameter_title="distance-bin count",
+    ),
+    parameter_config(
+        "n_pairs",
+        POINT_COUNTS,
+        RASTER_PAIR_SAMPLING,
+        RASTER_PAIR_CASES,
+        raster_pair_count_config,
+        name="raster-pair-count",
+        parameter_label="Number of sampled pairs",
+        parameter_title="pair count",
+    ),
+    parameter_config(
+        "raster_size",
+        RASTER_SIZES,
+        RASTER_PAIR_SAMPLING,
+        RASTER_PAIR_SIZE_CASES,
+        raster_pair_size_config,
+        name="raster-pair-size",
+        parameter_label="Size of raster (pixels per side)",
+        parameter_title="raster size",
+    ),
+    parameter_config(
+        "n_points",
+        POINT_COUNTS,
+        POINT_PAIR_SAMPLING,
+        POINT_PAIR_CASES,
+        point_pair_count_config,
+        parameter_label="Number of input points",
+        parameter_title="point count",
+    ),
+)

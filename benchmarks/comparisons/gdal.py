@@ -1,4 +1,4 @@
-"""Build GDAL commands equivalent to selected GeoUtils operations."""
+"""Build, execute and validate GDAL reference commands."""
 
 from __future__ import annotations
 
@@ -6,10 +6,14 @@ import math
 import os
 import shutil
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
-from benchmarks.workflows.config import BenchmarkConfig
-from benchmarks.workflows.operations import resolve_operation_parameters
+import geopandas as gpd
+
+from benchmarks.comparisons.subprocess import execute_command
+from benchmarks.workflows.config import RuntimeConfig
+from benchmarks.workflows.core import Case
+from benchmarks.workflows.io import read_raster_center
 
 # Only these GeoUtils operations have an equivalent GDAL CLI command for the external comparison
 ComparisonOperation = Literal["clip", "reproject", "polygonize", "rasterize", "grid"]
@@ -38,7 +42,7 @@ class GdalCommand:
     output_file: str
 
 
-def _warp_memory_limit_mb(config: BenchmarkConfig) -> int:
+def _warp_memory_limit_mb(config: RuntimeConfig) -> int:
     """Return the GDAL warp memory closest to one GeoUtils execution chunk."""
 
     # GDAL holds one Float32 source and destination buffer plus their one-bit nodata masks
@@ -143,7 +147,8 @@ def build_gdal_grid_command(
 
 def build_gdal_command(
     operation: ComparisonOperation,
-    config: BenchmarkConfig,
+    case: Case,
+    config: RuntimeConfig,
     raster_file: str,
     vector_file: str,
     point_file: str,
@@ -152,12 +157,7 @@ def build_gdal_command(
 
     if config.directory is None:
         raise ValueError("GDAL comparison commands require an explicit output directory")
-    operation_method, _, _ = resolve_operation_parameters(
-        operation,
-        config.operation_method,
-        config.calculation_engine,
-        config.operation_strategy,
-    )
+    operation_method = case.method
 
     # Match output storage tiles and the GDAL block cache used by GeoUtils
     # These settings control file access, not GDAL's internal processing chunks
@@ -317,8 +317,8 @@ def build_gdal_command(
             pixel_width = 1 / width
             pixel_height = 1 / height
             radius = (
-                config.grid_dist_nodata_pixel * pixel_width,
-                config.grid_dist_nodata_pixel * pixel_height,
+                config.value("grid_dist_nodata_pixel", float("inf")) * pixel_width,
+                config.value("grid_dist_nodata_pixel", float("inf")) * pixel_height,
             )
         return build_gdal_grid_command(
             point_file,
@@ -335,3 +335,31 @@ def build_gdal_command(
         )
 
     raise ValueError(f"Unsupported GDAL comparison operation: {operation}")
+
+
+def execute_gdal(runner: Any, case: Case) -> float:
+    """Run and validate the GDAL command matching the selected operation."""
+
+    operation = runner.operation.name
+    raster_file = runner.path("source-polygonize.tif" if operation == "polygonize" else "source-raster.tif")
+    command = build_gdal_command(
+        operation,
+        case,
+        runner.config,
+        raster_file=raster_file,
+        vector_file=runner.path("source-vector.gpkg"),
+        point_file=runner.path("source-points.gpkg"),
+    )
+    execute_command("GDAL", command.command, command.output_file)
+    runner._last_output_file = command.output_file
+
+    # Feature count validates vector output, raster workflows use one deterministic central pixel
+    if operation == "polygonize":
+        value = float(len(gpd.read_file(command.output_file)))
+        expected = int(runner.config.value("polygon_regions_per_axis", 1)) ** 2
+    else:
+        value = read_raster_center(command.output_file)
+        expected = runner.config.raster_value
+    if value != expected:
+        raise RuntimeError(f"Unexpected GDAL {operation} validation value: {value}")
+    return value

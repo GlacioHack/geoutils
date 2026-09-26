@@ -1,4 +1,4 @@
-"""Automatically collect benchmark operations defined in the ``operations/`` folder."""
+"""Automatically collect benchmark operations defined in files within ``operations/``."""
 
 from __future__ import annotations
 
@@ -9,17 +9,8 @@ from dataclasses import dataclass
 from types import ModuleType
 from typing import Any, cast
 
-from benchmarks.workflows.config import (
-    BenchmarkCase,
-    BenchmarkConfig,
-    Comparison,
-    ExecutionMode,
-    Operation,
-    OperationCoverage,
-    OperationName,
-    Sweep,
-    comparison,
-)
+from benchmarks.workflows.config import RuntimeConfig, fixed_config
+from benchmarks.workflows.core import Benchmark, Case, Comparison, Operation
 
 ############################
 # Automatic discovery
@@ -32,11 +23,9 @@ class OperationCatalog:
 
     modules: tuple[ModuleType, ...]
     operations: tuple[Operation, ...]
-    sweeps: tuple[Sweep, ...]
+    benchmarks: tuple[Benchmark, ...]
     comparisons: tuple[Comparison, ...]
-    coverage: tuple[Operation, ...]
-    cases: tuple[BenchmarkCase, ...]
-    references: tuple[BenchmarkCase, ...]
+    cases: tuple[Case, ...]
 
 
 def discover_operation_modules() -> tuple[ModuleType, ...]:
@@ -51,42 +40,43 @@ def discover_operation_modules() -> tuple[ModuleType, ...]:
 
 
 def unique_by(values: Iterable[Any], attribute: str, kind: str) -> tuple[Any, ...]:
+    """Raise error on duplicate IDs, to facilitate debugging when adding new benchmarks."""
+
     unique: dict[str, Any] = {}
     for value in values:
         identifier = getattr(value, attribute)
         if identifier in unique:
             raise ValueError(f"Duplicate {kind} ID: {identifier}")
         unique[identifier] = value
-
     return tuple(unique.values())
 
 
-def module_comparisons(module: ModuleType) -> tuple[Comparison, ...]:
-    """Return custom plots or one default plot per sweep."""
+def unique_cases(benchmarks: tuple[Benchmark, ...]) -> tuple[Case, ...]:
+    """Raise error on duplicate names, also to facilitate debugging when adding new benchmarks."""
 
-    # Generate the common one-plot-per-sweep layout unless the operation declares custom groupings
-    declared = getattr(module, "COMPARISONS", None)
-    return declared if declared is not None else tuple(comparison(sweep) for sweep in getattr(module, "SWEEPS", ()))
-
-
-def unique_cases(sweeps: tuple[Sweep, ...], *, references: bool = False) -> tuple[BenchmarkCase, ...]:
-    """Return cases after rejecting duplicate generated ASV class names."""
-
-    # A class name depends on both the implementation and its parent sweep axis
-    unique: dict[str, BenchmarkCase] = {}
-    for sweep in sweeps:
-        selected = sweep.references if references else sweep.cases
-        for case in selected:
-            class_name = sweep.benchmark_class(case)
+    unique: dict[str, Case] = {}
+    for benchmark in benchmarks:
+        for case in benchmark.cases:
+            class_name = benchmark.benchmark_class(case)
             if class_name in unique:
                 raise ValueError(f"Duplicate benchmark case ID: {class_name}")
             unique[class_name] = case
-
     return tuple(unique.values())
 
 
+def fixed_benchmarks(operations: tuple[Operation, ...], benchmarks: tuple[Benchmark, ...]) -> tuple[Benchmark, ...]:
+    """Return fixed benchmarks (single case) for operations without a parameter name to vary."""
+
+    parameterized = {benchmark.operation.name for benchmark in benchmarks if benchmark.parameter_name is not None}
+    return tuple(
+        Benchmark(operation, operation.large_data_cases, fixed_config)
+        for operation in operations
+        if operation.name not in parameterized and operation.large_data_cases
+    )
+
+
 def collect_operation_modules(modules: Iterable[Any]) -> OperationCatalog:
-    """Collect declarations from operation modules."""
+    """Collect declarations from all operation modules (files in the directory)."""
 
     # Freeze the discovered order before collecting each kind of declaration
     ordered_modules = cast(tuple[ModuleType, ...], tuple(modules))
@@ -95,108 +85,61 @@ def collect_operation_modules(modules: Iterable[Any]) -> OperationCatalog:
         "name",
         "operation",
     )
-    sweeps = unique_by(
-        (sweep for module in ordered_modules for sweep in getattr(module, "SWEEPS", ())),
+    declared = unique_by(
+        (benchmark for module in ordered_modules for benchmark in getattr(module, "BENCHMARKS", ())),
         "id",
-        "sweep",
+        "benchmark",
     )
 
-    # Build report comparisons and order the operations used by fixed benchmarks and large-data tests
+    # Fixed operations use the same Benchmark model and generic ASV harness as parameter sweeps
+    benchmarks = (*declared, *fixed_benchmarks(operations, declared))
     comparisons = unique_by(
-        (item for module in ordered_modules for item in module_comparisons(module)),
+        (comparison for module in ordered_modules for comparison in getattr(module, "COMPARISONS", ())),
         "slug",
         "comparison",
     )
-    coverage = tuple(
-        sorted(
-            (operation for operation in operations if operation.coverage is not None),
-            key=lambda operation: cast(OperationCoverage, operation.coverage).order,
-        )
-    )
 
-    # Ensure uniqueness
-    cases = unique_cases(sweeps)
-    references = unique_cases(sweeps, references=True)
-
-    # Check that every benchmark operation is adequately defined
+    # Check that every benchmark refers to the discovered operation object
     operation_names = {operation.name for operation in operations}
-    for sweep in sweeps:
-        if sweep.operation not in operation_names:
-            raise ValueError(f"Benchmark sweep {sweep.id!r} has no operation handler")
+    for benchmark in benchmarks:
+        if benchmark.operation.name not in operation_names:
+            raise ValueError(f"Benchmark {benchmark.id!r} has no operation handler")
+    cases = unique_cases(benchmarks)
+    return OperationCatalog(ordered_modules, operations, benchmarks, comparisons, cases)
 
-    # Return catalog shared by ASV, report rendering and large-data tests
-    return OperationCatalog(ordered_modules, operations, sweeps, comparisons, coverage, cases, references)
 
-
-# Discover once at import so ASV receives cases through sweeps and the renderer receives their report comparisons
+# Discover once at import so ASV and the renderer receive the same benchmark declarations
 CATALOG = collect_operation_modules(discover_operation_modules())
 OPERATION_MODULES = CATALOG.modules
 OPERATIONS = CATALOG.operations
-SWEEPS = CATALOG.sweeps
+BENCHMARKS = CATALOG.benchmarks
 COMPARISONS = CATALOG.comparisons
-OPERATION_CASES = CATALOG.coverage
 BENCHMARK_CASES = CATALOG.cases
-EXTERNAL_REFERENCE_CASES = CATALOG.references
 
-# Index operation and sweep declarations for runner and report lookups
+# Index declarations for tests, ASV, reports and large-data checks
 OPERATION_BY_NAME = {operation.name: operation for operation in OPERATIONS}
-OPERATION_COVERAGE_BY_NAME = {operation.name: operation.coverage for operation in OPERATION_CASES}
-SWEEP_BY_ID = {sweep.id: sweep for sweep in SWEEPS}
-BENCHMARK_CASE_BY_CLASS = {sweep.benchmark_class(case): case for sweep in SWEEPS for case in sweep.cases}
-EXTERNAL_REFERENCE_CASE_BY_CLASS = {sweep.benchmark_class(case): case for sweep in SWEEPS for case in sweep.references}
-
-# Build the identifiers used by benchmarks and large-data tests
-OPERATION_BENCHMARK_CASES = tuple(
-    f"{execution}-{operation.name}"
-    for operation in OPERATION_CASES
-    for execution in cast(OperationCoverage, operation.coverage).execution_modes
-)
-
-############################
-# Operation lookup helpers
-############################
+BENCHMARK_BY_ID = {benchmark.id: benchmark for benchmark in BENCHMARKS}
+BENCHMARK_BY_CLASS = {
+    benchmark.benchmark_class(case): benchmark for benchmark in BENCHMARKS for case in benchmark.cases
+}
+BENCHMARK_CASE_BY_CLASS = {
+    benchmark.benchmark_class(case): case for benchmark in BENCHMARKS for case in benchmark.cases
+}
+LARGE_DATA_CASES = {
+    f"{case.execution}-{operation.name}": (operation, case)
+    for operation in sorted(OPERATIONS, key=lambda item: item.order)
+    for case in operation.large_data_cases
+}
 
 
-def split_operation_case(case_name: str) -> tuple[ExecutionMode, OperationName]:
-    """Split one benchmark identifier into execution and operation names."""
-
-    execution, operation = case_name.split("-", maxsplit=1)
-
-    # Reject names that cannot resolve to one supported worker mode and registered operation
-    if execution not in ("dask", "multiprocessing") or operation not in OPERATION_BY_NAME:
-        raise ValueError(f"Unknown benchmark operation case: {case_name}")
-    return cast(ExecutionMode, execution), cast(OperationName, operation)
-
-
-def resolve_operation_parameters(
-    operation: OperationName,
-    method: str | None = None,
-    calculation_engine: Any | None = None,
-    strategy: Any | None = None,
-    execution_mode: Any | None = None,
-) -> tuple[str | None, Any | None, Any | None]:
-    """Resolve operation defaults through its local specification."""
-
-    # Collect the choices in the same config used by runners
-    config = BenchmarkConfig(
-        operation_method=method,
-        calculation_engine=calculation_engine,
-        operation_strategy=strategy,
-    )
-
-    # Appl defaults and validation for the requested execution mode
-    case = OPERATION_BY_NAME[operation].resolve_case(execution_mode or "inmem", config)
-    return case.method, case.engine, case.strategy
-
-
-def format_api_label(case: BenchmarkCase) -> str:
-    """Format the public call from the same options passed to its execution handler."""
+def format_api_label(operation: Operation, case: Case) -> str:
+    """Format the call from the same options passed to its execution."""
 
     # Build the public options once so labels remain aligned with the measured call
-    specification = OPERATION_BY_NAME[case.operation]
-    options = specification.option_builder(case, BenchmarkConfig())
+    values = {**case.options, "operation": operation.name}
+    options = operation.option_builder(case, RuntimeConfig(workload=values))
 
     # Keep only options chosen by the operation for concise report labels
-    selected = ((name, options[name]) for name in specification.label_options if name in options)
+    selected = ((name, options[name]) for name in operation.label_options if name in options)
     arguments = ", ".join(f"{name}={value!r}" for name, value in selected)
-    return f"{specification.public_call_name}({arguments})"
+    return f"{operation.public_call_name}({arguments})"

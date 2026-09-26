@@ -10,47 +10,46 @@ Mainly, it contains tools for running:
 
 ## Organization
 
-- `workflows/config.py` defines the shared benchmark configuration, parameter ranges and parameter sweeps,
-- `workflows/fixtures.py` defines inputs used by benchmarks (e.g. synthetic raster/point-cloud data),
-- `workflows/operations/` defines operations (e.g. ``reproject()``, ``grid()``), methods (e.g. ``resampling="linear"``),
-  calculation engines (e.g., SciPy, Numba), chunk strategies (e.g., "dense" or "sparse" for grouped stats), and
-  execution modes (in-memory, Dask, multiprocessing), beside the code that runs each operation,
-- `workflows/runner.py` sets up the shared inputs, workers, profiling and result computation,
-- `asv_suite/operations.py` sets up ASV to measure individual operations at one fixed configuration,
-- `asv_suite/parameter_sweeps.py` sets up ASV to measure operations across one-dimensional parameter ranges (e.g., raster input size, or method type),
-- `asv_suite/render_results.py` renders the raw measurements into comparisons and graphics used by the GitHub pages and documentation,
-- `dask_comparison/` contains direct Dask equivalent operations for internal performance comparison,
-- `flox_comparison/` contains direct Flox grouped statistics for performance comparison,
-- `gdal_comparison/` contains GDAL CLI equivalent operations for performance comparison,
-- `pdal_comparison/` contains PDAL pipelines equivalent operations for performance comparison,
+- `comparisons/` contains GDAL commands, PDAL pipelines to perform comparisons of equivalent operations that exist in GeoUtils,
+- `workflows/config.py` defines the configuration of parameters shared by all benchmarks,
+- `workflows/io.py` defines low-level input opening, output writing and fixtures shared by most operations,
+- `workflows/operations/` contains individual files defining GeoUtils benchmarked **operations** (e.g. ``reproject()``, ``grid()``); then **cases** which are combinations of
+  methods (e.g. ``resampling="linear"``), calculation engines (e.g., SciPy, Numba), chunk strategies (e.g., "dense" or "sparse" for grouped stats),
+ execution modes (in-memory, Dask, multiprocessing), and input data ranges (e.g., raster or point size); and finally defines **comparisons**
+  which link a GeoUtils methods to an external implementation (GDAL, PDAL, etc),
+- `workflows/operations/__init__.py` automatically retrieves all operations, cases and comparisons defined in the ``operations/`` directory,
+- `workflows/core.py` contains the `Operation`, `Case`, `Benchmark` and `Comparison` objects that facilitate the definition of operations above,
+- `workflows/runner.py` contains the logic about operation execution and profiling,
+- `asv_suite/benchmarks.py` defines a small class to register required ASV methods on all benchmarks,
+- `asv_suite/render_results.py` renders the raw measurements into HTML/graphics used by the GitHub pages and documentation,
 - `test_large_data.py` is a Pytest module to verify that every supported Dask/Multiprocessing operation computes correctly without
   loading the complete raster into memory.
 
 ## Adding a benchmark
 
 Benchmarks are defined in `workflows/operations/`, with one file per functionality (e.g., ``reprojection.py`` or ``filters.py``).
-Each file describes which GeoUtils function to call (e.g., ``reproject()``), which cases to compare (e.g., Dask/Multiproc), which
-parameter sweep to perform (e.g., varying raster input size) and finally if/how to compare to external references (e.g., GDAL/PDAL).
+Each file describes which GeoUtils function to call (e.g., ``reproject()``), which cases to compare (e.g., Dask/Multiproc, varying raster
+input size) and finally if/how to compare to other implementations (e.g., GDAL/PDAL).
 
-The benchmarks rely on five small objects:
+The benchmarks rely on three execution objects and one reporting object:
 
-- An `Operation` stores the functions that prepare and run one GeoUtils operation.
-- A `BenchmarkCase` stores a fixed implementation, such as a method + engine + execution mode. It is returned by
-  `execution_cases()`, `strategy_cases()` or `external_case()`, and each becomes one ASV benchmark.
-- A `ParameterAxis` stores the name and values of one changing input, such as raster size or chunk size.
-- A `Sweep` combines an axis, the function that applies its values and the cases to measure at every value.
-- A `Comparison`, returned by `comparison()`, selects saved result series for one report plot. It can combine GeoUtils
-  results with equivalent GDAL, PDAL or Flox results and does not run additional benchmarks.
+- An `Operation` stores the functions that prepare and run the operation.
+- A `Case` stores one fixed implementation of its operation (method, engine, execution mode, etc). Each case becomes one ASV benchmark.
+- A `Benchmark` combines one operation with all its cases. It can also define one varied input parameter and its
+  values; without that parameter, it is a fixed benchmark.
+- A `Comparison`, returned by `comparison()`, selects defined cases to compare to external benchmarks.
 
 To add a new benchmark, follow these steps:
 
 1. Choose the file in `workflows/operations/` to add your new benchmark of a functionality, or create a new one.
-2. Write the setup functions then register them with `Operation(...)`  (see examples in existing files).
+2. Write the preparation and execution functions then register them with `Operation(...)` (see simple example of setup in `filters.py`).
 3. Use `execution_cases()` or `strategy_cases()` to define the implementations to compare.
-4. Choose or define a `ParameterAxis`, write the function that applies its values to `BenchmarkConfig`, then add
-   `Sweep(axis, update, cases)` to the module's `SWEEPS`.
-5. If you want to add an external implementation, add a `<name>_comparison/` directory, and attach it to the sweep with
-   `external_case(...)`. Then, use `comparison(...)` in the functionality file to select the sweep  to compare with.
+4. To vary an input such as raster size or point count, define the values to test and a function that builds the
+   settings for each value. Use `parameter_config(...)` to combine them with the operation and cases, then add the
+   result to the module's `BENCHMARKS`.
+5. If no input varies, an operation with `large_data_cases` gets one fixed benchmark automatically.
+6. If you want to add an external implementation, add it under `comparisons/` and attach a normal case with
+   `reference_case(...)`. Then use `comparison(..., by=...)` to select the cases and plotted attribute.
 
 When running ASV, local outputs are generated under the gitignored `results/` directory:
 
@@ -115,7 +114,7 @@ python -m benchmarks.asv_suite.render_results --doc-only --doc-dir benchmarks/re
 Three workflows are related to ASV benchmark in our continuous integration.
 
 1. For every PR commit, `benchmark-asv-check` runs a quick check (~10min) of benchmark setups (it uses the `GEOUTILS_ASV_PR_CHECK=1`
-environment variable to run quick check on reduced parameters, and otherwise relies on ``asv check``).
+environment variable to run only the smallest test case of every benchmark, and otherwise relies on ``asv check``).
 
 2. For every PR merge into `main`, or on weekly schedule, `benchmark-asv` runs the full suite (1h+) and records
 the performance results to an `asv-results` branch on the GeoUtils repository (relying on ``asv run``).
