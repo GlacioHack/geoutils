@@ -16,10 +16,10 @@ Mainly, it contains tools for running:
 - `workflows/operations/` contains individual files defining GeoUtils benchmarked **operations** (e.g. ``reproject()``, ``grid()``); its **cases**, which are combinations of
   methods (e.g. ``resampling="linear"``), calculation engines (e.g., SciPy, Numba), chunk strategies (e.g., "dense" or "sparse" for grouped stats),
   execution modes (in-memory, Dask, multiprocessing), and input data ranges (e.g., raster or point size); and finally defines **comparisons**,
-  which select benchmark cases for report plots, including comparisons with external implementations (GDAL, PDAL, etc),
+  which selects chosen benchmark cases for generating comparison plots, including comparisons with external implementations (GDAL, PDAL, etc),
 - `workflows/operations/__init__.py` automatically collects the operations, benchmarks and comparisons defined in the ``operations/`` directory,
-- `workflows/core.py` contains the `Operation`, `Case`, `Benchmark` and `Comparison` objects that facilitate the definition of operations above,
-- `workflows/runner.py` contains the logic about operation execution and profiling,
+- `workflows/core.py` contains the `Operation`, `Case`, `Benchmark` and `Comparison` objects that facilitate the definitions of benchmarks,
+- `workflows/runner.py` contains the logic about worker execution (in-memory vs Dask vs multiprocessing) and links to GeoUtils profiling,
 - `asv_suite/benchmarks.py` defines a small class to register required ASV methods on all benchmarks,
 - `asv_suite/render_results.py` renders the raw measurements into HTML/graphics used by the GitHub pages and documentation,
 - `test_large_data.py` is a Pytest module to verify that every supported Dask/Multiprocessing operation computes correctly without
