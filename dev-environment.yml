@@ -13,7 +13,7 @@ dependencies:
 
   # Depend on the above
   - pyproj=3.*
-  - pandas>=1,<3
+  - pandas>=1,<4
   - numpy>=1,<3
   - affine
   - shapely
