@@ -467,6 +467,9 @@ def _point_values_at_support(
                 if dataframe is support_dataframe and point_partition_lengths is not None
                 else True
             )
+            # Dask cannot convert Pandas 3 string arrays directly to NumPy arrays
+            if isinstance(values.dtype, pd.StringDtype):
+                values = values.astype(object)
             return values.to_dask_array(lengths=lengths)
         return np.asarray(values)
 
