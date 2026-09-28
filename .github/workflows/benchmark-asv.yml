@@ -45,7 +45,7 @@ jobs:
           channel-priority: strict
           activate-environment: geoutils-dev
 
-      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: astral-sh/setup-uv@v10.2.0
         with:
           enable-cache: true
 
