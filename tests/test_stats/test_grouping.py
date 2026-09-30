@@ -579,6 +579,33 @@ class TestGroupedStats:
         assert set(axes_2d) == {"count_x", "count_y", "statistic", "colorbar"}
         plt.close("all")
 
+    def test_plot_grouped_stats__axes_min_count(self, tmp_path: Path) -> None:
+        """Checks that a figure relies on user axis and removes min_count."""
+
+        # Load plotting only for this test
+        pytest.importorskip("matplotlib")
+        import matplotlib.pyplot as plt
+
+        # We synthesize a group A/B to plot
+        table = gu.stats.stats(
+            np.array([2.0, 4.0, 10.0]),
+            by={"group": np.array(["A", "A", "B"])},
+            categories={"group": ["A", "B"]},
+            statistics="mean",
+        )
+        figure, frame = plt.subplots()
+        output = tmp_path / "grouped-means.png"
+
+        # Check min_count value was utilized in the plot
+        axes = gu.stats.plot_grouped_stats(table, statistic="mean", min_count=2, ax=frame, savefig_fname=str(output))
+        assert axes["statistic"].figure is figure
+        np.testing.assert_array_equal([bar.get_height() for bar in axes["count"].patches], [2, 1])
+        means = np.asarray(axes["statistic"].lines[0].get_ydata(), dtype=float)
+        assert means[0] == 3
+        assert np.isnan(means[1])
+        assert output.is_file()
+        plt.close(figure)
+
     @pytest.mark.parametrize("kind", ["integer", "boolean", "string"])
     def test_stats__masked_values_and_categories(self, kind: str) -> None:
         """Checks that masked values and masked category labels are excluded independently."""
@@ -700,6 +727,39 @@ class TestGroupedStats:
             backend="flox",
         )
         pd.testing.assert_frame_equal(result, expected)
+
+    def test_stats__flox_percentiles_spread(self) -> None:
+        """Checks that Flox computes exact percentiles and spreads from each each group."""
+
+        # We create synthetic values from two groups A/B, with one NaN and one masked value
+        pytest.importorskip("flox")
+        values = np.array([1.0, 2.0, 3.0, 10.0, 4.0, 5.0, 6.0, np.nan])
+        groups = np.array(["A"] * 4 + ["B"] * 4)
+        mask = np.array([True, True, False, True, True, True, True, True])
+        statistics = ["median", "90thpercentile", "iqr", "le90"]
+
+        # Compte stats with with Flox
+        result = gu.stats.stats(
+            values,
+            statistics=statistics,
+            by={"group": groups},
+            categories={"group": ["A", "B"]},
+            mask=mask,
+            backend="flox",
+        )
+        # We check exact equivalence with NumPy
+        selected = [values[mask & np.isfinite(values) & (groups == group)] for group in ("A", "B")]
+        np.testing.assert_array_equal(result[("value", "count")], [len(group) for group in selected])
+        np.testing.assert_allclose(result[("value", "median")], [np.median(group) for group in selected])
+        np.testing.assert_allclose(
+            result[("value", "90thpercentile")], [np.percentile(group, 90) for group in selected]
+        )
+        np.testing.assert_allclose(
+            result[("value", "iqr")], [np.percentile(group, 75) - np.percentile(group, 25) for group in selected]
+        )
+        np.testing.assert_allclose(
+            result[("value", "le90")], [np.percentile(group, 95) - np.percentile(group, 5) for group in selected]
+        )
 
 
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")

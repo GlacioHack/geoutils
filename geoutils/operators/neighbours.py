@@ -105,7 +105,7 @@ class PointNeighbours:
 @dataclass(frozen=True, init=False)
 class GridNeighbours:
     """
-    Define a grid neighbourhood for source cells, i.e. a window surrouding the target cells.
+    Define a grid neighbourhood for source cells, i.e. a window surrounding the target cells.
 
     Pass size for a square or circular window, or supply row/column offsets directly to define any window shape.
     For example, ``InverseDistance(neighborhood=GridNeighbours(size=5, shape="circular"))`` uses cells whose
@@ -711,6 +711,7 @@ def _prepare_regular_interpolation_data(
     array_indices: tuple[NDArrayNum, NDArrayNum] | None = None,
     source_index_offset: tuple[int, int] = (0, 0),
     source_shape: tuple[int, int] | None = None,
+    index_type: type[np.float32] | type[np.float64] = np.float32,
 ) -> tuple[Interpolator, list[LocalData], NodataHandling | None]:
     """Collect the cells and weights needed to propagate uncertainty through raster interpolation.
 
@@ -787,12 +788,14 @@ def _prepare_regular_interpolation_data(
     x = np.atleast_1d(np.asarray(points[0]))
     y = np.atleast_1d(np.asarray(points[1]))
     if array_indices is None:
+        # Match direct interpolation's pixel index precision
         source_rows, source_cols = _xy2ij(
             x,
             y,
             transform=transform,
             area_or_point=area_or_point,
             shift_area_or_point=shift_area_or_point,
+            op=index_type,
         )
     else:
         source_rows, source_cols = array_indices

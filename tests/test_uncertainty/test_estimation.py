@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import warnings
 from importlib.util import find_spec
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -18,6 +19,26 @@ from geoutils.stats.variography import VariogramModel
 
 class TestErrorStructureEstimation:
     """Test module for estimating independent and correlated error components."""
+
+    def test_estimate__constant_independent_component(self) -> None:
+        """Checks that independent errors have the standard deviation of the centered proxy values."""
+
+        # Symmetric point errors have zero median and standard deviation sqrt(2.5)
+        values = np.array([-2.0, -1.0, 1.0, 2.0])
+        proxy = gu.PointCloud.from_xyz(np.arange(4), np.zeros(4), values, crs=32631)
+
+        # Fit one constant component without a spatial variogram
+        structure = gu.ErrorStructure.estimate(
+            proxy,
+            components={"measurement": {"magnitude": "constant", "correlation": None}},
+            spread_estimator=np.std,
+            random_state=2,
+        )
+
+        # Population variance is the mean of 4, 1, 1, and 4
+        assert structure.predict_magnitude() == pytest.approx(np.sqrt(np.mean(values**2)))
+        assert structure.empirical_variogram is None
+        assert structure.fit_diagnostics["refinement"]["success"] is None
 
     def test_estimate_independent_variable_component_without_variography(self) -> None:
         """Checks that an independent component recovers increasing magnitudes without fitting a variogram."""
@@ -195,3 +216,77 @@ class TestStandardization:
         assert np.isnan(standardized[0])
         assert gu.stats.nmad(standardized) == pytest.approx(1)
         assert model((quality,))[1:] == pytest.approx(values[1:] / standardized[1:])
+
+    def test_two_step_standardization__masked_outlier(self) -> None:
+        """Checks that a masked proxy stays masked and an extreme standardized error is excluded."""
+
+        from geoutils.uncertainty.estimation import two_step_standardization
+
+        # Four ordinary errors, one extreme error, and one missing observation
+        values = np.ma.array([-2.0, -1.0, 1.0, 2.0, 100.0, 0.0], mask=[False] * 5 + [True])
+
+        def unit_magnitude(predictors: tuple[ArrayLike, ...]) -> NDArray[np.float64]:
+            """Return unit error magnitude at every supplied observation."""
+
+            return np.ones_like(np.asarray(predictors[0], dtype=float))
+
+        # Standardize after masking the extreme value
+        standardized, _ = two_step_standardization(values, [np.arange(len(values), dtype=float)], unit_magnitude)
+
+        # Four ordinary errors set the spread; the extreme and missing values remain masked
+        np.testing.assert_array_equal(np.ma.getmaskarray(standardized), [False] * 4 + [True, True])
+        assert gu.stats.nmad(standardized) == pytest.approx(1)
+
+
+class TestErrorStructureEstimationErrors:
+    """Test module for invalid configurations and statistical controls in ErrorStructure.estimate()."""
+
+    @pytest.mark.parametrize(
+        "components, error_type, message",
+        [
+            ({}, ValueError, "at least one named"),
+            ({"": {}}, TypeError, "non-empty names"),
+            ({"measurement": {"unknown": 1}}, ValueError, "Unknown configuration"),
+            ({"measurement": {"magnitude": "invalid"}}, ValueError, "magnitude must"),
+            ({"measurement": {"magnitude": "heteroscedastic"}}, ValueError, "requires at least one"),
+            ({"measurement": {"correlation": 2}}, TypeError, "variogram model name"),
+        ],
+    )
+    def test_estimate__error_invalid_component_configuration(
+        self, components: dict[str, dict[str, Any]], error_type: type[Exception], message: str
+    ) -> None:
+        """Checks an error is raised for a component description that cannot define an error model."""
+
+        # A valid point proxy isolates validation of the component description
+        proxy = gu.PointCloud.from_xyz([0, 1, 2, 3], [0, 0, 0, 0], [-2, -1, 1, 2], crs=32631)
+
+        # Invalid names, magnitudes, and correlation types fail before fitting
+        with pytest.raises(error_type, match=message):
+            gu.ErrorStructure.estimate(proxy, components=components)
+
+    @pytest.mark.parametrize(
+        "options, error_type, message",
+        [
+            ({"fit_method": "unknown"}, NotImplementedError, "Only fit_method"),
+            ({"min_count": 0}, ValueError, "min_count must"),
+            ({"outlier_factor": 0}, ValueError, "outlier_factor must"),
+            ({"spread_estimator": np.min}, ValueError, "spread_estimator returned"),
+            (
+                {"components": {"first": {"correlation": None}, "second": {"correlation": None}}},
+                ValueError,
+                "Only one independent component",
+            ),
+        ],
+    )
+    def test_estimate__error_invalid_fitting_options(
+        self, options: dict[str, Any], error_type: type[Exception], message: str
+    ) -> None:
+        """Checks an error is raised for invalid fitting controls or multiple independent components."""
+
+        # Four finite point errors make a valid constant-spread baseline
+        proxy = gu.PointCloud.from_xyz([0, 1, 2, 3], [0, 0, 0, 0], [-2, -1, 1, 2], crs=32631)
+        default: dict[str, Any] = {"components": {"measurement": {"correlation": None}}, "spread_estimator": np.std}
+
+        # Change one option at a time and check its reported error
+        with pytest.raises(error_type, match=message):
+            gu.ErrorStructure.estimate(proxy, **(default | options))

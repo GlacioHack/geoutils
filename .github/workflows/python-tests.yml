@@ -88,6 +88,9 @@ jobs:
       env:
         # Render plots without a GUI backend (avoid Tcl/Tk issues on Windows)
         MPLBACKEND: Agg
+        # Record compiled Numba lines when the test suite first compiles each function
+        NUMBA_JIT_COVERAGE: "1"
+        NUMBA_CACHE_DIR: ${{ runner.temp }}
       # Module execution also collects tests from the repository-only benchmarks package
       run: python -m pytest -ra --cov=geoutils/ --cov-report=lcov
 

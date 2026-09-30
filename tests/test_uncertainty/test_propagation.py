@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, Literal
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -182,6 +184,41 @@ class TestAnalyticalOperatorPropagation:
         assert summary.error_structure is source_error
         assert summary.covariance is not None
         np.testing.assert_allclose(summary.covariance, [[0.5, 0.25], [0.25, 0.5]])
+
+    @pytest.mark.parametrize(
+        "at, selected",
+        [("all", ["left", "right"]), (["right"], ["right"])],
+    )
+    def test_propagate__selects_analytical_covariance_and_quantiles(
+        self, at: Literal["all"] | list[str], selected: list[str]
+    ) -> None:
+        """Checks that selected outputs determine the saved covariance and analytical quantile columns."""
+
+        # Two overlapping means share the error in source b
+        first = _local([1, 2], ["a", "b"], [[0, 0], [1, 0]])
+        second = _local([2, 3], ["b", "c"], [[1, 0], [2, 0]])
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+
+        # Select both outputs or only the second while calculating the same two means
+        summary = gu.uncertainty.propagate(
+            Mean(),
+            [first, second],
+            structure,
+            output_labels=["left", "right"],
+            at=at,
+            return_covariance=True,
+            quantiles=(0.5,),
+        )
+
+        # Each mean has variance 1/2 and their shared source contributes covariance 1/4
+        labels = pd.Index(["left", "right"], name="output")
+        weights = np.array([[0.5, 0.5, 0.0], [0.0, 0.5, 0.5]])
+        full_covariance = pd.DataFrame(weights @ np.eye(3) @ weights.T, index=labels, columns=labels)
+        assert summary.covariance is not None
+        pd.testing.assert_frame_equal(summary.covariance, full_covariance.loc[selected, selected])
+        assert summary.quantiles is not None
+        expected_medians = pd.Series([np.mean(first.values), np.mean(second.values)], index=labels)
+        np.testing.assert_array_equal(summary.quantiles.loc[0.5, selected], expected_medians.loc[selected])
 
     def test_propagate__error_analytical_samples(self) -> None:
         """Checks that analytical propagation rejects a request for random output samples."""
@@ -394,6 +431,107 @@ class TestPropagationSummary:
         assert summary.std == pytest.approx(0)
         assert not hasattr(summary, "to_error_structure")
 
+    def test_summary__copies_labelled_outputs(self) -> None:
+        """Checks that a summary stores a copy of outputs (not a pointer that can back-propagate into the class)."""
+
+        # We create synthetic propagation
+        labels = pd.Index(["left", "right"], name="output")
+        selection = pd.DataFrame({"flat_index": [0, 1], "estimate": [2.0, 4.0]}, index=labels)
+        covariance = pd.DataFrame([[1.0, 0.5], [0.5, 4.0]], index=labels, columns=labels)
+        covariance_mean = pd.Series([2.0, 4.0], index=labels)
+        samples = pd.DataFrame([[1.0, 2.0], [3.0, 6.0]], columns=labels)
+        quantiles = pd.DataFrame([[2.0, 4.0]], index=[0.5], columns=labels)
+        marginal_weights = np.array([0.25, 0.75])
+        context_values = np.array([1.0, 2.0])
+        error_structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+
+        # Then we store everything in a summary object
+        summary = gu.PropagationSummary(
+            estimate=np.array([2.0, 4.0]),
+            mean=np.array([2.5, 4.5]),
+            std=np.array([1.0, 2.0]),
+            error_structure=error_structure,
+            method="numerical",
+            selection=selection,
+            covariance=covariance,
+            covariance_mean=covariance_mean,
+            samples=samples,
+            quantiles=quantiles,
+            marginals={"left": {"weights": marginal_weights}},
+            failures={1: "failed draw"},
+            output={"unit": "m"},
+            context={"values": context_values},
+            metadata={"source": "test"},
+            n_samples=2,
+        )
+
+        # We check that editing the tables/arrays does not alter the summary
+        selection.loc["left", "estimate"] = 99
+        covariance.loc["left", "right"] = 99
+        covariance_mean.loc["left"] = 99
+        samples.loc[0, "left"] = 99
+        quantiles.loc[0.5, "left"] = 99
+        marginal_weights[0] = 99
+        context_values[0] = 99
+        assert summary.selection.loc["left", "estimate"] == 2
+        assert summary.covariance is not None and summary.covariance.loc["left", "right"] == 0.5
+        assert summary.covariance_mean is not None and summary.covariance_mean.loc["left"] == 2
+        assert summary.samples is not None and summary.samples.loc[0, "left"] == 1
+        np.testing.assert_array_equal(summary.quantile(0.5), [2, 4])
+        np.testing.assert_array_equal(summary.marginal("left")["weights"], [0.25, 0.75])
+        assert summary.context is not None
+        np.testing.assert_array_equal(summary.context["values"], [1, 2])
+        assert summary.nsim == 2
+        np.testing.assert_array_equal(summary.bias, [0.5, 0.5])
+        np.testing.assert_array_equal(summary.variance, [1, 4])
+        assert summary.correlation is not None
+        np.testing.assert_allclose(summary.correlation, [[1, 0.25], [0.25, 1]])
+
+    def test_summary__circular_bias_has_no_linear_variance(self) -> None:
+        """Checks that circular bias wraps across a period and ordinary variance is unavailable."""
+
+        # An estimate near 360 degrees and a mean near zero differ by two degrees
+        selection = pd.DataFrame({"flat_index": [0], "estimate": [359.0]}, index=["bearing"])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        summary = gu.PropagationSummary(
+            estimate=np.array([359.0]),
+            mean=np.array([1.0]),
+            std=np.array([3.0]),
+            error_structure=source_error,
+            method="numerical",
+            selection=selection,
+            output={"circular_period": 360},
+        )
+
+        # Wrap the mean difference instead of subtracting angles as linear numbers
+        np.testing.assert_array_equal(summary.bias, [2])
+        with pytest.raises(TypeError, match="Circular output has no ordinary variance"):
+            _ = summary.variance
+
+    def test_quantile__unwraps_circular_draws_around_estimate(self) -> None:
+        """Checks that circular quantiles place draws on the same turn as the nominal angle."""
+
+        # Draws of 357 and 1 degrees lie two degrees either side of an estimate at 359
+        labels = pd.Index(["angle"])
+        selection = pd.DataFrame({"flat_index": [0], "estimate": [359.0]}, index=labels)
+        summary = gu.PropagationSummary(
+            estimate=np.array([359.0]),
+            mean=np.array([359.0]),
+            std=np.array([2.0]),
+            error_structure=gu.ErrorStructure([gu.ErrorComponent("measurement", 1)]),
+            method="numerical",
+            selection=selection,
+            samples=pd.DataFrame([[357.0], [1.0]], columns=labels),
+            output={"circular_period": 360},
+        )
+
+        # Unwrap 1 degree to 361 before taking the midpoint and 50% interval
+        assert summary.quantile(0.5).loc["angle"] == 359
+        interval = summary.interval(0.5)
+        assert interval.loc["angle", "lower"] == 358
+        assert interval.loc["angle", "upper"] == 360
+        assert interval.attrs["coordinate_convention"] == "unwrapped_about_estimate"
+
     def test_marginal__error_numerical_without_samples(self) -> None:
         """Checks that a numerical result without saved draws does not claim an exact normal marginal."""
 
@@ -409,6 +547,83 @@ class TestPropagationSummary:
             summary.quantile(0.5)
         with pytest.raises(ValueError, match="Quantiles require saved draws"):
             summary.interval()
+
+    @pytest.mark.parametrize(
+        "selection",
+        [
+            pd.DataFrame({"flat_index": [0, 1], "estimate": [2.0, 4.0]}, index=["left", "left"]),
+            pd.DataFrame({"flat_index": [0, 1]}, index=["left", "right"]),
+        ],
+    )
+    def test_summary__error_invalid_selection(self, selection: pd.DataFrame) -> None:
+        """Checks errors when creating a summary (must have unique labels and contain estimates)."""
+
+        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+
+        with pytest.raises(ValueError, match="selection must"):
+            gu.PropagationSummary(
+                estimate=np.array([2.0, 4.0]),
+                mean=np.array([2.0, 4.0]),
+                std=np.array([1.0, 1.0]),
+                error_structure=source_error,
+                method="analytical",
+                selection=selection,
+            )
+
+    @pytest.mark.parametrize("field", ["covariance", "covariance_mean", "samples", "quantiles"])
+    def test_summary__error_mismatched_output_labels(self, field: str) -> None:
+        """
+        Checks that a summary raises an error if covariance, covariance mean, samples, and quantiles
+        have labels that do not match.
+        """
+
+        # We reverse the labels, which changes the meaning of either covariance or draws
+        labels = pd.Index(["left", "right"], name="output")
+        reverse = labels[::-1]
+        selection = pd.DataFrame({"flat_index": [0, 1], "estimate": [2.0, 4.0]}, index=labels)
+        values = pd.DataFrame(np.eye(2), index=reverse, columns=reverse)
+        tables = {
+            "covariance": values,
+            "covariance_mean": pd.Series([2.0, 4.0], index=reverse),
+            "samples": pd.DataFrame([[2.0, 4.0]], columns=reverse),
+            "quantiles": pd.DataFrame([[2.0, 4.0]], index=[0.5], columns=reverse),
+        }
+        options: dict[str, Any] = {field: tables[field]}
+
+        # Check an error is raised for any reverted field
+        with pytest.raises(ValueError, match=field):
+            gu.PropagationSummary(
+                estimate=np.array([2.0, 4.0]),
+                mean=np.array([2.0, 4.0]),
+                std=np.array([1.0, 1.0]),
+                error_structure=gu.ErrorStructure([gu.ErrorComponent("measurement", 1)]),
+                method="numerical",
+                selection=selection,
+                **options,
+            )
+
+    def test_summary__error_invalid_probability_and_coverage(self) -> None:
+        """Checks that quantile() and interval() raise an error on invalid inputs."""
+
+        # We get a normal distribution propagation using a mean
+        data = _local([1.0, 3.0], ["a", "b"], [[0.0], [1.0]])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        summary = gu.uncertainty.propagate(Mean(), data, source_error)
+
+        # Raise error is probability is not finite/scalar
+        for invalid_type in (True, "half"):
+            with pytest.raises(TypeError, match="probability must be a scalar number"):
+                summary.quantile(invalid_type)  # type: ignore[arg-type]
+        for invalid_probability in (-0.1, 1.1, np.nan):
+            with pytest.raises(ValueError, match="probability must be finite"):
+                summary.quantile(invalid_probability)
+        # Same here
+        for invalid_type in (True, "half"):
+            with pytest.raises(TypeError, match="coverage must be a scalar number"):
+                summary.interval(invalid_type)  # type: ignore[arg-type]
+        for invalid_coverage in (0, 1, np.nan):
+            with pytest.raises(ValueError, match="coverage must be finite"):
+                summary.interval(invalid_coverage)
 
 
 class TestCallablePropagation:
@@ -590,3 +805,64 @@ class TestCallablePropagation:
                 structure,
                 nodata_propagation="ignore",
             )
+
+
+class TestPropagationValidation:
+    """Test module for invalid global options and output selections in propagate()."""
+
+    @pytest.mark.parametrize(
+        "options, error_type, message",
+        [
+            ({"error_structure": object()}, TypeError, "error_structure must"),
+            ({"method": "invalid"}, ValueError, "method must"),
+            ({"max_covariance_size": 0}, ValueError, "max_covariance_size must"),
+            ({"max_sample_bytes": 0}, ValueError, "max_sample_bytes must"),
+            ({"operation_kwargs": {}}, TypeError, "requires a bound spatial method"),
+            ({"operator": object()}, TypeError, "operator must"),
+            ({"circular_period": 360}, ValueError, "Circular outputs require"),
+            ({"data": []}, ValueError, "at least one LocalData target"),
+        ],
+    )
+    def test_propagate__error_invalid_global_options(
+        self, options: dict[str, Any], error_type: type[Exception], message: str
+    ) -> None:
+        """Checks an error is raised for invalid model, method, storage limits, or operator inputs."""
+
+        # One finite mean provides a valid baseline for each changed option
+        data = _local([1.0, 3.0], ["a", "b"], [[0, 0], [1, 0]])
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        defaults: dict[str, Any] = {"operator": Mean(), "data": data, "error_structure": structure}
+
+        # Each option must fail before a propagation result is produced
+        with pytest.raises(error_type, match=message):
+            gu.uncertainty.propagate(**(defaults | options))
+
+    @pytest.mark.parametrize(
+        "options, error_type, message",
+        [
+            ({"output_labels": ["left", "left"]}, ValueError, "output_labels must contain one unique label"),
+            ({"at": "left"}, TypeError, "at must be 'all' or a sequence"),
+            ({"at": ["right", "right"]}, ValueError, "at must name distinct existing"),
+            ({"at": ["missing"]}, ValueError, "at must name distinct existing"),
+            (
+                {"at": "all", "return_covariance": True, "max_covariance_size": 1},
+                ValueError,
+                "exceeds max_covariance_size",
+            ),
+            ({"return_covariance": True, "max_covariance_size": 1}, ValueError, "Select outputs with at"),
+        ],
+    )
+    def test_propagate__error_invalid_local_output_selection(
+        self, options: dict[str, Any], error_type: type[Exception], message: str
+    ) -> None:
+        """Checks an error is raised for duplicate labels, unknown outputs, or oversized covariance."""
+
+        # Two means provide left and right output labels
+        first = _local([1.0, 2.0], ["a", "b"], [[0, 0], [1, 0]])
+        second = _local([2.0, 3.0], ["b", "c"], [[1, 0], [2, 0]])
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        defaults: dict[str, Any] = {"output_labels": ["left", "right"]}
+
+        # Selection and covariance limits apply before the joint result is stored
+        with pytest.raises(error_type, match=message):
+            gu.uncertainty.propagate(Mean(), [first, second], structure, **(defaults | options))

@@ -1047,6 +1047,33 @@ class TestGridChunked:
         assert not dask_points.pc.is_loaded
         assert not multiproc_points.is_loaded
 
+    def test_grid__empty_dask_partitions(self, tmp_path: Path) -> None:
+        """Checks that chunked gridding returns empty Dask partitions when points are unreachable."""
+
+        # We create 5 points into partitions of 2/2/1
+        points = gpd.GeoDataFrame(
+            {"z": np.arange(5, dtype=float)},
+            geometry=gpd.points_from_xy(np.arange(5, dtype=float), np.zeros(5)),
+            crs=32631,
+        )
+        filename = tmp_path / "distant-points.gpkg"
+        points.to_file(filename, index=False)
+        source = gu.open_pointcloud(str(filename), data_column="z", chunks=2)
+
+        # We define a grid destination that is beyond the 1-pixel radius of every source point
+        reference = Raster.from_array(np.zeros((3, 4)), rio.transform.from_origin(100, 3, 1, 1), crs=32631)
+        options = {"ref": reference, "resampling": "nearest", "dist_nodata_pixel": 1}
+        expected = PointCloud(points, data_column="z").grid(**options)
+        result = source.pc.grid(**options, chunksizes=(2, 3))
+
+        # Check lazy input/output, then that all are NaNs
+        assert not source.pc.is_loaded
+        assert hasattr(result.data, "compute")
+        computed = result.compute()
+        assert np.isnan(expected.to_nanarray()).all()
+        np.testing.assert_array_equal(np.asarray(computed), expected.to_nanarray())
+        assert not source.pc.is_loaded
+
     def test_grid__dask_multiprocessing_error(self, tmp_path: Path) -> None:
         """Reject two schedulers for one gridding operation before evaluating point partitions."""
 

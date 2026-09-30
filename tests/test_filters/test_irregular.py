@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import geopandas as gpd
 import numpy as np
@@ -12,7 +13,7 @@ from geopandas.testing import assert_geodataframe_equal
 import geoutils as gu
 from geoutils.multiproc import MultiprocConfig
 from geoutils.multiproc.cluster import MpCluster
-from geoutils.operators import PointNeighbours
+from geoutils.operators import GridNeighbours, PointNeighbours
 from geoutils.operators.reducer import Mean, Median, Quantile
 
 
@@ -66,6 +67,24 @@ class TestPointCloudFilter:
 
         # Check first/middle and middle/last pair means
         np.testing.assert_array_equal(filtered.data, [5.0, 5.0, 25.0])
+
+    def test_filter__missing_neighbors_and_minimum_finite_points(self) -> None:
+        """Checks that a point mean handles missing neighbors and a custom reducer requires enough finite values."""
+
+        # The middle point sees both finite values; each end sees only one
+        points = gu.PointCloud.from_xyz([0.0, 1.0, 2.0], [0.0] * 3, [1.0, np.nan, 3.0], crs=32632)
+
+        # Compare missing-value handling and the minimum count for a median quantile
+        ignored = points.filter(method="mean", radius=1.1, nodata_propagation="ignore")
+        propagated = points.filter(method="mean", radius=1.1, nodata_propagation="propagate")
+        required = points.filter(method=Quantile(0.5), radius=1.1, min_points=2)
+
+        # Only the middle window has two finite values, whose NumPy mean is two
+        expected_ignored = np.array([1.0, np.mean(np.array([1.0, 3.0])), 3.0])
+        expected_required = np.array([np.nan, np.median(np.array([1.0, 3.0])), np.nan])
+        np.testing.assert_allclose(ignored.data, expected_ignored)
+        assert np.isnan(propagated.data).all()
+        np.testing.assert_allclose(required.data, expected_required, equal_nan=True)
 
     def test_filter__reducer_neighborhood_and_overrides(self) -> None:
         """Checks that point filters use the reducer's limits and honor explicit overrides without changing it."""
@@ -235,3 +254,30 @@ class TestPointCloudFilterChunked:
         assert filtered.data_column == "height"
         assert_geodataframe_equal(filtered.ds, expected.ds, check_dtype=False)
         assert not source.is_loaded
+
+
+class TestPointCloudFilterErrors:
+    """Test module for errors on point filters."""
+
+    @pytest.mark.parametrize(
+        "options, error_type, message",
+        [
+            ({"method": "unknown"}, ValueError, "Unknown point filter method"),
+            ({"method": Mean(neighborhood=GridNeighbours(size=3))}, TypeError, "requires PointNeighbours"),
+            ({"nodata_propagation": "invalid"}, ValueError, "nodata_propagation"),
+            ({"include_self": 1}, TypeError, "include_self"),
+            ({"min_points": -1}, ValueError, "min_points"),
+            ({"n_threads": -1}, ValueError, "n_threads"),
+            ({"batch_size": 0}, ValueError, "batch_size"),
+        ],
+    )
+    def test_filter__error_invalid_options(
+        self, options: dict[str, Any], error_type: type[Exception], message: str
+    ) -> None:
+        """Checks an error is raised for an invalid point filter method or execution option."""
+
+        # Synthetic point cloud from 2 points
+        points = gu.PointCloud.from_xyz([0.0, 1.0], [0.0, 0.0], [2.0, 4.0], crs=32632)
+
+        with pytest.raises(error_type, match=message):
+            points.filter(**options)

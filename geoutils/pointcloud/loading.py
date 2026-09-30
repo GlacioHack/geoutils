@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import pathlib
 from typing import Any
 
 import geopandas as gpd
@@ -118,6 +119,29 @@ def _load_pointcloud_bounds(
     return gpd.read_file(filename, bbox=tuple(bounds))
 
 
+def _read_point_file_rows(filename: str | pathlib.Path, columns: list[str], start: int, count: int) -> gpd.GeoDataFrame:
+    """Read a row range from a LAS or vector point file, including its schema when the range is empty."""
+
+    from geoutils.pointcloud.las import _is_laspy_supported, _load_laspy_data_slice
+
+    # LAS has its own row reader, while Pyogrio reads vector rows by offset
+    if _is_laspy_supported(filename):
+        return _load_laspy_data_slice(
+            filename,
+            columns=columns,
+            start=start,
+            count=count,
+        )
+    import pyogrio
+
+    dataframe = pyogrio.read_dataframe(
+        filename,
+        skip_features=start,
+        max_features=max(1, count),
+    )
+    return dataframe.iloc[:0] if count == 0 else dataframe
+
+
 def _load_pointcloud_rows(source_pointcloud: Any, start: int, count: int) -> gpd.GeoDataFrame:
     """Load a consecutive group of point cloud rows for one partition."""
 
@@ -125,21 +149,7 @@ def _load_pointcloud_rows(source_pointcloud: Any, start: int, count: int) -> gpd
     if source_pointcloud.is_loaded or source_pointcloud._is_pd:
         return source_pointcloud.ds.iloc[start : start + count]
     assert source_pointcloud.name is not None
-    from geoutils.pointcloud.las import _is_laspy_supported, _load_laspy_data_slice
 
-    # LAS has its own row reader, while Pyogrio reads vector rows by offset
-    if _is_laspy_supported(source_pointcloud.name):
-        return _load_laspy_data_slice(
-            source_pointcloud.name,
-            columns=list(source_pointcloud._nongeo_columns),
-            start=start,
-            count=count,
-        )
-    import pyogrio
-
-    dataframe = pyogrio.read_dataframe(
-        source_pointcloud.name,
-        skip_features=start,
-        max_features=max(1, count),
-    )
-    return dataframe.iloc[:0] if count == 0 else dataframe
+    # LAS needs its dimension names; vector files do not need columns for Pyogrio
+    columns = list(source_pointcloud._nongeo_columns) if source_pointcloud._is_las else []
+    return _read_point_file_rows(source_pointcloud.name, columns, start, count)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import os.path
 import re
 import tempfile
+import warnings
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Literal
@@ -138,6 +139,39 @@ class TestResampling:
         assert np.all(np.isfinite(vals[:-1]))
         np.testing.assert_allclose(vals[:-1], raster.to_nanarray()[index_i.ravel(), index_j.ravel()])
         assert not np.isfinite(vals[-1])
+
+    @pytest.mark.parametrize("method", ["interp_at_points", "reduce_at_points"])
+    @pytest.mark.parametrize("loaded", [False, True], ids=["unloaded", "loaded"])
+    def test_interp_reduce_at_points__out_of_bounds(self, method: str, loaded: bool, tmp_path: Path) -> None:
+        """Checks that all point sampling names return NaN beyond the bounds of loaded and unloaded rasters."""
+
+        # Create synthetic raster and write to file to test MP
+        values = np.arange(1, 31, dtype=np.float32).reshape(5, 6)
+        raster = gu.Raster.from_array(
+            values, rio.transform.from_origin(500_000, 4_100_000, 10, 20), crs=32610, nodata=0
+        )
+        filename = tmp_path / "source.tif"
+        raster.to_file(filename)
+        source = gu.Raster(filename, load_data=loaded)
+
+        # We query two lat/lon corners, slightly out of bounds
+        x = np.array([raster.bounds.left - 1_000, raster.bounds.right + 1_000])
+        y = np.array([raster.bounds.top + 1_000, raster.bounds.bottom - 1_000])
+        longitude, latitude = reproject_to_latlon((x, y), raster.crs)
+        options = {"method": "nearest"} if method.startswith("interp") else {}
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            result = getattr(source, method)((longitude, latitude), input_latlon=True, as_array=True, **options)
+
+        # Check every outside value is NaN, and source data is not loaded with MP
+        np.testing.assert_array_equal(result, [np.nan, np.nan])
+        assert source.is_loaded == loaded
+        if method.startswith("interp"):
+            assert any(
+                "All provided points were outside of raster bounds" in str(warning.message) for warning in caught
+            )
+        if method in {"interp_points", "reduce_points"}:
+            assert any(issubclass(warning.category, DeprecationWarning) for warning in caught)
 
     @pytest.mark.parametrize("method", ["interp_at_points", "reduce_at_points"])
     @pytest.mark.parametrize("point_input_type", ["pointcloud", "accessor", "geodataframe", "latlon"])

@@ -7,6 +7,7 @@ import subprocess
 import sys
 from importlib.util import find_spec
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -417,6 +418,23 @@ class TestVariogramConversion:
         np.testing.assert_allclose(axes.lines[-1].get_ydata()[0], result.variogram(0))
         pyplot.close(axes.figure)
 
+    def test_combine__flattens_nested_sum_and_uses_one_nugget(self) -> None:
+        """Checks that combining a summed model adds its components properly, including nugget."""
+
+        # We define 4 base models with different partial sills
+        # We add a nugger to the inner sum
+        first = VariogramModel("gaussian", effective_range=4, partial_sill=1)
+        second = VariogramModel("exponential", effective_range=8, partial_sill=2)
+        third = VariogramModel("spherical", effective_range=12, partial_sill=3)
+        inner = VariogramModel.combine([first, second], combination="sum", nugget=0.25)
+
+        # We check that combining the inner sum replaces nugget properly, and flattens the three models
+        combined = VariogramModel.combine([inner, third], combination="sum", nugget=0.5)
+        assert combined.model_name == "sum"
+        assert combined.components == (first, second, third)
+        assert combined.nugget == 0.5
+        assert combined.sill == np.sum([1, 2, 3]) + 0.5
+
     def test_product_model_multiplies_covariances(self) -> None:
         """Checks that a product model multiplies component covariances and keeps one nugget."""
 
@@ -572,6 +590,27 @@ class TestVariogramErrors:
         with pytest.raises(ValueError, match="read-only"):
             result.lags[0] = 3
 
+    @pytest.mark.parametrize(
+        "options, message",
+        [
+            ({"lags": np.array([[1.0, 2.0]])}, "one-dimensional"),
+            ({"semivariance": np.array([0.2])}, "equal lengths"),
+            ({"counts": np.array([2, -1])}, "cannot be negative"),
+            ({"bin_edges": np.array([1.0])}, "bin_edges.*aligned"),
+        ],
+    )
+    def test_variogram__error_invalid_bin_arrays(self, options: dict[str, NDArrayNum], message: str) -> None:
+        """Checks an error is raised for inconsistent variogram input arrays."""
+
+        # We create valid arrays, and will update with an invalid array at once below
+        arrays: dict[str, Any] = {
+            "lags": np.array([1.0, 2.0]),
+            "semivariance": np.array([0.2, 0.5]),
+            "counts": np.array([3, 4]),
+        }
+        with pytest.raises(ValueError, match=message):
+            gu.Variogram(**(arrays | options))
+
     def test_from_pairs__error_distance_dimensions(self) -> None:
         """Checks that from_pairs() rejects distances that do not provide one value per pair."""
 
@@ -582,6 +621,32 @@ class TestVariogramErrors:
 
         # Reject the incompatible dimensions before estimating semivariance
         with pytest.raises(ValueError, match="Variable 'distance' in argument ``pairs`` must have dimensions"):
+            gu.Variogram.from_pairs(pairs)
+
+    @pytest.mark.parametrize("case", ["missing_values", "wrong_endpoints", "zero_distances"])
+    def test_from_pairs__error_invalid_pair_values(self, case: str) -> None:
+        """Checks an error is raised when pairs don't have two endpoint or positive distances."""
+
+        # We define 3 pairs with valid endpoints/distances
+        values = np.array([[1.0, 2.0], [2.0, 4.0], [3.0, 6.0]])
+        pairs = xr.Dataset({"value": (("pair", "endpoint"), values), "distance": ("pair", [1.0, 2.0, 3.0])})
+
+        # We remove or reshape endpoint values, or make distance wrong
+        if case == "missing_values":
+            pairs = pairs.drop_vars("value")
+            error_type: type[Exception] = TypeError
+            message = "containing 'distance' and 'value'"
+        elif case == "wrong_endpoints":
+            pairs = pairs.isel(endpoint=[0])
+            error_type = ValueError
+            message = "length two"
+        else:
+            pairs["distance"] = ("pair", [0.0, 0.0, 0.0])
+            error_type = ValueError
+            message = "no finite observations with positive distance"
+
+        # Check error
+        with pytest.raises(error_type, match=message):
             gu.Variogram.from_pairs(pairs)
 
     @pytest.mark.parametrize("n_runs", [0, -1, 1.5, True])
@@ -632,6 +697,28 @@ class TestVariogramErrors:
         # Should raise error
         with pytest.raises(ValueError, match=message):
             VariogramModel(**options)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        "case, message", [("one", "at least two"), ("nested", "Nested sum"), ("nugget", "omit nuggets")]
+    )
+    def test_variogram_model__error_invalid_composition(self, case: str, message: str) -> None:
+        """Checks an error is raised for invalid variogram model composiition."""
+
+        # We define two base models
+        first = VariogramModel("gaussian", effective_range=4, partial_sill=1)
+        second = VariogramModel("exponential", effective_range=8, partial_sill=2)
+
+        if case == "one":
+            # A sum needs at least two components
+            components: tuple[VariogramModel, ...] = (first,)
+        elif case == "nested":
+            # A sum cannot directly contain another sum, combine() flattens it first
+            components = (VariogramModel.combine([first, second], combination="sum"), second)
+        else:
+            # Component nuggets must be specified once on the parent sum
+            components = (first, VariogramModel("exponential", effective_range=8, partial_sill=2, nugget=0.5))
+        with pytest.raises(ValueError, match=message):
+            VariogramModel("sum", components=components)
 
     def test_correlation__error_zerosill(self) -> None:
         """Checks that a model with zero sill has no defined correlation."""

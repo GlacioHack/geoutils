@@ -70,34 +70,6 @@ class TestStats:
         np.testing.assert_array_equal(grouped["value", "Mode"], [1.0, 6.0])
         np.testing.assert_array_equal(grouped["value", "Quantile"], [1.5, 7.0])
 
-    def test_stats__propagates_grouped_mean_uncertainty(self) -> None:
-        """Checks that grouped stats() propagates a Reducer's uncertainty from the exact group memberships."""
-
-        # Give two groups two independent observations each, with source standard deviation two
-        values = np.array([[1.0, 3.0], [6.0, 10.0]])
-        groups = np.array([[0, 0], [1, 1]])
-        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
-        by = {"group": groups}
-        categories = {"group": [0, 1]}
-
-        # Compare the returned table with the result calculated without requesting uncertainty
-        expected = gu.stats.stats(values, Mean(), by=by, categories=categories)
-        nominal, summary = gu.stats.stats(
-            values,
-            Mean(),
-            error_structure=source_error,
-            uncertainty_kwargs={"return_covariance": True},
-            by=by,
-            categories=categories,
-        )
-        pd.testing.assert_frame_equal(nominal, expected)
-        np.testing.assert_array_equal(summary.estimate, [2.0, 8.0])
-
-        # Each group mean has variance 4 / 2 and disjoint source IDs give zero cross-group covariance
-        np.testing.assert_allclose(summary.variance, [2.0, 2.0])
-        assert summary.covariance is not None
-        np.testing.assert_allclose(summary.covariance, np.diag([2.0, 2.0]))
-
     def test_stats__summary_and_grouped_routes(self) -> None:
         """Checks that by chooses between a summary and a grouped table."""
 
@@ -182,6 +154,25 @@ class TestStats:
         by = {"group": values > 1} if grouped else None
         with pytest.raises(TypeError, match="Argument ``subsample_per_group`` must be a boolean"):
             gu.stats.stats(values, "mean", by=by, subsample_per_group=invalid)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        ("option", "message", "error"),
+        [
+            ({"strategy": "invalid"}, "Argument ``strategy``", ValueError),
+            ({"backend": "invalid"}, "Argument ``backend``", ValueError),
+            ({"subsampling_strategy": "invalid"}, "Argument ``subsampling_strategy``", ValueError),
+            ({"subsample": 0}, "Argument ``subsample``", ValueError),
+            ({"fractional": "yes"}, "Argument ``fractional``", TypeError),
+            ({"fractional": True}, "Fractional statistics require one vector grouper", ValueError),
+            ({"return_masks": True}, "Argument ``by`` is required", ValueError),
+        ],
+    )
+    def test_stats__error_invalid_options(self, option: dict[str, Any], message: str, error: type[Exception]) -> None:
+        """Checks errors raised for various options."""
+
+        values = np.arange(4, dtype=float)
+        with pytest.raises(error, match=message):
+            gu.stats.stats(values, "mean", **option)
 
     @pytest.mark.parametrize("as_list", [False, True])
     def test_stats__empty_mask_callable_result(self, as_list: bool) -> None:
@@ -711,6 +702,107 @@ class TestStats:
             "Percentage valid points": np.float64(100.0),
         }
         compare_dict(rast_stats_crop_proj_pc, rast_crop_proj_pc.stats("all"))
+
+
+class TestStatsUncertainty:
+    """Test module for global and grouped statistics uncertainty and unsupported options."""
+
+    def test_stats__propagates_mean(self) -> None:
+        """Checks that a global mean propagates errors properly."""
+
+        # Create 4 values with fixed error magnitude
+        values = np.array([[1.0, 3.0], [6.0, 10.0]])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+
+        # Derive stats, check mean value is equal
+        nominal, summary = gu.stats.stats(
+            values,
+            Mean(),
+            error_structure=source_error,
+            uncertainty_kwargs={"return_covariance": True},
+        )
+        assert nominal == np.mean(values)
+        np.testing.assert_array_equal(summary.estimate, [np.mean(values)])
+
+        # Check the uncertainty (variance) on the mean value is as expected
+        weights = np.full(values.size, 1 / values.size)
+        expected_variance = np.sum((2 * weights) ** 2)
+        np.testing.assert_allclose(summary.variance, [expected_variance])
+        assert summary.covariance is not None
+        np.testing.assert_allclose(summary.covariance, [[expected_variance]])
+
+    def test_stats__propagates_independently(self) -> None:
+        """Checks that two value arrays have separate error propagation."""
+
+        # We create two array with different values
+        first = np.array([1.0, 3.0])
+        second = np.array([10.0, 14.0])
+        values = {"first": first, "second": second}
+        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+
+        # We propagate the mean for both, and check mean values
+        nominal, summary = gu.stats.stats(
+            values,
+            Mean(),
+            error_structure=source_error,
+            uncertainty_kwargs={"return_covariance": True},
+        )
+        assert nominal == {name: np.mean(array) for name, array in values.items()}
+        np.testing.assert_array_equal(summary.estimate, [np.mean(first), np.mean(second)])
+
+        # We check output uncertainty
+        np.testing.assert_allclose(summary.variance, [2, 2])
+        assert summary.covariance is not None
+        np.testing.assert_allclose(summary.covariance, np.diag([2, 2]))
+
+    def test_stats__propagates_grouped_mean(self) -> None:
+        """Checks that grouped stats() propagates uncertainty properly."""
+
+        # We create 2 groups of 2 values each, with and STD of 2
+        values = np.array([[1.0, 3.0], [6.0, 10.0]])
+        groups = np.array([[0, 0], [1, 1]])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        by = {"group": groups}
+        categories = {"group": [0, 1]}
+
+        # We estimate the grouped mean with/without uncertainty propagation
+        expected = gu.stats.stats(values, Mean(), by=by, categories=categories)
+        nominal, summary = gu.stats.stats(
+            values,
+            Mean(),
+            error_structure=source_error,
+            uncertainty_kwargs={"return_covariance": True},
+            by=by,
+            categories=categories,
+        )
+        pd.testing.assert_frame_equal(nominal, expected)
+        np.testing.assert_array_equal(summary.estimate, [2.0, 8.0])
+
+        # We check error propag: each group mean has variance of 4 / 2, and distinct ID so 0 cross-group covariance
+        np.testing.assert_allclose(summary.variance, [2.0, 2.0])
+        assert summary.covariance is not None
+        np.testing.assert_allclose(summary.covariance, np.diag([2.0, 2.0]))
+
+    @pytest.mark.parametrize(
+        ("statistics", "option", "message", "error"),
+        [
+            ("mean", {}, "requires one Reducer", TypeError),
+            (Mean(), {"subsample": 2}, "does not yet support subsampling", ValueError),
+            (Mean(), {"backend": "flox"}, "requires backend='geoutils'", ValueError),
+        ],
+    )
+    def test_stats__error_uncertainty(
+        self, statistics: str | Mean, option: dict[str, Any], message: str, error: type[Exception]
+    ) -> None:
+        """Checks that uncertainty works only with proper reducer/backend/sampling scheme."""
+
+        # We create an array with fixed error
+        values = np.array([1.0, 3.0])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+
+        # We raise error on options not working with uncertainty
+        with pytest.raises(error, match=message):
+            gu.stats.stats(values, statistics, error_structure=source_error, **option)
 
 
 class TestStatsChunked:

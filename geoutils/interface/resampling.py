@@ -180,6 +180,13 @@ except ImportError:
 # BASE FUNCTION FOR INTERP POINTS (WHOLE ARRAY IN MEMORY, USED BY CHUNKED FUNCTIONS + MAIN API)
 
 
+def _point_index_type(x: NDArrayNum | Number, y: NDArrayNum | Number) -> type[np.float32] | type[np.float64]:
+    """Use float64 pixel indices when the input coordinates need more than float32 precision."""
+
+    coordinate_dtype = np.result_type(np.asarray(x), np.asarray(y), np.float32)
+    return np.float64 if coordinate_dtype.itemsize > np.dtype(np.float32).itemsize else np.float32
+
+
 @overload
 def _interp_points_base(
     array: NDArrayNum,
@@ -312,6 +319,7 @@ def _interp_points_base(
             band=source_band,
             source_index_offset=source_index_offset,
             source_shape=source_shape,
+            index_type=_point_index_type(*points),
         )
         evaluator = method._with_regular_coefficients(prepared)
         result = evaluator.predict_batch(inputs, nodata_propagation=handling)
@@ -365,6 +373,7 @@ def _interp_points_base(
                     transform=transform,
                     area_or_point=area_or_point,
                     shift_area_or_point=shift_area_or_point,
+                    op=_point_index_type(x, y),
                 )
             else:
                 i, j = array_indices
@@ -579,6 +588,7 @@ def _dask_resample_points(
         transform=transform,
         area_or_point=kwargs["area_or_point"],
         shift_area_or_point=kwargs["shift_area_or_point"],
+        op=_point_index_type(*points),
     )
 
     # Overlap for the neighborhood and nodata mask
@@ -742,6 +752,7 @@ def _resample_points_partition(
         transform=source_raster.transform,
         area_or_point=source_raster.area_or_point,
         shift_area_or_point=interp_options["shift_area_or_point"],
+        op=_point_index_type(x, y),
     )
     # Detect partitions with no raster overlap before constructing interpolation work
     # Include outer half pixels accepted by nearest and linear interpolation when selecting partitions
@@ -916,6 +927,7 @@ def _multiproc_resample_points(
             transform=rst.transform,
             area_or_point=kwargs["area_or_point"],
             shift_area_or_point=kwargs["shift_area_or_point"],
+            op=_point_index_type(*points),
         )
 
     # Overlap for the neighborhood and nodata mask
@@ -1176,7 +1188,12 @@ def _prepare_resampling_points(
             j, i = ~transform * (x, y)
         else:
             i, j = _xy2ij(
-                x, y, transform=transform, area_or_point=area_or_point, shift_area_or_point=shift_area_or_point
+                x,
+                y,
+                transform=transform,
+                area_or_point=area_or_point,
+                shift_area_or_point=shift_area_or_point,
+                op=_point_index_type(x, y),
             )
 
         # Retain the outer half pixels accepted by nearest and linear array interpolation

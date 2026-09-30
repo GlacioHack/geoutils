@@ -16,7 +16,7 @@ import pytest
 import rasterio as rio
 from affine import Affine
 from scipy.interpolate import interpn
-from scipy.ndimage import binary_dilation
+from scipy.ndimage import binary_dilation, map_coordinates
 
 import geoutils as gu
 from benchmarks.comparisons.gdal import build_gdal_grid_command
@@ -537,6 +537,33 @@ class TestRasterInterpolationAccuracy:
         # Each target lies on its matching source cell, so all values should be unchanged
         assert result is not None
         np.testing.assert_array_equal(result.to_nanarray(), values)
+
+    @pytest.mark.parametrize("method,order", [("nearest", 0), ("linear", 1)])
+    def test_interp_at_points__unequal_xy_spacing(self, method: str, order: int) -> None:
+        """
+        Checks that interpolation gives equal result on both map_coordinates/interpn SciPy methods when X and Y pixel
+        sizes differ (ensures the fast map_coordinates() is accurate with different X/Y spacing).
+        """
+
+        # Create raster with unequal pixel sizes
+        values = np.array([[2, 11, 5, 19], [13, 7, 17, 3], [23, 29, 31, 37], [41, 43, 47, 53]], dtype=float)
+        transform = rio.transform.from_origin(100, 200, 2, 5)
+        raster = gu.Raster.from_array(values, transform, crs=32631, area_or_point="Area")
+        rows = np.array([0.25, 1.3, 2.65])
+        columns = np.array([0.4, 2.1, 1.2])
+        x = transform.c + columns * transform.a
+        y = transform.f + rows * transform.e
+
+        # Compare map_coords/interpn/interp_at_points
+        y_axis = transform.f + np.arange(values.shape[0]) * transform.e
+        x_axis = transform.c + np.arange(values.shape[1]) * transform.a
+        from_indices = map_coordinates(values, (rows, columns), order=order, mode="nearest", prefilter=False)
+        from_coordinates = interpn((y_axis, x_axis), values, np.column_stack((y, x)), method=method)
+        sampled = raster.interp_at_points((x, y), method=method, as_array=True)
+
+        # All should agree closely
+        np.testing.assert_allclose(from_indices, from_coordinates, rtol=0, atol=1e-12)
+        np.testing.assert_allclose(sampled, from_coordinates, rtol=0, atol=1e-12)
 
     @pytest.mark.parametrize("tag_aop", [None, "Area", "Point"])
     @pytest.mark.parametrize("shift_aop", [True, False])
