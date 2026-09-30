@@ -1042,6 +1042,8 @@ def _prepare_resampling_options(
         raise ValueError("Window must be a whole number.")
     if window is not None and (window < 1 or window % 2 != 1):
         raise ValueError("Window must be an odd number.")
+    if window is not None:
+        window = int(window)
 
     # Standard means supply coefficients for fractional weights and observation errors
     operator: Interpolator | Reducer
@@ -1086,9 +1088,10 @@ def _prepare_resampling_options(
             offsets = set(neighborhood.offsets)
             fractional_shape = neighborhood.window_shape
             if fractional_shape is None:
-                for window_shape in ("square", "circular"):
-                    if offsets == set(GridNeighbours(size=size, shape=window_shape).offsets):
-                        fractional_shape = window_shape
+                candidate_shapes: tuple[Literal["square", "circular"], ...] = ("square", "circular")
+                for candidate_shape in candidate_shapes:
+                    if offsets == set(GridNeighbours(size=size, shape=candidate_shape).offsets):
+                        fractional_shape = candidate_shape
                         break
             if fractional_shape is None or offsets != set(GridNeighbours(size=size, shape=fractional_shape).offsets):
                 raise ValueError("Area coverage requires a square or circular GridNeighbours window.")
@@ -1151,7 +1154,6 @@ def _prepare_resampling_points(
     shape = source_raster.shape
     operator = options["method"]
     fractional_window = options["fractional_window"]
-    fractional_shape = options["fractional_shape"]
     shift_area_or_point = options["shift_area_or_point"]
 
     # Convert from latlon if necessary
@@ -1186,10 +1188,7 @@ def _prepare_resampling_points(
         # Optional full-window requirement, checked in the complete raster before tiling
         if isinstance(operator, Reducer) and not boundless:
             if fractional_window is not None:
-                if fractional_shape == "square":
-                    radius = fractional_window / 2
-                else:
-                    radius = max(0.5, (fractional_window - 1) / 2)
+                radius = fractional_window / 2
                 ind_outofbounds |= (i - radius < 0) | (i + radius > shape[0])
                 ind_outofbounds |= (j - radius < 0) | (j + radius > shape[1])
             else:
@@ -1368,7 +1367,9 @@ def _resample_at_points(
             extra_kwargs={
                 **kwargs,
                 "_validity_only": _validity_only,
-                "fractional": fractional,
+                "coverage": coverage,
+                "window": window,
+                "window_shape": window_shape,
                 "boundless": boundless,
                 "masked": masked,
             },

@@ -519,17 +519,17 @@ class TestSamplingOperatorsReducers:
         raster = gu.Raster.from_array(values, transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326)
         x, y = raster.ij2xy(2, 2)
 
-        # Sample the center cell, average the default 3 x 3 window, then select only its center and four neighbors
+        # Sample the center cell, average the default 3 x 3 window, then use a five-cell circular window
         sampled = raster.resample_at_points((x, y), Nearest(neighborhood=GridNeighbours(size=1)), as_array=True)
         square_mean = raster.resample_at_points((x, y), Mean(), as_array=True)
         circular_mean = raster.resample_at_points(
-            (x, y), Mean(neighborhood=GridNeighbours(size=3, shape="circular")), as_array=True
+            (x, y), Mean(neighborhood=GridNeighbours(size=5, shape="circular")), as_array=True
         )
 
-        # The square has nine cells, while the circular window excludes its four corners
+        # The square has nine cells; the larger circle has 21 cell centers
         assert sampled == 9
         assert square_mean == pytest.approx(15 / 9)
-        assert circular_mean == 3
+        assert circular_mean == pytest.approx(15 / 21)
 
     def test_reduce_at_points__window_does_not_change_reducer(self) -> None:
         """Checks that a requested window does not change the reducer's own neighborhood."""
@@ -1434,7 +1434,12 @@ class TestReductionChunked:
         raster.to_file(filename)
         points = (np.array([8.75, 0.25, 4.25, 2.5, 10]), np.array([0.25, 6.75, 4.25, 3.5, 4]))
         operator = Sum(neighborhood=GridNeighbours(size=window, shape=shape))
-        options: dict[str, Any] = {"method": operator, "fractional": fractional, "band": 2, "as_array": True}
+        options: dict[str, Any] = {
+            "method": operator,
+            "coverage": ("fractional" if fractional else "center"),
+            "band": 2,
+            "as_array": True,
+        }
 
         # Uneven Dask/MP tiles force overlap reads and a shorter final chunk
         expected = raster.resample_at_points(points, **options)
@@ -1641,11 +1646,30 @@ class TestResamplingEdgeCases:
         raster = gu.Raster.from_array(np.ones((4, 4)), Affine(1, 0, 0, 0, -1, 4), 32631)
         points = (np.array([0.5, 1.5]), np.array([3.5, 2.5]))
         result = raster.reduce_at_points(
-            points, reducer_function=Sum(), window=3, fractional=fractional, boundless=boundless, as_array=True
+            points,
+            reducer_function=Sum(),
+            window=3,
+            coverage=("fractional" if fractional else "center"),
+            boundless=boundless,
+            as_array=True,
         )
 
         # Both ordinary and fractional windows have the same area at cell centers
         np.testing.assert_array_equal(result, [4 if boundless else np.nan, 9])
+
+    def test_reduce_at_points__circular_window_boundless(self) -> None:
+        """Checks that a size-five circle needs its full 2.5-pixel radius inside the raster."""
+
+        # The first circle crosses the left edge; the second touches it without crossing
+        raster = gu.Raster.from_array(np.ones((7, 7)), Affine(1, 0, 0, 0, -1, 7), 32631)
+        points = (np.array([2.25, 2.5]), np.array([3.5, 3.5]))
+
+        # Require the full circular area for both requested points
+        result = raster.reduce_at_points(
+            points, window=5, window_shape="circular", coverage="fractional", boundless=False, as_array=True
+        )
+        assert np.isnan(result[0])
+        assert result[1] == 1
 
     @pytest.mark.parametrize("method", [Mean(), np.nanmean])
     @pytest.mark.parametrize("fractional,masked", [(False, False), (False, True), (True, False)])
@@ -1662,7 +1686,7 @@ class TestResamplingEdgeCases:
         # Full windows only: one edge target, one complete window and one outside target
         options: dict[str, Any] = {
             "window": 3,
-            "fractional": fractional,
+            "coverage": ("fractional" if fractional else "center"),
             "masked": masked,
             "boundless": False,
             "as_array": True,
@@ -1727,12 +1751,16 @@ class TestResamplingEdgeCases:
 
         # A custom reducer must declare support for geometric weights
         with pytest.raises(ValueError, match="does not accept support_weights"):
-            raster.reduce_at_points(point, reducer_function=NoSupportReducer(), window=1, fractional=True, as_array=True)
+            raster.reduce_at_points(
+                point, reducer_function=NoSupportReducer(), window=1, coverage="fractional", as_array=True
+            )
         with pytest.raises(TypeError, match="requires a Reducer"):
-            raster.reduce_at_points(point, reducer_function=np.ma.median, window=1, fractional=True, as_array=True)
+            raster.reduce_at_points(
+                point, reducer_function=np.ma.median, window=1, coverage="fractional", as_array=True
+            )
         with pytest.raises(ValueError, match="square or circular GridNeighbours window"):
             raster.resample_at_points(
-                point, Mean(neighborhood=GridNeighbours(((0, 0), (0, 1)))), fractional=True, as_array=True
+                point, Mean(neighborhood=GridNeighbours(((0, 0), (0, 1)))), coverage="fractional", as_array=True
             )
 
     @pytest.mark.parametrize("method", ["reduce_at_points", "reduce_points"])

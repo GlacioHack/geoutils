@@ -491,7 +491,7 @@ class TestRasterReducerAccuracy:
 
         # Compare filtering a dense set of targets with evaluating small groups independently
         result = raster.resample_at_points(
-            points, operator, as_array=True, fractional=fractional, nodata_handling=nodata
+            points, operator, as_array=True, coverage=("fractional" if fractional else "center"), nodata_handling=nodata
         )
         expected = np.concatenate(
             [
@@ -499,7 +499,7 @@ class TestRasterReducerAccuracy:
                     (points[0][start : start + 7], points[1][start : start + 7]),
                     operator,
                     as_array=True,
-                    fractional=fractional,
+                    coverage=("fractional" if fractional else "center"),
                     nodata_handling=nodata,
                 )
                 for start in range(0, len(points[0]), 7)
@@ -529,27 +529,55 @@ class TestRasterReducerAccuracy:
 class TestFractionalReducerWindows:
     """Test module for covered area and weighted means in square and circular windows."""
 
+    def test_resample_at_points__coverage(self) -> None:
+        """Checks area coverage options (center, all touched, and fractional) for selecting window pixels."""
+
+        # We use a 1-pixel window shifted to lower-right of a 2x2 raster
+        values = np.array([[1.0, 2.0], [3.0, 4.0]])
+        raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 2, 1, 1), crs=32631)
+        point = (0.75, 1.25)
+        neighborhood = GridNeighbours(size=1)
+        operator = Sum(neighborhood=neighborhood)
+
+        # Center selects first pixel, touched selects all four, fractional uses area weights 9/16, 3/16, 3/16, 1/16
+        center = raster.resample_at_points(point, operator, as_array=True)
+        touched = raster.resample_at_points(point, operator, coverage="all_touched", as_array=True)
+        fractional = raster.resample_at_points(point, operator, coverage="fractional", as_array=True)
+        assert center == values[0, 0]
+        assert touched == np.sum(values)
+        assert fractional == pytest.approx((9 * values[0, 0] + 3 * values[0, 1] + 3 * values[1, 0] + values[1, 1]) / 16)
+        assert operator.default_neighborhood is neighborhood
+
+        # Check when defining the coverage through the operator directly
+        configured = Sum(neighborhood=GridNeighbours(size=1, coverage="all_touched"))
+        assert raster.resample_at_points(point, configured, as_array=True) == touched
+        wider = Sum(neighborhood=GridNeighbours(size=3))
+        assert raster.reduce_at_points(point, reducer_function=wider, as_array=True) == np.sum(values)
+        assert raster.reduce_at_points(point, reducer_function=wider, window=1, as_array=True) == values[0, 0]
+
     def test_filter__fractional_circle_area(self) -> None:
         """Checks that a fractional count measures circular area rather than the number of selected cells."""
 
-        # Radius two fits inside the five-cell window at the raster center
+        # A five-cell circle has radius 2.5 pixels at the raster center
         raster = gu.Raster.from_array(np.ones((9, 9)), rio.transform.from_origin(0, 9, 1, 1), crs=32631)
         neighborhood = GridNeighbours(size=5, shape="circular")
         operator = Count(neighborhood=neighborhood)
-        area = raster.filter(operator, fractional=True).to_nanarray()[4, 4]
+        area = raster.filter(operator, coverage="fractional").to_nanarray()[4, 4]
+        touched = raster.filter(operator, coverage="all_touched").to_nanarray()[4, 4]
         count = raster.filter(operator).to_nanarray()[4, 4]
 
         # The circular footprint uses a 512-sided polygon; compare its known area
         # ExactExtract stores individual cell fractions in float32
-        expected_area = 512 * 2**2 * np.sin(2 * np.pi / 512) / 2
+        expected_area = 512 * 2.5**2 * np.sin(2 * np.pi / 512) / 2
         assert area == pytest.approx(expected_area, rel=0, abs=1e-6)
-        assert count == len(neighborhood.offsets)
+        assert touched == 25
+        assert count == 21
 
-    @pytest.mark.parametrize(("window", "expected_area"), [(1, np.pi / 4), (3, np.pi), (5, 4 * np.pi)])
+    @pytest.mark.parametrize(("window", "expected_area"), [(1, np.pi / 4), (3, 2.25 * np.pi), (5, 6.25 * np.pi)])
     def test_reduce_points__fractional_circular_window(self, window: int, expected_area: float) -> None:
         """Checks that circular windows use their covered area for different pixel radii."""
 
-        # A centered circle fits entirely inside a seven by seven raster, including at radius two
+        # Every centered circle fits entirely inside the seven by seven raster
         raster = gu.Raster.from_array(np.ones((7, 7)), rio.transform.from_origin(0, 7, 1, 1), crs=32631)
         point = (3.5, 3.5)
         neighbourhood = GridNeighbours(size=window, shape="circular")
@@ -560,11 +588,11 @@ class TestFractionalReducerWindows:
             reducer_function=SupportMassReducer(),
             window=window,
             window_shape="circular",
-            fractional=True,
+            coverage="fractional",
             as_array=True,
         )
         resampled = raster.resample_at_points(
-            point, SupportMassReducer(neighborhood=neighbourhood), fractional=True, as_array=True
+            point, SupportMassReducer(neighborhood=neighbourhood), coverage="fractional", as_array=True
         )
         assert reduced == pytest.approx(expected_area, rel=1e-4)
         assert resampled == pytest.approx(reduced)
@@ -580,8 +608,10 @@ class TestFractionalReducerWindows:
         # The right column covers a circular segment beyond x=1; a square window covers one quarter instead
         right_area = np.pi / 12 - np.sqrt(3) / 16
         expected_mean = 10 * right_area / (np.pi / 4)
-        circular = raster.reduce_at_points(point, window=1, window_shape="circular", fractional=True, as_array=True)
-        square = raster.reduce_at_points(point, window=1, fractional=True, as_array=True)
+        circular = raster.reduce_at_points(
+            point, window=1, window_shape="circular", coverage="fractional", as_array=True
+        )
+        square = raster.reduce_at_points(point, window=1, coverage="fractional", as_array=True)
         assert circular == pytest.approx(expected_mean, rel=1e-4)
         assert square == 2.5
 
@@ -798,6 +828,36 @@ _EXACTEXTRACT_REDUCER_CASES = [
 ]
 
 
+class TestRasterReducerCoverage:
+    """Test module for source window coverage used by Reducers in reproject()."""
+
+    def test_reproject__source_window_coverage(self) -> None:
+        """Checks that the default source window and explicit coverage modes choose the expected cells."""
+
+        # We create a synthetic shifted destination cell that overlaps four source cells with unequal areas
+        values = np.array([[1.0, 2.0], [3.0, 4.0]])
+        source = gu.Raster.from_array(values, rio.transform.from_origin(0, 2, 1, 1), crs=32631)
+        reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(0.25, 1.75, 1, 1), crs=32631)
+        operator = Sum()
+
+        # We check the output
+        default = source.reproject(reference, resampling=operator)
+        center = source.reproject(reference, resampling=operator, coverage="center")
+        fractional = source.reproject(reference, resampling=operator, coverage="fractional")
+        fixed = source.reproject(reference, resampling=operator, window=1, coverage="all_touched")
+        assert default is not None and center is not None and fractional is not None and fixed is not None
+        # All touched uses all cells
+        assert default.data[0, 0] == np.sum(values)
+        # Center selects one
+        assert center.data[0, 0] == values[0, 0]
+        # Fractional uses areas
+        assert fractional.data[0, 0] == pytest.approx(
+            (9 * values[0, 0] + 3 * values[0, 1] + 3 * values[1, 0] + values[1, 1]) / 16
+        )
+        assert fixed.data[0, 0] == np.sum(values)
+        assert operator.default_neighborhood is None
+
+
 class TestRasterReducerReferences:
     """Test module for fractional reducers compared with GDAL and between ExactExtract and Shapely.
 
@@ -817,7 +877,9 @@ class TestRasterReducerReferences:
 
         # GDAL reduces the same physical square; whole-cell reduction gives a different answer
         expected = source.reproject(reference, resampling=rio.enums.Resampling.average)
-        fractional = source.reduce_at_points(point, reducer_function=Mean(), window=3, fractional=True, as_array=True)
+        fractional = source.reduce_at_points(
+            point, reducer_function=Mean(), window=3, coverage="fractional", as_array=True
+        )
         ordinary = source.reduce_at_points(point, reducer_function=Mean(), window=3, as_array=True)
         assert expected is not None
         assert fractional == pytest.approx(float(expected.data[0, 0]))
@@ -885,7 +947,7 @@ class TestRasterReducerReferences:
 
         # Compare the weighted reduction against GDAL's established implementation
         expected = source.reproject(reference, resampling=gdal_resampling)
-        actual = source.reproject(reference, resampling=operator)
+        actual = source.reproject(reference, resampling=operator, coverage="fractional")
         assert expected is not None and actual is not None
         np.testing.assert_allclose(actual.to_nanarray(), expected.to_nanarray(), rtol=1e-12, atol=1e-12)
 
@@ -920,7 +982,7 @@ class TestRasterReducerReferences:
 
         # Calculate the statistic within each rectangular output cell, separately for both bands
         expected = source.reproject(reference, resampling=gdal_resampling)
-        actual = source.reproject(reference, resampling=operator)
+        actual = source.reproject(reference, resampling=operator, coverage="fractional")
         assert expected is not None and actual is not None
         np.testing.assert_allclose(actual.to_nanarray(), expected.to_nanarray(), rtol=1e-12, atol=1e-12)
 
@@ -966,7 +1028,7 @@ class TestRasterReducerReferences:
 
         # GDAL sum directly reports fractional area contributions and independently validates the overlap fractions
         expected = source.reproject(reference, resampling=rio.enums.Resampling.sum)
-        actual = source.reproject(reference, resampling=Sum(), overlap_backend=overlap_backend)
+        actual = source.reproject(reference, resampling=Sum(), overlap_backend=overlap_backend, coverage="fractional")
         assert expected is not None and actual is not None
         np.testing.assert_allclose(actual.to_nanarray(), expected.to_nanarray(), rtol=rtol, atol=atol)
 
@@ -999,8 +1061,8 @@ class TestRasterReducerReferences:
         reference = gu.Raster.from_array(np.zeros((2, 2)), destination_transform, crs=32632, nodata=-9999)
 
         # Compare direct ExactExtract statistics with reductions calculated from Shapely intersection areas
-        expected = source.reproject(reference, resampling=operator, overlap_backend="shapely")
-        actual = source.reproject(reference, resampling=operator, overlap_backend="exactextract")
+        expected = source.reproject(reference, resampling=operator, overlap_backend="shapely", coverage="fractional")
+        actual = source.reproject(reference, resampling=operator, overlap_backend="exactextract", coverage="fractional")
         assert expected is not None and actual is not None
         np.testing.assert_allclose(actual.to_nanarray(), expected.to_nanarray(), rtol=5e-7, atol=5e-7)
 
@@ -1036,7 +1098,12 @@ class TestReducerUncertainty:
         # Covered fractions are 9/16, 3/16, 3/16, 1/16 in row order
         ordinary = raster.reduce_at_points(point, reducer_function=Mean(), window=1, as_array=True)
         fractional = raster.reduce_at_points(
-            reducer_function=Mean(), window=1, fractional=True, as_array=True, points=point, error_structure=errors
+            reducer_function=Mean(),
+            window=1,
+            coverage="fractional",
+            as_array=True,
+            points=point,
+            error_structure=errors,
         )
         summary = gu.uncertainty.propagate(
             raster.reduce_at_points,
@@ -1044,12 +1111,12 @@ class TestReducerUncertainty:
             operation_kwargs={
                 "reducer_function": Mean(),
                 "window": 1,
-                "fractional": True,
+                "coverage": "fractional",
                 "as_array": True,
                 "points": point,
             },
         )
-        default_mean = raster.reduce_at_points(point, window=1, fractional=True, as_array=True)
+        default_mean = raster.reduce_at_points(point, window=1, coverage="fractional", as_array=True)
         assert ordinary == 0
         assert fractional == pytest.approx(7.5)
         assert default_mean == pytest.approx(fractional)
@@ -1193,11 +1260,13 @@ class TestReducerUncertainty:
 
         # Check that requesting uncertainty returns the same mean values as the ordinary reprojection
         expected = source.reproject(reference, resampling=rio.enums.Resampling.average)
-        nominal = source.reproject(resampling=Mean(), ref=reference, error_structure=source_error)
+        nominal = source.reproject(
+            resampling=Mean(), ref=reference, error_structure=source_error, coverage="fractional"
+        )
         summary = gu.uncertainty.propagate(
             source.reproject,
             error_structure=source_error,
-            operation_kwargs={"resampling": Mean(), "ref": reference},
+            operation_kwargs={"resampling": Mean(), "ref": reference, "coverage": "fractional"},
         )
         assert expected is not None
         assert nominal.raster_equal(expected, strict_masked=False)
@@ -1218,10 +1287,10 @@ class TestFractionalReducerEdges:
         points = (np.array([0.25, -0.25]), np.array([1.75, 1.75]))
 
         # Mean divides by the covered area; Sum and the custom reducer use the 9/16 cell fraction directly
-        mean = raster.reduce_at_points(points, reducer_function=Mean(), window=1, fractional=True, as_array=True)
-        total = raster.reduce_at_points(points, reducer_function=Sum(), window=1, fractional=True, as_array=True)
+        mean = raster.reduce_at_points(points, reducer_function=Mean(), window=1, coverage="fractional", as_array=True)
+        total = raster.reduce_at_points(points, reducer_function=Sum(), window=1, coverage="fractional", as_array=True)
         area = raster.reduce_at_points(
-            points, reducer_function=SupportMassReducer(), window=1, fractional=True, as_array=True
+            points, reducer_function=SupportMassReducer(), window=1, coverage="fractional", as_array=True
         )
         assert mean[0] == 8
         assert total[0] == pytest.approx(4.5)
@@ -1239,11 +1308,13 @@ class TestFractionalReducerEdges:
         point = (0.75, 1.25)
 
         # The other cells contribute 9/16 + 3/16 + 1/16 of the window
-        omitted = raster.reduce_at_points(point, reducer_function=Mean(), window=1, fractional=True, as_array=True)
+        omitted = raster.reduce_at_points(
+            point, reducer_function=Mean(), window=1, coverage="fractional", as_array=True
+        )
         propagated = raster.resample_at_points(
             point,
             Mean(neighborhood=GridNeighbours(size=1)),
-            fractional=True,
+            coverage="fractional",
             nodata_handling="propagate",
             as_array=True,
         )
@@ -1257,19 +1328,19 @@ class TestFractionalReducerEdges:
         raster = gu.Raster.from_array(np.full((5, 5), 8.0), rio.transform.from_origin(0, 5, 1, 1), crs=32631)
         point = (0.0, 2.5)
 
-        # A three-cell circular window has radius one, so only half of its area covers raster cells
+        # A three-cell circle has radius 1.5 pixels, so half its area covers raster cells
         area = raster.reduce_at_points(
             point,
             reducer_function=SupportMassReducer(),
             window=3,
             window_shape="circular",
-            fractional=True,
+            coverage="fractional",
             as_array=True,
         )
         total = raster.reduce_at_points(
-            point, reducer_function=Sum(), window=3, window_shape="circular", fractional=True, as_array=True
+            point, reducer_function=Sum(), window=3, window_shape="circular", coverage="fractional", as_array=True
         )
-        mean = raster.reduce_at_points(point, window=3, window_shape="circular", fractional=True, as_array=True)
-        assert area == pytest.approx(np.pi / 2, rel=1e-4)
-        assert total == pytest.approx(8 * np.pi / 2, rel=1e-4)
+        mean = raster.reduce_at_points(point, window=3, window_shape="circular", coverage="fractional", as_array=True)
+        assert area == pytest.approx(2.25 * np.pi / 2, rel=1e-4)
+        assert total == pytest.approx(8 * 2.25 * np.pi / 2, rel=1e-4)
         assert mean == 8

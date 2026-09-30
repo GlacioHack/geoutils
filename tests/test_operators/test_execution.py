@@ -23,7 +23,7 @@ class TestOperatorDispatch:
 
     def test_interpolator__selects_neighbours_from_source(self) -> None:
         """
-        Checks that a regular/irregular interpolator without defined neighourhood can be reused for point
+        Checks that a regular/irregular interpolator without defined neighbourhood can be reused for point
         and raster.
         """
 
@@ -68,8 +68,7 @@ class TestResampleAtPoints:
     """
     Test module for raster resampling.
 
-    Theis wrapper is necessary because, for example, resample_at_points is used both by reproject() and
-    interp/reduce_at_points().
+    This wrapper is necessary because resample_at_points is used both by reproject() and interp/reduce_at_points().
     """
 
     def test_resample_at_points(self) -> None:

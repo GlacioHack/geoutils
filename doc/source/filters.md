@@ -100,12 +100,13 @@ from geoutils.operators import GridNeighbours
 from geoutils.operators.reducer import Mean
 
 window = GridNeighbours(size=5, shape="circular")
-smoothed = rast.filter(Mean(neighborhood=window), fractional=True)
+smoothed = rast.filter(Mean(neighborhood=window), coverage="fractional")
 ```
 
-`fractional=True` weights each cell by its covered area. It supports square and circular windows in pixel units.
-Other neighborhoods can supply arbitrary row/column offsets. `size` and `kernel_shape` override a reducer's window
-for that call. Without a configured window, filtering uses a 3 × 3 square.
+`coverage="center"` selects cells by their centers, `"all_touched"` includes cells with positive overlap, and
+`"fractional"` weights cells by covered area. Area coverage supports square and circular windows in pixel units.
+Other neighborhoods can supply arbitrary row/column offsets. `size`, `kernel_shape`, and `coverage` override a
+reducer's window for that call. Without a configured window, filtering uses a 3 × 3 square.
 
 Reducer filters preserve missing centers by default; `preserve_nodata=False` lets valid neighbors fill them.
 `nodata_handling="propagate"` makes any missing neighbor invalidate the result, and `boundless=False` requires a
@@ -116,8 +117,9 @@ Built-in reductions share sliding sums and convolution with raster filters. Dens
 sparse targets and custom reducers evaluate their neighborhoods directly. A custom reducer receives the same
 values, coordinates, source IDs and optional area weights through either API.
 
-Legacy named circular mean filters select cells strictly inside the radius. `GridNeighbours(size=5, shape="circular")` includes
-cells whose centers lie on that boundary. Fractional circles use covered area instead of either center test.
+Legacy named circular mean filters select cells strictly inside their kernel radius.
+`GridNeighbours(size=5, shape="circular")` draws a circle of radius 2.5 pixels from the window center for all three
+coverage rules.
 
 ## Point cloud neighborhood filters
 

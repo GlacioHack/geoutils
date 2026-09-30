@@ -1063,7 +1063,9 @@ class Variogram:
         """
 
         # Import Matplotlib only when the caller requests a plot
-        pyplot = import_optional("matplotlib.pyplot", package_name="matplotlib")
+        import_optional("matplotlib", package_name="matplotlib")
+        import matplotlib.pyplot as pyplot
+
         if ax is None:
             _, ax = pyplot.subplots()
 

@@ -34,7 +34,7 @@ from rasterio.features import sieve as rio_sieve
 from geoutils._misc import import_optional
 from geoutils._typing import MArrayNum, NDArrayBool, NDArrayNum
 from geoutils.multiproc import MultiprocConfig, map_overlap
-from geoutils.operators.neighbours import GridNeighbours, _grid_window_kernel
+from geoutils.operators.neighbours import GridCoverage, GridNeighbours, _configure_grid_neighbours, _grid_window_kernel
 from geoutils.operators.neighbours import _create_circular_mask as _create_circular_mask
 from geoutils.operators.nodata import NodataHandling
 from geoutils.operators.reducer import (
@@ -679,7 +679,6 @@ def _filter_grid(
     transform: rio.transform.Affine,
     neighborhood: GridNeighbours,
     kernel: NDArrayNum | None,
-    fractional: bool = False,
     preserve_nodata: bool = True,
     boundless: bool = True,
     nodata_handling: NodataHandling | None = None,
@@ -702,6 +701,11 @@ def _filter_grid(
     global_shape = (array.shape[-2], array.shape[-1]) if source_shape is None else source_shape
     output = np.empty(bands.shape, dtype=float)
     handling = operator.default_nodata_propagation if nodata_handling is None else nodata_handling
+    window_size = 2 * max(neighborhood.overlap) + 1
+    window_shape = neighborhood.window_shape
+    if neighborhood.coverage != "center" and window_shape is None:
+        # The validated offsets may describe a circle without storing its shape
+        window_shape = "square" if len(neighborhood.offsets) == window_size**2 else "circular"
 
     # Apply the same neighborhood independently to each band
     for index, values in enumerate(bands):
@@ -727,8 +731,8 @@ def _filter_grid(
                     nodata_propagation=handling,
                     dist_nodata_spread=None,
                     neighborhood=neighborhood,
-                    fractional_window=2 * max(neighborhood.overlap) + 1 if fractional else None,
-                    fractional_shape=neighborhood.window_shape or "square",
+                    fractional_window=window_size if neighborhood.coverage != "center" else None,
+                    fractional_shape=window_shape,
                     band=band + index,
                     source_index_offset=source_index_offset,
                     source_shape=global_shape,
@@ -924,6 +928,8 @@ def _filter(
     engine: Literal["scipy", "numba"] = "scipy",
     outlier_threshold: float = 2.0,
     mp_config: MultiprocConfig | None = None,
+    coverage: GridCoverage | None = None,
+    kernel_shape: Literal["square", "circular"] | None = None,
     **kwargs: Any,
 ) -> Any:
     """Filter a raster in memory, through Dask chunks, or in worker processes."""
@@ -952,21 +958,10 @@ def _filter(
         neighborhood = method.default_neighborhood
         if neighborhood is not None and not isinstance(neighborhood, GridNeighbours):
             raise TypeError("Raster filtering requires GridNeighbours.")
-        shape = kwargs.pop("kernel_shape", None)
-        if size is not None or shape is not None or neighborhood is None:
-            window_size = 3 if neighborhood is None else 2 * max(neighborhood.overlap) + 1
-            if size is not None:
-                window_size = size
-            window_shape = shape or (neighborhood.window_shape if neighborhood is not None else None) or "square"
-            neighborhood = GridNeighbours(size=window_size, shape=window_shape)
-        if kwargs.get("fractional", False) and neighborhood.window_shape is None:
-            # Record the geometric shape for custom reducers that need fractional neighborhoods
-            window_size = 2 * max(neighborhood.overlap) + 1
-            window_shape = "square" if len(neighborhood.offsets) == window_size**2 else "circular"
-            neighborhood = GridNeighbours(neighborhood.offsets, window_shape=window_shape)
+        neighborhood = _configure_grid_neighbours(neighborhood, size=size, shape=kernel_shape, coverage=coverage)
+        assert neighborhood is not None
         kernel = _grid_window_kernel(
             neighborhood,
-            fractional=kwargs.get("fractional", False),
             transform=source_raster.transform,
             max_cells=max(4096, 4 * int(np.prod(source_raster.shape))),
         )
@@ -977,6 +972,11 @@ def _filter(
             transform=source_raster.transform,
             source_shape=source_raster.shape,
         )
+    else:
+        if coverage is not None:
+            raise ValueError("Grid coverage requires a Reducer filter.")
+        if kernel_shape is not None:
+            kwargs["kernel_shape"] = kernel_shape
     size = 3 if size is None else size
 
     # Send file tiles to workers, build a lazy Dask result, or filter the complete array

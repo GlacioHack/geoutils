@@ -325,23 +325,32 @@ class RasterAccessor(RasterBase):
         if data.ndim == 3 and data.shape[0] == 1:
             data = data[0]
 
+        # Rotated grids need two-dimensional map coordinates alongside their row and column axes
+        if data.ndim in (2, 3):
+            spatial_coords: dict[str, Any] = affine_to_coords(
+                affine=transform, width=data.shape[-1], height=data.shape[-2]
+            )
+            if np.ndim(spatial_coords["x"]) == 2:
+                spatial_coords = {
+                    "x": np.arange(data.shape[-1]),
+                    "y": np.arange(data.shape[-2]),
+                    "xc": (("y", "x"), spatial_coords["x"]),
+                    "yc": (("y", "x"), spatial_coords["y"]),
+                }
+
         # For a 2-d array
         if data.ndim == 2:
-            # Get netCDF coordinates from transform and shape
-            coords = affine_to_coords(affine=transform, width=data.shape[1], height=data.shape[0])
             out_ds = xr.DataArray(
                 data=data,
                 dims=("y", "x"),
-                coords={"y": coords["y"], "x": coords["x"]},
+                coords=spatial_coords,
                 attrs=tags,
             )
         elif data.ndim == 3:
-            # Get netCDF coordinates from transform and shape
-            coords = affine_to_coords(affine=transform, width=data.shape[2], height=data.shape[1])
             out_ds = xr.DataArray(
                 data=data,
                 dims=("band", "y", "x"),
-                coords={"band": np.arange(1, data.shape[0] + 1), "y": coords["y"], "x": coords["x"]},
+                coords={"band": np.arange(1, data.shape[0] + 1), **spatial_coords},
                 attrs=tags,
             )
 

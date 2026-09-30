@@ -192,15 +192,16 @@ class TestSelection:
         values = xr.DataArray([[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]], dims=("y", "x"))
         keep = xr.DataArray([[True, False, True], [False, True, True]], dims=("y", "x"))
         groups = xr.DataArray([[0, 0, 0], [1, 1, 1]], dims=("y", "x"))
-        options = {"by": {"zone": groups}, "categories": {"zone": [0, 1]}} if grouped else {}
+        by = {"zone": groups} if grouped else None
+        categories = {"zone": [0, 1]} if grouped else None
 
         # Use these arrays directly or select them as values on an existing raster grid
         if source_type == "array":
-            result = gu.stats.stats(values, "mean", mask=keep, **options)
+            result = gu.stats.stats(values, "mean", mask=keep, by=by, categories=categories)
             value_name = "value"
         else:
             raster = gu.Raster.from_array(np.zeros((2, 3)), rio.transform.from_origin(0, 2, 1, 1), crs=4326)
-            result = raster.stats("mean", values={"temperature": values}, mask=keep, **options)
+            result = raster.stats("mean", values={"temperature": values}, mask=keep, by=by, categories=categories)
             value_name = "temperature"
 
         # The mask leaves two values in each row, giving row means of 20 and 55 and a whole mean of 37.5

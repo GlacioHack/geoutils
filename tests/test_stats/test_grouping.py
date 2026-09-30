@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from importlib.util import find_spec
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -246,7 +246,7 @@ class TestGroupedStats:
         assert np.isnan(table.xs("mean", level="statistic", axis=1).iloc[2, 0])
 
     @pytest.mark.parametrize("subsampling_strategy", ["topk", "sequential"])
-    def test_stats__separate_sampling_and_reduction(self, subsampling_strategy: str) -> None:
+    def test_stats__separate_sampling_and_reduction(self, subsampling_strategy: Literal["topk", "sequential"]) -> None:
         """Checks that the sampling option stays separate from the grouped calculation strategy."""
 
         # Sample ten values while requesting masks for both complete groups
@@ -486,6 +486,7 @@ class TestGroupedStats:
             fractional=True,
             overlap_backend="shapely",
             error_structure=errors,
+            uncertainty_kwargs={"return_covariance": True},
         )
         # Center mean: (1 + 2 + 3 + 4) / 4 = 2.5; right mean: (2 + 4) / 2 = 3
         np.testing.assert_allclose(nominal[("band_1", "Mean")], [2.5, 3])
@@ -639,16 +640,17 @@ class TestGroupedStats:
         pytest.importorskip("flox")
         values = np.array([1.0, 2.0, np.nan, 4.0, 5.0, 6.0])
         groups = np.array([2, 2, 0, 0, 1, 1])
-        options = {
-            "statistics": ["mean", "std"],
-            "by": {"zone": groups},
-            "categories": {"zone": [2, 0, 1, 3]},
-            "observed": False,
-        }
+        statistics = ["mean", "std"]
+        by = {"zone": groups}
+        categories = {"zone": [2, 0, 1, 3]}
 
         # Calculate the same complete table with the built-in and Flox reducers
-        expected = gu.stats.stats(values, backend="geoutils", **options)
-        result = gu.stats.stats(values, backend="flox", **options)
+        expected = gu.stats.stats(
+            values, statistics=statistics, by=by, categories=categories, observed=False, backend="geoutils"
+        )
+        result = gu.stats.stats(
+            values, statistics=statistics, by=by, categories=categories, observed=False, backend="flox"
+        )
 
         # Check the declared row order, empty category and every reduced value
         pd.testing.assert_frame_equal(result, expected)
@@ -666,20 +668,37 @@ class TestGroupedStats:
         values["first"][5] = np.nan
         distance = np.arange(24, dtype=float) % 6
         surface = np.array(["ice", "rock"] * 12)
-        options = {
-            "statistics": ["mean", "sum", "totalcount", "percentagevalidpoints"],
-            "by": {"distance": distance, "surface": surface},
-            "bins": {"distance": [0, 2, 4, 6]},
-            "categories": {"surface": ["rock", "ice", "water"]},
-            "mask": np.arange(24) % 5 != 0,
-            "subsample": 9,
-            "random_state": 42,
-            "observed": False,
-        }
+        statistics = ["mean", "sum", "totalcount", "percentagevalidpoints"]
+        by = {"distance": distance, "surface": surface}
+        bins = {"distance": [0, 2, 4, 6]}
+        categories = {"surface": ["rock", "ice", "water"]}
+        mask = np.arange(24) % 5 != 0
 
         # Compare every sampled value and empty declared group with the built-in reducer
-        expected = gu.stats.stats(values, backend="geoutils", **options)
-        result = gu.stats.stats(values, backend="flox", **options)
+        expected = gu.stats.stats(
+            values,
+            statistics=statistics,
+            by=by,
+            bins=bins,
+            categories=categories,
+            mask=mask,
+            subsample=9,
+            random_state=42,
+            observed=False,
+            backend="geoutils",
+        )
+        result = gu.stats.stats(
+            values,
+            statistics=statistics,
+            by=by,
+            bins=bins,
+            categories=categories,
+            mask=mask,
+            subsample=9,
+            random_state=42,
+            observed=False,
+            backend="flox",
+        )
         pd.testing.assert_frame_equal(result, expected)
 
 
@@ -695,7 +714,7 @@ class TestGroupedStatsChunked:
     """
 
     @pytest.mark.parametrize("strategy", ["dense", "sparse", "groupwise"])
-    def test_stats__empty_selection(self, strategy: str) -> None:
+    def test_stats__empty_selection(self, strategy: Literal["dense", "sparse", "groupwise"]) -> None:
         """Checks that fully masked chunks return an empty table and mask mapping."""
 
         # Mask every location while requesting both boolean groups in the result
@@ -1148,7 +1167,9 @@ class TestGroupedStatsChunked:
     @pytest.mark.parametrize("backend", ["dask", "multiproc"])
     @pytest.mark.parametrize("sampling_strategy", ["topk", "sequential"])
     @pytest.mark.parametrize("subsample", [0.25, 3, 1])
-    def test_stats__subsample_per_group(self, backend: str, sampling_strategy: str, subsample: int | float) -> None:
+    def test_stats__subsample_per_group(
+        self, backend: str, sampling_strategy: Literal["topk", "sequential"], subsample: int | float
+    ) -> None:
         """Checks that each combined group receives its own sample size while masks include every eligible location."""
 
         # 1/ Prepare unequal groups, one absent category/bin combination, and values with different finite counts
@@ -1537,7 +1558,8 @@ class TestGroupedStatsErrors:
         # Use one ordinary category input so each call reaches Flox-specific validation
         pytest.importorskip("flox")
         values = np.arange(6, dtype=float)
-        grouping = {"by": {"zone": np.arange(6) % 2}, "categories": {"zone": [0, 1]}}
+        by = {"zone": np.arange(6) % 2}
+        categories = {"zone": [0, 1]}
 
         # Raise errors for global statistics, group masks, sampling within groups,
         # multiprocessing and GeoUtils strategies
@@ -1550,9 +1572,9 @@ class TestGroupedStatsErrors:
             {"strategy": "dense"},
         ):
             with pytest.raises(ValueError, match="Flox backend requires"):
-                gu.stats.stats(values, "mean", backend="flox", **grouping, **options)
+                gu.stats.stats(values, "mean", backend="flox", by=by, categories=categories, **options)  # type: ignore[arg-type]
         with pytest.raises(ValueError, match="does not support"):
-            gu.stats.stats(values, "nmad", backend="flox", **grouping)
+            gu.stats.stats(values, "nmad", backend="flox", by=by, categories=categories)
 
     def test_raster_stats__flox_loading_warning(self) -> None:
         """Checks that a Raster input warns that the Flox backend loads its values."""

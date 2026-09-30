@@ -278,19 +278,6 @@ class TestErrorStructureGaussian:
         np.testing.assert_array_equal(errors, [[1.0, -2.0], [1.0, -2.0]])
         np.testing.assert_array_equal(values, [[11.0, 18.0], [11.0, 18.0]])
 
-    def test_from_gaussian__error_invalid_covariance(self) -> None:
-        """Checks that mismatched labels and invalid covariance matrices are rejected."""
-
-        # Check mismatched labels, zero-variance covariance and negative eigenvalues
-        labels = pd.Index(["x", "y"])
-        valid = pd.DataFrame([[1.0, 0.5], [0.5, 1.0]], index=labels, columns=labels)
-        with pytest.raises(ValueError, match="match exactly"):
-            gu.ErrorStructure.from_gaussian(valid.rename(columns={"y": "z"}))
-        with pytest.raises(ValueError, match="zero-variance"):
-            gu.ErrorStructure.from_gaussian(pd.DataFrame([[0.0, 0.1], [0.1, 1.0]], index=labels, columns=labels))
-        with pytest.raises(ValueError, match="positive semidefinite"):
-            gu.ErrorStructure.from_gaussian(pd.DataFrame([[1.0, 2.0], [2.0, 1.0]], index=labels, columns=labels))
-
 
 class TestErrorStructureBinding:
     """Test module for matching reusable error components to named source observations."""
@@ -324,6 +311,57 @@ class TestErrorStructureDiagnostics:
         assert summary is not None
         assert "terrain: varies with slope, independent" in summary
 
+    def test_info__gaussian_labels(self) -> None:
+        """Checks that a Gaussian error summary names its stored source observations."""
+
+        # Fixed mean and covariance for two labelled observations
+        labels = pd.Index(["left", "right"])
+        covariance = pd.DataFrame(np.eye(2), index=labels, columns=labels)
+        structure = gu.ErrorStructure.from_gaussian(covariance, mean=pd.Series([1.0, 2.0], index=labels))
+
+        # The summary describes the joint vector and its labels
+        summary = structure.info(verbose=False)
+        assert summary is not None
+        assert "joint Gaussian vector of 2 parameter(s)" in summary
+        assert "labels: left, right" in summary
+
+    @pytest.mark.skipif(find_spec("matplotlib") is None, reason="Requires Matplotlib")
+    def test_plot_correlation(self) -> None:
+        """Checks that correlation plot runs and contains the right axes/data."""
+
+        import_optional("matplotlib")
+        import matplotlib.pyplot as plt
+
+        # We create a synthetic error structure
+        model = VariogramModel("gaussian", effective_range=3, partial_sill=1)
+        empirical = gu.Variogram(
+            lags=np.array([1.0, 2.0]), semivariance=np.array([0.2, 0.7]), counts=np.array([8, 9]), model=model
+        )
+        structure = gu.ErrorStructure(
+            [gu.ErrorComponent("spatial", 1, model)], empirical_variogram=empirical
+        )
+
+        # Both panels should contain correlation axes
+        axes = structure.plot_correlation()
+        panels = structure.plot()
+        try:
+            assert set(panels) == {"correlation"}
+            assert axes.get_xlabel() == "Lag distance"
+            assert panels["correlation"].get_ylabel() == "Semivariance"
+        finally:
+            plt.close(axes.figure)
+            plt.close(panels["correlation"].figure)
+
+    def test_plot__warns_without_empirical_diagnostics(self) -> None:
+        """Checks that a plot without empirical variogram warns."""
+
+        # Synthetic error structure without empirical vario
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        with pytest.warns(UserWarning, match="no empirical diagnostics"):
+            assert structure.plot() == {}
+        with pytest.raises(ValueError, match="No empirical variogram"):
+            structure.plot_correlation()
+
     @pytest.mark.skipif(find_spec("matplotlib") is None, reason="Requires Matplotlib")
     @pytest.mark.parametrize("named_columns", [False, True])
     @pytest.mark.parametrize("method", ["plot_magnitude", "plot"])
@@ -356,6 +394,22 @@ class TestErrorStructureDiagnostics:
             assert [bar.get_height() for bar in panels["count"].patches] == [20, 30]
         finally:
             plt.close(panels["statistic"].figure)
+
+
+class TestErrorStructureGaussianErrors:
+    """Test module for invalid labelled Gaussian covariance matrices."""
+
+    def test_from_gaussian__error(self) -> None:
+        """Checks invalid labels/covariance."""
+
+        labels = pd.Index(["x", "y"])
+        valid = pd.DataFrame([[1.0, 0.5], [0.5, 1.0]], index=labels, columns=labels)
+        with pytest.raises(ValueError, match="match exactly"):
+            gu.ErrorStructure.from_gaussian(valid.rename(columns={"y": "z"}))
+        with pytest.raises(ValueError, match="zero-variance"):
+            gu.ErrorStructure.from_gaussian(pd.DataFrame([[0.0, 0.1], [0.1, 1.0]], index=labels, columns=labels))
+        with pytest.raises(ValueError, match="positive semidefinite"):
+            gu.ErrorStructure.from_gaussian(pd.DataFrame([[1.0, 2.0], [2.0, 1.0]], index=labels, columns=labels))
 
 
 class TestErrorMagnitudeValidation:
@@ -402,3 +456,55 @@ class TestErrorMagnitudeValidation:
         # Require the requested column without falling back to nmad
         with pytest.raises(ValueError, match="must contain.*std"):
             gu.ErrorMagnitude.variable_from_grouped_stats(statistics, statistic="std")
+
+
+class TestErrorStructureBindingErrors:
+    """Test module for invalid source identities, coordinates, predictors, and covariance indexes."""
+
+    @pytest.mark.parametrize(
+        "source_ids, message",
+        [
+            (np.array([[0, 1]]), "one-dimensional"),
+            ([0, 0], "each source_id once"),
+            ([[0]], "hashable IDs"),
+        ],
+    )
+    def test_bind__error_invalid_source_ids(self, source_ids: object, message: str) -> None:
+        """Checks that bound observations have unique, hashable, one-dimensional source IDs."""
+
+        # Independent errors still need distinct identities to form a covariance matrix
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        with pytest.raises(ValueError, match=message):
+            structure.bind(source_ids)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("coordinates", [np.array([0.0, 1.0]), np.array([[0.0], [np.nan]])])
+    def test_bind__error_invalid_coordinates(self, coordinates: np.ndarray) -> None:
+        """Checks that source coordinates have one finite row per observation."""
+
+        # Coordinate shape and finite values are checked before a spatial model draws errors
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        with pytest.raises(ValueError, match="coordinates must be finite with shape"):
+            structure.bind(["a", "b"], coordinates=coordinates)
+
+    def test_bind__error_invalid_predictor(self) -> None:
+        """Checks that variable error magnitudes receive one slope per bound observation."""
+
+        # Magnitudes depend on slope at two independent observations
+        statistics = pd.DataFrame({"nmad": [1.0, 2.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="slope"))
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
+        structure = gu.ErrorStructure([gu.ErrorComponent("terrain", magnitude)])
+
+        # Missing and wrong-length slope values cannot define both magnitudes
+        with pytest.raises(ValueError, match="Missing predictors"):
+            structure.bind(["a", "b"])
+        with pytest.raises(ValueError, match="must be scalar or contain one value per source"):
+            structure.bind(["a", "b"], predictors={"slope": [0.0, 0.5, 1.0]})
+
+    def test_covariance_block__error_outside_source(self) -> None:
+        """Checks that covariance blocks reject indexes outside the bound observations."""
+
+        # Two source IDs permit positions zero and one only
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        bound = structure.bind(["a", "b"])
+        with pytest.raises(ValueError, match="outside the selected source"):
+            bound.covariance_block([2], [0])

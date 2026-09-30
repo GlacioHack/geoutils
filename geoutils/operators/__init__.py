@@ -21,5 +21,5 @@
 
 from geoutils.operators.base import LinearCoefficients, LocalData
 from geoutils.operators.interpolator import Interpolator
-from geoutils.operators.neighbours import GridNeighbours, PointNeighbours
+from geoutils.operators.neighbours import GridCoverage, GridNeighbours, PointNeighbours
 from geoutils.operators.reducer import Reducer

@@ -8,6 +8,7 @@ import pytest
 from affine import Affine
 
 import geoutils as gu
+from geoutils._typing import NDArrayNum
 from geoutils.operators import Interpolator, LinearCoefficients, LocalData, Reducer
 from geoutils.operators.reducer import Mean
 
@@ -166,6 +167,22 @@ class TestAnalyticalOperatorPropagation:
         assert np.isnan(summary.std)
         assert summary.covariance is not None and np.isnan(summary.covariance.iloc[0, 0])
 
+    def test_propagate__selected_covariance_keeps_initial_error_structure(self) -> None:
+        """Checks that selected joint results refer to the original error model."""
+
+        # Overlapping means with shared source error
+        first = _local([1, 2], ["a", "b"], [[0, 0], [1, 0]])
+        second = _local([2, 3], ["b", "c"], [[1, 0], [2, 0]])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        summary = gu.uncertainty.propagate(
+            Mean(), [first, second], source_error, output_labels=["x", "y"], return_covariance=True
+        )
+
+        # Check output covariance and original input error model
+        assert summary.error_structure is source_error
+        assert summary.covariance is not None
+        np.testing.assert_allclose(summary.covariance, [[0.5, 0.25], [0.25, 0.5]])
+
     def test_propagate__error_analytical_samples(self) -> None:
         """Checks that analytical propagation rejects a request for random output samples."""
 
@@ -187,22 +204,6 @@ class TestAnalyticalOperatorPropagation:
         # Check error for two supplied results instead of one
         with pytest.raises(ValueError, match="one value per LocalData target"):
             gu.uncertainty.propagate(Mean(), data, structure, nominal_estimate=[2, 3])
-
-    def test_propagate__selected_covariance_keeps_initial_error_structure(self) -> None:
-        """Checks that selected joint results refer to the original error model."""
-
-        # Overlapping means with shared source error
-        first = _local([1, 2], ["a", "b"], [[0, 0], [1, 0]])
-        second = _local([2, 3], ["b", "c"], [[1, 0], [2, 0]])
-        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
-        summary = gu.uncertainty.propagate(
-            Mean(), [first, second], source_error, output_labels=["x", "y"], return_covariance=True
-        )
-
-        # Check output covariance and original input error model
-        assert summary.error_structure is source_error
-        assert summary.covariance is not None
-        np.testing.assert_allclose(summary.covariance, [[0.5, 0.25], [0.25, 0.5]])
 
 
 class TestNumericalOperatorPropagation:
@@ -259,17 +260,6 @@ class TestNumericalOperatorPropagation:
         assert summary.estimate == 2
         assert operator.calls == 3
 
-    def test_propagate__error_samples_without_valid_sources(self) -> None:
-        """Checks that a missing source cannot produce the requested random output samples."""
-
-        # Missing source with no valid observation to sample
-        data = LocalData(values=np.array([np.nan]), valid=np.array([False]), source_ids=np.array(["missing"]))
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
-
-        # Check sample request error for missing source
-        with pytest.raises(ValueError, match="at least one valid source"):
-            gu.uncertainty.propagate(Mean(), data, structure, return_samples=True)
-
     def test_propagate__masked_source_stays_invalid_in_numerical_draws(self) -> None:
         """Checks that a masked finite value is excluded from source errors and every simulated reduction."""
 
@@ -325,6 +315,17 @@ class TestNumericalOperatorPropagation:
         np.testing.assert_array_equal(forward.samples["first"], reversed_order.samples["first"])
         np.testing.assert_array_equal(forward.samples["second"], reversed_order.samples["second"])
 
+    def test_propagate__error_samples_without_valid_sources(self) -> None:
+        """Checks that a missing source cannot produce the requested random output samples."""
+
+        # Missing source with no valid observation to sample
+        data = LocalData(values=np.array([np.nan]), valid=np.array([False]), source_ids=np.array(["missing"]))
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+
+        # Check sample request error for missing source
+        with pytest.raises(ValueError, match="at least one valid source"):
+            gu.uncertainty.propagate(Mean(), data, structure, return_samples=True)
+
 
 # Tests for intervals, marginals, and correlations in propagation results.
 
@@ -360,22 +361,6 @@ class TestPropagationSummary:
         assert summary.covariance.loc["value", "value"] == 0
         assert np.isnan(summary.correlation.loc["value", "value"])
 
-    def test_marginal__error_numerical_without_samples(self) -> None:
-        """Checks that a numerical result without saved draws does not claim an exact normal marginal."""
-
-        # Numerical propagation without saved draws
-        data = LocalData(values=np.array([1.0, 3.0]), valid=np.ones(2, dtype=bool), source_ids=np.array(["a", "b"]))
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 0.5)])
-        summary = gu.uncertainty.propagate(Mean(), data, structure, method="numerical", n_samples=4, random_state=6)
-
-        # Check errors for distribution queries without saved draws
-        with pytest.raises(ValueError, match="no saved draws or known marginal"):
-            summary.marginal("value")
-        with pytest.raises(ValueError, match="Quantiles require saved draws"):
-            summary.quantile(0.5)
-        with pytest.raises(ValueError, match="Quantiles require saved draws"):
-            summary.interval()
-
     def test_marginal__numerical_samples_match_saved_draws(self) -> None:
         """Checks that a saved numerical marginal and its median come from the same output draws."""
 
@@ -408,6 +393,22 @@ class TestPropagationSummary:
         assert summary.mean == pytest.approx(14.5)
         assert summary.std == pytest.approx(0)
         assert not hasattr(summary, "to_error_structure")
+
+    def test_marginal__error_numerical_without_samples(self) -> None:
+        """Checks that a numerical result without saved draws does not claim an exact normal marginal."""
+
+        # Numerical propagation without saved draws
+        data = LocalData(values=np.array([1.0, 3.0]), valid=np.ones(2, dtype=bool), source_ids=np.array(["a", "b"]))
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 0.5)])
+        summary = gu.uncertainty.propagate(Mean(), data, structure, method="numerical", n_samples=4, random_state=6)
+
+        # Check errors for distribution queries without saved draws
+        with pytest.raises(ValueError, match="no saved draws or known marginal"):
+            summary.marginal("value")
+        with pytest.raises(ValueError, match="Quantiles require saved draws"):
+            summary.quantile(0.5)
+        with pytest.raises(ValueError, match="Quantiles require saved draws"):
+            summary.interval()
 
 
 class TestCallablePropagation:
@@ -470,6 +471,91 @@ class TestCallablePropagation:
         assert summary.samples is not None
         assert summary.samples.shape == (2, 1)
         np.testing.assert_array_equal(summary.samples[(3, 4)], [64, 64])
+
+    def test_propagate__dataframe_output_selects_row_and_column(self) -> None:
+        """Checks that selected DataFrame results use their row and column labels in saved draws."""
+
+        # Zero error makes every draw equal the original two-column calculation
+        source = np.array([2.0, 5.0])
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 0)])
+
+        def calculate(values: NDArrayNum) -> pd.DataFrame:
+            """Put the source values in a labelled row."""
+
+            return pd.DataFrame([[values[0], values[1]]], index=["row"], columns=["left", "right"])
+
+        # Select the right column by both labels, then compare its saved realizations
+        summary = gu.uncertainty.propagate(
+            calculate,
+            source,
+            structure,
+            at=[("row", "right")],
+            n_samples=3,
+            return_samples=True,
+            return_covariance=True,
+        )
+        assert summary.samples is not None
+        np.testing.assert_array_equal(summary.samples[("row", "right")], [5, 5, 5])
+        assert summary.selection["flat_index"].iloc[0] == 1
+
+    @pytest.mark.parametrize(
+        "result, at",
+        [
+            (np.array([1.0, 2.0]), "missing"),
+            (np.array([1.0, 2.0]), [0, 0]),
+            (np.array([1.0, 2.0]), [2]),
+            (np.array([[1.0, 2.0]]), [0]),
+            (pd.DataFrame([[1.0, 2.0]], index=["row"], columns=["left", "right"]), [("row", "missing")]),
+        ],
+    )
+    def test_propagate__error_invalid_callable_output_selection(self, result: object, at: object) -> None:
+        """Checks that selected callable outputs name distinct existing labels or grid positions."""
+
+        # A fixed calculation isolates validation of its requested output labels
+        source = np.array([0.0])
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 0)])
+
+        # Reject unknown, repeated, or wrongly shaped labels before simulation
+        with pytest.raises(ValueError, match="at must"):
+            gu.uncertainty.propagate(
+                lambda _values: result,
+                source,
+                structure,
+                at=at,  # type: ignore[arg-type]
+                n_samples=2,
+                return_samples=True,
+            )
+
+    @pytest.mark.parametrize("at, message", [(None, "Select outputs with at"), ("all", "exceeds max_covariance_size")])
+    def test_propagate__error_callable_output_limit(self, at: object, message: str) -> None:
+        """Checks that large callable results need an affordable explicit selection for joint statistics."""
+
+        # Ten output values exceed the two-output covariance budget
+        source = np.zeros(10)
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 0)])
+
+        # No selection is ambiguous, while selecting all ten exceeds the limit
+        with pytest.raises(ValueError, match=message):
+            gu.uncertainty.propagate(
+                lambda values: values,
+                source,
+                structure,
+                at=at,  # type: ignore[arg-type]
+                max_covariance_size=2,
+                return_covariance=True,
+                n_samples=2,
+            )
+
+    def test_propagate__error_callable_requires_numerical_method(self) -> None:
+        """Checks that a complete callable without derivatives cannot use analytical propagation."""
+
+        # A deterministic sum still has no coefficients for an arbitrary callable
+        source = np.array([1.0, 2.0])
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+
+        # Reject analytical propagation before drawing errors
+        with pytest.raises(NotImplementedError, match="needs explicit derivatives"):
+            gu.uncertainty.propagate(lambda values: values.sum(), source, structure, method="analytical")
 
     def test_propagate__error_selected_samples_exceed_memory_limit(self) -> None:
         """Checks that sample storage is rejected before drawing when it exceeds the requested limit."""

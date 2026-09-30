@@ -45,6 +45,21 @@ class TestRasterFilters:  # type: ignore
         expected_raster.data *= 2
         np.testing.assert_allclose(filtered.data.data, expected_raster.data.data)
 
+    def test_raster_filter__kernel_shape(self) -> None:
+        """Checks that a named mean filter accepts circular option."""
+
+        values = np.zeros((5, 5), dtype=float)
+        values[1, 1] = values[1, 3] = values[3, 1] = values[3, 3] = 10
+        values[1, 2], values[2, 1], values[2, 2], values[2, 3], values[3, 2] = 1, 2, 3, 4, 5
+        raster = Raster.from_array(values, rio.transform.from_origin(0, 5, 1, 1), crs=32631)
+
+        # Compare the center with the two NumPy window means
+        circular = raster.filter("mean", size=3, kernel_shape="circular")
+        square = raster.filter("mean", size=3, kernel_shape="square")
+        cross = np.array([values[1, 2], values[2, 1], values[2, 2], values[2, 3], values[3, 2]])
+        np.testing.assert_allclose(circular.data[2, 2], np.mean(cross))
+        np.testing.assert_allclose(square.data[2, 2], np.mean(values[1:4, 1:4]))
+
     def test_raster_filter_invalid(self) -> None:
         """Checks that Raster.filter() rejects an unknown name and a value that is not callable."""
         raster = gu.Raster(self.aster_dem_path)
@@ -358,12 +373,12 @@ class TestReducerFilters:
         points = (cols.ravel() + 0.5, 11 - rows.ravel() - 0.5)
 
         # Filtering can fill missing centers, as point reduction does by default
-        result = raster.filter(operator, fractional=fractional, preserve_nodata=False)
+        result = raster.filter(operator, coverage=("fractional" if fractional else "center"), preserve_nodata=False)
         expected = np.stack(
             [
-                raster.resample_at_points(points, operator, band=band, fractional=fractional, as_array=True).reshape(
-                    values.shape[-2:]
-                )
+                raster.resample_at_points(
+                    points, operator, band=band, coverage=("fractional" if fractional else "center"), as_array=True
+                ).reshape(values.shape[-2:])
                 for band in (1, 2)
             ]
         )
@@ -416,6 +431,21 @@ class TestReducerFilters:
         # Offset order selects the right-hand value; the lower median selects the current value
         np.testing.assert_array_equal(first[:, :-1], values[:, 1:])
         np.testing.assert_array_equal(lower, values)
+
+    def test_filter__circular_offsets_with_area_coverage(self) -> None:
+        """Checks that a custom reducer treats circular offsets as a circle when selecting touched cells."""
+
+        class CustomCount(Count):
+            """Count cells through the general reducer evaluation path."""
+
+        # Offsets describe a circle but do not record its shape
+        raster = gu.Raster.from_array(np.ones((9, 9)), rio.transform.from_origin(0, 9, 1, 1), crs=32631)
+        offsets = GridNeighbours(size=7, shape="circular").offsets
+        reducer = CustomCount(neighborhood=GridNeighbours(offsets))
+
+        # A seven-cell circle touches 45 cells; its four corner cells lie outside the circle
+        result = raster.filter(reducer, coverage="all_touched")
+        assert result.data[4, 4] == 45
 
     def test_filter__distant_offsets(self) -> None:
         """Checks that distant offsets are evaluated without allocating a mostly empty convolution kernel."""
@@ -634,8 +664,12 @@ class TestRasterReducerEngines:
         operator = operator_type(neighborhood=GridNeighbours(size=5, shape="circular"))
 
         # Compare Numba with SciPy; weighted sums may differ by roundoff
-        expected = raster.filter(operator, fractional=fractional, engine="scipy").to_nanarray()
-        result = raster.filter(operator, fractional=fractional, engine="numba").to_nanarray()
+        expected = raster.filter(
+            operator, coverage=("fractional" if fractional else "center"), engine="scipy"
+        ).to_nanarray()
+        result = raster.filter(
+            operator, coverage=("fractional" if fractional else "center"), engine="numba"
+        ).to_nanarray()
         np.testing.assert_allclose(result, expected, rtol=1e-14, atol=1e-14, equal_nan=True)
 
 
@@ -694,7 +728,12 @@ class TestFilterChunked:
         raster.save(path)
         lazy = gu.open_raster(path, chunks={"band": 1, "x": 7, "y": 5})
         source = gu.Raster(path)
-        options = {"size": 5, "fractional": fractional, "preserve_nodata": False, "boundless": False}
+        options = {
+            "size": 5,
+            "coverage": ("fractional" if fractional else "center"),
+            "preserve_nodata": False,
+            "boundless": False,
+        }
 
         # Run eager and worker calculations, then build the Dask result without loading its source
         expected = raster.filter(operator, **options).to_nanarray()

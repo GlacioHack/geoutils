@@ -169,7 +169,7 @@ class ErrorMagnitude:
 
     It should generally be estimated jointly with error correlation through higher-level function such as
     ``estimate_error_structure()`` from a raster or point object, or ``ErrorStructure.estimate()``.
-    Otherwise, to create it manuallly, use one of two methods:
+    Otherwise, to create it manually, use one of two methods:
 
     - For a constant error, use constant(value) with a single value,
     - For a variable error, use variable_from_grouped_stats(statistics) with a pandas DataFrame of spread estimates
@@ -566,8 +566,8 @@ class ErrorStructure:
 
     Use ``predict_magnitude()`` and ``predict_covariance()`` to compute values of magnitude and
     covariance according to the error model.
-    Pass this object to an interpolation/reduction with uncertainty, or use generate_random_field() to draw errors over a raster
-    or point cloud.
+    Pass this object to an interpolation/reduction with uncertainty, or use generate_random_field() to draw errors
+    over a raster or point cloud.
 
     For example, to draw independent measurement errors with standard deviation 2 over a raster:
 

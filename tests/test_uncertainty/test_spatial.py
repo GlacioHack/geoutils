@@ -38,23 +38,6 @@ class TestSpatialPropagation:
         np.testing.assert_array_equal(summary.estimate.to_nanarray(), result.to_nanarray())
         np.testing.assert_allclose(summary.mean.to_nanarray(), result.to_nanarray(), rtol=1e-14)
 
-    def test_reproject__integer_input_has_fractional_uncertainty(self) -> None:
-        """Checks that a fractional error magnitude remains floating point when the source raster stores integers."""
-
-        # Averaging four independent errors of magnitude one gives a standard deviation of one half
-        raster = gu.Raster.from_array(
-            np.array([[2, 4], [6, 8]], dtype=np.int16), rio.transform.from_origin(0, 2, 1, 1), crs=32631, nodata=-9999
-        )
-        reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(0, 2, 2, 2), crs=32631)
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
-        kwargs = {"ref": reference, "resampling": Mean()}
-
-        summary = gu.uncertainty.propagate(raster.reproject, error_structure=errors, operation_kwargs=kwargs)
-
-        assert summary.estimate.to_nanarray()[0, 0] == 5
-        assert np.issubdtype(summary.std.data.dtype, np.floating)
-        assert summary.std.to_nanarray()[0, 0] == 0.5
-
     @pytest.mark.parametrize("engine", ["scipy", "numba"])
     @pytest.mark.parametrize("method", ["mean", "idw"])
     def test_grid__error_model_weights_values(self, engine: str, method: str) -> None:
@@ -100,6 +83,23 @@ class TestSpatialPropagation:
         assert result == pytest.approx(weights @ [10, 20])
         assert summary.estimate == result
         assert summary.variance == pytest.approx(weights @ covariance @ weights)
+
+    def test_reproject__integer_input_has_fractional_uncertainty(self) -> None:
+        """Checks that a fractional error magnitude remains floating point when the source raster stores integers."""
+
+        # Averaging four independent errors of magnitude one gives a standard deviation of one half
+        raster = gu.Raster.from_array(
+            np.array([[2, 4], [6, 8]], dtype=np.int16), rio.transform.from_origin(0, 2, 1, 1), crs=32631, nodata=-9999
+        )
+        reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(0, 2, 2, 2), crs=32631)
+        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        kwargs = {"ref": reference, "resampling": Mean()}
+
+        summary = gu.uncertainty.propagate(raster.reproject, error_structure=errors, operation_kwargs=kwargs)
+
+        assert summary.estimate.to_nanarray()[0, 0] == 5
+        assert np.issubdtype(summary.std.data.dtype, np.floating)
+        assert summary.std.to_nanarray()[0, 0] == 0.5
 
     def test_reproject__bilinear_keeps_geometric_coefficients(self) -> None:
         """Checks that bilinear interpolation uses geometric weights even with unequal observation errors."""

@@ -269,7 +269,7 @@ def _resample_at_points(
             )
         return output
 
-    # A fractional window is centered on the requested X/Y point, so cells on its edges may contribute partly
+    # A fractional window follows the requested X/Y point, so edge cells can contribute partly
     if fractional_window is not None:
         local_inputs, source_rows, source_cols = _prepare_fractional_window_data(
             array,

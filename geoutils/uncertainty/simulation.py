@@ -178,7 +178,7 @@ def simulate(
     else:
         length = np.divide(np.hypot(sine, cosine), count, out=np.full(shape, np.nan), where=count > 0)
         length = np.minimum(length, 1.0)
-        mean = np.mod(np.arctan2(sine, cosine), 2 * np.pi) * period / (2 * np.pi)
+        mean = np.asarray(np.mod(np.arctan2(sine, cosine), 2 * np.pi) * period / (2 * np.pi))
         undefined = (count > 0) & (length <= 32 * np.finfo(float).eps)
         mean[(count == 0) | undefined] = np.nan
         regular = (count > 1) & ~undefined

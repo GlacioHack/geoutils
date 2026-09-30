@@ -82,7 +82,21 @@ class TestPointNeighbours:
 class TestGridNeighbours:
     """Test module for raster neighborhoods."""
 
-    @pytest.mark.parametrize("shape,expected_count", [("square", 25), ("circular", 13)])
+    def test_grid_neighbours__coverage(self) -> None:
+        """Checks that a grid window records its cell coverage rule and rejects unknown rules."""
+
+        # The same offsets can select complete cells or weight their covered area
+        center = GridNeighbours(size=3)
+        fractional = GridNeighbours(size=3, coverage="fractional")
+        assert center.offsets == fractional.offsets
+        assert center.coverage == "center"
+        assert fractional.coverage == "fractional"
+
+        # A misspelled rule cannot silently use center coverage
+        with pytest.raises(ValueError, match="GridNeighbours coverage"):
+            GridNeighbours(size=3, coverage="invalid")  # type: ignore
+
+    @pytest.mark.parametrize("shape,expected_count", [("square", 25), ("circular", 21)])
     def test_grid_neighbours__size_constructor(self, shape: Literal["square", "circular"], expected_count: int) -> None:
         """Checks that the constructor selects centered square and circular windows of the requested size."""
 
@@ -94,6 +108,11 @@ class TestGridNeighbours:
         assert (0, 0) in neighborhood.offsets
         assert neighborhood.window_shape == shape
         assert neighborhood.overlap == (2, 2)
+
+        # A radius of 2.5 pixels includes cells one row from the edge, but excludes the corners
+        if shape == "circular":
+            assert (2, 1) in neighborhood.offsets
+            assert (2, 2) not in neighborhood.offsets
 
         # Positional size creates the same square window
         if shape == "square":
@@ -121,13 +140,15 @@ class TestGridNeighbours:
         assert neighbours.overlap == (1, 1)
 
     def test_gridneighb__circular_window(self) -> None:
-        """Checks a circular 3x3 window."""
+        """Checks that a three-cell circle includes diagonal cell centers within its radius of 1.5 pixels."""
 
-        # Exclude diagonals beyond one-pixel radius
+        # All nine cell centers lie within 1.5 pixels of the middle cell
         neighborhood = GridNeighbours(size=3, shape="circular")
 
-        # Should only contain center and 4 edges
-        assert neighborhood.offsets == ((-1, 0), (0, -1), (0, 0), (0, 1), (1, 0))
+        # Check diagonal cells and the complete window
+        assert len(neighborhood.offsets) == 9
+        assert (-1, -1) in neighborhood.offsets
+        assert (1, 1) in neighborhood.offsets
         assert neighborhood.window_shape == "circular"
         assert neighborhood.overlap == (1, 1)
 

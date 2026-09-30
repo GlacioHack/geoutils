@@ -72,7 +72,7 @@ from geoutils.interface.resampling import (
 from geoutils.interface.vectorization import _polygonize
 from geoutils.multiproc import MultiprocConfig
 from geoutils.operators.interpolator import Interpolator, Kriging, KrigingBackend
-from geoutils.operators.neighbours import _build_kriging_grid_neighbours
+from geoutils.operators.neighbours import GridCoverage, _build_kriging_grid_neighbours
 from geoutils.operators.nodata import NodataChoice, NodataPropagation
 from geoutils.operators.overlap import OverlapBackend
 from geoutils.operators.reducer import Reducer
@@ -1562,6 +1562,9 @@ class RasterBase(ABC):
         nodata_propagation: NodataPropagation = "gdal",
         overlap_backend: OverlapBackend = "auto",
         error_structure: ErrorStructure | None = None,
+        window: int | None = None,
+        window_shape: Literal["square", "circular"] | None = None,
+        coverage: GridCoverage | None = None,
     ) -> RasterType | None:
         """
         Reproject raster to a different geotransform (resolution, bounds) and/or coordinate reference system (CRS).
@@ -1588,11 +1591,9 @@ class RasterBase(ABC):
             not exist, will use GDAL's default.
         :param dtype: Destination data type of array.
         :param resampling: A Rasterio resampling method or a custom Interpolator or Reducer. Existing methods can be
-            passed as strings and continue to use Rasterio. By default, a Reducer receives every source cell with
-            positive area overlap with the destination cell; Mean() and Sum() use the exact covered fraction of each
-            source cell.
-            With GridNeighbours, a Reducer instead uses the specified offsets around the source cell containing each
-            transformed destination center, without fractional area weights.
+            passed as strings and continue to use Rasterio. By default, a Reducer uses cells touched by the
+            rectangular source window enclosing each projected destination cell. With GridNeighbours, it uses a
+            fixed window around the transformed destination center.
             Defaults to bilinear.
             Can be configured with the global setting geoutils.config["reprojection_method"].
             See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
@@ -1609,6 +1610,10 @@ class RasterBase(ABC):
             installed and compatible, and otherwise uses Shapely; the other options select one explicitly.
         :param error_structure: Optional observation error model used for weighting and fitting.
             Use geoutils.uncertainty.propagate() to calculate output uncertainty.
+        :param window: Odd source window size for a Reducer, overriding its configured neighborhood.
+        :param window_shape: Square or circular source window for a Reducer.
+        :param coverage: Select cells by center, include all touched cells, or weight by covered area. With no fixed
+            neighborhood, reproject() uses all touched cells by default.
 
         :returns: Reprojected raster.
         """
@@ -1637,6 +1642,9 @@ class RasterBase(ABC):
             mp_config=mp_config,
             nodata_propagation=nodata_propagation,
             overlap_backend=overlap_backend,
+            window=window,
+            window_shape=window_shape,
+            coverage=coverage,
         )
         return_copy, data, transformed, crs, nodata = reprojected
 
@@ -2171,14 +2179,14 @@ class RasterBase(ABC):
         points: tuple[NDArrayNum, NDArrayNum] | tuple[Number, Number] | PointCloudLike,
         method: InterpolationMethodLike | Reducer | Callable[[NDArrayNum], float],
         *,
-        fractional: bool = False,
+        coverage: GridCoverage | None = None,
         band: int = 1,
         input_latlon: bool = False,
         as_array: bool = False,
         nodata_handling: NodataChoice | None = None,
         error_structure: ErrorStructure | None = None,
         window: int | None = None,
-        window_shape: Literal["square", "circular"] = "square",
+        window_shape: Literal["square", "circular"] | None = None,
         masked: bool = False,
         boundless: bool = True,
         **kwargs: Any,
@@ -2191,8 +2199,7 @@ class RasterBase(ABC):
 
         :param points: X/Y coordinates or a point cloud defining the requested positions.
         :param method: Interpolator, Reducer, a reduction callable, or a built-in interpolation name.
-        :param fractional: For a Reducer with a square or circular window, weight cells by the fraction covered
-            by a window centered on each requested X/Y point.
+        :param coverage: Select cells by center, include all touched cells, or weight by covered area.
         :param band: Source band number, starting at one.
         :param input_latlon: Convert tuple coordinates from longitude/latitude to the raster CRS.
         :param as_array: Return values rather than a point cloud at the requested coordinates.
@@ -2201,7 +2208,7 @@ class RasterBase(ABC):
         :param error_structure: Optional observation error model used for weighting and fitting.
             Use geoutils.uncertainty.propagate() to calculate output uncertainty.
         :param window: Optional odd window size for a reducer, overriding its configured neighborhood for this call.
-        :param window_shape: Use a square or circular window when fractional=True.
+        :param window_shape: Use a square or circular window.
         :param masked: Return a masked array when as_array=True.
         :param boundless: Allow partial reduction windows at raster edges. If False, incomplete windows return NaN.
         :param kwargs: Additional interp_at_points() options when method is an Interpolator or method name.
@@ -2212,7 +2219,7 @@ class RasterBase(ABC):
             self,
             points=points,
             method=method,
-            fractional=fractional,
+            coverage=coverage,
             band=band,
             input_latlon=input_latlon,
             as_array=as_array,
@@ -2236,8 +2243,8 @@ class RasterBase(ABC):
         as_array: bool = False,
         boundless: bool = True,
         *,
-        fractional: bool = False,
-        window_shape: Literal["square", "circular"] = "square",
+        coverage: GridCoverage | None = None,
+        window_shape: Literal["square", "circular"] | None = None,
         error_structure: ErrorStructure | None = None,
         mp_config: MultiprocConfig | None = None,
     ) -> Any:
@@ -2259,26 +2266,31 @@ class RasterBase(ABC):
         :param as_array: Whether to return an array of reduced values (defaults to a point cloud containing input
             coordinates).
         :param boundless: Allow partial windows at raster edges. If False, incomplete windows return NaN.
-        :param fractional: Weight each source cell by the fraction covered by a window centered on the requested
-            point. Pass a Reducer for methods other than the default mean.
-        :param window_shape: Use a square or circular window when fractional=True.
+        :param coverage: Select cells by center, include all touched cells, or weight by covered area.
+        :param window_shape: Use a square or circular window.
         :param error_structure: Optional observation error model used for weighting and fitting.
             Use geoutils.uncertainty.propagate() to calculate output uncertainty.
         :param mp_config: Multiprocessing settings for reading and reducing raster tiles.
         :returns: Point cloud of reduced values, or a scalar/array when as_array=True.
         """
 
+        selected_window = window
+        if selected_window is None and (
+            not isinstance(reducer_function, Reducer) or reducer_function.default_neighborhood is None
+        ):
+            selected_window = 1
+
         return _resample_at_points(
             self,
             points=points,
             method=reducer_function,
-            window=1 if window is None else window,
+            window=selected_window,
             input_latlon=input_latlon,
             band=band,
             masked=masked,
             as_array=as_array,
             boundless=boundless,
-            fractional=fractional,
+            coverage=coverage,
             window_shape=window_shape,
             error_structure=error_structure,
             mp_config=mp_config,
@@ -2295,8 +2307,8 @@ class RasterBase(ABC):
         as_array: bool = False,
         boundless: bool = True,
         *,
-        fractional: bool = False,
-        window_shape: Literal["square", "circular"] = "square",
+        coverage: GridCoverage | None = None,
+        window_shape: Literal["square", "circular"] | None = None,
         error_structure: ErrorStructure | None = None,
         mp_config: MultiprocConfig | None = None,
     ) -> Any:
@@ -2317,7 +2329,7 @@ class RasterBase(ABC):
             masked=masked,
             as_array=as_array,
             boundless=boundless,
-            fractional=fractional,
+            coverage=coverage,
             window_shape=window_shape,
             error_structure=error_structure,
             mp_config=mp_config,
@@ -2332,20 +2344,23 @@ class RasterBase(ABC):
         engine: Literal["scipy", "numba"] = "scipy",
         outlier_threshold: float = 2.0,
         mp_config: MultiprocConfig | None = None,
+        coverage: GridCoverage | None = None,
+        kernel_shape: Literal["square", "circular"] | None = None,
         **kwargs: dict[str, Any],
     ) -> RasterType:
         """
         Apply a filter to the raster array.
 
         A Reducer can select its cells with GridNeighbours, for example
-        ``filter(Mean(neighborhood=GridNeighbours(size=5, shape="circular")), fractional=True)``.
-        Its configured window is used unless size or kernel_shape is supplied. Reducer filters accept fractional
-        square/circular coverage, nodata_handling, preserve_nodata and boundless through kwargs.
+        ``filter(Mean(neighborhood=GridNeighbours(size=5, shape="circular", coverage="fractional")))``.
+        Its configured window is used unless size, kernel_shape or coverage is supplied.
 
         :param method: The filter to apply. Can be a string ("gaussian", "median", "mean", "max", "min", "distance")
             for built-in filters, or a custom callable that takes a 2D ndarray and returns one.
         :param size: Window size for filter
         :param mp_config: Multiprocessing configuration.
+        :param coverage: Select cells by center, include all touched cells, or weight by covered area.
+        :param kernel_shape: Use a square or circular window for a Reducer.
         :param sigma: Optional standard deviation for Gaussian filtering.
             Only used when `method="gaussian"`.
         :param engine: Optional engine to use for filtering, either "scipy" (default) or "numba".
@@ -2371,6 +2386,8 @@ class RasterBase(ABC):
             sigma=sigma,
             engine=engine,
             outlier_threshold=outlier_threshold,
+            coverage=coverage,
+            kernel_shape=kernel_shape,
             **kwargs,
         )
         return self._cast_raster_output(output)

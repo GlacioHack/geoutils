@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import warnings
 from cmath import isnan
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -77,16 +77,18 @@ class TestStats:
         values = np.array([[1.0, 3.0], [6.0, 10.0]])
         groups = np.array([[0, 0], [1, 1]])
         source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
-        options = {"by": {"group": groups}, "categories": {"group": [0, 1]}}
+        by = {"group": groups}
+        categories = {"group": [0, 1]}
 
         # Compare the returned table with the result calculated without requesting uncertainty
-        expected = gu.stats.stats(values, Mean(), **options)
+        expected = gu.stats.stats(values, Mean(), by=by, categories=categories)
         nominal, summary = gu.stats.stats(
             values,
             Mean(),
             error_structure=source_error,
             uncertainty_kwargs={"return_covariance": True},
-            **options,
+            by=by,
+            categories=categories,
         )
         pd.testing.assert_frame_equal(nominal, expected)
         np.testing.assert_array_equal(summary.estimate, [2.0, 8.0])
@@ -142,17 +144,31 @@ class TestStats:
         assert default_grouped.columns.get_level_values("statistic").tolist() == expected_grouped_statistics
 
     @pytest.mark.parametrize("subsampling_strategy", ["topk", "sequential"])
-    def test_stats__subsample_per_group_without_by(self, subsampling_strategy: str) -> None:
+    def test_stats__subsample_per_group_without_by(self, subsampling_strategy: Literal["topk", "sequential"]) -> None:
         """Checks that per-group sampling without groups behaves like ordinary summary sampling."""
 
         # Use a shared mask so the sample must exclude locations before selecting any values
         values = pd.Series(np.arange(30, dtype=float))
         mask = values.to_numpy() % 3 != 0
-        options = {"mask": mask, "subsample": 7, "random_state": 42, "subsampling_strategy": subsampling_strategy}
 
         # Compare the option against the established summary path with the same seed
-        expected = gu.stats.stats(values, ["mean", "std", "totalcount"], **options)
-        result = gu.stats.stats(values, ["mean", "std", "totalcount"], subsample_per_group=True, **options)
+        expected = gu.stats.stats(
+            values,
+            ["mean", "std", "totalcount"],
+            mask=mask,
+            subsample=7,
+            random_state=42,
+            subsampling_strategy=subsampling_strategy,
+        )
+        result = gu.stats.stats(
+            values,
+            ["mean", "std", "totalcount"],
+            mask=mask,
+            subsample=7,
+            random_state=42,
+            subsampling_strategy=subsampling_strategy,
+            subsample_per_group=True,
+        )
         assert result == expected
         assert result["totalcount"] == 7
 
@@ -165,7 +181,7 @@ class TestStats:
         values = pd.Series(np.arange(4, dtype=float))
         by = {"group": values > 1} if grouped else None
         with pytest.raises(TypeError, match="Argument ``subsample_per_group`` must be a boolean"):
-            gu.stats.stats(values, "mean", by=by, subsample_per_group=invalid)
+            gu.stats.stats(values, "mean", by=by, subsample_per_group=invalid)  # type: ignore[arg-type]
 
     @pytest.mark.parametrize("as_list", [False, True])
     def test_stats__empty_mask_callable_result(self, as_list: bool) -> None:
@@ -189,13 +205,12 @@ class TestStats:
         # Give the second named array a distinct mean and the exact same spread
         first = np.arange(6, dtype=float)
         values = {"first": first, "second": first + 100}
-        options = {}
-        if grouped:
-            options = {"by": {"zone": np.array([0, 0, 0, 1, 1, 1])}, "categories": {"zone": [0, 1]}}
+        by = {"zone": np.array([0, 0, 0, 1, 1, 1])} if grouped else None
+        categories = {"zone": [0, 1]} if grouped else None
 
         # Pass a generator that can only be consumed once while selecting both arrays
         statistics = (name for name in ["mean", "std"])
-        result = gu.stats.stats(values, statistics, **options)
+        result = gu.stats.stats(values, statistics, by=by, categories=categories)
 
         # Check each array independently so an exhausted request cannot silently omit its statistics
         for name, array in values.items():

@@ -1321,7 +1321,13 @@ class TestReprojectionOperators:
             np.zeros((1, 1)), rio.transform.from_origin(0.0005, 0.0031, 0.0024, 0.0024), crs=4326, nodata=-9999
         )
         with patch("geoutils.projtools.reproject_points", wraps=gu.projtools.reproject_points) as transform_points:
-            result = raster.reproject(reference, resampling=operator)
+            result = raster.reproject(
+                reference,
+                resampling=operator,
+                coverage="fractional"
+                if isinstance(operator, Reducer) and operator.default_neighborhood is None
+                else None,
+            )
         assert result is not None
 
         # We check projtools was called the right number of times internally: only fractional area needs to project
@@ -1435,7 +1441,7 @@ class TestReprojectionOperatorsChunked:
         mp_config = MultiprocConfig(chunks=(2, 3), outfile=str(tmp_path / "operator_result.tif"))
         mp_result = unloaded_source.reproject(reference, resampling=operator, mp_config=mp_config)
 
-        # Dask ouput should be lazy, MP without loading either raster in memory
+        # Dask output should be lazy, MP without loading either raster in memory
         assert expected is not None and mp_result is not None
         assert not lazy_source._in_memory
         assert not lazy_result._in_memory
@@ -1463,9 +1469,7 @@ class TestReprojectionOperatorsChunked:
         ],
         ids=["square", "circular", "offsets"],
     )
-    def test_reproject__reducer_neighb_chunk_invariance(
-        self, tmp_path: Any, neighborhood: GridNeighbours
-    ) -> None:
+    def test_reproject__reducer_neighb_chunk_invariance(self, tmp_path: Any, neighborhood: GridNeighbours) -> None:
         """Checks Dask and MP give same results as eager for various neighborhoods."""
 
         # 1/ Write raster
@@ -1621,8 +1625,8 @@ class TestReprojectionErrors:
 
         # A reducer without support_weights=True raises an error
         with pytest.raises(ValueError, match="does not accept support_weights"):
-            source.reproject(reference, resampling=NoSupportReducer())
-        result = source.reproject(reference, resampling=SupportMassReducer())
+            source.reproject(reference, resampling=NoSupportReducer(), coverage="fractional")
+        result = source.reproject(reference, resampling=SupportMassReducer(), coverage="fractional")
         assert result is not None
         assert result.data[0, 0] == 1
 

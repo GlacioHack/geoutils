@@ -6,6 +6,7 @@ import geopandas as gpd
 import numpy as np
 import pytest
 import rasterio as rio
+from affine import Affine
 from rasterio.transform import from_origin
 from shapely.geometry import box
 
@@ -28,6 +29,27 @@ class TestAccessor:
 
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
+
+    @pytest.mark.parametrize("bands", [1, 2])
+    def test_from_array__rotated_grid_coordinates(self, bands: int) -> None:
+        """Checks that rotated grids store each pixel's map coordinates and affine transform."""
+
+        # Rotation makes the X and Y coordinates depend on both row and column
+        values = np.arange(bands * 6).reshape((bands, 2, 3))
+        transform = Affine(2, 0.5, 10, 0.25, -2, 20)
+
+        # Construct a single-band or multi-band xarray raster from the same grid
+        result = gu.RasterAccessor.from_array(values, transform=transform, crs=32606)
+        rows, columns = np.indices((2, 3))
+        expected_x = transform.a * (columns + 0.5) + transform.b * (rows + 0.5) + transform.c
+        expected_y = transform.d * (columns + 0.5) + transform.e * (rows + 0.5) + transform.f
+
+        # Check map coordinates, georeferencing, and original values
+        assert result.rst.transform == transform
+        assert result.rst.crs.to_epsg() == 32606
+        np.testing.assert_allclose(result.coords["xc"], expected_x)
+        np.testing.assert_allclose(result.coords["yc"], expected_y)
+        np.testing.assert_array_equal(result.data, values[0] if bands == 1 else values)
 
     @pytest.mark.parametrize("shape", [(1, 3), (3, 1), (1, 1)])
     @pytest.mark.parametrize("bands", [1, 2])

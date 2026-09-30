@@ -353,7 +353,7 @@ def random_field(
             raise ValueError("source_ids and coordinates must be omitted when like defines the output locations.")
         source_ids, coordinates, spatial_shape, random_coordinates, mesh_type = _spatial_support(like)
         predictors = _spatial_predictors(like, predictors, size=int(np.prod(spatial_shape)))
-        if error_structure.kind == "components" and mesh_type == "structured":
+        if error_structure.kind == "components":
             from geoutils.stats.variography import VariogramModel
 
             component_dims: set[tuple[int, ...] | None] = set()
@@ -365,8 +365,8 @@ def random_field(
                     raise AssertionError("A validated error component must contain a VariogramModel.")
                 component_dims.add(correlation.active_dims)
             if any(dimensions not in (None, (0, 1)) for dimensions in component_dims):
-                # Separate X/Y axes cannot describe a model that uses only some of those coordinates
-                random_coordinates = (coordinates[:, 0], coordinates[:, 1])
+                # Let each component select its own coordinate dimensions before drawing
+                random_coordinates = None
                 mesh_type = "unstructured"
     else:
         spatial_shape = None

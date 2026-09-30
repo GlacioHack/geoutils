@@ -27,6 +27,7 @@ import warnings
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from copy import copy
+from dataclasses import replace
 from importlib.util import find_spec
 from typing import TYPE_CHECKING, Any, Callable, Literal, cast
 
@@ -67,9 +68,11 @@ from geoutils.multiproc.mparray import (
 from geoutils.operators.execution import _evaluate_operator_batch, _resample_at_points
 from geoutils.operators.interpolator import Interpolator, Linear, Nearest, _regular_interpolation_method
 from geoutils.operators.neighbours import (
+    GridCoverage,
     GridNeighbours,
     PointNeighbours,
     _check_regular_grid_neighbours,
+    _configure_grid_neighbours,
     _resolve_grid_neighbours_for_interpolator,
 )
 from geoutils.operators.nodata import NodataHandling, NodataPropagation, _validate_nodata_propagation
@@ -398,8 +401,7 @@ def _destination_grid_in_source_crs(
     The two center arrays have length (height * width), ordered by destination row then column.
     Corners have shape (height * width, 4, 2), ordered upper left, upper right, lower right, lower left within
     each cell, or are None when only centers are needed.
-    Reducers without an explicit neighborhood join these transformed corners with straight edges to define each
-    destination footprint in the source CRS.
+    Reducers without a fixed neighborhood use these corners to locate the destination cell in the source grid.
     """
 
     # Use physical cell centers and boundaries, regardless of the raster's Area/Point interpretation
@@ -483,6 +485,7 @@ def _reproject_grid_operator(
     source_nodata: int | float | None,
     nodata_propagation: NodataPropagation,
     overlap_backend: OverlapBackend = "auto",
+    coverage: GridCoverage | None = None,
     source_index_offset: tuple[int, int] = (0, 0),
     global_source_shape: tuple[int, int] | None = None,
     source_band_offset: int = 0,
@@ -491,9 +494,9 @@ def _reproject_grid_operator(
     Reproject from a regular raster using an Interpolator or Reducer for resampling.
 
     An Interpolator receives source cells around each transformed destination center.
-    A Reducer without an explicit neighborhood receives every source cell that overlaps a transformed destination cell,
-    together with the exact overlap fraction. With GridNeighbours, it receives the source cells at the specified offsets
-    around the cell containing each transformed destination center.
+    A Reducer without an explicit neighborhood uses the rectangular source window around a destination cell.
+    Coverage selects centers, all touched cells, or fractional overlap with the destination cell. With GridNeighbours,
+    it uses a fixed window around the cell containing each transformed destination center.
 
     The input can be single or multi-band (2D/3D array shape), and might be only a chunk
     (Dask/MP chunked logic sends here).
@@ -503,9 +506,9 @@ def _reproject_grid_operator(
     regular grid interpolation or reduction).
     - Interpolators sample those centers with _interp_points_base()
     - Reducers with GridNeighbours sample those centers with _resample_at_points(). Other reducers use
-    _grid_intersection_fractions_from_corners() to find covered source cells once for all bands.
+    _grid_intersection_fractions_from_corners() to select source cells once for all bands.
 
-    For footprint reductions, built-in methods can use _run_exactextract() or _reduce_overlap_batch() to evaluate many
+    For fractional reductions, built-in methods can use _run_exactextract() or _reduce_overlap_batch() to evaluate many
     cells together; custom reductions and uncertainty use _grid_intersection_local_data() to describe each result's
     inputs.
 
@@ -545,13 +548,30 @@ def _reproject_grid_operator(
     output_bands: list[NDArrayNum] = []
     handling: NodataHandling | None = None
 
-    # 2/ Prepare Reducer footprints once for all bands when no explicit neighborhood is supplied
+    # 2/ Prepare source windows once for all bands when no explicit neighborhood is supplied
 
     reducer_overlap: GridIntersection | None = None
     reducer_polygons: NDArray[Any] | None = None
     exactextract_operation: str | None = None
     if use_footprints:
         assert isinstance(operator, Reducer) and target_corners is not None
+        selected_coverage = "all_touched" if coverage is None else coverage
+        if selected_coverage not in ("center", "all_touched", "fractional"):
+            raise ValueError("coverage must be 'center', 'all_touched' or 'fractional'.")
+        # Map projected corners to source pixel coordinates to bound the source window
+        inverse = ~src_transform
+        corner_columns = inverse.a * target_corners[..., 0] + inverse.b * target_corners[..., 1] + inverse.c
+        corner_rows = inverse.d * target_corners[..., 0] + inverse.e * target_corners[..., 1] + inverse.f
+        lower_columns, upper_columns = corner_columns.min(axis=1), corner_columns.max(axis=1)
+        lower_rows, upper_rows = corner_rows.min(axis=1), corner_rows.max(axis=1)
+        window_columns = np.stack((lower_columns, upper_columns, upper_columns, lower_columns), axis=1)
+        window_rows = np.stack((lower_rows, lower_rows, upper_rows, upper_rows), axis=1)
+        window_x = src_transform.a * window_columns + src_transform.b * window_rows + src_transform.c
+        window_y = src_transform.d * window_columns + src_transform.e * window_rows + src_transform.f
+        window_corners = np.stack((window_x, window_y), axis=-1)
+        # Fractional coverage uses the projected cell itself to measure source pixel areas
+        if selected_coverage == "fractional":
+            window_corners = target_corners
         # Let ExactExtract calculate common statistics directly when its operation exactly matches the Reducer
         source_shape = (int(source_bands.shape[-2]), int(source_bands.shape[-1]))
         exactextract_operation = _exactextract_operation(operator)
@@ -567,18 +587,43 @@ def _reproject_grid_operator(
             and exactextract_operation is not None
             and exactextract_compatible
             and find_spec("exactextract") is not None
-            and not _corners_are_grid_aligned(target_corners, src_transform)
+            and selected_coverage == "fractional"
+            and not _corners_are_grid_aligned(window_corners, src_transform)
         )
         if direct_exactextract:
-            reducer_polygons = np.asarray(shapely.polygons(target_corners), dtype=object)
+            reducer_polygons = np.asarray(shapely.polygons(window_corners), dtype=object)
         else:
-            # Calculate the overlapping cells once because every source band uses the same source and destination grids
+            # Calculate selected cells once because every band uses the same source and destination grids
             reducer_overlap = _grid_intersection_fractions_from_corners(
-                target_corners,
+                window_corners,
                 src_transform,
                 source_shape,
                 backend=overlap_backend,
             )
+            if selected_coverage == "center":
+                # Keep source cells whose centers fall inside the rectangular source window
+                selected = []
+                for target_index in range(reducer_overlap.geometry_count):
+                    start, stop = reducer_overlap.offsets[target_index : target_index + 2]
+                    rows = reducer_overlap.rows[start:stop]
+                    columns = reducer_overlap.columns[start:stop]
+                    selected.append(
+                        (rows + 0.5 >= lower_rows[target_index])
+                        & (rows + 0.5 < upper_rows[target_index])
+                        & (columns + 0.5 >= lower_columns[target_index])
+                        & (columns + 0.5 < upper_columns[target_index])
+                    )
+                use = np.concatenate(selected) if selected else np.empty(0, dtype=bool)
+                counts = np.asarray([int(np.count_nonzero(mask)) for mask in selected], dtype=np.int64)
+                offsets = np.r_[0, np.cumsum(counts)]
+                reducer_overlap = GridIntersection(
+                    offsets,
+                    reducer_overlap.rows[use],
+                    reducer_overlap.columns[use],
+                    np.ones(int(offsets[-1])),
+                )
+            elif selected_coverage == "all_touched":
+                reducer_overlap = replace(reducer_overlap, fractions=np.ones_like(reducer_overlap.fractions))
 
     # 3/ Calculate each band values
 
@@ -610,10 +655,14 @@ def _reproject_grid_operator(
                 source_band=band_index + source_band_offset + 1,
             )
         else:
-            # Use the explicit source neighborhood or, by default, the destination cell's footprint
+            # Use the fixed source window or the window derived from each destination cell
             handling = "ignore" if propagation == "gdal" else propagation
             if isinstance(operator.default_neighborhood, GridNeighbours):
                 # Reuse point sampling so offsets, nodata rules and band IDs match resample_at_points()
+                neighborhood = operator.default_neighborhood
+                window_size = 2 * max(neighborhood.overlap) + 1
+                if neighborhood.coverage != "center" and neighborhood.window_shape is None:
+                    raise ValueError("Area coverage requires a square or circular GridNeighbours window.")
                 band_output = _resample_at_points(
                     source_band,
                     src_transform,
@@ -623,7 +672,9 @@ def _reproject_grid_operator(
                     shift_area_or_point=False,
                     nodata_propagation=propagation,
                     dist_nodata_spread=None,
-                    neighborhood=operator.default_neighborhood,
+                    neighborhood=neighborhood,
+                    fractional_window=window_size if neighborhood.coverage != "center" else None,
+                    fractional_shape=neighborhood.window_shape,
                     band=band_index + source_band_offset + 1,
                     source_index_offset=source_index_offset,
                     source_shape=global_shape,
@@ -661,6 +712,8 @@ def _reproject_grid_operator(
                     source_nodata=source_nodata,
                     targets=targets,
                 )
+                if selected_coverage != "fractional":
+                    local_inputs = [replace(local, support_weights=None) for local in local_inputs]
                 band_output = _evaluate_operator_batch(operator, local_inputs, nodata_propagation=handling)
         output_bands.append(np.asarray(band_output).reshape(dst_shape))
 
@@ -924,6 +977,7 @@ def _reproject_per_block(
             source_nodata=kwargs.get("src_nodata"),
             nodata_propagation=propagation,
             overlap_backend=kwargs.get("overlap_backend", "auto"),
+            coverage=kwargs.get("coverage"),
             source_index_offset=(int(round(np.asarray(source_row).item())), int(round(np.asarray(source_col).item()))),
             global_source_shape=combined_meta["global_source_shape"],
             source_band_offset=source_band_offset,
@@ -1232,6 +1286,9 @@ def _reproject(
     mp_config: MultiprocConfig | None = None,
     nodata_propagation: NodataPropagation = "gdal",
     overlap_backend: OverlapBackend = "auto",
+    window: int | None = None,
+    window_shape: Literal["square", "circular"] | None = None,
+    coverage: GridCoverage | None = None,
 ) -> Any:
     """
     Reproject raster. See Raster.reproject() for details.
@@ -1257,6 +1314,10 @@ def _reproject(
 
     # 3/ Store georeferencing parameters and convert named methods to Rasterio's Resampling values
     is_operator = isinstance(resampling, (Interpolator, Reducer))
+    if isinstance(resampling, Interpolator) and (
+        window is not None or window_shape is not None or coverage is not None
+    ):
+        raise ValueError("Source window options require a Reducer.")
     if isinstance(resampling, Interpolator):
         regular_method = _regular_interpolation_method(resampling)
         if regular_method is not None:
@@ -1267,8 +1328,22 @@ def _reproject(
                 raster_operator = copy(resampling)
                 raster_operator.default_neighborhood = neighbours
                 resampling = raster_operator
-    elif isinstance(resampling, Reducer) and isinstance(resampling.default_neighborhood, PointNeighbours):
-        raise ValueError("PointNeighbours applies to point sources; use GridNeighbours for raster cells.")
+    elif isinstance(resampling, Reducer):
+        if isinstance(resampling.default_neighborhood, PointNeighbours):
+            raise ValueError("PointNeighbours applies to point sources; use GridNeighbours for raster cells.")
+        neighborhood = _configure_grid_neighbours(
+            resampling.default_neighborhood,
+            size=window,
+            shape=window_shape,
+            coverage=coverage,
+            default_size=3 if window_shape is not None else None,
+        )
+        if neighborhood is not None and neighborhood is not resampling.default_neighborhood:
+            configured = copy(resampling)
+            configured.default_neighborhood = neighborhood
+            resampling = configured
+    elif window is not None or window_shape is not None or coverage is not None:
+        raise ValueError("Source window options require a Reducer.")
     if is_operator:
         resolved_resampling = Resampling.nearest
     else:
@@ -1329,6 +1404,7 @@ def _reproject(
             source_nodata=src_nodata,
             nodata_propagation=propagation,
             overlap_backend=overlap_backend,
+            coverage=coverage,
         )
         # Use a mask for missing results when the requested integer data type cannot represent NaN
         output_dtype = np.dtype(dtype)
@@ -1353,6 +1429,7 @@ def _reproject(
                 "resampling": operator,
                 "nodata_propagation": _validate_nodata_propagation(nodata_propagation),
                 "overlap_backend": overlap_backend,
+                "coverage": coverage,
                 "source_pixel_overlap": source_pixel_overlap,
             }
         )

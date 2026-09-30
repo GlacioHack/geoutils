@@ -105,11 +105,19 @@ class PointNeighbours:
 @dataclass(frozen=True, init=False)
 class GridNeighbours:
     """
-    Define a grid neighbourhood for source cells, i.e. a window with fixed row and column offsets from a target cell.
+    Define a grid neighbourhood for source cells, i.e. a window surrouding the target cells.
 
-    Pass size for a square or circular window, or supply row/column offsets directly. For example,
-    ``InverseDistance(neighborhood=GridNeighbours(size=5, shape="circular"))`` uses cells inside a circle of radius
-    two pixels (the circle fits within a 5 x 5 window).
+    Pass size for a square or circular window, or supply row/column offsets directly to define any window shape.
+    For example, ``InverseDistance(neighborhood=GridNeighbours(size=5, shape="circular"))`` uses cells whose
+    centers lie within 2.5 pixels of the target cell's center. For a Reducer with ``coverage="fractional"``, a
+    circle of the same radius is centered on the requested point.
+
+    For use with a Reducer with either a non-square window or involving area deformations through a CRS change (i.e.
+    use in ``reproject()``), exact area coverage can be defined according to the following options:
+
+    - ``center`` uses all cells whose center is intersected by the window shape,
+    - ``all_touched`` includes all touched cells,
+    - ``fractional`` weights each cell by its area covered fraction, requiring a Reducer that supports weighting.
 
     For built-in regular interpolation, offsets describe the method's natural stencil: nearest uses (0, 0)
     relative to the nearest cell; linear/slinear use (0, 1) on each axis relative to the lower grid index, and
@@ -129,7 +137,7 @@ class GridNeighbours:
     :param window_shape: Shape recorded for an existing set of offsets.
     :param size: Positive odd number of rows and columns in a centered window, used instead of offsets.
     :param shape: Include the whole square or only cells inside its centered circle when size is given.
-    :param coverage: Select cells by their centers, include every cell with positive overlap, or weight by overlap.
+    :param coverage: How a cells at the edge of a r window.
     """
 
     offsets: tuple[tuple[int, int], ...]
@@ -160,11 +168,12 @@ class GridNeighbours:
 
             # Select the centered square, excluding corners outside the circle when requested
             half_size = size // 2
+            radius = size / 2
             offsets = tuple(
                 (row, col)
                 for row in range(-half_size, half_size + 1)
                 for col in range(-half_size, half_size + 1)
-                if shape == "square" or row * row + col * col <= half_size * half_size
+                if shape == "square" or row * row + col * col <= radius * radius
             )
             window_shape = shape
         elif offsets is None:
@@ -219,18 +228,20 @@ def _configure_grid_neighbours(
 ) -> GridNeighbours | None:
     """Apply call-level window options without changing the supplied neighborhood."""
 
-    selected_coverage = coverage if coverage is not None else (neighborhood.coverage if neighborhood is not None else "center")
+    selected_coverage = (
+        coverage if coverage is not None else (neighborhood.coverage if neighborhood is not None else "center")
+    )
     if size is None and shape is None and neighborhood is not None:
         if selected_coverage == neighborhood.coverage:
             return neighborhood
-        return GridNeighbours(
-            neighborhood.offsets, window_shape=neighborhood.window_shape, coverage=selected_coverage
-        )
+        return GridNeighbours(neighborhood.offsets, window_shape=neighborhood.window_shape, coverage=selected_coverage)
     if size is None and shape is None and default_size is None:
         return None
 
     # An explicit size or shape replaces offset patterns with a square or circular window
-    window_size = size if size is not None else (default_size if neighborhood is None else 2 * max(neighborhood.overlap) + 1)
+    window_size = (
+        size if size is not None else (default_size if neighborhood is None else 2 * max(neighborhood.overlap) + 1)
+    )
     assert window_size is not None
     window_shape = shape or (neighborhood.window_shape if neighborhood is not None else None) or "square"
     return GridNeighbours(size=window_size, shape=window_shape, coverage=selected_coverage)
@@ -255,6 +266,8 @@ def _resolve_grid_neighbours_for_interpolator(
 
     configured = operator.default_neighborhood
     if isinstance(configured, GridNeighbours):
+        if configured.coverage != "center":
+            raise ValueError("GridNeighbours coverage applies to Reducers, not Interpolators.")
         return configured
     if isinstance(configured, PointNeighbours):
         raise ValueError("PointNeighbours applies to point sources; use GridNeighbours for raster cells.")
@@ -346,6 +359,8 @@ def _check_regular_grid_neighbours(
         return
     if not isinstance(neighborhood, GridNeighbours):
         raise ValueError("PointNeighbours applies to point sources; use GridNeighbours for raster cells.")
+    if neighborhood.coverage != "center":
+        raise ValueError("GridNeighbours coverage applies to Reducers, not Interpolators.")
     if method in ("cubic", "quintic", "splinef2d"):
         raise ValueError(
             f"Raster {method} interpolation fits a spline over the grid and does not support GridNeighbours."
@@ -422,10 +437,10 @@ def _grid_window_kernel(
         kernel[offsets[:, 0] + depth[0], offsets[:, 1] + depth[1]] = 1
         return kernel
 
-    # Fractional coverage needs a geometric window, rather than an arbitrary set of offsets
+    # Area coverage needs a geometric window, rather than an arbitrary set of offsets
     size = int(2 * np.max(depth) + 1)
     if len(offsets) < size:
-        raise ValueError("Fractional filtering requires a square or circular GridNeighbours window.")
+        raise ValueError("Area filtering requires a square or circular GridNeighbours window.")
     shape = neighborhood.window_shape
     if shape is None:
         shapes: tuple[Literal["square", "circular"], ...] = ("square", "circular")
@@ -434,7 +449,7 @@ def _grid_window_kernel(
                 shape = candidate
                 break
     if shape is None or set(neighborhood.offsets) != set(GridNeighbours(size=size, shape=shape).offsets):
-        raise ValueError("Fractional filtering requires a square or circular GridNeighbours window.")
+        raise ValueError("Area filtering requires a square or circular GridNeighbours window.")
     if max_cells is not None and (size + 2) ** 2 > max_cells:
         return None
 
@@ -448,7 +463,7 @@ def _grid_window_kernel(
         transform = Affine(1, 0, 0, 0, -1, array_shape[0])
     if shape == "circular":
         angles = np.linspace(0, 2 * np.pi, 512, endpoint=False)
-        radius = max(0.5, (size - 1) / 2)
+        radius = size / 2
         corners = np.column_stack((center_col + radius * np.cos(angles), center_row + radius * np.sin(angles)))
         x, y = transform * (corners[:, 0], corners[:, 1])
         overlap = _grid_intersection_fractions(shapely.polygons(np.column_stack((x, y))[None]), transform, array_shape)
@@ -607,7 +622,7 @@ def _prepare_fractional_window_data(
     source_shape: tuple[int, int] | None = None,
 ) -> tuple[list[LocalData], NDArrayNum, NDArrayNum]:
     """
-    Derive covered fractional area in a window centered on each point.
+    Select cells touched by a window centered on each point, with optional area weights.
 
     It also returns each point's row and column position in the source raster so _resample_at_points() can check
     the corresponding cell against the nodata mask.
@@ -620,8 +635,8 @@ def _prepare_fractional_window_data(
         points[0], points[1], transform, area_or_point, op=np.float64, shift_area_or_point=False
     )
     if fractional_shape == "circular":
-        # Match the radius of a GridNeighbours(size=1) circle, which fits inside one cell
-        radius = max(0.5, (fractional_window - 1) / 2)
+        # Match the circle used to select cell centers for this window size
+        radius = fractional_window / 2
         # Approximate the curved boundary before measuring how much of each cell it covers
         angles = np.linspace(0, 2 * np.pi, 512, endpoint=False)
         footprint_rows = source_rows[:, None] + radius * np.sin(angles)
