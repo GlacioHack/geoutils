@@ -38,7 +38,8 @@ def _filter_points_by_bounds(pc: gpd.GeoDataFrame, bounds: BoundingBox) -> gpd.G
     # Apply the same inclusive bounds to eager and distributed point partitions
     mask = (pc.geometry.x >= bounds.left) & (pc.geometry.x <= bounds.right)
     mask &= (pc.geometry.y >= bounds.bottom) & (pc.geometry.y <= bounds.top)
-    return pc.loc[mask]
+    # Copy the selected geometries so Shapely can inspect them under Pandas 3
+    return pc.loc[mask].copy()
 
 
 def _filter_dask_points_by_bounds(ds: Any, bounds: BoundingBox) -> Any:
@@ -69,7 +70,9 @@ def _concat_point_parts(parts: list[gpd.GeoDataFrame], crs: Any = None) -> gpd.G
     if len(non_empty) == 0:
         return parts[0].iloc[0:0]
 
-    return gpd.GeoDataFrame(pd.concat(non_empty, ignore_index=False), geometry="geometry", crs=crs)
+    # Pandas 3 can expose read-only geometry arrays from Dask partitions to GeoPandas
+    independent_parts = [part.copy() for part in non_empty]
+    return gpd.GeoDataFrame(pd.concat(independent_parts, ignore_index=False), geometry="geometry", crs=crs)
 
 
 def _source_dataframe(source_pointcloud: Any) -> gpd.GeoDataFrame | Any | None:
