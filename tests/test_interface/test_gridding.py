@@ -1,8 +1,9 @@
 """Test point-cloud gridding values and consistency across calculation backends."""
 
-import subprocess
+from collections.abc import Callable, Sequence
 from importlib.util import find_spec
 from pathlib import Path
+from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -12,15 +13,61 @@ import xarray as xr
 from shapely import geometry
 
 import geoutils as gu
-from benchmarks.comparisons.gdal import build_gdal_grid_command
 from geoutils import PointCloud, Raster
 from geoutils._typing import NDArrayNum
 from geoutils.interface.gridding import GriddingMethod, _grid_pointcloud
 from geoutils.multiproc import MultiprocConfig
+from geoutils.operators import (
+    GridNeighbours,
+    Interpolator,
+    LocalData,
+    PointNeighbours,
+    Reducer,
+)
+from geoutils.operators.interpolator import Cubic, InverseDistance, Kriging, Linear, Nearest, ScipyInterpolator
+from geoutils.operators.nodata import NodataChoice, NodataHandling, NodataSpread
+from geoutils.operators.reducer import (
+    Maximum,
+    Mean,
+    Median,
+)
+from geoutils.stats.variography import VariogramModel
+from tests.operator_helpers import LocalMeanInterpolator, PropagatingLocalMeanInterpolator, PropagatingMeanReducer
+
+
+class TwoNearestMeanInterpolator(Interpolator):
+    """Predict a value from the two nearest point observations."""
+
+    default_neighborhood = PointNeighbours(k=2)
+
+    def __init__(self) -> None:
+        """Start with no irregular-source batches evaluated."""
+
+        self.batch_calls = 0
+
+    def predict(self, data: LocalData) -> float:
+        """Return the unweighted mean of the two selected source values."""
+
+        return float(np.mean(data.values))
+
+    def predict_batch(
+        self,
+        data: Sequence[LocalData],
+        *,
+        nodata_propagation: NodataHandling | None = None,
+    ) -> NDArrayNum:
+        """Count calls to predict_batch() before predicting each value."""
+
+        self.batch_calls += 1
+        return super().predict_batch(data, nodata_propagation=nodata_propagation)
 
 
 class TestPointCloud:
-    """Test interpolation and neighborhood methods used to grid point clouds."""
+    """Test module for gridding coordinates, nodata options, validation and uncertainty output.
+
+    Interpolation accuracy and engines are covered in test_operators/test_interpolator.py;
+    point statistics and reducer engines are in test_operators/test_reducer.py.
+    """
 
     def test_grid_pc(self) -> None:
         """Test point cloud gridding."""
@@ -36,7 +83,7 @@ class TestPointCloud:
 
         # Generate random coordinates to interpolate, to create an irregular point cloud
         points = rng.integers(low=1, high=shape[0] - 1, size=(100, 2)) + rng.normal(0, 0.15, size=(100, 2))
-        b1_value = rst.interp_points((points[:, 0], points[:, 1]), as_array=True)
+        b1_value = rst.interp_at_points((points[:, 0], points[:, 1]), as_array=True)
         pc = gpd.GeoDataFrame(data={"b1": b1_value}, geometry=gpd.points_from_xy(x=points[:, 0], y=points[:, 1]))
         grid_coords = rst.coords(grid=False)
 
@@ -146,281 +193,77 @@ class TestPointCloud:
             grid_coords[0][0] += 1
             Raster.from_pointcloud_regular(pc, grid_coords=grid_coords)  # type: ignore
 
-    @pytest.mark.parametrize("resampling", ["idw", "mean"])
-    def test_grid_pc__circular_neighborhood(self, resampling: GriddingMethod) -> None:
-        """Check IDW and moving means on points with an exact analytical result."""
-
-        # Two constant value columns place an equal pair of neighbors around the central column
-        pc = gpd.GeoDataFrame(
-            data={"z": [0.0, 10.0, 0.0, 10.0]},
-            geometry=gpd.points_from_xy(x=[0.0, 2.0, 0.0, 2.0], y=[0.0, 0.0, 1.0, 1.0]),
-        )
-        grid_coords = (np.array([0.0, 1.0, 2.0]), np.array([0.0, 1.0]))
-
-        # A radius just over one pixel reaches both same-row neighbors at the center
-        result, _ = _grid_pointcloud(
-            pc,
-            grid_coords=grid_coords,
-            data_column_name="z",
-            resampling=resampling,
-            dist_nodata_pixel=1.1,
-        )
-        expected = np.array([[0.0, 5.0, 10.0], [0.0, 5.0, 10.0]])
-        assert np.allclose(result, expected)
-
-    @pytest.mark.parametrize("resampling", ["nearest", "linear"])
-    def test_grid_pc__nodata_policies(self, resampling: GriddingMethod) -> None:
-        """Apply the same default, ignored and propagated nodata rules as raster interpolation."""
-
-        # A regular point grid has one invalid value that surrounding finite values can replace
-        x, y = np.meshgrid(np.arange(3, dtype=float), np.arange(3, dtype=float))
-        values = np.arange(9, dtype=float)
-        values[4] = np.nan
-        pc = gpd.GeoDataFrame(data={"z": values}, geometry=gpd.points_from_xy(x=x.ravel(), y=y.ravel()))
-        grid_coords = (np.arange(3, dtype=float), np.arange(3, dtype=float))
-
-        # GDAL gridding and the explicit ignore rule both omit invalid point values
-        default, _ = _grid_pointcloud(
-            pc,
-            grid_coords=grid_coords,
-            data_column_name="z",
-            resampling=resampling,
-        )
-        ignored, _ = _grid_pointcloud(
-            pc,
-            grid_coords=grid_coords,
-            data_column_name="z",
-            resampling=resampling,
-            nodata_propagation="ignore",
-        )
-        propagated, _ = _grid_pointcloud(
-            pc,
-            grid_coords=grid_coords,
-            data_column_name="z",
-            resampling=resampling,
-            nodata_propagation="propagate",
-        )
-        assert np.array_equal(default, ignored, equal_nan=True)
-        assert np.isfinite(default[1, 1])
-        assert np.isnan(propagated[1, 1])
-
-    def test_grid_pc__circular_nodata_propagation(self) -> None:
-        """Propagate an invalid point through the complete circular support when requested."""
-
-        # The finite endpoints give every central neighborhood a result when invalid values are ignored
-        pc = gpd.GeoDataFrame(
-            data={"z": [2.0, np.nan, 8.0]},
-            geometry=gpd.points_from_xy(x=[0.0, 1.0, 2.0], y=[0.0, 0.0, 0.0]),
-        )
-        grid_coords = (np.arange(4, dtype=float), np.array([0.0]))
-        default, _ = _grid_pointcloud(
-            pc,
-            grid_coords=grid_coords,
-            grid_res=(1.0, 1.0),
-            data_column_name="z",
-            resampling="mean",
-            dist_nodata_pixel=1.1,
-        )
-        propagated, _ = _grid_pointcloud(
-            pc,
-            grid_coords=grid_coords,
-            grid_res=(1.0, 1.0),
-            data_column_name="z",
-            resampling="mean",
-            dist_nodata_pixel=1.1,
-            nodata_propagation="propagate",
-        )
-
-        # The last cell lies outside the invalid point support and therefore remains unchanged
-        assert np.all(np.isfinite(default[0, :3]))
-        assert np.all(np.isnan(propagated[0, :3]))
-        assert propagated[0, 3] == default[0, 3]
-
     @pytest.mark.parametrize(
-        ("resampling", "expected_center"),
+        ("resampling", "spread", "expected_invalid"),
         [
-            ("mean", 5.0),
-            ("average", 5.0),
-            ("minimum", 2.0),
-            ("min", 2.0),
-            ("maximum", 8.0),
-            ("max", 8.0),
-            ("range", 6.0),
-            ("count", 2.0),
-            ("stdev", 3.0),
-            ("average_distance", 1.0),
-            ("average_distance_pts", 2.0),
+            ("linear", "half_order_down", 1),
+            ("linear", "half_order_up", 5),
+            ("cubic", "half_order_down", 5),
+            ("cubic", "half_order_up", 13),
+            ("linear", 2, 13),
         ],
     )
-    def test_grid_pc__circular_statistics(self, resampling: GriddingMethod, expected_center: float) -> None:
-        """Check circular statistics, aliases and the shared handling of invalid values."""
+    def test_grid_pc__nodata_spread(
+        self,
+        resampling: GriddingMethod,
+        spread: NodataSpread,
+        expected_invalid: int,
+    ) -> None:
+        """Checks that fixed and half-order distances expand a gridded nodata mask by the requested radius."""
 
-        # Two finite points surround the central cell while invalid values cannot contribute
-        pc = gpd.GeoDataFrame(
-            data={"z": [2.0, 8.0, np.nan, 20.0]},
-            geometry=gpd.points_from_xy(x=[0.0, 2.0, 1.0, np.nan], y=[0.0, 0.0, 0.0, 0.0]),
+        # Place one invalid observation at the center of an otherwise complete regular point grid
+        x, y = np.meshgrid(np.arange(7, dtype=float), np.arange(7, dtype=float))
+        values = np.arange(49, dtype=float)
+        values[24] = np.nan
+        point_cloud = gpd.GeoDataFrame(
+            data={"z": values},
+            geometry=gpd.points_from_xy(x=x.ravel(), y=y.ravel()),
         )
-        grid_coords = (np.arange(5, dtype=float), np.array([0.0]))
+        grid_coords = (np.arange(7, dtype=float), np.arange(7, dtype=float))
 
-        # Cells with neighbors use only finite values and cells outside support remain NaN
+        # Resolve the method-dependent distance and count cells inside its output-pixel radius
         result, _ = _grid_pointcloud(
-            pc,
+            point_cloud,
             grid_coords=grid_coords,
-            grid_res=(1.0, 1.0),
             data_column_name="z",
             resampling=resampling,
-            dist_nodata_pixel=1.1,
+            dist_nodata_pixel=np.inf,
+            nodata_handling=spread,
         )
-        assert result[0, 1] == pytest.approx(expected_center)
-        assert np.isnan(result[0, 4])
+        assert np.count_nonzero(np.isnan(result)) == expected_invalid
 
-    @pytest.mark.parametrize(
-        ("resampling", "expected"),
-        [
-            ("range", 0.0),
-            ("count", 1.0),
-            ("stdev", 0.0),
-            ("average_distance", 0.0),
-            ("average_distance_pts", np.nan),
-        ],
-    )
-    def test_grid_pc__circular_single_point(self, resampling: GriddingMethod, expected: float) -> None:
-        """Check circular spread and distance metrics when only one point is supported."""
+    def test_grid_pc__zero_distance_replaces_gdal_rule(self) -> None:
+        """Checks that zero-distance masking leaves a nearby cell valid even when GDAL would mask it."""
 
-        # Match the central neighborhood used as the large data correctness fingerprint
-        pc = gpd.GeoDataFrame(data={"z": [1.0]}, geometry=gpd.points_from_xy(x=[1.0], y=[1.0]))
-        result, _ = _grid_pointcloud(
-            pc,
-            grid_coords=(np.arange(3, dtype=float), np.arange(3, dtype=float)),
-            grid_res=(1.0, 1.0),
-            data_column_name="z",
-            resampling=resampling,
-            dist_nodata_pixel=0.1,
-        )
-
-        assert np.isclose(result[1, 1], expected, equal_nan=True)
-
-    def test_grid_pc__minimum_points(self) -> None:
-        """Check that circular outputs need the requested number of finite points."""
-
-        # Only the central cell reaches both points inside its circular support
-        pc = gpd.GeoDataFrame(
-            data={"z": [2.0, 8.0]},
+        # The missing point is nearest to both output cells, while the finite point can supply their values
+        point_cloud = gpd.GeoDataFrame(
+            data={"z": [np.nan, 5.0]},
             geometry=gpd.points_from_xy(x=[0.0, 2.0], y=[0.0, 0.0]),
         )
-        result, _ = _grid_pointcloud(
-            pc,
-            grid_coords=(np.array([0.0, 1.0, 2.0]), np.array([0.0])),
-            grid_res=(1.0, 1.0),
-            data_column_name="z",
-            resampling="mean",
-            dist_nodata_pixel=1.1,
-            min_points=2,
-        )
-        assert np.array_equal(result, np.array([[np.nan, 5.0, np.nan]]), equal_nan=True)
+        grid_coords = (np.array([0.0, 0.4]), np.array([0.0]))
 
-    def test_grid_pc__idw_distance_power_and_exact_points(self) -> None:
-        """Check that IDW follows its distance exponent and preserves exact source values."""
-
-        # The first output cell coincides with a point while the middle cell has unequal distances
-        pc = gpd.GeoDataFrame(
-            data={"z": [0.0, 10.0]},
-            geometry=gpd.points_from_xy(x=[0.0, 3.0], y=[0.0, 0.0]),
-        )
-        grid_coords = (np.array([0.0, 1.0, 2.0, 3.0]), np.array([0.0, 1.0]))
-
-        # Squared inverse distances give weights of one and one quarter at the inner columns
-        result, _ = _grid_pointcloud(
-            pc,
+        # GDAL masks both cells, but a zero-pixel distance masks only the cell at the missing point
+        gdal_result, _ = _grid_pointcloud(
+            point_cloud,
             grid_coords=grid_coords,
+            grid_res=(0.4, 1.0),
             data_column_name="z",
-            resampling="idw",
-            dist_nodata_pixel=2.1,
-            distance_power=2,
+            resampling="nearest",
+            dist_nodata_pixel=np.inf,
+            nodata_handling="gdal",
         )
-        assert np.allclose(result[1], [0.0, 2.0, 8.0, 10.0])
-
-    @pytest.mark.parametrize(
-        "resampling",
-        ["nearest", "idw", "mean", "minimum", "maximum", "range", "count", "stdev", "average_distance"],
-    )
-    def test_grid_pc__engine(self, resampling: GriddingMethod) -> None:
-        """Check that the SciPy and Numba engines give the same gridded values."""
-
-        pytest.importorskip("numba")
-
-        # Uneven point values and positions exercise distance choices and every accumulation
-        pc = gpd.GeoDataFrame(
-            data={"z": [1.0, 4.0, 8.0]},
-            geometry=gpd.points_from_xy(x=[0.0, 1.2, 3.0], y=[0.0, 1.0, 0.0]),
-        )
-        grid_coords = (np.arange(4, dtype=float), np.arange(2, dtype=float))
-        scipy_result, _ = _grid_pointcloud(
-            pc,
+        zero_distance_result, _ = _grid_pointcloud(
+            point_cloud,
             grid_coords=grid_coords,
+            grid_res=(0.4, 1.0),
             data_column_name="z",
-            resampling=resampling,
-            dist_nodata_pixel=2,
-            engine="scipy",
+            resampling="nearest",
+            dist_nodata_pixel=np.inf,
+            nodata_handling=0,
         )
-
-        # The explicit Numba engine follows the same interface as elsewhere in GeoUtils and xDEM
-        numba_result, _ = _grid_pointcloud(
-            pc,
-            grid_coords=grid_coords,
-            data_column_name="z",
-            resampling=resampling,
-            dist_nodata_pixel=2,
-            engine="numba",
-        )
-        assert np.allclose(scipy_result, numba_result, equal_nan=True)
-
-    @pytest.mark.parametrize(
-        ("resampling", "expected"),
-        [
-            ("nearest", np.array([[4.0, 4.0, np.nan]])),
-            ("idw", np.array([[4.0, 4.0, np.nan]])),
-            ("average_distance", np.array([[0.0, 1.0, np.nan]])),
-        ],
-    )
-    def test_grid_pc__engines_include_support_boundary(self, resampling: GriddingMethod, expected: NDArrayNum) -> None:
-        """Check that both Numba/SciPy engines include cells on the support radius and exclude cells beyond it."""
-
-        pytest.importorskip("numba")
-        pc = gpd.GeoDataFrame(data={"z": [4.0]}, geometry=gpd.points_from_xy(x=[0.0], y=[0.0]))
-        for engine in ("scipy", "numba"):
-            result, _ = _grid_pointcloud(
-                pc,
-                grid_coords=(np.arange(3, dtype=float), np.array([0.0])),
-                grid_res=(1.0, 1.0),
-                data_column_name="z",
-                resampling=resampling,
-                dist_nodata_pixel=1,
-                engine=engine,
-            )
-            assert np.allclose(result, expected, equal_nan=True)
-
-    def test_grid_pc__engines_average_duplicate_exact_idw_points(self) -> None:
-        """Check that both Numba/SciPy engines average duplicate exact IDW points even when min_points is unmet."""
-
-        pytest.importorskip("numba")
-        # Process a weighted neighbor before two exact points to ensure exact values replace it
-        pc = gpd.GeoDataFrame(
-            data={"z": [100.0, 2.0, 8.0]},
-            geometry=gpd.points_from_xy(x=[1.0, 0.0, 0.0], y=[0.0, 0.0, 0.0]),
-        )
-        for engine in ("scipy", "numba"):
-            result, _ = _grid_pointcloud(
-                pc,
-                grid_coords=(np.array([0.0]), np.array([0.0])),
-                grid_res=(1.0, 1.0),
-                data_column_name="z",
-                resampling="idw",
-                dist_nodata_pixel=1.1,
-                min_points=4,
-                engine=engine,
-            )
-            assert result[0, 0] == pytest.approx(5.0)
+        assert np.isnan(gdal_result).all()
+        assert np.isnan(zero_distance_result[0, 0])
+        assert zero_distance_result[0, 1] == 5.0
 
     @pytest.mark.parametrize("resampling", ["linear", "cubic", "average_distance_pts"])
     def test_grid_pc__numba_unsupported_method(self, resampling: GriddingMethod) -> None:
@@ -483,12 +326,12 @@ class TestPointCloud:
                 resampling="count",
                 min_points=-1,
             )
-        with pytest.raises(ValueError, match="nodata_propagation must be one of"):
+        with pytest.raises(ValueError, match="nodata_handling must be"):
             _grid_pointcloud(
                 pc,
                 grid_coords=grid_coords,
                 data_column_name="z",
-                nodata_propagation="invalid",  # type: ignore[arg-type]
+                nodata_handling="invalid",  # type: ignore[arg-type]
             )
         with pytest.raises(ValueError, match="engine.*either 'scipy' or 'numba'"):
             _grid_pointcloud(
@@ -498,183 +341,480 @@ class TestPointCloud:
                 engine="invalid",  # type: ignore[arg-type]
             )
 
-    @pytest.mark.parametrize(("geoutils_method", "gdal_algorithm"), [("nearest", "nearest"), ("linear", "linear")])
-    def test_grid_pc__gdal_interpolation(
-        self, geoutils_method: GriddingMethod, gdal_algorithm: str, tmp_path: Path
-    ) -> None:
-        """Match complete GDAL nearest and linear outputs for an irregular point cloud."""
+    def test_grid__propagates_reducer_uncertainty(self) -> None:
+        """Checks that requesting uncertainty leaves grid() values unchanged and accounts for shared source points."""
 
-        # Unequal positions and values expose axis rescaling and nearest-neighbor differences
-        points = gpd.GeoDataFrame(
-            {"z": [2.0, 8.0, 4.0, 10.0, 6.0]},
-            geometry=gpd.points_from_xy(x=[0.0, 37.0, 4.0, 40.0, 17.0], y=[0.0, 0.2, 3.6, 4.0, 2.3]),
-            crs=32631,
+        # Arrange six independent observations on the same two-by-three grid requested for the output
+        x, y = np.meshgrid(np.arange(3, dtype=float), np.arange(2, dtype=float))
+        points = PointCloud(
+            gpd.GeoDataFrame(
+                {"z": np.arange(6, dtype=float)},
+                geometry=gpd.points_from_xy(x=x.ravel(), y=y.ravel()),
+                crs=32631,
+            ),
+            data_column="z",
         )
-        point_file = tmp_path / "interpolation-points.gpkg"
-        points.to_file(point_file, layer="source-points", driver="GPKG")
-        grid_coords = (np.arange(0, 50, 10, dtype=float), np.arange(5, dtype=float))
+        grid_coords = (np.arange(3, dtype=float), np.arange(2, dtype=float))
+        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
 
-        # Infinite nearest support and linear interpolation without extrapolation match GDAL radius zero
+        # Request uncertainty with the mean method string and compare its raster with the usual gridding result
+        expected = points.grid(grid_coords=grid_coords, resampling="mean", dist_nodata_pixel=1.1)
+        nominal = points.grid(
+            grid_coords=grid_coords, resampling="mean", dist_nodata_pixel=1.1, error_structure=source_error
+        )
+        summary = gu.uncertainty.propagate(
+            points.grid,
+            error_structure=source_error,
+            operation_kwargs={"grid_coords": grid_coords, "resampling": "mean", "dist_nodata_pixel": 1.1},
+            return_covariance=True,
+        )
+        # The local weighted calculation and vectorized mean can differ by rounding in their summation order
+        np.testing.assert_allclose(nominal.to_nanarray(), expected.to_nanarray(), rtol=1e-14)
+        np.testing.assert_array_equal(summary.estimate.to_nanarray(), nominal.to_nanarray())
+
+        # The top-left mean uses three points and the top-middle mean uses four; two points contribute to both
+        assert summary.covariance is not None
+        np.testing.assert_allclose(summary.variance.to_nanarray().reshape(-1)[:2], [4 / 3, 1])
+        assert summary.covariance.iloc[0, 1] == pytest.approx(2 / 3)
+
+
+class TestGridOperatorExecution:
+    """Test module for built-in and custom operators used by point-cloud grid()."""
+
+    @pytest.mark.parametrize(
+        ("method", "operator_factory"),
+        [
+            ("nearest", Nearest),
+            ("linear", Linear),
+            ("cubic", Cubic),
+            ("idw", InverseDistance),
+            ("mean", Mean),
+            ("maximum", Maximum),
+        ],
+    )
+    def test_grid__built_in_operator_matches_string(
+        self,
+        method: str,
+        operator_factory: Callable[[], Interpolator | Reducer],
+    ) -> None:
+        """Checks that built-in operator objects and their method strings produce exactly the same grid."""
+
+        # Use an irregular finite point set spanning every target cell and supporting cubic triangulation
+        rng = np.random.default_rng(42)
+        coordinates = rng.uniform(0, 4, size=(40, 2))
+        values = coordinates[:, 0] + 2 * coordinates[:, 1]
+        points = gpd.GeoDataFrame(
+            {"value": values},
+            geometry=gpd.points_from_xy(coordinates[:, 0], coordinates[:, 1]),
+            crs=4326,
+        )
+        grid_coords = (np.arange(0.5, 4, 1.0), np.arange(0.5, 4, 1.0))
+
+        # Both public forms must use the same SciPy calculation without altering any output value
         expected, _ = _grid_pointcloud(
             points,
             grid_coords=grid_coords,
-            data_column_name="z",
-            resampling=geoutils_method,
-            dist_nodata_pixel=float("inf"),
-            engine="scipy",
+            data_column_name="value",
+            resampling=method,  # type: ignore[arg-type]
+            dist_nodata_pixel=2,
         )
-        output_file = tmp_path / f"gdal-{gdal_algorithm}.tif"
-        command = build_gdal_grid_command(
-            str(point_file),
-            str(output_file),
-            algorithm=gdal_algorithm,  # type: ignore[arg-type]
-            bounds=(-5.0, -0.5, 45.0, 4.5),
-            shape=(5, 5),
-            radius=(0.0, 0.0),
+        result, _ = _grid_pointcloud(
+            points,
+            grid_coords=grid_coords,
+            data_column_name="value",
+            resampling=operator_factory(),
+            dist_nodata_pixel=2,
         )
-        subprocess.run(command.command, check=True, capture_output=True, text=True)
-        with rio.open(output_file) as dataset:
-            actual = dataset.read(1, masked=True).filled(np.nan)
+        np.testing.assert_array_equal(result, expected)
 
-        assert np.allclose(actual, expected, equal_nan=True)
+    def test_grid__custom_reducer(self) -> None:
+        """Checks that grid() applies a custom reducer to points within the requested radius."""
+
+        # Place three values around one target, including a large value outside the one-pixel radius
+        points = gpd.GeoDataFrame(
+            {"value": [1.0, 5.0, 100.0]},
+            geometry=gpd.points_from_xy([0.0, 0.5, 3.0], [0.0, 0.0, 0.0]),
+            crs=4326,
+        )
+        grid_coords = (np.array([0.0]), np.array([0.0]))
+
+        # grid() calls Median.reduce() for each neighborhood because there is no specialized gridding function for it
+        result, _ = _grid_pointcloud(
+            points,
+            grid_coords=grid_coords,
+            grid_res=(1.0, 1.0),
+            data_column_name="value",
+            resampling=Median(),
+            dist_nodata_pixel=1,
+        )
+        assert result[0, 0] == 3.0
+
+    def test_grid__custom_interpolator(self) -> None:
+        """Checks that grid() selects the requested nearest neighbors before calling predict()."""
+
+        # Put values 2 and 6 closest to the target and a third unrelated value farther away
+        points = gpd.GeoDataFrame(
+            {"value": [2.0, 6.0, 100.0]},
+            geometry=gpd.points_from_xy([0.0, 0.5, 4.0], [0.0, 0.0, 0.0]),
+            crs=4326,
+        )
+        grid_coords = (np.array([0.0]), np.array([0.0]))
+
+        # grid() selects the two nearest points and the custom method returns their mean
+        operator = TwoNearestMeanInterpolator()
+        result, _ = _grid_pointcloud(
+            points,
+            grid_coords=grid_coords,
+            grid_res=(1.0, 1.0),
+            data_column_name="value",
+            resampling=operator,
+        )
+        assert result[0, 0] == 4.0
+        assert operator.batch_calls == 1
+
+    def test_grid__custom_interpolator_gdal_nodata(self) -> None:
+        """Checks that irregular interpolation applies GDAL's nearest-source nodata rule around a custom method."""
+
+        # Make the nearest observation invalid while leaving the second neighbor available to the custom method
+        points = gpd.GeoDataFrame(
+            {"value": [np.nan, 6.0, 100.0]},
+            geometry=gpd.points_from_xy([0.0, 0.5, 4.0], [0.0, 0.0, 0.0]),
+            crs=4326,
+        )
+        grid_coords = (np.array([0.0]), np.array([0.0]))
+
+        # The default masks the result because the nearest source is invalid; ignore uses the valid neighbor's value
+        default, _ = _grid_pointcloud(
+            points,
+            grid_coords=grid_coords,
+            grid_res=(1.0, 1.0),
+            data_column_name="value",
+            resampling=TwoNearestMeanInterpolator(),
+        )
+        ignored, _ = _grid_pointcloud(
+            points,
+            grid_coords=grid_coords,
+            grid_res=(1.0, 1.0),
+            data_column_name="value",
+            resampling=TwoNearestMeanInterpolator(),
+            nodata_handling="ignore",
+        )
+        assert np.isnan(default[0, 0])
+        assert ignored[0, 0] == 6.0
 
     @pytest.mark.parametrize(
-        ("geoutils_method", "gdal_algorithm"),
-        [
-            ("idw", "invdist"),
-            ("mean", "average"),
-            ("minimum", "minimum"),
-            ("maximum", "maximum"),
-            ("range", "range"),
-            ("count", "count"),
-            ("average_distance", "average_distance"),
-            ("average_distance_pts", "average_distance_pts"),
-        ],
+        ("method", "operator_factory"),
+        [("nearest", Nearest), ("idw", InverseDistance), ("mean", Mean)],
     )
-    def test_grid_pc__gdal_circular_methods(
-        self, geoutils_method: GriddingMethod, gdal_algorithm: str, tmp_path: Path
+    def test_grid__numba_operator_matches_string(
+        self,
+        method: str,
+        operator_factory: Callable[[], Interpolator | Reducer],
     ) -> None:
-        """Match GDAL values and nodata cells for every shared circular method."""
+        """Checks that operator objects and their method strings use the same compiled Numba kernels."""
 
-        # Two unequal values exercise all statistics while an invalid value checks GDAL's omission rule
+        pytest.importorskip("numba")
+        coordinates = np.array([[0.0, 0.0], [0.4, 0.2], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
         points = gpd.GeoDataFrame(
-            {"z": [2.0, np.nan, 8.0]},
-            geometry=gpd.points_from_xy(x=[0.0, 1.0, 2.0], y=[0.0, 0.0, 0.0]),
-            crs=32631,
+            {"value": np.array([1.0, 3.0, 5.0, 7.0, 9.0])},
+            geometry=gpd.points_from_xy(coordinates[:, 0], coordinates[:, 1]),
+            crs=4326,
         )
-        point_file = tmp_path / "circular-points.gpkg"
-        points.to_file(point_file, layer="source-points", driver="GPKG")
-        x_coords = np.arange(5, dtype=float)
-        y_coords = np.array([0.0])
+        grid_coords = (np.array([0.0, 0.5, 1.0]), np.array([0.0, 0.5, 1.0]))
 
-        # GeoUtils expresses the support ellipse in output pixels
+        # Compare the object and string forms through the same compiled batch calculation
         expected, _ = _grid_pointcloud(
             points,
-            grid_coords=(x_coords, y_coords),
-            grid_res=(1.0, 1.0),
-            data_column_name="z",
-            resampling=geoutils_method,
-            dist_nodata_pixel=1.1,
+            grid_coords=grid_coords,
+            data_column_name="value",
+            resampling=method,  # type: ignore[arg-type]
+            dist_nodata_pixel=1,
+            engine="numba",
         )
-
-        # GDAL receives the equivalent support in coordinate units and the same cell centers
-        output_file = tmp_path / f"gdal-{gdal_algorithm}.tif"
-        command = build_gdal_grid_command(
-            str(point_file),
-            str(output_file),
-            algorithm=gdal_algorithm,  # type: ignore[arg-type]
-            bounds=(-0.5, -0.5, 4.5, 0.5),
-            shape=(1, 5),
-            radius=(1.1, 1.1),
+        result, _ = _grid_pointcloud(
+            points,
+            grid_coords=grid_coords,
+            data_column_name="value",
+            resampling=operator_factory(),
+            dist_nodata_pixel=1,
+            engine="numba",
         )
-        subprocess.run(command.command, check=True, capture_output=True, text=True)
-        with rio.open(output_file) as dataset:
-            actual = dataset.read(1, masked=True).filled(np.nan)
+        np.testing.assert_array_equal(result, expected)
 
-        assert np.allclose(actual, expected, equal_nan=True)
 
-    def test_grid_pc__gdal_idw_minimum_points(self, tmp_path: Path) -> None:
-        """Give exact IDW points precedence over minimum neighbor counts like GDAL."""
+class TestGriddingOperators:
+    """Test module for point neighborhoods, custom gridding operators, missing values and uncertainty."""
 
-        # Exact edge cells have one neighbor while the central cell has two
-        points = gpd.GeoDataFrame(
-            {"z": [2.0, 8.0]},
-            geometry=gpd.points_from_xy(x=[0.0, 2.0], y=[0.0, 0.0]),
+    @pytest.mark.parametrize("operator", [PropagatingLocalMeanInterpolator(), PropagatingMeanReducer()])
+    def test_grid__gdal_overrides_operator_default(self, operator: Interpolator | Reducer) -> None:
+        """Checks that point gridding calculates from finite values before applying its GDAL spatial rule."""
+
+        # The output center coincides with a valid point and has one nearby point with nodata
+        points = gu.PointCloud.from_xyz([0.5, 1.5], [0.5, 0.5], [2.0, np.nan], crs=32631)
+        reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(0, 1, 1, 1), crs=32631)
+
+        # The closest point is valid, so the nodata point does not mask this output cell
+        result = points.grid(ref=reference, resampling=operator, nodata_handling="gdal")
+        assert result.to_nanarray()[0, 0] == 2.0
+
+    @pytest.mark.parametrize(
+        ("operator", "interpolate"),
+        [(PropagatingLocalMeanInterpolator(), True), (PropagatingMeanReducer(), False)],
+    )
+    def test_grid__gdal_follows_custom_operator_class(
+        self, operator: Interpolator | Reducer, interpolate: bool
+    ) -> None:
+        """Checks that a custom point interpolator masks a missing nearest point while a reducer omits it."""
+
+        # The missing observation lies at the output center, with a finite point one unit away
+        points = gu.PointCloud.from_xyz([0.5, 1.5], [0.5, 0.5], [np.nan, 2.0], crs=32631)
+        reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(0, 1, 1, 1), crs=32631)
+
+        # A two-pixel radius includes the finite point for the reducer; only interpolation masks the output
+        result = points.grid(ref=reference, resampling=operator, dist_nodata_pixel=2.0, nodata_handling="gdal")
+        value = result.to_nanarray()[0, 0]
+        if interpolate:
+            assert np.isnan(value)
+        else:
+            assert value == 2.0
+
+    def test_grid__automatic_and_custom_point_neighbours(self) -> None:
+        """Checks that grid() uses nearby points by default or a requested count or circular distance."""
+
+        # Place two points near the target and two farther away so their means are different
+        points = gu.PointCloud.from_xyz([0, 1, 10, 20], [0, 0, 0, 0], [1, 3, 7, 11], crs=32631)
+        reference = gu.Raster.from_array(
+            np.zeros((1, 1)),
+            transform=rio.transform.from_origin(0, 1, 1, 1),
             crs=32631,
         )
-        point_file = tmp_path / "idw-points.gpkg"
-        points.to_file(point_file, layer="source-points", driver="GPKG")
-        expected, _ = _grid_pointcloud(
-            points,
-            grid_coords=(np.arange(3, dtype=float), np.array([0.0])),
-            grid_res=(1.0, 1.0),
-            data_column_name="z",
-            resampling="idw",
-            dist_nodata_pixel=1.1,
-            min_points=2,
+        operator = LocalMeanInterpolator()
+
+        # The usual eight-nearest search reaches all four points; both custom searches select the two nearby points
+        usual = points.grid(ref=reference, resampling=operator, nodata_handling="ignore")
+        nearest_two = points.grid(
+            ref=reference,
+            resampling=LocalMeanInterpolator(neighborhood=PointNeighbours(k=2)),
+            nodata_handling="ignore",
+        )
+        within_five = points.grid(
+            ref=reference,
+            resampling=LocalMeanInterpolator(neighborhood=PointNeighbours(radius=5)),
+            nodata_handling="ignore",
+        )
+        assert usual.to_nanarray()[0, 0] == 5.5
+        assert nearest_two.to_nanarray()[0, 0] == 2
+        assert within_five.to_nanarray()[0, 0] == 2
+        assert operator.default_neighborhood is None
+
+    @pytest.mark.parametrize("neighborhood", [PointNeighbours(k=2), PointNeighbours(radius=2)])
+    def test_grid__reducer_point_neighbours(self, neighborhood: PointNeighbours) -> None:
+        """Checks that a reducer's point count or radius selects values and uncertainty inputs for grid()."""
+
+        # Put two small values near the target and two larger values farther away
+        points = gu.PointCloud.from_xyz([0, 1, 10, 20], [0, 0, 0, 0], [1, 3, 7, 11], crs=32631)
+        reference = gu.Raster.from_array(np.zeros((1, 1)), transform=rio.transform.from_origin(0, 1, 1, 1), crs=32631)
+        reducer = Mean(neighborhood=neighborhood)
+        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+
+        # The configured point limits select only the first two observations, despite the larger pixel radius
+        usual = points.grid(ref=reference, resampling=Mean(), dist_nodata_pixel=30, nodata_handling="ignore")
+        reduced = points.grid(
+            ref=reference,
+            resampling=reducer,
+            dist_nodata_pixel=30,
+            nodata_handling="ignore",
+            error_structure=source_error,
+        )
+        summary = gu.uncertainty.propagate(
+            points.grid,
+            error_structure=source_error,
+            operation_kwargs={
+                "ref": reference,
+                "resampling": reducer,
+                "dist_nodata_pixel": 30,
+                "nodata_handling": "ignore",
+            },
         )
 
-        # Use the same local support and minimum count in the GDAL reference
-        output_file = tmp_path / "gdal-idw-min-points.tif"
-        command = build_gdal_grid_command(
-            str(point_file),
-            str(output_file),
-            algorithm="invdist",
-            bounds=(-0.5, -0.5, 2.5, 0.5),
-            shape=(1, 3),
-            radius=(1.1, 1.1),
-            min_points=2,
-        )
-        subprocess.run(command.command, check=True, capture_output=True, text=True)
-        with rio.open(output_file) as dataset:
-            actual = dataset.read(1, masked=True).filled(np.nan)
+        # Averaging 1 and 3 gives 2; two independent errors of magnitude two give variance 2
+        assert usual.to_nanarray()[0, 0] == 5.5
+        assert reduced.to_nanarray()[0, 0] == 2
+        assert summary.variance.to_nanarray().reshape(-1)[0] == pytest.approx(2)
+        assert reducer.default_neighborhood is neighborhood
 
-        assert np.allclose(actual, expected, equal_nan=True)
+    def test_grid__error_grid_neighborhood_for_reducer(self) -> None:
+        """Checks that point cloud gridding rejects a neighborhood intended for raster cells."""
 
-    @pytest.mark.parametrize("engine", ["scipy", "numba"])
-    def test_grid_pc__gdal_idw_anisotropic_grid(self, engine: str, tmp_path: Path) -> None:
-        """Weight IDW values by coordinate distance on an anisotropic output grid like GDAL."""
+        # A small point cloud and matching raster are enough to reach neighborhood selection
+        points = gu.PointCloud.from_xyz([0, 1], [0, 0], [1, 3], crs=32631)
+        reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(0, 1, 1, 1), crs=32631)
+        reducer = Mean(neighborhood=GridNeighbours(size=3))
 
-        if engine == "numba":
-            pytest.importorskip("numba")
+        # GridNeighbours contains row and column offsets rather than nearby point locations
+        with pytest.raises(ValueError, match="GridNeighbours applies to raster cells"):
+            points.grid(ref=reference, resampling=reducer)
 
-        # One X pixel is ten times larger than one Y pixel so scaled and coordinate distances differ
-        points = gpd.GeoDataFrame(
-            {"z": [0.0, 10.0]},
-            geometry=gpd.points_from_xy(x=[0.0, 10.0], y=[1.0, 0.0]),
+    def test_grid__zero_radius_includes_coincident_sources(self) -> None:
+        """Checks that a zero-radius point search includes coincident sources in values and uncertainty."""
+
+        # Place two independent observations exactly at the requested grid coordinate
+        points = gu.PointCloud.from_xyz([0, 0], [0, 0], [2, 4], crs=32631)
+        reference = gu.Raster.from_array(
+            np.zeros((1, 1)),
+            transform=rio.transform.from_origin(0, 0, 1, 1),
             crs=32631,
         )
-        point_file = tmp_path / f"anisotropic-idw-{engine}.gpkg"
-        points.to_file(point_file, layer="source-points", driver="GPKG")
-        expected, _ = _grid_pointcloud(
-            points,
-            grid_coords=(np.arange(0, 30, 10, dtype=float), np.arange(3, dtype=float)),
-            data_column_name="z",
-            resampling="idw",
-            dist_nodata_pixel=1.1,
-            engine=engine,  # type: ignore[arg-type]
+        operator = InverseDistance(neighborhood=PointNeighbours(k=2, radius=0))
+        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+
+        # Both zero-distance values receive half the weight, including in analytical variance
+        nominal = points.grid(ref=reference, resampling=operator, nodata_handling="ignore", error_structure=errors)
+        summary = gu.uncertainty.propagate(
+            points.grid,
+            error_structure=errors,
+            operation_kwargs={"ref": reference, "resampling": operator, "nodata_handling": "ignore"},
+        )
+        np.testing.assert_allclose(nominal.to_nanarray(), [[3]])
+        np.testing.assert_allclose(summary.variance.to_nanarray().reshape(-1), [0.5])
+
+    def test_grid__builtin_interpolator_uses_custom_point_count(self) -> None:
+        """Checks that a custom point count changes inverse-distance gridding instead of using the fast radius rule."""
+
+        # The two nearest points have values one and three, while distant points can change a full-radius average
+        points = gu.PointCloud.from_xyz([0, 1, 10, 20], [0, 0, 0, 0], [1, 3, 7, 11], crs=32631)
+        reference = gu.Raster.from_array(
+            np.zeros((1, 1)),
+            transform=rio.transform.from_origin(0, 1, 1, 1),
+            crs=32631,
         )
 
-        # GDAL receives the same support radius converted from pixels to coordinate units
-        output_file = tmp_path / f"gdal-anisotropic-idw-{engine}.tif"
-        command = build_gdal_grid_command(
-            str(point_file),
-            str(output_file),
-            algorithm="invdist",
-            bounds=(-5.0, -0.5, 25.0, 2.5),
-            shape=(3, 3),
-            radius=(11.0, 1.1),
+        # A thirty-pixel radius includes all points; k=2 uses only the two nearest ones
+        full_radius = points.grid(
+            ref=reference,
+            resampling=InverseDistance(),
+            dist_nodata_pixel=30,
+            nodata_handling="ignore",
         )
-        subprocess.run(command.command, check=True, capture_output=True, text=True)
-        with rio.open(output_file) as dataset:
-            actual = dataset.read(1, masked=True).filled(np.nan)
+        nearest_two = points.grid(
+            ref=reference,
+            resampling=InverseDistance(neighborhood=PointNeighbours(k=2)),
+            dist_nodata_pixel=30,
+            nodata_handling="ignore",
+        )
+        assert nearest_two.to_nanarray()[0, 0] == pytest.approx(5 / 3)
+        assert full_radius.to_nanarray()[0, 0] > nearest_two.to_nanarray()[0, 0]
 
-        assert np.allclose(actual, expected, equal_nan=True)
+
+class TestGridOperatorNodata:
+    """Test module for spatial nodata masks and contributions selected by operator neighborhoods."""
+
+    @pytest.mark.parametrize("method", ["nearest", "linear", "cubic", "idw", "mean"])
+    def test_grid__gdal_follows_operator_class(self, method: str) -> None:
+        """Checks that point-grid interpolators mask a missing nearest point and a reducer uses finite points."""
+
+        # Four finite corners can fill the center by every method, while the center observation is missing
+        points = gu.PointCloud.from_xyz(
+            [-1.0, 1.0, -1.0, 1.0, 0.0],
+            [-1.0, -1.0, 1.0, 1.0, 0.0],
+            [5.0, 5.0, 5.0, 5.0, np.nan],
+            crs=32631,
+        )
+        grid_coords = (np.array([0.0, 1.0]), np.array([0.0, 1.0]))
+
+        # All calculations find five from finite points; only the interpolators then mask the missing center
+        options: dict[str, Any] = {"grid_coords": grid_coords, "resampling": method, "dist_nodata_pixel": 2.0}
+        ignored = points.grid(**options, nodata_handling="ignore").to_nanarray()
+        gdal = points.grid(**options, nodata_handling="gdal").to_nanarray()
+        assert ignored[1, 0] == pytest.approx(5.0)
+        if method == "mean":
+            assert gdal[1, 0] == pytest.approx(5.0)
+        else:
+            assert np.isnan(gdal[1, 0])
+
+
+@pytest.mark.skipif(find_spec("gstools") is None, reason="Requires GSTools")
+class TestKrigingPoints:
+    """Test module for kriging neighborhoods, missing values and propagated uncertainty."""
+
+    def test_grid__kriging_operator_matches_point_krige(self) -> None:
+        """Checks that grid() accepts a Kriging object and returns the same value as PointCloud.krige()."""
+
+        # Place four points around one output cell and use a fitted model for both public calls
+        points = gu.PointCloud.from_xyz([0, 2, 0, 2], [0, 0, 2, 2], [1, 3, 2, 5], crs=32631)
+        reference = gu.Raster.from_array(
+            np.zeros((1, 1)),
+            transform=rio.transform.from_origin(0.5, 1.5, 1, 1),
+            crs=32631,
+        )
+        variogram = gu.Variogram.from_model("exponential", effective_range=4, partial_sill=2)
+
+        # The configured operator should use its point neighbors on the grid
+        actual = points.grid(ref=reference, resampling=Kriging(variogram), nodata_handling="ignore")
+        expected = points.krige(variogram, ref=reference)
+        np.testing.assert_allclose(actual.to_nanarray(), expected.to_nanarray(), rtol=0, atol=1e-12)
+
+    def test_krige__error_partial_spatial_dimensions(self) -> None:
+        """Checks that geospatial kriging rejects a model whose radius omits one spatial coordinate."""
+
+        # A one-dimensional covariance would require an unbounded point search along the omitted Y coordinate
+        points = gu.PointCloud.from_xyz([0, 1], [0, 1], [2, 3], crs=32631)
+        model = VariogramModel("gaussian", effective_range=2, partial_sill=1, active_dims=(0,))
+
+        # Reject the incomplete neighborhood before gridding rather than silently dropping distant Y observations
+        with pytest.raises(NotImplementedError, match="every spatial coordinate"):
+            points.krige(model, res=1)
+        with pytest.raises(NotImplementedError, match="every spatial coordinate"):
+            points.grid(res=1, resampling=Kriging(model))
+
+    def test_krige__point_method_propagates_exact_coefficients(self) -> None:
+        """Checks that PointCloud.krige() uses the same weights for predicted values and their uncertainty."""
+
+        # Place four observations around one off-center raster target so every ordinary-kriging weight matters
+        coordinates = np.array([[0.0, 0.0], [2.0, 0.0], [0.0, 2.0], [2.0, 2.0]])
+        values = np.array([1.0, 3.0, 2.0, 5.0])
+        target = np.array([0.8, 1.1])
+        points = gu.PointCloud.from_xyz(coordinates[:, 0], coordinates[:, 1], values, crs=32631)
+        reference = gu.Raster.from_array(
+            np.zeros((1, 1)),
+            transform=rio.transform.from_origin(0.8, 1.1, 1, 1),
+            crs=32631,
+        )
+        variogram = gu.Variogram.from_model("exponential", effective_range=4, partial_sill=2)
+        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+
+        # Observation noise adds an identity matrix to the covariance used for the kriging fit
+        local = LocalData(
+            values=values,
+            valid=np.ones(4, dtype=bool),
+            source_ids=np.arange(4),
+            coordinates=coordinates,
+            target=target,
+            distances=np.linalg.norm(coordinates - target, axis=1),
+            error_covariance=np.eye(4),
+        )
+        coefficients = Kriging(variogram).coefficients(local)
+        assert coefficients is not None
+        expected_value = float(coefficients.weights @ values)
+        expected_std = float(np.sqrt(coefficients.weights @ coefficients.weights))
+
+        nominal = points.krige(ref=reference, variogram=variogram, error_structure=errors)
+        summary = gu.uncertainty.propagate(
+            points.krige,
+            error_structure=errors,
+            operation_kwargs={"ref": reference, "variogram": variogram},
+        )
+        assert nominal.to_nanarray()[0, 0] == pytest.approx(expected_value, rel=0, abs=1e-12)
+        assert np.asarray(summary.std.to_nanarray().reshape(-1))[0] == pytest.approx(expected_std, rel=0, abs=1e-12)
 
 
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestGridChunked:
-    """Compare gridding outputs and loading across eager, Dask and Multiprocessing backends."""
+    """Test module for gridding outputs and loading across eager, Dask and Multiprocessing backends.
+
+    Method accuracy and numerical engines are covered in test_operators/test_interpolator.py
+    and test_operators/test_reducer.py.
+    """
 
     # Use a regular point grid so every interpolation method has enough local support
     x, y = np.meshgrid(np.arange(3, dtype=float), np.arange(3, dtype=float))
@@ -700,6 +840,7 @@ class TestGridChunked:
             "stdev",
             "average_distance",
             "average_distance_pts",
+            Mean(neighborhood=PointNeighbours(k=2)),
         ],
     )
     def test_grid__chunked_backends_equal(self, resampling: GriddingMethod, tmp_path: Path) -> None:
@@ -871,8 +1012,14 @@ class TestGridChunked:
         assert not dask_points.pc.is_loaded
         assert not multiproc_points.is_loaded
 
-    def test_grid__nodata_propagation_chunked_backends(self, tmp_path: Path) -> None:
-        """Ensure nodata propagation is identical across eager, Dask and Multiprocessing gridding."""
+    @pytest.mark.parametrize(
+        ("nodata_handling", "resampling"),
+        [("propagate", "mean"), (2, "mean"), ("gdal", "idw"), ("gdal", "mean")],
+    )
+    def test_grid__nodata_propagation_chunked_backends(
+        self, tmp_path: Path, nodata_handling: NodataChoice, resampling: GriddingMethod
+    ) -> None:
+        """Checks that each nodata choice gives identical results across gridding backends."""
 
         # Add one invalid center to exercise support across output chunk boundaries
         points = self.points.copy()
@@ -881,9 +1028,9 @@ class TestGridChunked:
         points.to_file(point_file)
         kwargs = {
             "grid_coords": self.grid_coords,
-            "resampling": "mean",
+            "resampling": resampling,
             "dist_nodata_pixel": 1.1,
-            "nodata_propagation": "propagate",
+            "nodata_handling": nodata_handling,
         }
 
         # Compare the same nodata rule before and after splitting either input or output
@@ -935,3 +1082,144 @@ class TestGridChunked:
             points.grid(ref=lazy_reference, mp_config=config)
         assert not lazy_reference._in_memory
         assert not output_file.exists()
+
+
+class TestGriddingOperatorsChunked:
+    """Test module for eager and lazy agreement when gridding operator neighborhoods."""
+
+    def test_grid__automatic_point_neighbours_chunk_invariance(self) -> None:
+        """Checks that automatic point searches give the same eager and lazy grid values."""
+
+        # Four points feed a four by four output grid split into 2 x 3 cell chunks
+        points = gu.PointCloud.from_xyz([0, 1, 3, 6], [0, 0, 0, 0], [1, 3, 7, 11], crs=32631)
+        reference = gu.Raster.from_array(
+            np.zeros((4, 4)),
+            transform=rio.transform.from_origin(0, 4, 1, 1),
+            crs=32631,
+        )
+        operator = LocalMeanInterpolator()
+
+        # The lazy reference chooses Dask, while the point source remains available for each output chunk
+        expected = points.grid(ref=reference, resampling=operator, nodata_handling="ignore")
+        lazy_reference = reference.to_xarray().chunk({"y": 2, "x": 3})
+        lazy_result = points.grid(ref=lazy_reference, resampling=operator, nodata_handling="ignore")
+        assert hasattr(lazy_reference.data, "compute")
+        assert hasattr(lazy_result.data, "compute")
+
+        # Computing the grid must agree with the complete eager point search
+        np.testing.assert_array_equal(np.asarray(lazy_result.compute()), expected.to_nanarray())
+
+    def test_grid__custom_reducer_chunk_invariance(self, tmp_path: Path) -> None:
+        """Checks that a custom reducer receives the same neighbors with eager, Dask and multiprocessing grids."""
+
+        pytest.importorskip("dask_geopandas")
+
+        # Store an irregular source whose circular neighborhoods cross every rectangular output chunk boundary
+        coordinates = np.array([[0.0, 0.0], [0.4, 0.2], [1.0, 0.0], [2.0, 0.0], [0.0, 1.0], [1.0, 1.0], [2.0, 1.0]])
+        points = gpd.GeoDataFrame(
+            {"value": np.array([1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0])},
+            geometry=gpd.points_from_xy(coordinates[:, 0], coordinates[:, 1]),
+            crs=32632,
+        )
+        point_file = tmp_path / "custom-reducer-points.gpkg"
+        points.to_file(point_file)
+        grid_coords = (np.arange(3, dtype=float), np.arange(2, dtype=float))
+        options = {"grid_coords": grid_coords, "resampling": Median(), "dist_nodata_pixel": 1.1}
+
+        # Evaluate one complete grid and two grids whose output cells are split independently
+        expected = gu.PointCloud(points, data_column="value").grid(**options)
+        dask_points = gu.open_pointcloud(str(point_file), data_column="value", chunks=3)
+        dask_result = dask_points.pc.grid(**options, chunksizes=(1, 2))
+        assert hasattr(dask_points, "compute")
+        assert hasattr(dask_result.data, "compute")
+        dask_result = dask_result.compute()
+        multiproc_points = gu.PointCloud(point_file, data_column="value")
+        multiproc_result = multiproc_points.grid(
+            **options,
+            mp_config=MultiprocConfig(chunks=(2, 1), outfile=str(tmp_path / "custom-reducer-grid.tif")),
+        )
+
+        # Compare values exactly to check that chunk boundaries do not change which neighbors are selected
+        assert not multiproc_points.is_loaded
+        assert not multiproc_result.is_loaded
+        assert expected.raster_equal(dask_result, warn_failure_reason=True, strict_masked=False)
+        assert expected.raster_equal(multiproc_result, warn_failure_reason=True, strict_masked=False)
+
+
+class TestPointNeighbourMethodsChunked:
+    """Test module for lazy and multiprocessing grids with explicit neighborhoods and either numerical engine."""
+
+    @pytest.mark.parametrize("engine", ["scipy", "numba"])
+    @pytest.mark.parametrize("operator_type", [Mean, InverseDistance])
+    def test_grid__explicit_neighborhood_chunk_invariance(
+        self, engine: Literal["scipy", "numba"], operator_type: type[Reducer] | type[Interpolator], tmp_path: Path
+    ) -> None:
+        """Checks that count-limited neighborhoods cross output chunk boundaries without changing the grid."""
+
+        if engine == "numba":
+            pytest.importorskip("numba")
+
+        # An uneven final chunk checks that the point search uses the complete source at each boundary
+        points = gu.PointCloud.from_xyz([0, 1, 3, 6], [0, 0, 1, 2], [1, 3, 7, 11], crs=32631)
+        reference = gu.Raster.from_array(np.zeros((4, 5)), rio.transform.from_origin(0, 4, 1, 1), crs=32631)
+        operator = operator_type(neighborhood=PointNeighbours(k=2, radius=4))
+        options: dict[str, Any] = {"resampling": operator, "engine": engine, "nodata_handling": "ignore"}
+        expected = points.grid(ref=reference, **options)
+
+        # Dask returns a lazy array; multiprocessing writes its output without loading the returned raster
+        lazy_reference = reference.to_xarray().chunk({"y": 3, "x": 2})
+        lazy_result = points.grid(ref=lazy_reference, **options)
+        assert hasattr(lazy_reference.data, "compute")
+        assert hasattr(lazy_result.data, "compute")
+        result = points.grid(
+            ref=reference,
+            **options,
+            mp_config=MultiprocConfig(chunks=(2, 3), outfile=str(tmp_path / "point-neighborhood.tif")),
+        )
+        assert points.is_loaded
+        assert not result.is_loaded
+        np.testing.assert_array_equal(np.asarray(lazy_result.compute()), expected.to_nanarray())
+        np.testing.assert_array_equal(result.to_nanarray(), expected.to_nanarray())
+
+
+@pytest.mark.skipif(find_spec("gstools") is None, reason="Requires GSTools")
+class TestKrigingPointsChunked:
+    """Test module for lazy and multiprocessing kriging across chunk boundaries."""
+
+    def test_krige__point_chunk_invariance(self) -> None:
+        """Checks that eager and Dask kriging use the same neighbors within the requested radius."""
+
+        # Place a regular set of known points around a four by four destination grid
+        x, y = np.meshgrid(np.arange(5, dtype=float), np.arange(5, dtype=float))
+        values = 2 * x.reshape(-1) - y.reshape(-1)
+        points = gu.PointCloud.from_xyz(x.reshape(-1), y.reshape(-1), values, crs=32631)
+        reference = gu.Raster.from_array(
+            np.zeros((4, 4)),
+            transform=rio.transform.from_origin(0.5, 4.5, 1, 1),
+            crs=32631,
+        )
+        variogram = gu.Variogram.from_model("exponential", effective_range=2.1, partial_sill=1)
+
+        # Split the output into chunks of 2 x 3 cells, so neighbors cross chunk boundaries and the last chunk is shorter
+        expected = points.krige(variogram, ref=reference, max_overlap=2.1)
+        lazy_reference = reference.to_xarray().chunk({"y": 2, "x": 3})
+        lazy = points.krige(variogram, ref=lazy_reference, max_overlap=2.1)
+        assert hasattr(lazy.data, "compute")
+        np.testing.assert_allclose(np.asarray(lazy.compute()), expected.to_nanarray(), rtol=0, atol=1e-12)
+
+
+class TestPointNeighbourMethods:
+    """Test module for rejecting raster interpolation methods on point sources.
+
+    Selected-point accuracy and SciPy/Numba comparisons are covered in test_operators/test_interpolator.py
+    and test_operators/test_reducer.py.
+    """
+
+    @pytest.mark.parametrize("method", ["slinear", "pchip", "quintic", "splinef2d"])
+    def test_grid__error_regular_only_method(self, method: str) -> None:
+        """Checks that point gridding rejects SciPy methods that require a regular input grid."""
+
+        # Reject the method before trying to prepare a triangulation or a point neighborhood
+        points = gu.PointCloud.from_xyz([0, 1, 0], [0, 0, 1], [1, 2, 3], crs=32631)
+        with pytest.raises(ValueError, match="regular-grid SciPy method"):
+            points.grid(grid_coords=(np.arange(2.0), np.arange(2.0)), resampling=ScipyInterpolator(method))  # type: ignore[arg-type]

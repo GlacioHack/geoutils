@@ -279,7 +279,7 @@ class _BlockReader:
             points = _read_point_rows(self.support, self.slices[0], None)
             coordinates = (points.geometry.x.to_numpy(), points.geometry.y.to_numpy())
             config = MultiprocConfig(chunks=self.chunks)
-            values = self.source.interp_points(
+            values = self.source.interp_at_points(
                 coordinates, method=self.interpolation, band=self.selector, as_array=True, mp_config=config
             )
             if self.source.is_mask:

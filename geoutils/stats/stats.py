@@ -23,28 +23,34 @@ from __future__ import annotations
 import warnings
 from collections.abc import Callable, Hashable, Iterable, Mapping
 from contextlib import ExitStack
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 
-from geoutils._dispatch import _is_pointcloud, _is_raster
+from geoutils._dispatch import _is_pointcloud, _is_raster, is_dask_array
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, NDArrayNum
+from geoutils.operators.base import LocalData
+from geoutils.operators.overlap import OverlapBackend
+from geoutils.operators.reducer import Reducer
+from geoutils.raster.array import get_mask_from_array
 from geoutils.stats.grouping import _grouped_stats, _validate_group_declarations
 from geoutils.stats.reduction import _normalize_statistics, _reduce_global_values
 from geoutils.stats.selection import (
+    _coordinates_at_support,
     _sample_and_mask_global_values,
     _select_values_and_mask_at_support,
 )
 from geoutils.stats.variography import Variogram, _estimate_variogram
 
 if TYPE_CHECKING:
-    from geoutils.interface.interpolation import InterpolationMethod
+    from geoutils.interface.resampling import InterpolationMethod
     from geoutils.multiproc import MultiprocConfig
     from geoutils.pointcloud.base import PointCloudBase
     from geoutils.pointcloud.pointcloud import PointCloudLike
     from geoutils.raster.base import RasterBase, RasterLike
     from geoutils.stats.reduction import _Statistics
+    from geoutils.uncertainty import ErrorStructure, PropagationSummary
     from geoutils.vector.base import VectorLike
 
 __all__ = ["stats", "variogram"]
@@ -60,6 +66,8 @@ def _global_stats(
     strategy: Literal["auto", "dense", "sparse", "groupwise"],
     subsampling_strategy: Literal["sequential", "topk"],
     mp_config: MultiprocConfig | None,
+    support: RasterBase | PointCloudBase | None = None,
+    _return_local_data: bool = False,
 ) -> Any:
     """
     Calculate global statistic.
@@ -91,17 +99,42 @@ def _global_stats(
     )
 
     # Reduce all values through one shared calculation and restore the established global output form
-    return _reduce_global_values(
+    result = _reduce_global_values(
         values_to_reduce,
         statistics,
         strategy=strategy,
         mp_config=mp_config if subsample == 1 else None,
     )
+    if not _return_local_data:
+        return result
+
+    # Use original array positions as source IDs so repeated selections receive the same source error
+    coordinates = _coordinates_at_support(support)
+    local_inputs = []
+    names = list(values_to_reduce)
+    for name in names:
+        array = values_to_reduce[name][0]
+        if is_dask_array(array) or not isinstance(array, np.ndarray):
+            raise ValueError("Statistics uncertainty propagation currently requires eager in-memory values.")
+        flat_values = np.asanyarray(np.ma.getdata(array)).reshape(-1)
+        valid = ~get_mask_from_array(array).reshape(-1)
+        source_ids = np.empty(array.size, dtype=object)
+        source_ids[:] = [(name, position) for position in range(array.size)]
+        local_inputs.append(
+            LocalData(
+                values=flat_values,
+                valid=valid,
+                source_ids=source_ids,
+                coordinates=coordinates,
+            )
+        )
+    nominal = np.asarray([result] if len(names) == 1 else [result[name] for name in names], dtype=float)
+    return result, local_inputs, names, nominal
 
 
 def stats(
     source: RasterLike | PointCloudLike | ArrayLike | Mapping[str, ArrayLike],
-    statistics: str | Callable[[Any], Any] | Iterable[str | Callable[[Any], Any]] | None = None,
+    statistics: str | Callable[[Any], Any] | Reducer | Iterable[str | Callable[[Any], Any] | Reducer] | None = None,
     *,
     by: Mapping[str, Any] | None = None,
     values: int | str | Iterable[int | str] | Mapping[str, Any] | None = None,
@@ -121,6 +154,10 @@ def stats(
     observed: bool = True,
     return_masks: bool = False,
     mp_config: MultiprocConfig | None = None,
+    fractional: bool = False,
+    overlap_backend: OverlapBackend = "auto",
+    error_structure: ErrorStructure | None = None,
+    uncertainty_kwargs: Mapping[str, Any] | None = None,
 ) -> Any:
     """
     Calculate statistics, either global (whole array) or grouped with other geospatial objects (continuous binning or
@@ -298,6 +335,13 @@ def stats(
         Masks cover complete groups before subsampling. Requires by.
     :param mp_config: Worker and tile settings for multiprocessing, e.g. MultiprocConfig(chunks=512).
         Cannot be combined with Dask inputs.
+    :param fractional: Weight source raster cells by the exact area covered by one vector grouping. Overlapping feature
+        groups are calculated independently.
+    :param overlap_backend: Library used to calculate polygon coverage of raster cells. Auto uses ExactExtract when it
+        is installed and the grid is compatible, and otherwise uses Shapely.
+    :param error_structure: Optional source error model for one supplied Reducer. When supplied, return the statistic
+        result and a PropagationSummary calculated from the same selected values.
+    :param uncertainty_kwargs: Options passed to geoutils.uncertainty.propagate().
     :returns: A statistic, summary dictionary, grouped dataframe, or grouped dataframe and mask mapping.
     """
 
@@ -312,6 +356,22 @@ def stats(
         raise ValueError("Argument ``subsample`` must be a positive number.")
     if not isinstance(subsample_per_group, (bool, np.bool_)):
         raise TypeError("Argument ``subsample_per_group`` must be a boolean.")
+    if not isinstance(fractional, (bool, np.bool_)):
+        raise TypeError("Argument ``fractional`` must be a boolean.")
+    if fractional:
+        if by is None:
+            raise ValueError("Fractional statistics require one vector grouper through argument by.")
+        if subsample != 1 or subsample_per_group:
+            raise ValueError("Fractional statistics do not support subsampling.")
+        if backend != "geoutils" or mp_config is not None or return_masks:
+            raise ValueError("Fractional statistics require backend='geoutils', mp_config=None and return_masks=False.")
+    if error_structure is not None:
+        if not isinstance(statistics, Reducer):
+            raise TypeError("Statistics uncertainty propagation requires one Reducer as statistics.")
+        if subsample != 1:
+            raise ValueError("Statistics uncertainty propagation does not yet support subsampling.")
+        if backend != "geoutils":
+            raise ValueError("Statistics uncertainty propagation requires backend='geoutils'.")
     if by is None and (bins is not None or categories is not None or not observed or return_masks):
         raise ValueError(
             "Argument ``by`` is required for ``bins``, ``categories``, ``observed``=False or ``return_masks``=True."
@@ -338,7 +398,7 @@ def stats(
     if (
         by is None
         and statistics is not None
-        and not isinstance(statistics, (str, Iterable))
+        and not isinstance(statistics, (str, Iterable, Reducer))
         and not callable(statistics)
     ):
         warnings.warn(f"Statistic name {statistics} is a not recognized string", category=UserWarning)
@@ -370,7 +430,7 @@ def stats(
 
         # If no grouping, compute global stats
         if by is None:
-            return _global_stats(
+            result = _global_stats(
                 values_at_support,
                 normalized_statistics,
                 mask=support_mask,
@@ -379,31 +439,73 @@ def stats(
                 strategy=strategy,
                 subsampling_strategy=subsampling_strategy,
                 mp_config=mp_config,
+                support=support,
+                _return_local_data=error_structure is not None,
             )
+        else:
+            # For eager data, build the group IDs and reduce each selected value directly
+            assert definitions is not None
+            if fractional:
+                if support is None or not _is_raster(support):
+                    raise TypeError("Fractional vector statistics require a raster support grid.")
+                from geoutils.stats.fractional import _fractional_vector_stats
 
-        # Otherwise perform grouping
-        assert definitions is not None
-        return _grouped_stats(
-            source,
-            by,
-            values=values_at_support,
-            support=support,
-            statistics=normalized_statistics,
-            mask=support_mask,
-            subsample=subsample,
-            subsample_per_group=subsample_per_group,
-            random_state=random_state,
-            strategy=strategy,
-            backend=backend,
-            subsampling_strategy=subsampling_strategy,
-            interpolation=interpolation,
-            align=align,
-            observed=observed,
-            return_masks=return_masks,
-            mp_config=mp_config,
-            definitions=definitions,
-            stack=stack,
-        )
+                result = _fractional_vector_stats(
+                    source,
+                    by,
+                    values=values_at_support,
+                    support=cast("RasterBase", support),
+                    statistics=normalized_statistics,
+                    mask=support_mask,
+                    definitions=definitions,
+                    observed=observed,
+                    overlap_backend=overlap_backend,
+                    return_local_data=error_structure is not None,
+                )
+            else:
+                result = _grouped_stats(
+                    source,
+                    by,
+                    values=values_at_support,
+                    support=support,
+                    statistics=normalized_statistics,
+                    mask=support_mask,
+                    subsample=subsample,
+                    subsample_per_group=subsample_per_group,
+                    random_state=random_state,
+                    strategy=strategy,
+                    backend=backend,
+                    subsampling_strategy=subsampling_strategy,
+                    interpolation=interpolation,
+                    align=align,
+                    observed=observed,
+                    return_masks=return_masks,
+                    mp_config=mp_config,
+                    definitions=definitions,
+                    stack=stack,
+                    _return_local_data=error_structure is not None,
+                )
+
+    if error_structure is None:
+        return result
+
+    # Calculate uncertainty from the same selected values and their original array positions
+    nominal_result, local_inputs, output_labels, nominal_values = result
+    options = dict(uncertainty_kwargs or {})
+    for reserved in ("nominal_estimate", "output_labels"):
+        if reserved in options:
+            raise ValueError(f"uncertainty_kwargs cannot override {reserved}.")
+    from geoutils.uncertainty import propagate
+
+    summary: PropagationSummary = propagate(
+        cast(Reducer, statistics),
+        local_inputs,
+        error_structure,
+        nominal_estimate=nominal_values,
+        output_labels=output_labels,
+        **options,
+    )
+    return nominal_result, summary
 
 
 def variogram(

@@ -13,6 +13,7 @@ import geoutils as gu
 from geoutils import examples
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
+from geoutils.operators.reducer import Mean, Mode, Quantile, Range, Sum
 from geoutils.stats.reduction import (
     _STATS_ALIAS_ALL,
     _STATS_ALIAS_CALLABLE,
@@ -38,6 +39,62 @@ class TestStats:
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
     landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
+
+    def test_stats__reducer_objects(self) -> None:
+        """Checks that stats() reuses Reducers globally and within declared groups."""
+
+        # Split four finite values into two categories with a known mean and range in each group
+        values = np.array([[1.0, 3.0], [6.0, 10.0]])
+        groups = np.array([[0, 0], [1, 1]])
+
+        # A built-in linear Reducer follows the established optimized statistic result
+        mean = gu.stats.stats(values, Mean())
+        assert mean == gu.stats.stats(values, "mean")
+        total = gu.stats.stats(values, Sum())
+        assert total == gu.stats.stats(values, "sum")
+
+        # A nonlinear Reducer without a legacy statistic name receives each complete group through LocalData
+        grouped = gu.stats.stats(
+            values,
+            [
+                Mean(),
+                Range(),
+                Mode(weighted=False, tie_break="first"),
+                Quantile(0.25),
+            ],
+            by={"group": groups},
+            categories={"group": [0, 1]},
+        )
+        np.testing.assert_array_equal(grouped["value", "Mean"], [2.0, 8.0])
+        np.testing.assert_array_equal(grouped["value", "Range"], [2.0, 4.0])
+        np.testing.assert_array_equal(grouped["value", "Mode"], [1.0, 6.0])
+        np.testing.assert_array_equal(grouped["value", "Quantile"], [1.5, 7.0])
+
+    def test_stats__propagates_grouped_mean_uncertainty(self) -> None:
+        """Checks that grouped stats() propagates a Reducer's uncertainty from the exact group memberships."""
+
+        # Give two groups two independent observations each, with source standard deviation two
+        values = np.array([[1.0, 3.0], [6.0, 10.0]])
+        groups = np.array([[0, 0], [1, 1]])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        options = {"by": {"group": groups}, "categories": {"group": [0, 1]}}
+
+        # Compare the returned table with the result calculated without requesting uncertainty
+        expected = gu.stats.stats(values, Mean(), **options)
+        nominal, summary = gu.stats.stats(
+            values,
+            Mean(),
+            error_structure=source_error,
+            uncertainty_kwargs={"return_covariance": True},
+            **options,
+        )
+        pd.testing.assert_frame_equal(nominal, expected)
+        np.testing.assert_array_equal(summary.estimate, [2.0, 8.0])
+
+        # Each group mean has variance 4 / 2 and disjoint source IDs give zero cross-group covariance
+        np.testing.assert_allclose(summary.variance, [2.0, 2.0])
+        assert summary.covariance is not None
+        np.testing.assert_allclose(summary.covariance, np.diag([2.0, 2.0]))
 
     def test_stats__summary_and_grouped_routes(self) -> None:
         """Checks that by chooses between a summary and a grouped table."""

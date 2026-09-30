@@ -124,7 +124,7 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
 * - Interpolate at coordinates
   - `gdallocationinfo`
   - `gdal raster pixel-info`
-  - {meth}`~geoutils.Raster.to_pointcloud`/{meth}`~geoutils.Raster.interp_points`
+  - {meth}`~geoutils.Raster.to_pointcloud`/{meth}`~geoutils.Raster.interp_at_points`
 
 * - <span class="gu-table-section">Raster ⟶ Vector</span>
   -

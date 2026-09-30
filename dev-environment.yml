@@ -16,7 +16,7 @@ dependencies:
   - pandas>=1,<3
   - numpy>=1,<3
   - affine
-  - shapely
+  - shapely>=2.0
   - pyogrio
 
   # Development-specific, to mirror manually in setup.cfg [options.extras_require].
@@ -32,16 +32,18 @@ dependencies:
   - dask # For out-of-memory operations
   - dask-geopandas # For out-of-memory vector/point operations
   - flox # For grouped statistics
+  - exactextract>=0.3 # For fast exact polygon-cell coverage
 
   # Test dependencies
   - gdal<3.13.3  # To benchmark functionalities against GDAL
   - pdal>=2.10  # To benchmark functionalities against PDAL
-  - pytest=7.*
+  - pytest>=8,<10
   - pytest-xdist
   - pytest-lazy-fixtures
   - pytest-instafail
   - pytest-socket
   - pytest-cov
+  - sybil>=9.3,<10
   - coveralls
   - pyyaml
   - netcdf4  # To write synthetic data with chunksizes

@@ -17,6 +17,8 @@ from pyproj import CRS
 from pyproj.crs import CompoundCRS
 
 from geoutils import (
+    ErrorComponent,
+    ErrorStructure,
     PointCloud,
     Raster,
     Variogram,
@@ -24,6 +26,7 @@ from geoutils import (
     examples,
     open_raster,
 )
+from geoutils.operators.reducer import Mean
 from geoutils.raster import MultiprocConfig
 from geoutils.raster.base import RasterBase
 from geoutils.raster.xr_accessor import RasterAccessor
@@ -148,7 +151,7 @@ class TestClassVsAccessorConsistency:
     # The full list of methods is used a posteriori to check all were tested across multiple tests
     methods = [k for k, v in RasterBase.__dict__.items() if not k.startswith("_") and not isinstance(v, property)]
     # Ignore deprecated methods (already tested through their new name)
-    methods = [m for m in methods if m not in ["get_nanarray", "to_points", "save"]]
+    methods = [m for m in methods if m not in ["get_nanarray", "to_points", "save", "interp_points", "reduce_points"]]
 
     # List of properties that WILL load the input dataset (only one does, the data itself)
     properties_input_load = ["data"]
@@ -171,6 +174,7 @@ class TestClassVsAccessorConsistency:
         "intersection",
         "edit",
         "subsample",
+        "random_field",
     ]
     # List of methods that WILL NOT load the input for certain arguments
     methods_input_noload_allowed_args = {"info": {"stats": [False]}}
@@ -343,8 +347,9 @@ class TestClassVsAccessorConsistency:
         ("raster_equal", {"other": "self"}),
         ("raster_allclose", {"other": "self"}),
         ("intersection", {"other": "self"}),
-        ("reduce_points", {"points": "random"}),  # Needs implementation in RasterBase (currently only for Raster)
-        ("interp_points", {"points": "random"}),  # "random" will be derived during the test to work on all inputs
+        ("reduce_at_points", {"points": "random"}),  # Needs implementation in RasterBase (currently only for Raster)
+        ("interp_at_points", {"points": "random"}),  # "random" will be derived during the test to work on all inputs
+        ("resample_at_points", {"points": "random", "method": Mean(), "as_array": True}),
         ("proximity", {"target_values": [100]}),
         ("to_nanarray", {}),
         ("to_pointcloud", {"subsample": 1, "random_state": 42}),
@@ -353,6 +358,20 @@ class TestClassVsAccessorConsistency:
         ("cosample", {"other": "self", "subsample": 1_000, "random_state": 42}),
         ("pairsample", {"n_pairs": 1_000, "random_state": 42}),
         ("variogram", {"n_pairs": 1_000, "n_lags": 6, "random_state": 42}),
+        (
+            "krige",
+            {
+                "variogram": Variogram.from_model("gaussian", effective_range=1, partial_sill=1),
+                "max_overlap": 0.01,
+            },
+        ),
+        (
+            "random_field",
+            {
+                "error_structure": ErrorStructure([ErrorComponent("measurement", 1)]),
+                "random_state": 42,
+            },
+        ),
         ("filter", {"method": "median", "size": 7}),
         ("sieve", {"size": 7}),
         ("fill_nodata", {"max_search_distance": 3}),
@@ -468,7 +487,8 @@ class TestClassVsAccessorConsistency:
                 noload_allowed_args=self.methods_input_noload_allowed_args,
             )
             assert raster.is_loaded is should_input_be_loaded
-            if method == "subsample":
+            # Xarray loads source values to derive a mask for sampling or a random field; Raster reads only its mask
+            if method in ("subsample", "random_field"):
                 assert ds._in_memory
             else:
                 assert ds._in_memory is should_input_be_loaded
@@ -546,7 +566,7 @@ class TestClassVsAccessorConsistency:
 
     chunked_methods_and_args = (
         ("reproject", {"crs": CRS.from_epsg(4326)}),
-        ("interp_points", {"points": "random", "as_array": True}),
+        ("interp_at_points", {"points": "random", "as_array": True}),
         ("cosample", {"other": "self", "subsample": 100, "strategy": "topk", "random_state": 42}),
         (
             "subsample",

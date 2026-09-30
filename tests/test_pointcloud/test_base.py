@@ -137,6 +137,7 @@ class TestClassVsAccessorConsistency:
         ("copy", {}),
         ("clip", {"mask": Polygon([(-0.1, -0.1), (0.5, -0.1), (0.5, 1.1), (-0.1, 1.1)])}),
         ("reproject", {"crs": 4326}),
+        ("filter", {"method": "median", "radius": 1.1}),
         ("to_xyz", {}),
         ("to_array", {}),
         ("to_tuples", {}),
@@ -177,6 +178,21 @@ class TestClassVsAccessorConsistency:
                 "data_column": "b2",
             },
         ),
+        (
+            "krige",
+            {
+                "variogram": gu.Variogram.from_model("gaussian", effective_range=1, partial_sill=1),
+                "grid_coords": (np.array([0.0, 1.0]), np.array([0.0, 1.0])),
+                "max_overlap": 0.01,
+            },
+        ),
+        (
+            "random_field",
+            {
+                "error_structure": gu.ErrorStructure([gu.ErrorComponent("measurement", 1)]),
+                "random_state": 42,
+            },
+        ),
     ]
 
     @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in methods_and_kwargs])
@@ -208,7 +224,7 @@ class TestClassVsAccessorConsistency:
             assert output_ds is None
             assert pc.data_column == ds.pc.data_column
         else:
-            assert_output_equal(output_pc, output_ds, use_allclose=method == "grid")
+            assert_output_equal(output_pc, output_ds, use_allclose=method in ("grid", "krige"))
 
         assert pc.is_loaded
         assert ds.pc.is_loaded

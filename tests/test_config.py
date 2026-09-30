@@ -58,14 +58,18 @@ class TestConfig:
         ):
             gu.config["interpolation_method"] = "bilinear"
 
-        # interpolation_dist_nodata_spread validator
-        gu.config["interpolation_dist_nodata_spread"] = "half_order_up"
-        gu.config["interpolation_dist_nodata_spread"] = 1
+        # interpolation_nodata_handling validator
+        default_handling = gu.config["interpolation_nodata_handling"]
+        gu.config["interpolation_nodata_handling"] = "half_order_up"
+        gu.config["interpolation_nodata_handling"] = 1
         with pytest.raises(
             ValueError,
             match="'bilinear' is not a valid*",
         ):
-            gu.config["interpolation_dist_nodata_spread"] = "bilinear"
+            gu.config["interpolation_nodata_handling"] = "bilinear"
+
+        # Leave the configured nodata handling at its initial GDAL-compatible default
+        gu.config["interpolation_nodata_handling"] = default_handling
 
     def test_default_reproject(self) -> None:
         landsat_b4_crop_path = gu.examples.get_path_test("everest_landsat_b4_cropped")
@@ -99,7 +103,7 @@ class TestConfig:
         assert stack_force.raster_equal(stack)
 
     def test_default_interpolation(self) -> None:
-        # Test from test_interpolation.py::TestInterpolate::test_interp_points__synthetic
+        # Test from test_resampling.py::TestInterpolate::test_interp_points__synthetic
         arr = np.flipud(np.array([1, 2, 3, 4, 5, 6, 7, 8, 9]).reshape((3, 3)))
         transform = rio.transform.from_bounds(0, 0, 3, 3, 3, 3)
         raster = gu.Raster.from_array(data=arr, transform=transform, crs=None, nodata=-9999)
@@ -108,16 +112,16 @@ class TestConfig:
         index_y = [0, 0, 0, 1, 1, 1, 2, 2, 2]
         points_x, points_y = raster.ij2xy(i=index_x, j=index_y)
 
-        raster_points_force = raster.interp_points(
+        raster_points_force = raster.interp_at_points(
             (points_x, points_y),
             method=gu.config["interpolation_method"],
-            dist_nodata_spread=gu.config["interpolation_dist_nodata_spread"],
+            nodata_handling=gu.config["interpolation_nodata_handling"],
             as_array=True,
         )
-        raster_points = raster.interp_points((points_x, points_y), as_array=True)
+        raster_points = raster.interp_at_points((points_x, points_y), as_array=True)
         assert np.array_equal(raster_points, raster_points_force)
 
-        raster_points_sub = gu.interface.interpolation._interp_points(
+        raster_points_sub = gu.interface.resampling._resample_at_points(
             source_raster=raster, points=(points_x, points_y), as_array=True
         )
         assert np.array_equal(raster_points_force, raster_points_sub)

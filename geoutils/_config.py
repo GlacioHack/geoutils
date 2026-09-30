@@ -67,17 +67,23 @@ def validate_interpolation_method(interpolation_method: bool | str | int) -> str
         raise ValueError(f"'{interpolation_method}' is not a valid interpolation methodValid methods: {valid_methods}")
 
 
-def validate_dist_nodata_spread(dist_nodata_spread: bool | str | int) -> str | int:
-    """Test interpolation_method"""
-    valid_spreads = ["half_order_up", "half_order_down"]
-    if isinstance(dist_nodata_spread, str) and dist_nodata_spread.lower() in valid_spreads:
-        return dist_nodata_spread.lower()
-    elif isinstance(dist_nodata_spread, int):
-        return dist_nodata_spread
-    else:
-        raise ValueError(
-            f"'{dist_nodata_spread}' is not a valid dist_nodata_spread parameterValid value: {valid_spreads} or integer"
-        )
+def validate_nodata_handling(nodata_handling: bool | str | int) -> str | int:
+    """Validate how interpolation handles missing source values."""
+    valid_choices = ["gdal", "ignore", "propagate", "half_order_up", "half_order_down"]
+    if isinstance(nodata_handling, str):
+        if nodata_handling.lower() in valid_choices:
+            return nodata_handling.lower()
+        try:
+            configured_distance = int(nodata_handling)
+        except ValueError:
+            configured_distance = -1
+        if configured_distance >= 0:
+            return configured_distance
+    elif not isinstance(nodata_handling, bool) and isinstance(nodata_handling, int) and nodata_handling >= 0:
+        return nodata_handling
+    raise ValueError(
+        f"'{nodata_handling}' is not a valid nodata_handling choice. Use {valid_choices} or a non-negative integer."
+    )
 
 
 # Map the parameter names with a validating function to check user input
@@ -86,7 +92,7 @@ _validators = {
     "warn_area_or_point": validate_bool,
     "reprojection_method": validate_reprojection_method,
     "interpolation_method": validate_interpolation_method,
-    "interpolation_dist_nodata_spread": validate_dist_nodata_spread,
+    "interpolation_nodata_handling": validate_nodata_handling,
 }
 
 

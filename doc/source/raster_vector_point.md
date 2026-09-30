@@ -146,9 +146,9 @@ plt.tight_layout()
 
 ## Raster–point operations
 
-### Point interpolation
+### Interpolation at points
 
-{func}`geoutils.Raster.interp_points`
+{func}`geoutils.Raster.interp_at_points`
 
 Point interpolation of a raster **consists in estimating the values at exact point coordinates by 2D regular-grid
 interpolation** such as nearest neighbour, bilinear (default), cubic, etc.
@@ -171,7 +171,7 @@ rng = np.random.default_rng(42)
 x_coords = rng.uniform(rast.bbox.left, rast.bbox.right, 50)
 y_coords = rng.uniform(rast.bbox.bottom, rast.bbox.top, 50)
 
-pc_int = rast.interp_points(points=(x_coords, y_coords))
+pc_int = rast.interp_at_points(points=(x_coords, y_coords))
 ```
 
 The interpolated points can be returned as a {class}`~geoutils.PointCloud`, enabling quick interfacing, or as an array.
@@ -191,16 +191,16 @@ _ = ax[1].set_yticklabels([])
 plt.tight_layout()
 ```
 
-### Reduction around point
+### Reduction at points
 
 Point reduction of a raster is **the estimation of the values at point coordinates by applying a reductor function (e.g., mean,
 median) to pixels contained in a window centered on the point**. For a window smaller than the pixel size, the value of
 the closest pixel is returned.
 
-{func}`geoutils.Raster.reduce_points`
+{func}`geoutils.Raster.reduce_at_points`
 
 ```{code-cell} ipython3
-pc_red = rast.reduce_points((x_coords, y_coords), window=5, reducer_function=np.nanmedian)
+pc_red = rast.reduce_at_points((x_coords, y_coords), window=5, reducer_function=np.nanmedian)
 ```
 
 The reduced points can be returned as a {class}`~geoutils.PointCloud`, enabling quick interfacing, or as an array.

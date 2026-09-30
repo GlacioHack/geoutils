@@ -6,26 +6,44 @@ import re
 import warnings
 from importlib.util import find_spec
 from typing import Any, Literal
+from unittest.mock import patch
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 import rasterio as rio
+from affine import Affine
 from packaging.version import Version
 from pyproj import CRS
 from shapely.geometry import Polygon
 
 import geoutils as gu
 from geoutils import examples, open_raster
-from geoutils.exceptions import InvalidGridError
+from geoutils.exceptions import InvalidCRSError, InvalidGridError
 from geoutils.multiproc import MultiprocConfig
 from geoutils.multiproc.cluster import MpCluster
+from geoutils.operators import GridNeighbours, Interpolator, PointNeighbours, Reducer
+from geoutils.operators.interpolator import Linear, Nearest
+from geoutils.operators.reducer import (
+    Maximum,
+    Mean,
+    Median,
+    Minimum,
+    Sum,
+)
 from geoutils.projtools import _get_bounds_projected
 from geoutils.raster.raster import _default_nodata
 from geoutils.raster.transformation import (
     _resampling_method_from_str,
 )
 from geoutils.sampling.subsampling import _subsample_numpy
+from tests.operator_helpers import (
+    LocalMeanInterpolator,
+    NoSupportReducer,
+    PropagatingMeanReducer,
+    SupportMassReducer,
+    WindowRangeInterpolator,
+)
 
 DO_PLOT = False
 
@@ -365,51 +383,9 @@ class TestTransformation:
         # Reference raster to be used
         r = gu.Raster(example)
 
-        # -- Check proper errors are raised if nodata are not set -- #
-        r_nodata = r.copy()
-        r_nodata.set_nodata(None)
-
-        # Make sure at least one pixel is masked for test 1
-        rand_indices = _subsample_numpy(r_nodata.data, 10, return_indices=True)
-        r_nodata.data[rand_indices] = np.ma.masked
-        assert np.count_nonzero(r_nodata.data.mask) > 0
-
-        # Make sure at least one pixel is set at default nodata for test
-        default_nodata = _default_nodata(r_nodata.dtype)
-        rand_indices = _subsample_numpy(r_nodata.data, 10, return_indices=True)
-        r_nodata.data[rand_indices] = default_nodata
-        assert np.count_nonzero(r_nodata.data == default_nodata) > 0
-
-        # 1 - if no force_source_nodata is set and masked values exist, raises an error
-        with pytest.raises(
-            ValueError,
-            match=re.escape(
-                "No nodata set, set one for the raster with self.set_nodata() or use a "
-                "temporary one with `force_source_nodata`."
-            ),
-        ):
-            _ = r_nodata.reproject(res=r_nodata.res[0] / 2, nodata=0)
-
-        # 2 - if no nodata is set and default value conflicts with existing value, a warning is raised
-        with pytest.warns(
-            UserWarning,
-            match=re.escape(
-                f"For reprojection, nodata must be set. Default chosen value "
-                f"{_default_nodata(r_nodata.dtype)} exists in self.data. This may have unexpected "
-                f"consequences. Consider setting a different nodata with self.set_nodata()."
-            ),
-        ):
-            r_test = r_nodata.reproject(res=r_nodata.res[0] / 2, force_source_nodata=default_nodata)
-        assert r_test.nodata == default_nodata
-
-        # 3 - if default nodata does not conflict, should not raise a warning
-        r_nodata.data[r_nodata.data == default_nodata] = 3
-        r_test = r_nodata.reproject(res=r_nodata.res[0] / 2, force_source_nodata=default_nodata)
-        assert r_test.nodata == default_nodata
-
         # -- Test setting each combination of georeferences bounds, res and size -- #
 
-        # specific for the landsat test case, default nodata 255 cannot be used (see above), so use 0
+        # Landsat data contain the default nodata value 255, so use 0
         if r.nodata is None:
             r.set_nodata(0)
 
@@ -662,29 +638,17 @@ class TestTransformation:
 
         assert r_crs.raster_equal(r_tmp_crs)
 
-        # -- Test additional errors raised for argument combinations -- #
-
-        # If both ref and crs are set
-        with pytest.raises(InvalidGridError, match="Either 'ref' or 'crs' must be provided"):
-            _ = r.reproject(ref=r2, crs=r.crs)
-
-        # Size and res are mutually exclusive
-        with pytest.raises(InvalidGridError, match="Both output grid resolution 'res' and shape"):
-            _ = r.reproject(grid_size=(10, 10), res=50)
-
-        # If wrong type for `ref`
-        with pytest.raises(InvalidGridError, match="Cannot interpret reference grid from"):
-            _ = r.reproject(ref=3)
-
         # -- Check warning for area_or_point works -- #
         r.set_area_or_point("Area", shift_area_or_point=False)
         r2 = r.copy()
         r2.set_area_or_point("Point", shift_area_or_point=False)
 
-        with (
-            pytest.warns(UserWarning, match="One raster has a pixel"),
-        ):
+        with pytest.warns(UserWarning) as raised:
             r.reproject(r2)
+        assert any("One raster has a pixel" in str(warning.message) for warning in raised)
+        assert any(
+            "Output projection, bounds and grid size are identical" in str(warning.message) for warning in raised
+        )
 
         # Check that reprojecting preserves interpretation
         r_reproj = r.reproject(res=r.res[0] * 2)
@@ -827,7 +791,7 @@ class TestMaskGeotransformations:
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])
     def test_reproject(self, mask: gu.Raster) -> None:
-        # Test 1: with a classic resampling (bilinear)
+        # Reproject with nearest neighbor resampling
 
         # Reproject mask - resample to 100 x 100 grid
         mask_orig = mask.copy()
@@ -851,12 +815,6 @@ class TestMaskGeotransformations:
         mask_uint8_reproj = mask_uint8_reproj.astype("bool")
         # The strict comparison ensures masked data are propagated exactly the same
         assert mask_reproj.raster_equal(mask_uint8_reproj, strict_masked=True)
-
-        # Test 2: Should raise a warning when the resampling differs from nearest
-        with pytest.raises(
-            UserWarning, match=re.escape("Reprojecting a raster mask (boolean type) with a resampling method")
-        ):
-            mask.reproject(res=50, resampling="bilinear")
 
     def test_reproject__no_inters(self) -> None:
         """Test reprojection behaviour without intersection of inputs."""
@@ -1177,3 +1135,514 @@ class TestTransformationChunked:
         assert base.raster_allclose(xr_base, warn_failure_reason=True, strict_masked=False)
         assert base.raster_allclose(dask_r, warn_failure_reason=True, strict_masked=False)
         assert base.raster_allclose(mp_r, warn_failure_reason=True, strict_masked=False)
+
+
+class TestReprojectionOperators:
+    """
+    Test module for reprojection with custom operators, neighborhoods, and uncertainty.
+
+    Tests on interpolators are covered in test_operators/test_interpolator.py.
+    Tests on fractional area and uncertainty are covered in test_operators/test_reducer.py.
+    """
+
+    def test_reproject__custom_interpolator(self) -> None:
+        """Checks a custom interpolator for reprojection."""
+
+        # Use same input/output transform
+        values = np.arange(25, dtype=np.float64).reshape(5, 5)
+        # Make neighboring windows have different ranges from the centered window
+        values[2, 2] = 100.0
+        transform = rio.transform.from_origin(0, 5, 1, 1)
+        raster = gu.Raster.from_array(values, transform=transform, crs=4326, nodata=-9999)
+        reference = gu.Raster.from_array(np.zeros((5, 5)), transform=transform, crs=4326, nodata=-9999)
+
+        # We use a custom operator that replace each center value by the range (max - min) in 3x3 window
+        operator = WindowRangeInterpolator()
+        result = raster.reproject(reference, resampling=operator)
+        assert result is not None
+        # We check we match the range computed manually with NumPy
+        assert result.data[2, 2] == np.max(values[1:4, 1:4]) - np.min(values[1:4, 1:4])
+        assert operator.batch_calls == 1
+
+    def test_reproject__custom_reducer(self) -> None:
+        """Checks a custom reducer for reprojection."""
+
+        # Downsample from 4x4 to 2x2, matching each destination pixel by a 2x2 source block exactly
+        values = np.arange(16, dtype=np.float64).reshape(4, 4)
+        raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 4, 1, 1), crs=4326, nodata=-9999)
+        reference = gu.Raster.from_array(
+            np.zeros((2, 2)),
+            rio.transform.from_origin(0, 4, 2, 2),
+            crs=4326,
+            nodata=-9999,
+        )
+
+        # Reproject with custom mean
+        result = raster.reproject(reference, resampling=Mean())
+        assert result is not None
+
+        # We check we match exactly the mean of the corresponding 2 x 2 source block
+        expected = np.empty(reference.shape, dtype=np.float64)
+        for row in range(reference.shape[0]):
+            for column in range(reference.shape[1]):
+                source_block = values[2 * row : 2 * row + 2, 2 * column : 2 * column + 2]
+                expected[row, column] = np.mean(source_block)
+        np.testing.assert_array_equal(result.data, expected)
+
+    @pytest.mark.parametrize("operator_type", [Mean, Sum, NoSupportReducer])
+    def test_reproject__neighborhood(self, operator_type: type[Reducer]) -> None:
+        """Checks a custom neighborhood for reprojection (has to be grid neighborhood!)."""
+
+        # Create synthetic raster, and neighborhood with window of size 3 on custom operator
+        values = np.arange(25, dtype=np.float64).reshape(5, 5) ** 2
+        raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 5, 1, 1), crs=32632, nodata=-9999)
+        neighborhood = GridNeighbours(size=3)
+        operator = operator_type(neighborhood=neighborhood)
+
+        # Reproject
+        result = raster.reproject(raster, resampling=operator)
+        assert result is not None
+        assert operator.default_neighborhood is neighborhood
+
+        # Compare with NumPy
+        calculation = np.mean if operator_type is Mean else np.sum
+        # The center will use 3x3 = 9 cells, the upper-left has only 4 cells inside
+        expected = [calculation(values[1:4, 1:4]), calculation(values[:2, :2])]
+        np.testing.assert_allclose([result.data[2, 2], result.data[0, 0]], expected, rtol=0, atol=1e-13)
+
+    @pytest.mark.parametrize("operator_type", [Mean, Sum, Minimum, Maximum, Median, NoSupportReducer])
+    @pytest.mark.parametrize(
+        "neighborhood",
+        [
+            GridNeighbours(size=3),
+            GridNeighbours(size=5, shape="circular"),
+            GridNeighbours(((-2, 1), (0, 0), (1, -1))),
+        ],
+        ids=["square", "circular", "offsets"],
+    )
+    @pytest.mark.parametrize("nodata_propagation", ["gdal", "ignore", "propagate"])
+    def test_reproject__matches_resample_at_points(
+        self,
+        operator_type: type[Reducer],
+        neighborhood: GridNeighbours,
+        nodata_propagation: Literal["gdal", "ignore", "propagate"],
+    ) -> None:
+        """
+        Checks that reducer reprojection matches resampling at points on complex (rotated) grids,
+        including nodata and edges behaviour.
+        """
+
+        # Two bands with different values so neighborhood/nodata affect the result
+        values = np.arange(42, dtype=np.float64).reshape(6, 7) ** 2
+        values[2, 3] = np.nan
+        transform = Affine.translation(500000, 4640000) * Affine.rotation(23) * Affine.scale(2, -3)
+        raster = gu.Raster.from_array(np.stack((values, values + 100)), transform, crs=32632, nodata=-9999)
+        reference = gu.Raster.from_array(
+            np.zeros((8, 9)), transform * Affine.translation(-0.75, -0.875), crs=32632, nodata=-9999
+        )
+
+        # Reproject with operator, neighborhood
+        operator = operator_type(neighborhood=neighborhood)
+        result = raster.reproject(reference, resampling=operator, nodata_propagation=nodata_propagation)
+        assert result is not None
+
+        # Extract coordinates, and apply the same calculation per point through resample_at_points()
+        rows, columns = np.indices(reference.shape)
+        x, y = reference.ij2xy(rows.reshape(-1), columns.reshape(-1), force_offset="center")
+        for band in (1, 2):
+            expected = raster.resample_at_points(
+                (x, y), method=operator, band=band, as_array=True, nodata_handling=nodata_propagation
+            )
+            # Exact equality for any operator/neighborhood
+            np.testing.assert_array_equal(result.to_nanarray()[band - 1], expected.reshape(reference.shape))
+
+    def test_reproject__automatic_neighbours(self) -> None:
+        """Checks that neighborhood default uses only nearby raster."""
+
+        # Use an interpolator without explicit neighborhood
+        values = np.arange(25, dtype=float).reshape(5, 5)
+        raster = gu.Raster.from_array(values, transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326)
+        operator = LocalMeanInterpolator()
+
+        # Reproject
+        result = raster.reproject(raster, resampling=operator)
+        assert result is not None
+
+        # Check equality
+        assert result.to_nanarray()[2, 2] == np.mean(values[1:4, 1:4])  # Should be using 3x3
+        assert operator.default_neighborhood is None
+
+    @pytest.mark.parametrize("operator", [Nearest(), Linear()])
+    @pytest.mark.parametrize("rotation", [0, 23])
+    def test_reproject__subpixel_precision(self, operator: Interpolator, rotation: int) -> None:
+        """Checks that reprojection with interpolators uses subpixel centers on complex grids (shifted, rotated)."""
+
+        # We use a plane to know interpolated value at any fractional row/column
+        rows, columns = np.indices((6, 7))
+        values = (10 * rows + columns).astype(np.float64)
+        transform = Affine.translation(500000, 4640000) * Affine.rotation(rotation) * Affine.scale(0.02, -0.03)
+        raster = gu.Raster.from_array(values, transform, crs=32632, nodata=-9999)
+        # Destination is shifted 1.375 rows and 1.25 columns
+        reference = gu.Raster.from_array(
+            np.zeros((3, 4)), transform * Affine.translation(1.25, 1.375), crs=32632, nodata=-9999
+        )
+
+        # Reproject
+        result = raster.reproject(reference, resampling=operator)
+        assert result is not None
+
+        # The affine translation shifts target centers in source pixel coordinates, even when the grid is rotated
+        # Target (row, column) maps to source (row + 1.375, column + 1.25)
+        target_rows, target_columns = np.indices(reference.shape)
+        expected = 10 * target_rows + target_columns
+        if isinstance(operator, Nearest):
+            # Nearest rounds row + 1.375 and column + 1.25 to row + 1 and column + 1: 10 * 1 + 1 = 11
+            np.testing.assert_array_equal(result.to_nanarray(), expected + 11)
+        else:
+            # Linear samples the plane at the fractional shift: 10 * 1.375 + 1.25 = 15
+            np.testing.assert_allclose(result.to_nanarray(), expected + 15, rtol=0, atol=1e-6)
+
+    @pytest.mark.parametrize("operator", [Nearest(), Linear(), Mean(), Mean(neighborhood=GridNeighbours(size=3))])
+    def test_reproject__centers_and_footprints_across_crs(self, operator: Interpolator | Reducer) -> None:
+        """
+        Checks that resampling methods behave properly when reprojecting in a different CRS.
+
+        We write independent calculations to verify nearest cell, linear interpolation, 3x3 mean, and a mean
+        weighted by overlap with the source cells.
+        The test also checks that only the 4th call to overlap-weighted mean triggers internally the function to
+        reproject the target cell corners.
+        """
+
+        # Place one geographic destination cell inside a 4x4 Web Mercator raster
+        # The values are a plane with formula 4 * row + column, that we can easily use to verify interpolation
+        values = np.arange(16, dtype=np.float64).reshape(4, 4)
+        raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 400, 100, 100), crs=3857, nodata=-9999)
+        reference = gu.Raster.from_array(
+            np.zeros((1, 1)), rio.transform.from_origin(0.0005, 0.0031, 0.0024, 0.0024), crs=4326, nodata=-9999
+        )
+        with patch("geoutils.projtools.reproject_points", wraps=gu.projtools.reproject_points) as transform_points:
+            result = raster.reproject(reference, resampling=operator)
+        assert result is not None
+
+        # We check projtools was called the right number of times internally: only fractional area needs to project
+        # the four corners, other operators only need to project the center
+        projected_counts = [len(call.args[0][0]) for call in transform_points.call_args_list]
+        uses_footprint = isinstance(operator, Reducer) and operator.default_neighborhood is None
+        assert projected_counts == ([1, 4] if uses_footprint else [1])
+
+        # We back-project left/center/right longitudes and bottom/center/top latitudes into the source CRS
+        target_bounds = reference.bounds
+        longitudes = np.linspace(target_bounds.left, target_bounds.right, 3)
+        latitudes = np.linspace(target_bounds.bottom, target_bounds.top, 3)
+        projected_x, projected_y = gu.projtools.reproject_points(
+            (longitudes, latitudes), in_crs=reference.crs, out_crs=raster.crs
+        )
+        x = np.asarray(projected_x)
+        y = np.asarray(projected_y)
+
+        # We can locate the projected center within the source grid
+        source_bounds = raster.bounds
+        source_width, source_height = raster.res
+        center_row = (source_bounds.top - y[1]) / source_height - 0.5
+        center_column = (x[1] - source_bounds.left) / source_width - 0.5
+
+        # For nearest, expected is the closest cell
+        if isinstance(operator, Nearest):
+            expected = values[int(np.floor(center_row + 0.5)), int(np.floor(center_column + 0.5))]
+        # For linear, we can use the plane 4 * row + column with projected center values
+        elif isinstance(operator, Linear):
+            expected = 4 * center_row + center_column
+        # The projected center lies in source row 1, column 1, so its window contains these nine complete cells
+        elif operator.default_neighborhood is not None:
+            expected = np.mean(values[:3, :3])
+        else:
+            # The projected output cell is a rectangle inside the source raster
+            # Width = smaller right edge - larger left edge, clipped at zero
+            left_edges = source_bounds.left + np.arange(values.shape[1]) * source_width
+            widths = np.maximum(0, np.minimum(left_edges + source_width, x[2]) - np.maximum(left_edges, x[0]))
+
+            # Same for height
+            top_edges = source_bounds.top - np.arange(values.shape[0]) * source_height
+            heights = np.maximum(0, np.minimum(top_edges, y[2]) - np.maximum(top_edges - source_height, y[0]))
+
+            # Fractional area of cells is width times height
+            areas = heights[:, None] * widths[None, :]
+            # Finally, we divide the area-weighted values by the total covered area
+            expected = np.sum(areas * values) / np.sum(areas)
+
+        # Check equality of the one output pixel with expected
+        np.testing.assert_allclose(result.to_nanarray(), [[expected]], rtol=0, atol=1e-9)
+
+    def test_reproject__nodata_gdal(self) -> None:
+        """Checks that area reduction omits nodata even when a custom reducer normally propagates it."""
+
+        # We create a shifted output with overlap on one nodata cell
+        values = np.full((2, 2), 2.0)
+        values[0, 0] = np.nan
+        raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 2, 1, 1), crs=32631, nodata=-9999)
+        reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(0.5, 1.5, 1, 1), crs=32631)
+
+        # Area reduction with GDAL propagation only uses finite values to derive the mean
+        result = raster.reproject(reference, resampling=PropagatingMeanReducer(), nodata_propagation="gdal")
+        assert result is not None
+        assert result.to_nanarray()[0, 0] == 2.0
+
+
+class TestReprojectionOperatorsChunked:
+    """
+    Test module for eager and lazy agreement when reprojecting operator neighborhoods.
+
+    Tests comparing SciPy/Numba backends are covered in test_operators/.
+    """
+
+    def test_reproject__default_neighb_chunk_invariance(self) -> None:
+        """Checks that default neighborhoods agree between eager and chunked for default neighborhood."""
+
+        # Synthetic raster with local reducer
+        values = np.arange(42, dtype=float).reshape(6, 7)
+        raster = gu.Raster.from_array(values, transform=rio.transform.from_origin(0, 6, 1, 1), crs=4326, nodata=-9999)
+        operator = LocalMeanInterpolator()
+
+        # Reproject onto the same grid, reducing
+        expected = raster.reproject(raster, resampling=operator)
+        lazy_source = raster.to_xarray().chunk({"y": 2, "x": 3})
+        lazy_result = lazy_source.rst.reproject(ref=raster, resampling=operator)
+        assert expected is not None
+        assert hasattr(lazy_source.data, "compute")
+        assert hasattr(lazy_result.data, "compute")
+
+        # Check exact quality
+        np.testing.assert_array_equal(np.asarray(lazy_result.compute()).squeeze(), expected.to_nanarray())
+
+    @pytest.mark.parametrize("operator", [Nearest(), Linear(), Mean(), Mean(neighborhood=GridNeighbours(size=3))])
+    def test_reproject__crs_chunk_invariance(self, tmp_path: Any, operator: Interpolator | Reducer) -> None:
+        """Checks that reprojection across CRS with operators is consistent across eager, Dask and MP execution."""
+
+        # Synthetic 4x4 with chunks of 2x3 to get uneven blocks
+        values = np.arange(16, dtype=np.float64).reshape(4, 4)
+        raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 400, 100, 100), crs=3857, nodata=-9999)
+        source_path = tmp_path / "operator_source.tif"
+        raster.to_file(source_path)
+        reference = gu.Raster.from_array(
+            np.zeros((4, 5)), rio.transform.from_origin(0.0005, 0.0031, 0.0004, 0.0004), crs=4326, nodata=-9999
+        )
+
+        # Reproject all
+        expected = raster.reproject(reference, resampling=operator)
+        lazy_source = open_raster(source_path, chunks={"y": 2, "x": 3})
+        lazy_result = lazy_source.rst.reproject(ref=reference, resampling=operator)
+        unloaded_source = gu.Raster(source_path)
+        mp_config = MultiprocConfig(chunks=(2, 3), outfile=str(tmp_path / "operator_result.tif"))
+        mp_result = unloaded_source.reproject(reference, resampling=operator, mp_config=mp_config)
+
+        # Dask ouput should be lazy, MP without loading either raster in memory
+        assert expected is not None and mp_result is not None
+        assert not lazy_source._in_memory
+        assert not lazy_result._in_memory
+        assert hasattr(lazy_result.data, "compute")
+        assert not unloaded_source.is_loaded
+        assert not mp_result.is_loaded
+
+        # Check exact equality
+        dask_values = np.asarray(lazy_result.compute()).squeeze()
+        mp_values = mp_result.to_nanarray()
+        if isinstance(operator, Mean) and operator.default_neighborhood is None:
+            # Allow tiny numerical differences for fractional area cases
+            np.testing.assert_allclose(dask_values, expected.to_nanarray(), rtol=0, atol=1e-14)
+            np.testing.assert_allclose(mp_values, expected.to_nanarray(), rtol=0, atol=1e-14)
+        else:
+            np.testing.assert_array_equal(dask_values, expected.to_nanarray())
+            np.testing.assert_array_equal(mp_values, expected.to_nanarray())
+
+    @pytest.mark.parametrize(
+        "neighborhood",
+        [
+            GridNeighbours(size=13),
+            GridNeighbours(size=13, shape="circular"),
+            GridNeighbours(((-6, 0), (0, 0), (0, 7))),
+        ],
+        ids=["square", "circular", "offsets"],
+    )
+    def test_reproject__reducer_neighb_chunk_invariance(
+        self, tmp_path: Any, neighborhood: GridNeighbours
+    ) -> None:
+        """Checks Dask and MP give same results as eager for various neighborhoods."""
+
+        # 1/ Write raster
+
+        # We pick chunks of 3x2 to leave shorter blocks in 11x13 raster
+        values = np.arange(143, dtype=np.float64).reshape(11, 13) ** 2
+        values[4, 6] = np.nan
+        raster = gu.Raster.from_array(
+            np.stack((values, values + 1000)), rio.transform.from_origin(0, 11, 1, 1), crs=32632, nodata=-9999
+        )
+        source_path = tmp_path / "window_source.tif"
+        raster.to_file(source_path)
+        reference = gu.Raster.from_array(
+            np.zeros((12, 14)), rio.transform.from_origin(-0.25, 11.375, 1, 1), crs=32632, nodata=-9999
+        )
+        operator = Mean(neighborhood=neighborhood)
+
+        # 2/ Run eager, Dask and MP
+        expected = raster.reproject(reference, resampling=operator)
+        lazy_source = open_raster(source_path, chunks={"y": 3, "x": 2})
+        lazy_result = lazy_source.rst.reproject(ref=reference, resampling=operator)
+        unloaded_source = gu.Raster(source_path)
+        mp_config = MultiprocConfig(chunks=(3, 2), outfile=str(tmp_path / "window_result.tif"))
+        mp_result = unloaded_source.reproject(reference, resampling=operator, mp_config=mp_config)
+
+        # Dask lazy, and MP unloaded for input/output
+        assert expected is not None and mp_result is not None
+        assert not lazy_source._in_memory
+        assert not lazy_result._in_memory
+        assert hasattr(lazy_result.data, "compute")
+        assert not unloaded_source.is_loaded
+        assert not mp_result.is_loaded
+
+        # Check for almost equality
+        np.testing.assert_allclose(np.asarray(lazy_result.compute()), expected.to_nanarray(), rtol=1e-15, atol=1e-12)
+        np.testing.assert_allclose(mp_result.to_nanarray(), expected.to_nanarray(), rtol=1e-15, atol=1e-12)
+
+
+class TestReprojectionErrors:
+    """Test module reprojection errors."""
+
+    @pytest.mark.parametrize(
+        "example", [examples.get_path_test("everest_landsat_b4"), examples.get_path_test("exploradores_aster_dem")]
+    )
+    def test_reproject__error_nodata(self, example: str) -> None:
+        """Checks that reproject() rejects masked data and warns when its fallback nodata conflicts."""
+
+        # Check handling of missing nodata
+        r = gu.Raster(example)
+        r_nodata = r.copy()
+        r_nodata.set_nodata(None)
+
+        # Make sure at least one pixel is masked for test 1
+        rand_indices = _subsample_numpy(r_nodata.data, 10, return_indices=True)
+        r_nodata.data[rand_indices] = np.ma.masked
+        assert np.count_nonzero(r_nodata.data.mask) > 0
+
+        # Make sure at least one pixel is set at default nodata for test
+        default_nodata = _default_nodata(r_nodata.dtype)
+        rand_indices = _subsample_numpy(r_nodata.data, 10, return_indices=True)
+        r_nodata.data[rand_indices] = default_nodata
+        assert np.count_nonzero(r_nodata.data == default_nodata) > 0
+
+        # 1 - if no force_source_nodata is set and masked values exist, raises an error
+        with pytest.raises(
+            ValueError,
+            match=re.escape(
+                "No nodata set, set one for the raster with self.set_nodata() or use a "
+                "temporary one with `force_source_nodata`."
+            ),
+        ):
+            _ = r_nodata.reproject(res=r_nodata.res[0] / 2, nodata=0)
+
+        # 2 - if no nodata is set and default value conflicts with existing value, a warning is raised
+        with pytest.warns(
+            UserWarning,
+            match=re.escape(
+                f"For reprojection, nodata must be set. Default chosen value "
+                f"{_default_nodata(r_nodata.dtype)} exists in self.data. This may have unexpected "
+                f"consequences. Consider setting a different nodata with self.set_nodata()."
+            ),
+        ):
+            r_test = r_nodata.reproject(res=r_nodata.res[0] / 2, force_source_nodata=default_nodata)
+        assert r_test.nodata == default_nodata
+
+        # 3 - if default nodata does not conflict, should not raise a warning
+        r_nodata.data[r_nodata.data == default_nodata] = 3
+        r_test = r_nodata.reproject(res=r_nodata.res[0] / 2, force_source_nodata=default_nodata)
+        assert r_test.nodata == default_nodata
+
+    def test_reproject__error_argcombinations(self) -> None:
+        """Checks that reproject() rejects conflicting settings and an invalid reference."""
+
+        # -- Test additional errors raised for argument combinations -- #
+        r = gu.Raster.from_array(np.ones((4, 4)), rio.transform.from_origin(0, 4, 1, 1), crs=32632)
+        r2 = r.copy()
+
+        # If both ref and crs are set
+        with pytest.raises(InvalidGridError, match="Either 'ref' or 'crs' must be provided"):
+            _ = r.reproject(ref=r2, crs=r.crs)
+
+        # Size and res are mutually exclusive
+        with pytest.raises(InvalidGridError, match="Both output grid resolution 'res' and shape"):
+            _ = r.reproject(grid_size=(10, 10), res=50)
+
+        # If wrong type for `ref`
+        with pytest.raises(InvalidGridError, match="Cannot interpret reference grid from"):
+            _ = r.reproject(ref=3)
+
+    def test_reproject__error_missing_crs(self) -> None:
+        """Checks that we raise an error during reprojection if source raster has no CRS."""
+
+        transform = rio.transform.from_origin(0, 4, 1, 1)
+        raster = gu.Raster.from_array(np.ones((4, 4)), transform, crs=None)
+        reference = gu.Raster.from_array(np.zeros((4, 4)), transform, crs=32632)
+        with pytest.raises(InvalidCRSError, match="Projection not recognized"):
+            raster.reproject(reference)
+
+    @pytest.mark.parametrize(
+        "mask",
+        [
+            TestMaskGeotransformations.mask_landsat_b4,
+            TestMaskGeotransformations.mask_aster_dem,
+            TestMaskGeotransformations.mask_everest,
+        ],
+    )
+    def test_reproject__error_mask_resampling(self, mask: gu.Raster) -> None:
+        """Checks that mask reprojection reports a warning for bilinear resampling."""
+
+        # Check warning for resampling other than nearest
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            with pytest.raises(
+                UserWarning, match=re.escape("Reprojecting a raster mask (boolean type) with a resampling method")
+            ):
+                mask.reproject(res=50, resampling="bilinear")
+
+    def test_reproject__reducer_fractional_error(self) -> None:
+        """Checks that reducers not supporting fractional area raised an error during reprojection."""
+
+        source = gu.Raster.from_array(
+            np.arange(4, dtype=np.float64).reshape(2, 2),
+            rio.transform.from_origin(0, 2, 1, 1),
+            crs=32632,
+            nodata=-9999,
+        )
+        reference = gu.Raster.from_array(
+            np.zeros((1, 1)),
+            rio.transform.from_origin(0.5, 1.5, 1, 1),
+            crs=32632,
+            nodata=-9999,
+        )
+
+        # A reducer without support_weights=True raises an error
+        with pytest.raises(ValueError, match="does not accept support_weights"):
+            source.reproject(reference, resampling=NoSupportReducer())
+        result = source.reproject(reference, resampling=SupportMassReducer())
+        assert result is not None
+        assert result.data[0, 0] == 1
+
+    def test_reproject__error_pointneighb(self) -> None:
+        """Checks that reproject() rejects PointNeighbours because the source values are raster cells."""
+
+        # Identical grids still validate the reducer configuration before any early return
+        raster = gu.Raster.from_array(np.ones((4, 4)), rio.transform.from_origin(0, 4, 1, 1), crs=32631)
+        with pytest.raises(ValueError, match="PointNeighbours applies to point sources"):
+            raster.reproject(raster, resampling=Mean(neighborhood=PointNeighbours(k=3)))
+
+    @pytest.mark.parametrize("operator_type", [Nearest, Linear])
+    def test_reproject__warn_regular_offsets(self, operator_type: type[Interpolator]) -> None:
+        """Checks that a larger raster window warns and preserves regular interpolation during reprojection."""
+
+        # A shifted target grid forces interpolation of a nonlinear source surface
+        rows, cols = np.indices((6, 6), dtype=float)
+        raster = gu.Raster.from_array(rows * cols, rio.transform.from_origin(0, 6, 1, 1), crs=32631)
+        reference = gu.Raster.from_array(np.zeros((4, 4)), rio.transform.from_origin(0.2, 5.7, 1, 1), crs=32631)
+        expected = raster.reproject(reference, resampling=operator_type())
+        with pytest.warns(UserWarning, match="extra GridNeighbours offsets are ignored"):
+            result = raster.reproject(reference, resampling=operator_type(neighborhood=GridNeighbours(size=3)))
+        np.testing.assert_array_equal(result.to_nanarray(), expected.to_nanarray())

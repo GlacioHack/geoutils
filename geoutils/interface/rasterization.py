@@ -22,12 +22,13 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Iterable, Sequence
+from typing import TYPE_CHECKING, Any, Iterable, Literal, Sequence
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 import rasterio as rio
+import shapely
 import xarray as xr
 from rasterio import features
 from rasterio.crs import CRS
@@ -52,6 +53,12 @@ from geoutils.multiproc.mparray import (
     MultiprocConfig,
     _split_chunk_size,
     _write_multiproc_result,
+)
+from geoutils.operators.overlap import (
+    OverlapBackend,
+    _grid_intersection_fractions,
+    _union_geometries,
+    _union_geometries_by_label,
 )
 from geoutils.raster.referencing import _cast_nodata, _default_nodata
 
@@ -86,6 +93,49 @@ class _VectorBurnSpec:
     geoms: NDArrayNum
     values: NDArrayNum | None
     default_value: int | float | None
+
+
+@dataclass(frozen=True)
+class _FractionalGeometrySpec:
+    """Store geometries, the output layer for each geometry, and the total number of layers."""
+
+    geoms: NDArrayNum
+    layer_indices: NDArrayNum
+    layer_count: int
+
+
+def _normalize_fractional_geometries(
+    dataframe: gpd.GeoDataFrame,
+    mode: Literal["features", "union"],
+    fractional_by: str | None,
+) -> tuple[_FractionalGeometrySpec, pd.Index]:
+    """Prepare separate features, labelled groups, or one geometry union for fractional rasterization."""
+
+    geometries = np.asarray(dataframe.geometry.values, dtype=object)
+    if mode == "union":
+        if fractional_by is not None:
+            raise ValueError("fractional_by cannot be combined with fractional='union'.")
+        union = _union_geometries(geometries)
+        return _FractionalGeometrySpec(np.asarray([union], dtype=object), np.array([0]), 1), pd.Index(["union"])
+
+    # Create one layer per feature unless fractional_by combines features with the same label
+    if fractional_by is None:
+        labels = pd.Index(dataframe.index, name=dataframe.index.name or "feature")
+        layer_indices = np.arange(len(geometries), dtype=np.int64)
+        return _FractionalGeometrySpec(geometries, layer_indices, len(geometries)), labels
+    if fractional_by not in dataframe.columns:
+        raise ValueError(f"Fractional rasterization column {fractional_by!r} does not exist.")
+    if dataframe[fractional_by].isna().any():
+        raise ValueError("Fractional rasterization group labels cannot be missing.")
+
+    # Combine polygons in each group so their overlapping areas count only once
+    labels = pd.Index(pd.unique(dataframe[fractional_by]), name=fractional_by)
+    grouped_geometries = _union_geometries_by_label(geometries, dataframe[fractional_by], labels)
+    layer_indices = np.arange(len(grouped_geometries), dtype=np.int64)
+    return (
+        _FractionalGeometrySpec(grouped_geometries, layer_indices, len(labels)),
+        labels,
+    )
 
 
 def _normalize_burn_values(
@@ -224,6 +274,60 @@ def _partition_burn_by_geogrids(burn: _VectorBurnSpec, geogrids: list[GeoGrid]) 
     return block_burns
 
 
+def _partition_fractional_by_geogrids(
+    specification: _FractionalGeometrySpec, geogrids: list[GeoGrid]
+) -> list[_FractionalGeometrySpec]:
+    """Select the geometries near each output block and record their positions in the complete layer array."""
+
+    tree, geometry_positions = _build_spatial_index(specification.geoms)
+    block_specs = []
+    for geogrid in geogrids:
+        bounds = geogrid.bounds
+        query_box = shapely_box(bounds.left, bounds.bottom, bounds.right, bounds.top)
+        indices = _query_indices(tree, geometry_positions=geometry_positions, query_geom=query_box)
+        block_specs.append(
+            _FractionalGeometrySpec(
+                geoms=specification.geoms[indices],
+                layer_indices=specification.layer_indices[indices],
+                layer_count=specification.layer_count,
+            )
+        )
+    return block_specs
+
+
+def _fractional_rasterize_selected_on_geogrid(
+    geogrid: GeoGrid,
+    specification: _FractionalGeometrySpec,
+    dtype: DTypeLike,
+    overlap_backend: OverlapBackend,
+) -> NDArrayNum:
+    """Calculate exact cell coverage for the geometries near one output block."""
+
+    output = np.zeros((specification.layer_count, *geogrid.shape), dtype=dtype)
+    if len(specification.geoms) == 0:
+        return output
+
+    # Skip empty groups because intersection libraries require geometries with finite bounds
+    usable = ~np.asarray(shapely.is_empty(specification.geoms), dtype=bool)
+    usable &= ~np.asarray(shapely.is_missing(specification.geoms), dtype=bool)
+    if not np.any(usable):
+        return output
+    geometries = specification.geoms[usable]
+    layer_indices = specification.layer_indices[usable]
+
+    # Write each intersected cell fraction directly to the geometry's output layer
+    overlap = _grid_intersection_fractions(
+        geometries,
+        geogrid.transform,
+        geogrid.shape,
+        backend=overlap_backend,
+    )
+    for local_index, layer_index in enumerate(layer_indices):
+        rows, columns, fractions = overlap.for_geometry(local_index)
+        output[int(layer_index), rows, columns] = fractions
+    return output
+
+
 def _rasterio_rasterize_burn(
     geoms: NDArrayNum,
     values: NDArrayNum | None,
@@ -342,6 +446,97 @@ def _rasterize_base(
         dtype=dtype,
         all_touched=all_touched,
     )
+
+
+def _fractional_rasterize_base(
+    specification: _FractionalGeometrySpec,
+    out_shape: tuple[int, int],
+    out_transform: rio.transform.Affine,
+    out_dtype: DTypeLike,
+    overlap_backend: OverlapBackend,
+) -> NDArrayNum:
+    """Rasterize one exact coverage layer per feature or union group."""
+
+    geogrid = GeoGrid(transform=out_transform, shape=out_shape, crs=None)
+    return _fractional_rasterize_selected_on_geogrid(geogrid, specification, out_dtype, overlap_backend)
+
+
+def _dask_fractional_rasterize(
+    specification: _FractionalGeometrySpec,
+    dst_geotiling: ChunkedGeoGrid,
+    dst_block_geogrids: list[GeoGrid],
+    out_dtype: DTypeLike,
+    overlap_backend: OverlapBackend,
+) -> da.Array:
+    """Build a lazy array of fractional feature layers from spatial output blocks."""
+
+    dask = import_optional("dask")
+    import dask.array as da
+
+    block_specs = _partition_fractional_by_geogrids(specification, dst_block_geogrids)
+    block_arrays = []
+    for iy in range(dst_geotiling.num_chunks[0]):
+        row_arrays = []
+        for ix in range(dst_geotiling.num_chunks[1]):
+            block_index = dst_geotiling.flat_block_index((iy, ix))
+            geogrid = dst_block_geogrids[block_index]
+            tile = dask.delayed(_fractional_rasterize_selected_on_geogrid)(
+                geogrid,
+                block_specs[block_index],
+                out_dtype,
+                overlap_backend,
+            )
+            row_arrays.append(
+                da.from_delayed(
+                    tile,
+                    shape=(specification.layer_count, *geogrid.shape),
+                    dtype=out_dtype,
+                )
+            )
+        block_arrays.append(row_arrays)
+    return da.block(block_arrays)
+
+
+def _multiproc_fractional_block(
+    block_id: dict[str, Any],
+    geogrid: GeoGrid,
+    specification: _FractionalGeometrySpec,
+    out_dtype: DTypeLike,
+    overlap_backend: OverlapBackend,
+) -> tuple[NDArrayNum, tuple[int, int, int, int]]:
+    """Rasterize one fractional output block and return its row and column bounds in the output."""
+
+    tile = _fractional_rasterize_selected_on_geogrid(geogrid, specification, out_dtype, overlap_backend)
+    destination = (block_id["ys"], block_id["ye"], block_id["xs"], block_id["xe"])
+    return tile, destination
+
+
+def _multiproc_fractional_rasterize(
+    specification: _FractionalGeometrySpec,
+    dst_geotiling: ChunkedGeoGrid,
+    dst_block_geogrids: list[GeoGrid],
+    mp_config: MultiprocConfig,
+    file_metadata: dict[str, Any],
+    out_dtype: DTypeLike,
+    overlap_backend: OverlapBackend,
+    tags: dict[str, Any],
+) -> Raster:
+    """Rasterize fractional layers in worker processes and write them to one file."""
+
+    block_ids = dst_geotiling.get_block_locations()
+    block_specs = _partition_fractional_by_geogrids(specification, dst_block_geogrids)
+    tasks = [
+        mp_config.cluster.submit(
+            _multiproc_fractional_block,
+            block_ids[index],
+            dst_block_geogrids[index],
+            block_specs[index],
+            out_dtype,
+            overlap_backend,
+        )
+        for index in range(len(block_ids))
+    ]
+    return _write_multiproc_result(tasks=tasks, mp_config=mp_config, file_metadata=file_metadata, tags=tags)
 
 
 def _dask_rasterize(
@@ -495,6 +690,9 @@ def _rasterize(
     mp_config: MultiprocConfig | None = None,
     dask: bool = False,
     mask_output: bool = False,
+    fractional: bool | Literal["union"] = False,
+    fractional_by: str | None = None,
+    overlap_backend: OverlapBackend = "auto",
 ) -> Raster:
     """
     Rasterize vector to raster, with optional Dask or Multiprocessing backends.
@@ -515,6 +713,11 @@ def _rasterize(
     :param mp_config: Multiprocessing config.
     :param dask: If True, return a Dask-backed Raster. A Dask-backed reference raster also selects this backend.
     :param mask_output: Return boolean values for an in-memory or Dask mask.
+    :param fractional: Return exact cell coverage instead of burn values. True returns one layer per feature or
+        fractional_by group; ``"union"`` returns one layer for the union of all features.
+    :param fractional_by: Optional feature column used to combine equal values into fractional output layers.
+    :param overlap_backend: Library used to calculate fractional coverage. Auto uses ExactExtract when it is installed
+        and the grid is compatible, and otherwise uses Shapely.
     """
     # Compute output grid
     out_shape, out_transform, out_crs = _check_match_grid(
@@ -539,6 +742,97 @@ def _rasterize(
         raise ValueError(
             "Cannot use Multiprocessing and Dask simultaneously. To use Dask, remove mp_config. "
             "To use Multiprocessing, set dask=False."
+        )
+
+    if fractional is False and fractional_by is not None:
+        raise ValueError("fractional_by requires fractional=True.")
+
+    # Fractional output stores covered cell area, so it follows a separate path from ordered burn values
+    if fractional is not False:
+        if fractional not in {True, "union"}:
+            raise ValueError("fractional must be False, True or 'union'.")
+        if in_value is not None:
+            raise ValueError("in_value cannot be combined with fractional rasterization.")
+        if out_value != 0:
+            raise ValueError("Fractional rasterization requires out_value=0 because uncovered area has zero coverage.")
+        if all_touched:
+            raise ValueError("all_touched cannot be combined with fractional rasterization.")
+        if mask_output:
+            raise ValueError("Boolean mask output cannot be combined with fractional rasterization.")
+        dtype = np.dtype(np.float32 if out_dtype is None else out_dtype)
+        if not np.issubdtype(dtype, np.floating):
+            raise TypeError("Fractional rasterization requires a floating output dtype.")
+        mode: Literal["features", "union"] = "features" if fractional is True else "union"
+        specification, labels = _normalize_fractional_geometries(vect, mode, fractional_by)
+        if specification.layer_count == 0:
+            raise ValueError("Fractional feature rasterization requires at least one input feature.")
+        tags = {"long_name": tuple(str(label) for label in labels)}
+
+        # Import concrete raster classes here to avoid a circular import with the interface package
+        from geoutils.raster import Raster
+        from geoutils.raster.xr_accessor import RasterAccessor
+
+        if not mp_backend and not dask_backend:
+            data = _fractional_rasterize_base(
+                specification,
+                out_shape,
+                out_transform,
+                dtype,
+                overlap_backend,
+            )
+            if mode == "union":
+                data = data[0]
+            return Raster.from_array(data=data, transform=out_transform, crs=out_crs, nodata=nodata, tags=tags)
+
+        # Split the output only by rows and columns; every spatial block still writes all feature layers
+        if chunksizes is None:
+            if mp_backend:
+                assert mp_config is not None
+                chunksizes = _split_chunk_size(mp_config.chunks)
+            else:
+                chunksizes = ref_chunks or (1024, 1024)
+        dst_geogrid = GeoGrid(transform=out_transform, shape=out_shape, crs=out_crs)
+        dst_chunks = normalize_chunks(chunks=chunksizes, shape=out_shape)
+        dst_geotiling = ChunkedGeoGrid(grid=dst_geogrid, chunks=dst_chunks)
+        dst_block_geogrids = dst_geotiling.get_blocks_as_geogrids()
+
+        if dask_backend:
+            data = _dask_fractional_rasterize(
+                specification,
+                dst_geotiling,
+                dst_block_geogrids,
+                dtype,
+                overlap_backend,
+            )
+            if mode == "union":
+                data = data[0]
+            return RasterAccessor.from_array(
+                data=data,
+                transform=out_transform,
+                crs=out_crs,
+                nodata=nodata,
+                tags=tags,
+            )
+
+        assert mp_config is not None
+        file_metadata = {
+            "height": out_shape[0],
+            "width": out_shape[1],
+            "count": specification.layer_count,
+            "dtype": dtype,
+            "crs": out_crs,
+            "transform": out_transform,
+            "nodata": nodata,
+        }
+        return _multiproc_fractional_rasterize(
+            specification,
+            dst_geotiling,
+            dst_block_geogrids,
+            mp_config,
+            file_metadata,
+            dtype,
+            overlap_backend,
+            tags,
         )
 
     # Normalize burn once

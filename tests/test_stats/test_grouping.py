@@ -12,10 +12,19 @@ import numpy as np
 import pandas as pd
 import pytest
 from affine import Affine
-from shapely.geometry import box
+from shapely.geometry import Polygon, box
 
 import geoutils as gu
 from geoutils.multiproc import MultiprocConfig
+from geoutils.operators import LocalData, Reducer
+from geoutils.operators.reducer import Mean
+
+
+class NoFractionalSupportReducer(Reducer):
+    """Reducer that does not accept area weights for tests."""
+
+    def reduce(self, data: LocalData) -> float:
+        return float(np.mean(data.values))
 
 
 class TestGroupedStats:
@@ -275,6 +284,248 @@ class TestGroupedStats:
         assert union[("band_1", "count")].tolist() == [6, 2]
         assert features[("band_1", "count")].tolist() == [1, 1]
         assert features[("band_1", "mean")].tolist() == [1, 8]
+
+    def test_stats__fractional_vector_accuracy(self) -> None:
+        """Checks that vector groups use fractional coverage properly with weighted reducers."""
+
+        # We define:
+        # A polygon across four cells (covers 0.25 of each)
+        # Another polygon over the right column
+        raster = gu.Raster.from_array(
+            np.array([[1.0, 2.0], [3.0, 4.0]]),
+            transform=Affine(1, 0, 0, 0, -1, 2),
+            crs=32631,
+        )
+        zones = gu.Vector(
+            gpd.GeoDataFrame(
+                {"zone": ["center", "right"]},
+                geometry=[box(0.5, 0.5, 1.5, 1.5), box(1, 0, 2, 2)],
+                crs=32631,
+            )
+        )
+
+        # Calculate means, sums, extrema, and distribution statistics using the same covered cell fractions
+        statistics = [
+            "mean",
+            "sum",
+            "sumofsquares",
+            "min",
+            "max",
+            "std",
+            "rmse",
+            "median",
+            "90thpercentile",
+            "iqr",
+            "le90",
+            "nmad",
+            "validcount",
+            "totalcount",
+            "percentagevalidpoints",
+        ]
+        result = raster.stats(
+            statistics,
+            by={"zone": (zones, "zone")},
+            fractional=True,
+            overlap_backend="shapely",
+        )
+
+        # The centered zones with 0.25 cells weights a total of 1
+        # The right zone contains 2 cells
+        raster_values = np.asarray(raster.data)
+        zone_values = (raster_values.ravel(), raster_values[:, 1])
+        zone_weights = (np.full(raster_values.size, 0.25), np.ones(raster_values.shape[0]))
+        expected = {name: [] for name in ("count", *statistics)}
+
+        # We weight manually to compare:
+        for values, weights in zip(zone_values, zone_weights):
+            valid = np.isfinite(values)
+            valid_values = values[valid]
+            valid_weights = weights[valid]
+
+            # We can micmic the effect of weighted statistics by repeating values
+            # Center values [1, 2, 3, 4] appear once, and right values [2, 4] appear 4 times
+            # So we multiply all weights by 4 to repeat values with an integer weight
+            repeated_values = np.repeat(valid_values, (4 * valid_weights).astype(int))
+
+            # Counts
+            count = np.sum(valid_weights)
+            total_count = np.sum(weights)
+
+            # Quantiles
+            low, lower_quartile, median, upper_quartile, percentile_90, high = np.quantile(
+                repeated_values, [0.05, 0.25, 0.5, 0.75, 0.9, 0.95], method="inverted_cdf"
+            )
+            median_deviation = np.quantile(np.abs(repeated_values - median), 0.5, method="inverted_cdf")
+
+            # (We use original fractions for sums as repeated values would multiply them by 4)
+            zone_expected = {
+                "count": count,
+                "mean": np.mean(repeated_values),
+                "sum": np.sum(valid_values * valid_weights),
+                "sumofsquares": np.sum(np.square(valid_values) * valid_weights),
+                "min": np.min(repeated_values),
+                "max": np.max(repeated_values),
+                "std": np.std(repeated_values),
+                "rmse": np.sqrt(np.mean(np.square(repeated_values))),
+                "median": median,
+                "90thpercentile": percentile_90,
+                "iqr": upper_quartile - lower_quartile,
+                "le90": high - low,
+                "nmad": 1.4826 * median_deviation,
+                "validcount": count,
+                "totalcount": total_count,
+                "percentagevalidpoints": 100 * count / total_count,
+            }
+            for statistic, value in zone_expected.items():
+                expected[statistic].append(value)
+
+        # Check exact equality with NumPy
+        for statistic, expected_values in expected.items():
+            np.testing.assert_allclose(result[("band_1", statistic)], expected_values, err_msg=statistic)
+
+        # Check "all" return the same as asking all by name one by one
+        all_result = raster.stats(
+            "all",
+            by={"zone": (zones, "zone")},
+            fractional=True,
+            overlap_backend="shapely",
+        )
+        for statistic in all_result.columns.get_level_values("statistic"):
+            np.testing.assert_allclose(all_result[("band_1", statistic)], result[("band_1", statistic)])
+
+    def test_stats__fractional_vector_union(self) -> None:
+        """Checks union of group labels, and that overlapping groups (fractional on same pixels) stay independent."""
+
+        # Repeat one geometry twice, overlap another one
+        raster = gu.Raster.from_array(
+            np.array([[1.0, 2.0], [3.0, 4.0]]),
+            transform=Affine(1, 0, 0, 0, -1, 2),
+            crs=32631,
+        )
+        centered = box(0.5, 0.5, 1.5, 1.5)
+        zones = gu.Vector(
+            gpd.GeoDataFrame(
+                {"zone": ["center", "center", "right"]},
+                geometry=[centered, centered, box(1, 0, 2, 2)],
+                crs=32631,
+            )
+        )
+
+        # Repeated center geometry should be counted only once
+        # Each group should be able to use their relative pixel weights
+        grouped = raster.stats(
+            ["mean", "sum"],
+            by={"zone": (zones, "zone")},
+            fractional=True,
+            overlap_backend="shapely",
+        )
+        # Count calculation
+        # Center: four quarter-cell sum to 1; Right: two full cells sum to 2
+        np.testing.assert_allclose(grouped[("band_1", "count")], [1, 2])
+        # Mean calculation
+        # Center: (1 + 2 + 3 + 4) * 0.25 / 1 = 2.5; Right: (2 + 4) / 2 = 3
+        np.testing.assert_allclose(grouped[("band_1", "mean")], [2.5, 3])
+
+        # Not passing a vector feature name should use inside/outside boolean zones, still fractional
+        # Union covers 0.25 of each left cell and both right cells completely
+        # Outside gets the remaining 0.75 of each left cell
+        binary = raster.stats(
+            "mean",
+            by={"inside": zones},
+            fractional=True,
+            overlap_backend="shapely",
+        )
+        # Count calculation
+        # Outside: 0.75 + 0.75 = 1.5; Inside: 0.25 + 1 + 0.25 + 1 = 2.5
+        np.testing.assert_allclose(binary[("band_1", "count")], [1.5, 2.5])
+        # Mean calculation
+        # Outside: (1 * 0.75 + 3 * 0.75) / 1.5 = 2; Inside: (1 * 0.25 + 2 + 3 * 0.25 + 4) / 2.5 = 2.8
+        np.testing.assert_allclose(binary[("band_1", "mean")], [2, 2.8])
+
+    def test_stats__fractional_reducer_error(self) -> None:
+        """Checks that fractional stats only work with a custom reducer that accepts support weights."""
+
+        raster = gu.Raster.from_array(
+            np.arange(4, dtype=float).reshape(2, 2),
+            transform=Affine(1, 0, 0, 0, -1, 2),
+            crs=32631,
+        )
+        zone = gu.Vector(gpd.GeoDataFrame({"zone": ["center"]}, geometry=[box(0.5, 0.5, 1.5, 1.5)], crs=32631))
+
+        # The reducer must raise an error because it cannot use the supplied area weights
+        with pytest.raises(ValueError, match="does not accept support_weights"):
+            raster.stats(
+                NoFractionalSupportReducer(),
+                by={"zone": (zone, "zone")},
+                fractional=True,
+                overlap_backend="shapely",
+            )
+
+    def test_stats__fractional_covar(self) -> None:
+        """Checks that overlapping fractional are properly used when propagating covariance."""
+
+        # Two overlapping geometries, one containing 4 quarter cells, one the right column
+        raster = gu.Raster.from_array(
+            np.array([[1.0, 2.0], [3.0, 4.0]]),
+            transform=Affine(1, 0, 0, 0, -1, 2),
+            crs=32631,
+        )
+        zones = gu.Vector(
+            gpd.GeoDataFrame(
+                {"zone": ["center", "right"]},
+                geometry=[box(0.5, 0.5, 1.5, 1.5), box(1, 0, 2, 2)],
+                crs=32631,
+            )
+        )
+        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+
+        # We pass an error to stats()
+        nominal, summary = raster.stats(
+            Mean(),
+            by={"zone": (zones, "zone")},
+            fractional=True,
+            overlap_backend="shapely",
+            error_structure=errors,
+        )
+        # Center mean: (1 + 2 + 3 + 4) / 4 = 2.5; right mean: (2 + 4) / 2 = 3
+        np.testing.assert_allclose(nominal[("band_1", "Mean")], [2.5, 3])
+
+        # Center weights are 0.25; right weights are 0.5
+        assert summary.covariance is not None
+        # Each source has unit variance, so we sum products of mean weights
+        # (center, center): four cells give 4 * 0.25 * 0.25 = 0.25
+        # (center, right): two shared cells give 2 * 0.25 * 0.5 = 0.25
+        # (right, center): the same cells give 2 * 0.5 * 0.25 = 0.25
+        # (right, right): two cells give 2 * 0.5 * 0.5 = 0.5
+        np.testing.assert_allclose(summary.covariance, [[0.25, 0.25], [0.25, 0.5]])
+
+    def test_stats__fractional_exactextract_matches_shapely(self) -> None:
+        """Checks that optional ExactExtract and Shapely produce the same fractional grouped statistics."""
+
+        pytest.importorskip("exactextract")
+
+        # Synthetic polygons not vertical/horizontal (not aligned with grid) so coverage weights are nontrivial
+        raster = gu.Raster.from_array(
+            np.arange(1, 10, dtype=float).reshape(3, 3),
+            transform=Affine(1, 0, 0, 0, -1, 3),
+            crs=32631,
+        )
+        polygon = Polygon([(0.2, 0.3), (2.7, 0.6), (2.4, 2.6), (0.4, 2.4)])
+        zone = gu.Vector(gpd.GeoDataFrame({"zone": ["present"]}, geometry=[polygon], crs=32631))
+        options = {
+            "statistics": ["mean", "sum", "std"],
+            "by": {"zone": (zone, "zone")},
+            "categories": {"zone": ["present", "missing"]},
+            "observed": False,
+            "fractional": True,
+        }
+
+        # Check results are indeed equal (within numerical tolerance)!
+        shapely_result = raster.stats(**options, overlap_backend="shapely")
+        exactextract_result = raster.stats(**options, overlap_backend="exactextract")
+        pd.testing.assert_frame_equal(exactextract_result, shapely_result, rtol=5e-7, atol=5e-7)
+        assert exactextract_result.loc["missing", ("band_1", "count")] == 0
+        assert np.isnan(exactextract_result.loc["missing", ("band_1", "mean")])
 
     @pytest.mark.parametrize("source_type", ["pointcloud", "dataframe"])
     def test_stats__geometry_z_is_unchanged_by_masks(self, source_type: str) -> None:

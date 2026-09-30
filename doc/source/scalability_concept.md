@@ -129,7 +129,7 @@ import numpy as np
 rng = np.random.default_rng(seed=42)
 x = rng.uniform(ds.rst.bbox.left, ds.rst.bbox.right, size=30)
 y = rng.uniform(ds.rst.bbox.bottom, ds.rst.bbox.top, size=30)
-ds_interp = ds.rst.interp_points((x, y), as_array=True)
+ds_interp = ds.rst.interp_at_points((x, y), as_array=True)
 
 # Result is still lazy
 print("Result is still lazy after raster interpolation:\n")

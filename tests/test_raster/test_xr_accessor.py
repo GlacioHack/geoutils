@@ -255,7 +255,7 @@ class TestAccessor:
         assert isinstance(pointcloud, gpd.GeoDataFrame)
         assert pointcloud.pc.data_column == "b1"
 
-        interpolated = ds.rst.interp_points((np.array([0.5]), np.array([1.5])), method="nearest")
+        interpolated = ds.rst.interp_at_points((np.array([0.5]), np.array([1.5])), method="nearest")
         assert isinstance(interpolated, gpd.GeoDataFrame)
         assert interpolated.pc.data_column == "z"
 

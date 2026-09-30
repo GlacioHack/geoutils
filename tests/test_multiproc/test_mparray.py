@@ -203,7 +203,8 @@ class TestMultiproc:
     landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
 
     @pytest.fixture(scope="class", params=[None, "test"])
-    def cluster(self, request: pytest.FixtureRequest) -> Iterator[AbstractCluster | None]:
+    @classmethod
+    def cluster(cls, request: pytest.FixtureRequest) -> Iterator[AbstractCluster | None]:
         # This is for tests to work with spawn (Windows, requires this fixture) or Fork (ubuntu, macos)
         if request.param is None:
             yield None

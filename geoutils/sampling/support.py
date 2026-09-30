@@ -41,7 +41,7 @@ from geoutils.raster.array import _selected_raster_data
 from geoutils.vector.base import _as_geodataframe
 
 if TYPE_CHECKING:
-    from geoutils.interface.interpolation import InterpolationMethod
+    from geoutils.interface.resampling import InterpolationMethod
     from geoutils.multiproc import MultiprocConfig
     from geoutils.pointcloud.base import PointCloudBase
     from geoutils.pointcloud.pointcloud import PointCloudLike
@@ -582,7 +582,7 @@ def _values_at_support(
             else (support_dataframe.geometry.x.to_numpy(), support_dataframe.geometry.y.to_numpy())
         )
         known_partitions = is_dask_dataframe(points) and point_partition_lengths is not None
-        values = raster.interp_points(
+        values = raster.interp_at_points(
             points=points,
             method=interpolation,
             band=band,

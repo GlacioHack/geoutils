@@ -50,7 +50,7 @@ from geoutils.sampling.support import (
 )
 
 if TYPE_CHECKING:
-    from geoutils.interface.interpolation import InterpolationMethod
+    from geoutils.interface.resampling import InterpolationMethod
     from geoutils.multiproc import MultiprocConfig
     from geoutils.pointcloud.base import PointCloudBase
     from geoutils.pointcloud.pointcloud import PointCloudLike
@@ -755,14 +755,17 @@ def _raster_valid_at_points(
 
     # Interpolate a mask of 1 for finite raster cells and NaN for missing cells to find points with data
     # Use no extra nodata spreading unless the caller requests it
-    values = raster.interp_points(
-        points=points,
-        method=resample_method,
-        band=band,
-        as_array=not is_dask_dataframe(points),
-        mp_config=mp_config,
-        _validity_only=True,
-        **{"dist_nodata_spread": 0, **resample_kwargs},
+    values = cast(
+        Any,
+        raster.interp_at_points(
+            points=points,
+            method=resample_method,
+            band=band,
+            as_array=not is_dask_dataframe(points),
+            mp_config=mp_config,
+            _validity_only=True,
+            **{"nodata_handling": 0, **resample_kwargs},
+        ),
     )
 
     # Convert the interpolated Dask column to an array, reusing point counts per chunk when available
@@ -884,7 +887,7 @@ def _cosample_on_points(
         )
         sampled = {}
         for name, (raster, selected_band) in aligned_rasters.items():
-            values = raster.interp_points(
+            values = raster.interp_at_points(
                 points=selected_points,
                 method=resample_method,
                 band=selected_band,
@@ -992,8 +995,8 @@ def _cosample(
     :param grid_kwargs: Options for PointCloud.grid(), e.g. {"dist_nodata_pixel": 2, "min_points": 3} sets a two-pixel
         radius and minimum of three finite points for circular methods. Other options include "distance_power" for
         IDW and "engine" ("scipy" or "numba"). Set output locations and method with at and grid_method.
-    :param resample_kwargs: Options for Raster.interp_points(), e.g. {"nodata_propagation": "ignore"}. The nodata
-        policies are "gdal", "ignore" and "propagate"; "dist_nodata_spread" controls extra spreading in pixels.
+    :param resample_kwargs: Options for Raster.interp_points(), e.g. {"nodata_handling": "ignore"}. The choices are
+        "gdal", "ignore", "propagate", a half-order rule, or a non-negative distance in pixels.
         Set locations, band and method with the corresponding cosample() arguments.
     :param align: Handling of mismatched grids or coordinate systems: "raise" an error, or "reproject" to match at.
         Point inputs must still share the same ordered coordinates when sampled at points.
