@@ -1298,7 +1298,7 @@ class BoundErrorStructure:
     source_ids: NDArray[Any]
     coordinates: NDArray[np.float64] | None
     _component_data: tuple[tuple[ErrorComponent, NDArray[np.float64]], ...] = ()
-    predictors: Mapping[str, NDArray[np.float64]] = MappingProxyType({})
+    predictors: Mapping[str, NDArray[np.float64]] = field(default_factory=lambda: MappingProxyType({}))
 
     @property
     def size(self) -> int:
