@@ -1768,7 +1768,7 @@ class RasterBase(ABC):
     ) -> RasterType | list[RasterType]:
         """Generate one or more error fields across this raster.
 
-        :param error_structure: Component or finite Gaussian error model.
+        :param error_structure: Error model defined by magnitude and correlation components.
         :param predictors: Named magnitude predictors aligned with this raster.
         :param n_fields: Number of independent fields.
         :param random_state: Seed or generator used for reproducible fields.
@@ -2857,6 +2857,46 @@ class RasterBase(ABC):
             rename_default_data_column=False,
         )
         return self._cast_pointcloud_output(output)
+
+    def estimate_error_structure(
+        self,
+        other: RasterLike | PointCloudLike | ArrayLike,
+        *,
+        other_precision: Literal["same", "negligible"] = "same",
+        predictors: Mapping[str, Any] | None = None,
+        components: Mapping[str, Mapping[str, Any]] | None = None,
+        mask: RasterLike | VectorLike | ArrayLike | None = None,
+        mp_config: MultiprocConfig | None = None,
+        **estimate_kwargs: Any,
+    ) -> ErrorStructure:
+        """Estimate this raster's error structure from its difference with another dataset.
+
+        The two inputs are aligned by cosample(). With ``other_precision="same"``, their errors must be independent
+        and have the same magnitude and correlation; the difference is divided by the square root of two. Use
+        ``"negligible"`` when the other dataset's error can be ignored.
+
+        :param other: Raster, point cloud, or array of comparable measurements.
+        :param other_precision: Whether the other input has the same precision or negligible error.
+        :param predictors: Named variables controlling a magnitude that varies with location.
+        :param components: Named magnitude and correlation models to fit.
+        :param mask: Locations used to estimate the error structure.
+        :param mp_config: Worker and tile settings for multiprocessing.
+        :param estimate_kwargs: Additional options accepted by ErrorStructure.estimate().
+        :returns: Fitted error structure for this raster.
+        """
+
+        from geoutils.uncertainty import ErrorStructure
+
+        return ErrorStructure.estimate(
+            self,
+            other=other,
+            other_precision=other_precision,
+            predictors=predictors,
+            components=components,
+            mask=mask,
+            mp_config=mp_config,
+            **estimate_kwargs,
+        )
 
     def cosample(
         self,

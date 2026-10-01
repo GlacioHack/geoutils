@@ -11,7 +11,6 @@ from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
-import pandas as pd
 import pytest
 import rasterio as rio
 from affine import Affine
@@ -1477,37 +1476,6 @@ class TestRegularInterpolationUncertainty:
         )
         np.testing.assert_allclose(summary.mean, result, rtol=0, atol=1e-12)
         np.testing.assert_array_equal(summary.variance, np.where(np.isfinite(result), 0, np.nan))
-
-    @pytest.mark.parametrize("method", ["cubic", "quintic", "splinef2d"])
-    def test_resample_at_points__distant_error_changes_spline(self, method: ScipyInterpolationMethod) -> None:
-        """Checks that numerical propagation refits the spline when an input outside a local stencil changes."""
-
-        # A deterministic error at the first corner affects fitted coefficients beyond its neighboring cells
-        values = np.random.default_rng(9).normal(size=(8, 8))
-        raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 8, 1, 1), crs=32631)
-        targets = (np.array([3.3]), np.array([4.2]))
-        mean = pd.Series(np.zeros(values.size))
-        mean.iloc[0] = 10
-        errors = gu.ErrorStructure.from_gaussian(pd.DataFrame(np.zeros((64, 64))), mean=mean)
-
-        # Compare propagation with a complete refit of an independently changed raster
-        nominal = raster.resample_at_points(
-            as_array=True, points=targets, method=ScipyInterpolator(method), error_structure=errors
-        )
-        summary = gu.uncertainty.propagate(
-            raster.resample_at_points,
-            error_structure=errors,
-            operation_kwargs={"as_array": True, "points": targets, "method": ScipyInterpolator(method)},
-            method="numerical",
-            n_samples=2,
-            random_state=5,
-        )
-        changed_values = values.copy()
-        changed_values[0, 0] += 10
-        changed = gu.Raster.from_array(changed_values, raster.transform, crs=raster.crs)
-        expected = changed.interp_at_points(targets, method=method, as_array=True)
-        assert abs(expected[0] - nominal[0]) > 1e-7
-        np.testing.assert_allclose(summary.mean, expected, rtol=0, atol=1e-12)
 
 
 class TestRasterInterpolationNodata:

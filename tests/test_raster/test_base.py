@@ -86,6 +86,12 @@ def assert_output_equal(output1: Any, output2: Any, use_allclose: bool = False, 
     elif isinstance(output1, pd.DataFrame):
         assert_frame_equal(output1, output2)
 
+    # For fitted error structures
+    elif isinstance(output1, ErrorStructure):
+        assert isinstance(output2, ErrorStructure)
+        assert output1.components == output2.components
+        assert output1.empirical_variogram == output2.empirical_variogram
+
     # For lightweight variogram records
     elif isinstance(output1, Variogram):
         assert isinstance(output2, Variogram)
@@ -356,6 +362,17 @@ class TestClassVsAccessorConsistency:
         ("polygonize", {"target_values": "all"}),
         ("subsample", {"subsample": 1000, "random_state": 42}),
         ("cosample", {"other": "self", "subsample": 1_000, "random_state": 42}),
+        (
+            "estimate_error_structure",
+            {
+                "other": "reference",
+                "other_precision": "negligible",
+                "components": {"measurement": {"magnitude": "constant", "correlation": None}},
+                "spread_estimator": np.std,
+                "subsample_magnitude": 256,
+                "random_state": 42,
+            },
+        ),
         ("pairsample", {"n_pairs": 1_000, "random_state": 42}),
         ("variogram", {"n_pairs": 1_000, "n_lags": 6, "random_state": 42}),
         (
@@ -455,6 +472,8 @@ class TestClassVsAccessorConsistency:
             args.update({"other": ds.copy(deep=False)})
         elif method == "cosample":
             args.update({"other": raster})
+        elif method == "estimate_error_structure":
+            args["other"] = raster.copy(new_array=np.zeros_like(raster.data, dtype=float))
         elif method == "copy" and "new_array" in args:
             args.update({"new_array": np.ones(ds.shape)})
 
@@ -467,6 +486,8 @@ class TestClassVsAccessorConsistency:
         output_raster = getattr(raster, method)(**args)
         if method == "cosample":
             args.update({"other": ds.copy(deep=False)})
+        elif method == "estimate_error_structure":
+            args["other"] = args["other"].to_xarray()
         output_ds = getattr(ds.rst, method)(**args)
 
         # Determine if operation was in-place or not

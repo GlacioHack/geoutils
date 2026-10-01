@@ -333,7 +333,6 @@ class TestErrorStructure:
         structure = gu.ErrorStructure([component])
 
         # Check attributes
-        assert structure.kind == "components"
         assert list(structure.components) == ["measurement"]
         assert structure.predict_magnitude() == 2
         assert structure.predict_variance() == 4
@@ -415,57 +414,23 @@ class TestErrorStructure:
         covariance = structure.to_covariance_matrix(np.array([[0.0, 0.0], [1.0, 0.0]]), predictors=predictors)
         np.testing.assert_allclose(np.diag(covariance), [1.0, 4.0])
 
-    def test_from_gaussian__copies_labelled_inputs(self) -> None:
-        """Checks that a Gaussian model stores its labeled covariance, mean, and units independently of the inputs."""
+    def test_iter_samples__adds_errors_to_source_values(self) -> None:
+        """Checks that value samples add the same sampled errors to each source value."""
 
-        # We create 2 observations with correlated errors and different unit labels
-        labels = pd.Index(["left", "right"])
-        covariance = pd.DataFrame([[4.0, 1.0], [1.0, 9.0]], index=labels, columns=labels)
-        mean = pd.Series([1.0, -1.0], index=labels)
-        units = pd.Series(["m", "cm"], index=labels)
-        structure = gu.ErrorStructure.from_gaussian(covariance, mean=mean, units=units)
+        # Independent unit errors for two named sources
+        source_ids = pd.Index(["a", "b"])
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        nominal = np.array([10.0, 20.0])
 
-        # Changing each input table leaves the stored error model unchanged
-        covariance.loc["left", "right"] = 99
-        mean.loc["left"] = 99
-        units.loc["left"] = "km"
-        assert structure.kind == "gaussian"
-        assert structure.mean is not None
-        assert structure.covariance is not None
-        assert isinstance(structure.units, pd.Series)
-        np.testing.assert_array_equal(structure.mean.to_numpy(), [1.0, -1.0])
-        np.testing.assert_allclose(structure.covariance.to_numpy(), [[4.0, 1.0], [1.0, 9.0]])
-        pd.testing.assert_series_equal(structure.units, pd.Series(["m", "cm"], index=labels))
-
-    def test_from_gaussian__preserves_singular_draws(self) -> None:
-        """Checks that perfect dependence and deterministic parameters gain no artificial noise."""
-
-        # Perfectly correlated pair plus fixed error
-        labels = pd.Index(["a", "b", "fixed"])
-        covariance = pd.DataFrame([[4.0, 2.0, 0.0], [2.0, 1.0, 0.0], [0.0, 0.0, 0.0]], index=labels, columns=labels)
-        mean = pd.Series([1.0, -1.0, 3.0], index=labels)
-        structure = gu.ErrorStructure.from_gaussian(covariance, mean=mean, units="m")
-
-        # Check exact dependence and fixed third error
-        fields = structure.generate_random_field(n_fields=4, random_state=4)
-        assert fields.shape == (4, 3)
-        np.testing.assert_allclose(fields[:, 0] - 1, 2 * (fields[:, 1] + 1), atol=1e-14)
-        np.testing.assert_allclose(fields[:, 2], 3)
-
-    def test_iter_samples__adds_gaussian_errors_to_source_values(self) -> None:
-        """Checks that value samples add labelled Gaussian mean errors to the matching source values."""
-
-        # Zero covariance for deterministic mean errors
-        labels = pd.Index(["a", "b"])
-        covariance = pd.DataFrame(np.zeros((2, 2)), index=labels, columns=labels)
-        mean = pd.Series([1.0, -2.0], index=labels)
-        structure = gu.ErrorStructure.from_gaussian(covariance, mean=mean)
-
-        # Check fixed error draws and source values plus errors
-        errors = list(structure.iter_samples(n_samples=2, random_state=4))
-        values = list(structure.iter_samples(nominal=[10, 20], kind="value", n_samples=2, random_state=4))
-        np.testing.assert_array_equal(errors, [[1.0, -2.0], [1.0, -2.0]])
-        np.testing.assert_array_equal(values, [[11.0, 18.0], [11.0, 18.0]])
+        # Check matching error draws and source values plus errors
+        error_samples = list(structure.iter_samples(source_ids=source_ids, n_samples=2, random_state=4))
+        value_samples = list(
+            structure.iter_samples(source_ids=source_ids, nominal=nominal, kind="value", n_samples=2, random_state=4)
+        )
+        errors = np.asarray(error_samples)
+        values = np.asarray(value_samples)
+        assert errors.shape == (2, 2)
+        np.testing.assert_array_equal(values, nominal + errors)
 
     def test_info__variable_magnitude(self) -> None:
         """Checks that info() describes a variable magnitude by the predictors that control it."""
@@ -479,20 +444,6 @@ class TestErrorStructure:
         summary = structure.info(verbose=False)
         assert summary is not None
         assert "terrain: varies with slope, independent" in summary
-
-    def test_info__gaussian_labels(self) -> None:
-        """Checks that a Gaussian error summary names its stored source observations."""
-
-        # Fixed mean and covariance for two labelled observations
-        labels = pd.Index(["left", "right"])
-        covariance = pd.DataFrame(np.eye(2), index=labels, columns=labels)
-        structure = gu.ErrorStructure.from_gaussian(covariance, mean=pd.Series([1.0, 2.0], index=labels))
-
-        # The summary describes the joint vector and its labels
-        summary = structure.info(verbose=False)
-        assert summary is not None
-        assert "joint Gaussian vector of 2 parameter(s)" in summary
-        assert "labels: left, right" in summary
 
     @pytest.mark.skipif(find_spec("matplotlib") is None, reason="Requires Matplotlib")
     def test_plot_correlation(self) -> None:
@@ -566,67 +517,16 @@ class TestErrorStructureErrors:
         with pytest.raises(ValueError, match="No empirical variogram"):
             structure.plot_correlation()
 
-    def test_from_gaussian__error(self) -> None:
-        """Checks invalid labels/covariance."""
-
-        labels = pd.Index(["x", "y"])
-        valid = pd.DataFrame([[1.0, 0.5], [0.5, 1.0]], index=labels, columns=labels)
-        with pytest.raises(ValueError, match="match exactly"):
-            gu.ErrorStructure.from_gaussian(valid.rename(columns={"y": "z"}))
-        with pytest.raises(ValueError, match="zero-variance"):
-            gu.ErrorStructure.from_gaussian(pd.DataFrame([[0.0, 0.1], [0.1, 1.0]], index=labels, columns=labels))
-        with pytest.raises(ValueError, match="positive semidefinite"):
-            gu.ErrorStructure.from_gaussian(pd.DataFrame([[1.0, 2.0], [2.0, 1.0]], index=labels, columns=labels))
-
-    @pytest.mark.parametrize(
-        "covariance, error_type, message",
-        [
-            (np.eye(2), TypeError, "pandas DataFrame"),
-            (pd.DataFrame(), ValueError, "nonempty square"),
-            (pd.DataFrame(np.eye(2), index=["a", "a"], columns=["a", "a"]), ValueError, "unique labels"),
-            (pd.DataFrame([[1.0, np.nan], [np.nan, 1.0]]), ValueError, "must all be finite"),
-            (pd.DataFrame([[-1.0, 0.0], [0.0, 1.0]]), ValueError, "diagonal must be non-negative"),
-            (pd.DataFrame([[1.0, 0.2], [0.1, 1.0]]), ValueError, "must be symmetric"),
-        ],
-    )
-    def test_from_gaussian__error_invalid_covariance(
-        self, covariance: object, error_type: type[Exception], message: str
-    ) -> None:
-        """Checks an error is raised for a invalid covariance input of from_gaussian."""
-
-        with pytest.raises(error_type, match=message):
-            gu.ErrorStructure.from_gaussian(covariance)  # type: ignore[arg-type]
-
-    @pytest.mark.parametrize(
-        "options, error_type, message",
-        [
-            ({"mean": pd.Series([0.0, 0.0], index=["b", "a"])}, ValueError, "mean must be a pandas Series"),
-            ({"mean": pd.Series([0.0, np.nan], index=["a", "b"])}, ValueError, "mean values must all be finite"),
-            ({"units": pd.Series(["m", "m"], index=["b", "a"])}, ValueError, "units index must exactly match"),
-            ({"units": 2}, TypeError, "units must be a string"),
-        ],
-    )
-    def test_from_gaussian__error_mismatched_mean_or_units(
-        self, options: dict[str, object], error_type: type[Exception], message: str
-    ) -> None:
-        """Checks an error is raised for Gaussian means or units that do not match the covariance labels."""
-
-        labels = pd.Index(["a", "b"])
-        covariance = pd.DataFrame(np.eye(2), index=labels, columns=labels)
-        with pytest.raises(error_type, match=message):
-            gu.ErrorStructure.from_gaussian(covariance, **options)  # type: ignore[arg-type]
-
     @pytest.mark.parametrize(
         "options, message",
         [
             ({"source_ids": ["a", "b"], "n_samples": 0}, "n_samples must be a positive integer"),
             ({"source_ids": ["a", "b"], "kind": "unknown"}, "kind must"),
-            ({}, "source_ids are required"),
             ({"source_ids": ["a", "b"], "nominal": [1.0]}, "nominal must contain one value"),
         ],
     )
     def test_iter_samples__error_invalid_request(self, options: dict[str, object], message: str) -> None:
-        """Checks an error is raised for sample requests without valid IDs, count, kind, or source values."""
+        """Checks an error is raised for an invalid sample count, kind, or source values."""
 
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
         with pytest.raises(ValueError, match=message):
@@ -659,25 +559,6 @@ class TestBoundErrorStructure:
         bound = structure.bind(source_ids)
         covariance = bound.covariance_block([0, 1], [0, 1])
         np.testing.assert_array_equal(covariance, np.diag([4.0, 4.0]))
-
-    def test_bind__selects_gaussian_labels_in_requested_order(self) -> None:
-        """Checks that binding a Gaussian model selects and reorders its means and covariance."""
-
-        # Three labeled errors with unequal variances and means distinguish the selected order
-        labels = pd.Index(["a", "b", "c"])
-        covariance = pd.DataFrame([[1.0, 0.0, 0.0], [0.0, 4.0, 1.0], [0.0, 1.0, 9.0]], index=labels, columns=labels)
-        mean = pd.Series([10.0, 20.0, 30.0], index=labels)
-        structure = gu.ErrorStructure.from_gaussian(covariance, mean=mean)
-
-        # Request c before b and compare with the same labeled rows and columns in the input
-        selected = ["c", "b"]
-        bound = structure.bind(selected)
-        np.testing.assert_array_equal(bound.source_ids, selected)
-        np.testing.assert_array_equal(bound.error_mean, mean.loc[selected])
-        # Eigenvalue reconstruction introduces only floating point roundoff in the covariance
-        np.testing.assert_allclose(
-            bound.covariance_block([0, 1], [0, 1]), covariance.loc[selected, selected], rtol=0, atol=1e-14
-        )
 
 
 class TestBoundErrorStructureErrors:

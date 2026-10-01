@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Module to generate random fields from spatial error models."""
+"""Module to generate random correlated fields from spatial error structure, using either GSTools or GPyTorch."""
 
 from __future__ import annotations
 
@@ -326,8 +326,8 @@ def random_field(
     magnitudes there. We then draw all errors together, or use _chunked_raster_fields() to build a Dask raster. Raster
     chunks share their random seeds, so changing their size does not create breaks in the spatial pattern.
 
-    :param error_structure: Error model defined by components or by a table of Gaussian mean/covariance values.
-    :param source_ids: Unique ID of every observation, inferred from stored labels for Gaussian models.
+    :param error_structure: Error model defined by magnitude and correlation components.
+    :param source_ids: Unique ID of every observation when like does not define the output locations.
     :param like: Optional raster or point cloud defining coordinates, output locations, and result type.
     :param coordinates: Array of shape (n_observations, n_dimensions), in the correlation model's distance units.
     :param predictors: Named values used to calculate each component's error magnitude (e.g. slope or elevation).
@@ -353,42 +353,35 @@ def random_field(
             raise ValueError("source_ids and coordinates must be omitted when like defines the output locations.")
         source_ids, coordinates, spatial_shape, random_coordinates, mesh_type = _spatial_support(like)
         predictors = _spatial_predictors(like, predictors, size=int(np.prod(spatial_shape)))
-        if error_structure.kind == "components":
-            from geoutils.stats.variography import VariogramModel
+        from geoutils.stats.variography import VariogramModel
 
-            component_dims: set[tuple[int, ...] | None] = set()
-            for component in error_structure.components.values():
-                correlation = component.correlation
-                if correlation is None:
-                    continue
-                if not isinstance(correlation, VariogramModel):
-                    raise AssertionError("A validated error component must contain a VariogramModel.")
-                component_dims.add(correlation.active_dims)
-            if any(dimensions not in (None, (0, 1)) for dimensions in component_dims):
-                # Let each component select its own coordinate dimensions before drawing
-                random_coordinates = None
-                mesh_type = "unstructured"
+        component_dims: set[tuple[int, ...] | None] = set()
+        for component in error_structure.components.values():
+            correlation = component.correlation
+            if correlation is None:
+                continue
+            if not isinstance(correlation, VariogramModel):
+                raise AssertionError("A validated error component must contain a VariogramModel.")
+            component_dims.add(correlation.active_dims)
+        if any(dimensions not in (None, (0, 1)) for dimensions in component_dims):
+            # Let each component select its own coordinate dimensions before drawing
+            random_coordinates = None
+            mesh_type = "unstructured"
     else:
         spatial_shape = None
         random_coordinates = None
         mesh_type = "unstructured"
 
-    # A covariance table already names its observations; component models need IDs from the input
     if source_ids is None:
-        mean = error_structure.mean
-        if mean is None:
-            raise ValueError("source_ids are required for a component error structure.")
-        source_ids = mean.index.to_numpy()
+        raise ValueError("source_ids are required when like is not supplied.")
     bound = error_structure.bind(source_ids, coordinates=coordinates, predictors=predictors)
 
-    # Chunked fields are currently available for raster component models through GSTools
+    # Chunked fields are available for rasters through GSTools
     if chunksizes is not None:
         from geoutils.raster.base import RasterBase
 
         if like is None or not isinstance(like, RasterBase):
             raise ValueError("Chunked random fields currently require a raster.")
-        if error_structure.kind != "components":
-            raise ValueError("Chunked random fields require a component ErrorStructure.")
         if backend != "gstools":
             raise ValueError("Chunked random fields require the GSTools backend.")
         return _chunked_raster_fields(

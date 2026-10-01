@@ -23,7 +23,7 @@ import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 import pandas as pd
@@ -35,6 +35,9 @@ from scipy.special import ndtri
 
 from geoutils._misc import import_optional
 from geoutils.stats.variography import Variogram, VariogramModel
+
+if TYPE_CHECKING:
+    from geoutils.multiproc import MultiprocConfig
 
 __all__ = ["ErrorComponent", "ErrorMagnitude", "ErrorStructure"]
 
@@ -51,9 +54,20 @@ def _grouped_interpolator(
     statistic: str,
     min_count: int,
 ) -> Callable[[Mapping[str, Any]], NDArray[np.float64]]:
-    """Interpolate grouped error statistics at new predictor values (e.g. slope/elevation)."""
+    """
+    Interpolate grouped error statistics at new predictor values (e.g. slope/elevation).
 
-    # Groups must have named numeric coordinates; for interval bins, we use their centers
+    This function is used to build an empirical model of heteroscedasticity from binned spread statistics,
+    and accepts any number of predictors (so is equivalent to a N-dimension interpolator)
+
+    Points inside the edge bins are interpolated linearly.
+    Points outside the edge bins are interpolated by nearest neighbours (to avoid unrealistic linear extrapolation
+    where few samples exist anyway).
+
+    This function was simplified from an old ``interpolate_nd_binning`` in xDEM.
+    """
+
+    # Input checks
     predictor_names = tuple(table.index.names)
     if not predictor_names or any(not isinstance(name, str) or not name for name in predictor_names):
         raise ValueError("Grouped statistics must have named predictor index levels.")
@@ -72,7 +86,7 @@ def _grouped_interpolator(
             raise ValueError(f"Predictor {name!r} must have finite, increasing group coordinates.")
         coordinates.append(cast(NDArray[np.float64], coordinate))
 
-    # Some combinations of groups may be missing from the table; add them as NaN in the full grid
+    # Some combinations of groups may be missing from the table: we add them as NaN in the full grid
     # We also exclude estimates based on fewer than min_count observations
     statistic_column = (value_name, statistic)
     count_column = (value_name, "count")
@@ -115,7 +129,7 @@ def _grouped_interpolator(
     def evaluate(predictors: Mapping[str, Any]) -> NDArray[np.float64]:
         """Calculate error magnitudes at the supplied predictors, in their shared array shape."""
 
-        # Use predictor names to avoid mixing up the order of dimensions
+        # We use predictor names to avoid mixing up the order of dimensions
         missing_names = set(predictor_names).difference(predictors)
         if missing_names:
             raise ValueError(f"Missing predictors: {sorted(missing_names)!r}.")
@@ -125,7 +139,7 @@ def _grouped_interpolator(
         finite = np.all(np.isfinite(prediction_points), axis=1)
         result = np.full(len(prediction_points), np.nan, dtype=float)
 
-        # Beyond the sampled range, use the nearest outer group center (we do not extrapolate the error magnitude)
+        # Beyond the sampled range, we use the nearest outer group center (to not extrapolate the error magnitude)
         if np.any(finite):
             bounded = prediction_points[finite].copy()
             for index, coordinate in enumerate(coordinates):
@@ -621,27 +635,15 @@ class ErrorStructure:
             raise ValueError("ErrorStructure requires at least one ErrorComponent.")
 
         # Store the error model without attaching it to a particular set of observations
-        self._kind: Literal["components", "gaussian"] = "components"
         self._components = MappingProxyType(normalized)
-        self._mean: pd.Series | None = None
-        self._covariance: pd.DataFrame | None = None
-        self._units: str | pd.Series | None = None
         self.empirical_variogram = empirical_variogram
         self.fit_diagnostics = MappingProxyType(dict(fit_diagnostics or {}))
         self.metadata = MappingProxyType(dict(metadata or {}))
 
     def __repr__(self) -> str:
-        """Show the component names or Gaussian observation count."""
+        """Show the component names."""
 
-        if self.kind == "gaussian":
-            return f"ErrorStructure(kind='gaussian', size={len(cast(pd.Series, self._mean))})"
         return f"ErrorStructure(components={list(self.components)!r})"
-
-    @property
-    def kind(self) -> Literal["components", "gaussian"]:
-        """Return whether the model uses components or a Gaussian mean/covariance table."""
-
-        return self._kind
 
     @property
     def components(self) -> Mapping[str, ErrorComponent]:
@@ -661,123 +663,7 @@ class ErrorStructure:
                     names.append(name)
         return tuple(names)
 
-    @property
-    def mean(self) -> pd.Series | None:
-        """Return a copy of the Gaussian mean errors by observation label, or None for component models."""
-
-        return None if self._mean is None else self._mean.copy(deep=True)
-
-    @property
-    def covariance(self) -> pd.DataFrame | None:
-        """Return a copy of the Gaussian covariance table, or None for component models."""
-
-        return None if self._covariance is None else self._covariance.copy(deep=True)
-
-    @property
-    def units(self) -> str | pd.Series | None:
-        """Return the units stored with a Gaussian model, if supplied."""
-
-        return self._units.copy(deep=True) if isinstance(self._units, pd.Series) else self._units
-
-    # 4.1/ Construct a model from an existing covariance table
-
-    @classmethod
-    def from_gaussian(
-        cls,
-        covariance: pd.DataFrame,
-        *,
-        mean: pd.Series | None = None,
-        units: str | pd.Series | None = None,
-        metadata: Mapping[str, Any] | None = None,
-    ) -> ErrorStructure:
-        """Create a Gaussian error model for a specific set of observation labels.
-
-        :param covariance: Square DataFrame with the same observation labels on both axes, in the same order.
-            It must be symmetric and positive semidefinite (every weighted combination has non-negative variance).
-        :param mean: Mean errors with the same labels/order as covariance. Defaults to zero.
-        :param units: One unit string for all observations, or a Series with the same labels/order.
-        :param metadata: Other information to store with the model.
-        :returns: An ErrorStructure storing the means/covariance of these observations.
-        """
-
-        # Each row/column must describe the same observation, and all covariance values must be finite
-        if not isinstance(covariance, pd.DataFrame):
-            raise TypeError("covariance must be a pandas DataFrame.")
-        if covariance.empty or covariance.shape[0] != covariance.shape[1]:
-            raise ValueError("covariance must be a nonempty square DataFrame.")
-        if not covariance.index.is_unique or not covariance.columns.is_unique:
-            raise ValueError("covariance axes must contain unique labels.")
-        if not covariance.index.equals(covariance.columns):
-            raise ValueError("covariance index and columns must match exactly and in the same order.")
-        values = covariance.to_numpy(dtype=float, copy=True)
-        if np.any(~np.isfinite(values)):
-            raise ValueError("covariance values must all be finite.")
-
-        # The diagonal is each observation's variance; zero variance means its whole row/column must be zero
-        diagonal = np.diag(values).copy()
-        if np.any(diagonal < 0):
-            raise ValueError("covariance diagonal must be non-negative.")
-        standard_deviation = np.sqrt(diagonal)
-        zero_variance = standard_deviation == 0
-        if np.any(values[zero_variance, :] != 0) or np.any(values[:, zero_variance] != 0):
-            raise ValueError("A zero-variance covariance row and column must contain only zeros.")
-
-        # Compare correlations instead of raw covariance, so the checks do not depend on the values' scale
-        positive = ~zero_variance
-        normalized = np.zeros_like(values)
-        if np.any(positive):
-            divisor = np.outer(standard_deviation[positive], standard_deviation[positive])
-            normalized[np.ix_(positive, positive)] = values[np.ix_(positive, positive)] / divisor
-        if float(np.max(np.abs(normalized - normalized.T))) > 1e-10:
-            raise ValueError("covariance must be symmetric after diagonal normalization.")
-        normalized = (normalized + normalized.T) / 2
-
-        # Negative eigenvalues would allow a weighted combination with negative variance
-        # Ignore tiny negative values from roundoff, and factor the matrix for later random draws
-        eigenvalues, eigenvectors = np.linalg.eigh(normalized)
-        if float(np.min(eigenvalues)) < -1e-10:
-            raise ValueError("covariance must be positive semidefinite.")
-        eigenfactor = standard_deviation[:, None] * (eigenvectors * np.sqrt(np.maximum(eigenvalues, 0)))
-        rebuilt = (eigenfactor @ eigenfactor.T + (eigenfactor @ eigenfactor.T).T) / 2
-
-        # Copy the mean and optional units in covariance label order
-        labels = covariance.index.copy()
-        if mean is None:
-            mean_copy = pd.Series(np.zeros(len(labels)), index=labels, dtype=float)
-        elif not isinstance(mean, pd.Series) or not mean.index.equals(labels):
-            raise ValueError("mean must be a pandas Series whose index exactly matches covariance.")
-        else:
-            mean_copy = pd.Series(mean.to_numpy(dtype=float, copy=True), index=labels, name=mean.name)
-            if np.any(~np.isfinite(mean_copy)):
-                raise ValueError("mean values must all be finite.")
-        if isinstance(units, pd.Series):
-            if not units.index.equals(labels):
-                raise ValueError("units index must exactly match covariance.")
-            units_copy: str | pd.Series | None = units.copy(deep=True)
-        elif units is None or isinstance(units, str):
-            units_copy = units
-        else:
-            raise TypeError("units must be a string, pandas Series or None.")
-
-        # Create the Gaussian form directly because it has no component definitions
-        gaussian = cls.__new__(cls)
-        gaussian._kind = "gaussian"
-        gaussian._components = MappingProxyType({})
-        gaussian._mean = mean_copy
-        gaussian._covariance = pd.DataFrame(rebuilt, index=labels, columns=labels)
-        gaussian._units = units_copy
-        gaussian.empirical_variogram = None
-        gaussian.fit_diagnostics = MappingProxyType({})
-        gaussian.metadata = MappingProxyType(dict(metadata or {}))
-        return gaussian
-
-    # 4.2/ Error magnitude, correlation and covariance at new locations
-
-    def _require_components(self, method: str) -> None:
-        """Reject methods that need component definitions when the model stores a Gaussian covariance table."""
-
-        if self.kind != "components":
-            raise TypeError(f"{method}() applies only to component error structures.")
+    # 4.1/ Error magnitude, correlation and covariance at new locations
 
     def predict_magnitude(
         self,
@@ -794,7 +680,6 @@ class ErrorStructure:
         :returns: A standard deviation, an array, or a spatial object matching like.
         """
 
-        self._require_components("predict_magnitude")
         from geoutils._dispatch import _is_pointcloud, _is_raster
 
         # Spatial predictors supply their numeric values while the optional output keeps the spatial support
@@ -855,8 +740,6 @@ class ErrorStructure:
         :returns: Correlation values with the same shape as distance.
         """
 
-        self._require_components("predict_correlation")
-
         # Components with larger variance contribute more to the combined correlation
         total_variance = sum(
             cast(ErrorMagnitude, component.magnitude).reference_value ** 2 for component in self.components.values()
@@ -885,7 +768,6 @@ class ErrorStructure:
         :returns: Covariance values with the shared shape of distances and predictor arrays.
         """
 
-        self._require_components("predict_covariance")
         other = predictors if other_predictors is None else other_predictors
         covariance: Any = 0.0
         for component in self.components.values():
@@ -911,7 +793,6 @@ class ErrorStructure:
         :returns: An array of shape (n_observations, n_observations), including all components' covariance.
         """
 
-        self._require_components("to_covariance_matrix")
         coordinate_array = np.asarray(coordinates, dtype=float)
         if coordinate_array.ndim != 2 or len(coordinate_array) == 0 or np.any(~np.isfinite(coordinate_array)):
             raise ValueError("coordinates must be a finite two-dimensional observation array.")
@@ -926,7 +807,7 @@ class ErrorStructure:
         bound = self.bind(source_ids, coordinates=coordinate_array, predictors=predictors)
         return bound.covariance_block(source_ids, source_ids)
 
-    # 4.3/ Apply the model to observations and draw random errors
+    # 4.2/ Apply the model to observations and draw random errors
 
     def bind(
         self,
@@ -947,7 +828,7 @@ class ErrorStructure:
 
     def iter_samples(
         self,
-        source_ids: ArrayLike | None = None,
+        source_ids: ArrayLike,
         *,
         coordinates: ArrayLike | None = None,
         predictors: Mapping[str, Any] | None = None,
@@ -958,7 +839,7 @@ class ErrorStructure:
     ) -> Iterator[NDArray[np.float64]]:
         """Yield random errors, or source values plus those errors, for the selected observations.
 
-        :param source_ids: Unique observation IDs. Gaussian models default to their stored labels.
+        :param source_ids: Unique observation IDs.
         :param coordinates: Array of shape (n_observations, n_dimensions), required for correlated components.
         :param predictors: Named values used to calculate each component's error magnitude.
         :param nominal: Original source values, added to the errors when kind="value". Defaults to zero.
@@ -973,11 +854,6 @@ class ErrorStructure:
         if kind not in {"error", "value"}:
             raise ValueError("kind must be 'error' or 'value'.")
 
-        # Gaussian tables already identify their observations; component models need IDs from the input
-        if source_ids is None:
-            if self._mean is None:
-                raise ValueError("source_ids are required for a component error structure.")
-            source_ids = self._mean.index.to_numpy()
         bound = self.bind(source_ids, coordinates=coordinates, predictors=predictors)
         nominal_values = np.zeros(bound.size, dtype=float) if nominal is None else np.asarray(nominal, dtype=float)
         if nominal_values.shape != (bound.size,):
@@ -1028,20 +904,21 @@ class ErrorStructure:
             backend=backend,
         )
 
-    # 4.4/ Estimate a reusable spatial model from observed errors
+    # 4.3/ Estimate a reusable spatial model from observed errors
 
     @classmethod
     def estimate(
         cls,
         error_proxy: Any,
         *,
+        other: Any | None = None,
+        other_precision: Literal["same", "negligible"] = "same",
         predictors: Mapping[str, Any] | None = None,
         components: Mapping[str, Mapping[str, Any]] | None = None,
         mask: Any | None = None,
         bins: Mapping[str, Any] | int | None = None,
         spread_estimator: Callable[[Any], Any] | None = None,
         min_count: int = 100,
-        outlier_factor: float | None = 7,
         subsample_magnitude: int | float = 1_000_000,
         variogram_estimator: str | Callable[[Any], float] = "dowd",
         n_pairs: int = 1_000_000,
@@ -1051,37 +928,110 @@ class ErrorStructure:
         max_lag: float | None = None,
         n_runs: int = 1,
         fit_method: Literal["variogram"] = "variogram",
-        refine: bool = True,
         fit_kwargs: Mapping[str, Any] | None = None,
         pair_sampling_kwargs: Mapping[str, Any] | None = None,
+        mp_config: MultiprocConfig | None = None,
         random_state: int | np.random.Generator | None = None,
     ) -> ErrorStructure:
-        """Estimate component magnitudes and correlations from one error proxy.
+        """
+        Estimate error structure from an error proxy variable.
 
-        At most one component can have ``magnitude="heteroscedastic"`` in the first variogram estimator. Remaining
-        components have constant magnitudes. Their initial variance fractions come from a nested standardized
-        variogram and are refined against conditional pair semivariances.
+        This function works on eager, Dask, or multiprocessing inputs.
+
+        An error proxy consists of a variable that can be used to represent errors, for instance the difference of two
+        coincident measurements that should normally have the same values, whether from the same sensor, or between a
+        sensor and ground data. For instance, with elevation or velocity data, static surfaces (rock, grasslands, etc)
+        do not move in time,
+        and therefore the difference of elevation/velocity between two acquisitions (even not at the same time) can
+        often be used as a decent error proxy to estimate the error structure.
+
+        The error structure is estimated according to the composition chosen for error components, composed of
+        error magnitude tied to an error autocorrelation.
+        At most one component can have variable error magnitude, i.e. ``magnitude="heteroscedastic"``. Remaining
+        components have constant magnitudes. Their variance fractions come from a nested standardized variogram.
+
+        The error magnitude is estimated from the error proxy's statistical spread (e.g. STD, NMAD), optionally
+        grouped by predictors to account for variability (e.g., with terrain slope, landcover type).
+        The error correlation is estimated by variography, after optional standardization by the variable magnitude.
+
+        When ``other`` is supplied, the proxy is the difference between the two measurements on their common finite
+        support. ``other_precision="same"`` assumes independent errors with the same magnitude and correlation in
+        both inputs, so the difference is divided by the square root of two. Use ``"negligible"`` when the other
+        measurement's error is small enough to ignore.
+
+
+        This error structure estimation was refactored from that of xDEM (which was method-based, and thus more
+        volatile with inputs and outputs).
+
+        For independent point errors, estimate a constant magnitude without fitting a variogram:
+
+        .. code-block:: python
+
+            import numpy as np
+
+            import geoutils as gu
+
+            points = gu.PointCloud.from_xyz(
+                x=np.arange(4), y=np.zeros(4), z=np.array([-2.0, -1.0, 1.0, 2.0]), crs=32631
+            )
+            errors = gu.ErrorStructure.estimate(
+                points,
+                components={"measurement": {"magnitude": "constant", "correlation": None}},
+                spread_estimator=np.std,
+            )
+            round(errors.predict_magnitude(), 2)  # 1.58
+
+        With SciKit-GStat installed, a raster proxy can also fit a magnitude that varies with a predictor and a
+        spatial correlation:
+
+        .. code-block:: python
+
+            import numpy as np
+            from affine import Affine
+
+            import geoutils as gu
+
+            quality = np.broadcast_to(np.linspace(0, 1, 12), (12, 12)).copy()
+            values = (1 + quality) * np.random.default_rng(31).normal(size=quality.shape)
+            grid = Affine(10, 0, 0, 0, -10, 120)
+            proxy = gu.Raster.from_array(values, grid, 32632, nodata=-9999)
+            predictor = gu.Raster.from_array(quality, grid, 32632, nodata=-9999)
+            errors = gu.ErrorStructure.estimate(
+                proxy,
+                predictors={"quality": predictor},
+                components={"spatial": {"magnitude": "heteroscedastic", "correlation": "spherical"}},
+                bins=3,
+                min_count=10,
+                spread_estimator=np.std,
+                n_pairs=300,
+                n_lags=5,
+                pair_sampling="random_xy",
+                random_state=4,
+            )
+            errors.predict_magnitude({"quality": np.array([0.2, 0.8])})
+            errors.predict_correlation([0, 20, 80])
 
         :param error_proxy: Raster or point cloud whose values represent errors.
+        :param other: Second raster or point cloud to compare with error_proxy, or None if it already contains errors.
+        :param other_precision: Precision of the second input relative to the first, when other is supplied.
         :param predictors: Named continuous variables controlling a heteroscedastic magnitude.
         :param components: Ordered named component specifications with ``magnitude`` and ``correlation`` entries.
         :param mask: Spatial or Boolean mask identifying values used for estimation.
         :param bins: Group definitions by predictor, or one bin count applied to every predictor.
-        :param spread_estimator: Robust or classical estimator of error magnitude (default nmad).
+        :param spread_estimator: Spread estimator used for the error magnitude (default nmad).
         :param min_count: Smallest grouped sample retained in the magnitude model.
-        :param outlier_factor: Standardized error threshold used for a second magnitude scaling, or ``None``.
-        :param subsample_magnitude: Maximum observations used for grouped magnitude statistics.
+        :param subsample_magnitude: Maximum observations used to fit the magnitude.
         :param variogram_estimator: Empirical variogram estimator name or callable.
-        :param n_pairs: Target spatial pairs per variogram run and conditional refinement.
+        :param n_pairs: Target spatial pairs per variogram run.
         :param pair_sampling: Pair sampling scheme exposed by GeoUtils spatial objects.
         :param n_lags: Number of empirical lag classes.
         :param min_lag: Smallest sampled spatial distance.
         :param max_lag: Largest sampled spatial distance.
         :param n_runs: Independent variogram samples used to estimate empirical sampling error.
         :param fit_method: Fitting backend, currently ``"variogram"``.
-        :param refine: Whether to refine component contributions using conditional pair semivariances.
         :param fit_kwargs: Options passed to Variogram.fit().
         :param pair_sampling_kwargs: Advanced options passed to pairsample() and variogram().
+        :param mp_config: Worker and tile settings for multiprocessing estimation.
         :param random_state: Random generator or seed used throughout estimation.
         :returns: Fitted error structure with compact diagnostics.
         """
@@ -1091,13 +1041,14 @@ class ErrorStructure:
 
         return _estimate_error_structure(
             error_proxy,
+            other=other,
+            other_precision=other_precision,
             predictors=predictors,
             components=components,
             mask=mask,
             bins=bins,
             spread_estimator=stats.nmad if spread_estimator is None else spread_estimator,
             min_count=min_count,
-            outlier_factor=outlier_factor,
             subsample_magnitude=subsample_magnitude,
             variogram_estimator=variogram_estimator,
             n_pairs=n_pairs,
@@ -1107,9 +1058,9 @@ class ErrorStructure:
             max_lag=max_lag,
             n_runs=n_runs,
             fit_method=fit_method,
-            refine=refine,
             fit_kwargs=fit_kwargs,
             pair_sampling_kwargs=pair_sampling_kwargs,
+            mp_config=mp_config,
             random_state=random_state,
         )
 
@@ -1122,15 +1073,13 @@ class ErrorStructure:
         """Refit correlations and their component magnitude contributions.
 
         Refit uses the retained empirical variogram and variable magnitude model. It updates every dependent component
-        together, avoiding an inconsistent magnitude fit paired with a new correlation fit. Conditional pair
-        refinement requires re-estimation because individual pairs are deliberately not stored.
+        together, avoiding an inconsistent magnitude fit paired with a new correlation fit.
 
         :param correlation_models: Ordered variogram models, defaulting to the current correlated components.
         :param fit_kwargs: Options passed to Variogram.fit().
         :returns: New error structure fitted from the retained compact diagnostics.
         """
 
-        self._require_components("refit")
         from geoutils.uncertainty.estimation import _refit_error_structure
 
         return _refit_error_structure(self, correlation_models=correlation_models, fit_kwargs=fit_kwargs)
@@ -1144,7 +1093,6 @@ class ErrorStructure:
         :returns: Axes containing the variogram diagnostics.
         """
 
-        self._require_components("plot_correlation")
         if self.empirical_variogram is None:
             raise ValueError("No empirical variogram is stored on this error structure.")
         return self.empirical_variogram.plot(ax=ax, show_error=show_error, **kwargs)
@@ -1165,7 +1113,6 @@ class ErrorStructure:
         """
 
         # Select the only variable component unless the user names another one
-        self._require_components("plot_magnitude")
         variable_components = [
             item
             for item in self.components.values()
@@ -1209,7 +1156,6 @@ class ErrorStructure:
         :returns: Mapping containing the created plotting axes.
         """
 
-        self._require_components("plot")
         axes: dict[str, Any] = {}
         for component in self.components.values():
             if isinstance(component.magnitude, ErrorMagnitude) and component.magnitude.kind == "variable":
@@ -1227,27 +1173,20 @@ class ErrorStructure:
         :returns: Summary string when verbose is False.
         """
 
-        if self.kind == "components":
-            lines = [f"ErrorStructure with {len(self.components)} independent component(s)"]
-            for component in self.components.values():
-                # ErrorComponent converts fitted Variogram results to their portable model at construction
-                correlation = cast(VariogramModel | None, component.correlation)
-                model = "independent" if correlation is None else correlation.model_name
-                error_range = None if correlation is None else correlation.effective_range
-                magnitude = cast(ErrorMagnitude, component.magnitude)
-                size = (
-                    f"constant {magnitude.reference_value:.4g}"
-                    if magnitude.kind == "constant"
-                    else f"varies with {', '.join(magnitude.predictor_names)}"
-                )
-                range_text = "" if error_range is None else f", range {error_range:.4g}"
-                lines.append(f"  {component.name}: {size}, {model}{range_text}")
-        else:
-            mean = self.mean
-            if mean is None:
-                raise AssertionError("A Gaussian error structure must contain its mean vector.")
-            lines = [f"ErrorStructure with a joint Gaussian vector of {len(mean)} parameter(s)"]
-            lines.append(f"  labels: {', '.join(map(str, mean.index))}")
+        lines = [f"ErrorStructure with {len(self.components)} independent component(s)"]
+        for component in self.components.values():
+            # ErrorComponent converts fitted Variogram results to their portable model at construction
+            correlation = cast(VariogramModel | None, component.correlation)
+            model = "independent" if correlation is None else correlation.model_name
+            error_range = None if correlation is None else correlation.effective_range
+            magnitude = cast(ErrorMagnitude, component.magnitude)
+            size = (
+                f"constant {magnitude.reference_value:.4g}"
+                if magnitude.kind == "constant"
+                else f"varies with {', '.join(magnitude.predictor_names)}"
+            )
+            range_text = "" if error_range is None else f", range {error_range:.4g}"
+            lines.append(f"  {component.name}: {size}, {model}{range_text}")
         result = "\n".join(lines)
         if verbose:
             print(result)
@@ -1263,7 +1202,7 @@ class ErrorStructure:
 ############################################
 
 
-def _normalize_source_ids(source_ids: ArrayLike) -> tuple[NDArray[Any], pd.Index]:
+def _normalize_source_ids(source_ids: ArrayLike) -> NDArray[Any]:
     """Check and copy the unique ID of each source observation."""
 
     if isinstance(source_ids, np.ndarray) and source_ids.ndim != 1:
@@ -1285,7 +1224,7 @@ def _normalize_source_ids(source_ids: ArrayLike) -> tuple[NDArray[Any], pd.Index
     normalized = np.empty(len(labels), dtype=object)
     normalized[:] = labels.tolist()
     normalized.setflags(write=False)
-    return normalized, labels
+    return normalized
 
 
 def _normalize_coordinates(coordinates: ArrayLike | None, size: int) -> NDArray[np.float64] | None:
@@ -1358,10 +1297,7 @@ class BoundErrorStructure:
 
     source_ids: NDArray[Any]
     coordinates: NDArray[np.float64] | None
-    error_mean: NDArray[np.float64]
     _component_data: tuple[tuple[ErrorComponent, NDArray[np.float64]], ...] = ()
-    _gaussian_covariance: NDArray[np.float64] | None = None
-    _gaussian_factor: NDArray[np.float64] | None = None
     predictors: Mapping[str, NDArray[np.float64]] = MappingProxyType({})
 
     @property
@@ -1373,7 +1309,7 @@ class BoundErrorStructure:
     def covariance_block(self, rows: ArrayLike, columns: ArrayLike) -> NDArray[np.float64]:
         """Calculate part of the covariance matrix without allocating the complete matrix."""
 
-        # Select source rows/columns, or read their covariance directly if the model stores a complete table
+        # Select source rows/columns for this covariance block
         row_indexes = np.asarray(rows, dtype=np.int64).reshape(-1)
         column_indexes = np.asarray(columns, dtype=np.int64).reshape(-1)
         if (
@@ -1383,9 +1319,6 @@ class BoundErrorStructure:
             or np.any(column_indexes >= self.size)
         ):
             raise ValueError("Covariance block indexes are outside the selected source observations.")
-        if self._gaussian_covariance is not None:
-            return self._gaussian_covariance[np.ix_(row_indexes, column_indexes)]
-
         # For independent errors, only the same source ID is correlated with itself
         # Two observations at identical coordinates still have independent errors if their IDs differ
         covariance = np.zeros((len(row_indexes), len(column_indexes)), dtype=float)
@@ -1434,9 +1367,6 @@ class BoundErrorStructure:
         random field calculation; covariance_block() uses the original spatial coordinates.
         """
 
-        # Multiplying independent normal draws by this factor gives them the requested covariance
-        if self._gaussian_factor is not None:
-            return self.error_mean + self._gaussian_factor @ rng.standard_normal(self._gaussian_factor.shape[1])
         combined = np.zeros(self.size, dtype=float)
         for component, magnitude in self._component_data:
             seed = int(rng.integers(0, np.iinfo(np.uint32).max, dtype=np.uint32))
@@ -1540,51 +1470,11 @@ def _bind_components(
         magnitude.setflags(write=False)
         component_data.append((component, magnitude))
 
-    # Component models describe zero-mean errors; only their magnitude/correlation varies
-    error_mean = np.zeros(len(source_ids), dtype=float)
-    error_mean.setflags(write=False)
     return BoundErrorStructure(
         source_ids=source_ids,
         coordinates=coordinates,
-        error_mean=error_mean,
         _component_data=tuple(component_data),
         predictors=predictors,
-    )
-
-
-def _bind_gaussian(
-    structure: ErrorStructure,
-    *,
-    source_ids: NDArray[Any],
-    labels: pd.Index,
-) -> BoundErrorStructure:
-    """Select Gaussian means/covariance from their table in the requested source ID order."""
-
-    mean = structure.mean
-    covariance = structure.covariance
-    if mean is None or covariance is None:
-        raise AssertionError("A Gaussian error structure must contain mean and covariance.")
-    positions = mean.index.get_indexer(labels)
-    if np.any(positions < 0):
-        missing = labels[positions < 0].tolist()
-        raise ValueError(f"Gaussian error structure does not contain source_ids {missing!r}.")
-    mean_values = mean.to_numpy(dtype=float)[positions]
-    covariance_values = covariance.to_numpy(dtype=float)[np.ix_(positions, positions)]
-
-    # We need a new factor for this subset: multiplying its independent normal draws by the factor must
-    # reproduce this subset's covariance (the factor from the full table has different dimensions)
-    eigenvalues, eigenvectors = np.linalg.eigh((covariance_values + covariance_values.T) / 2)
-    if float(np.min(eigenvalues)) < -1e-10:
-        raise ValueError("Selected Gaussian covariance is not positive semidefinite.")
-    factor = eigenvectors * np.sqrt(np.maximum(eigenvalues, 0))
-    for array in (mean_values, covariance_values, factor):
-        array.setflags(write=False)
-    return BoundErrorStructure(
-        source_ids=source_ids,
-        coordinates=None,
-        error_mean=mean_values,
-        _gaussian_covariance=covariance_values,
-        _gaussian_factor=factor,
     )
 
 
@@ -1603,18 +1493,12 @@ def bind_error_structure(
     """Match an ErrorStructure to unique source IDs and optional spatial coordinates.
 
     _normalize_source_ids(), _normalize_coordinates() and _normalize_predictors() check the inputs.
-    _bind_components() then calculates each component's error magnitude at those locations, or _bind_gaussian()
-    selects the corresponding mean/covariance rows.
+    _bind_components() then calculates each component's error magnitude at those locations.
     """
 
     if not isinstance(structure, ErrorStructure):
         raise TypeError("structure must be an ErrorStructure.")
-    normalized_ids, labels = _normalize_source_ids(source_ids)
-    if structure.kind == "gaussian":
-        if predictors:
-            raise ValueError("A finite Gaussian error structure does not accept magnitude predictors.")
-        return _bind_gaussian(structure, source_ids=normalized_ids, labels=labels)
-
+    normalized_ids = _normalize_source_ids(source_ids)
     normalized_coordinates = _normalize_coordinates(coordinates, len(normalized_ids))
     normalized_predictors = _normalize_predictors(
         predictors, required=structure.required_predictors, size=len(normalized_ids)

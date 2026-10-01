@@ -15,23 +15,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Estimate error component magnitudes and correlations from one spatial proxy."""
+"""Estimate error component magnitudes and correlations from an error proxy, with out-of-memory support on Dask/MP."""
 
 from __future__ import annotations
 
 import warnings
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import replace
+from contextlib import ExitStack
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
-import pandas as pd
-from numpy.typing import ArrayLike, NDArray
-from scipy.optimize import least_squares
+import xarray as xr
 
-import geoutils as gu
-from geoutils._dispatch import _is_pointcloud, _is_raster
-from geoutils._misc import import_optional
+from geoutils._dispatch import (
+    _get_pointcloud_interface,
+    _get_raster_interface,
+    _is_pointcloud,
+    _is_raster,
+    is_dask_array,
+)
+from geoutils._typing import NDArrayNum
 from geoutils.stats.variography import Variogram, VariogramModel
 from geoutils.uncertainty.error_structure import (
     ErrorComponent,
@@ -39,11 +43,11 @@ from geoutils.uncertainty.error_structure import (
     ErrorStructure,
 )
 
-NDArrayf = NDArray[np.float64]
-
 if TYPE_CHECKING:
+    from geoutils.multiproc import MultiprocConfig
     from geoutils.pointcloud.base import PointCloudBase
     from geoutils.raster.base import RasterBase
+    from geoutils.raster.raster import Raster
 
 ############################
 # 1/ INPUT AND MASK ALIGNMENT
@@ -54,21 +58,24 @@ def _prepare_proxy_inputs(
     error_proxy: RasterBase | PointCloudBase,
     predictors: Mapping[str, Any],
     mask: Any | None,
-) -> tuple[
-    RasterBase | PointCloudBase,
-    NDArray[np.floating[Any]],
-    dict[str, NDArray[np.floating[Any]]],
-    NDArray[np.bool_],
-]:
-    """Cosample an error proxy and predictors on their common finite support."""
+    mp_config: MultiprocConfig | None,
+    other: Any | None,
+    other_precision: Literal["same", "negligible"],
+    temporary_files: ExitStack,
+) -> tuple[Any, dict[str, str]]:
+    """
+    Prepare error proxy and predictors on their common finite support using ``cosample()``, which supports
+    Dask/MP itself, so does all the heavy lifting.
+    """
 
-    # Require the GeoUtils interface that aligns raster and point values on one support
-    is_raster = _is_raster(error_proxy)
-    is_pointcloud = _is_pointcloud(error_proxy)
-    if not (is_raster or is_pointcloud):
-        raise TypeError("error_proxy must be a GeoUtils raster or point cloud.")
+    # Input checks
+    raster_proxy = _get_raster_interface(error_proxy)
+    pointcloud_proxy = _get_pointcloud_interface(error_proxy) if raster_proxy is None else None
+    proxy = raster_proxy if raster_proxy is not None else pointcloud_proxy
+    if proxy is None:
+        raise TypeError("Argument 'error_proxy' must be a raster or point cloud.")
 
-    # Give predictors private output names so user names cannot conflict with cosample() columns
+    # We give predictors private names to avoid conflict with cosample() columns
     auxiliary: dict[str, Any] = {}
     auxiliary_at: dict[str, Literal["self"]] = {}
     output_names: dict[str, str] = {}
@@ -76,7 +83,7 @@ def _prepare_proxy_inputs(
         output_name = f"predictor_{index}"
         output_names[name] = output_name
         if isinstance(predictor, str):
-            if not is_pointcloud:
+            if pointcloud_proxy is None:
                 raise TypeError("Raster magnitude predictors cannot be column names.")
             auxiliary[output_name] = (error_proxy, predictor)
         else:
@@ -87,39 +94,74 @@ def _prepare_proxy_inputs(
                 auxiliary[output_name] = predictor.to_numpy() if hasattr(predictor, "to_numpy") else predictor
                 auxiliary_at[output_name] = "self"
 
-    # Align predictors and masks once, retaining only locations that are finite in every input
-    sampled = error_proxy.cosample(
-        error_proxy,
+    # Align the two measurements and predictors on finite, masked locations
+    sampled = proxy.cosample(
+        error_proxy if other is None else other,
         auxiliary=auxiliary or None,
         auxiliary_at=auxiliary_at or None,
         at="self",
         mask=mask,
+        mp_config=mp_config,
     )
+    if other is not None:
+        scale = np.sqrt(2.0) if other_precision == "same" else 1.0
+        sampled = _difference_proxy(sampled, scale, mp_config, temporary_files)
+    return sampled, output_names
 
-    if is_raster:
-        # Read the first band as the proxy and the remaining named bands as aligned predictors
-        sampled_values = np.ma.asarray(sampled.data, dtype=float).filled(np.nan)
-        values = np.asarray(sampled_values[0], dtype=float)
-        predictor_arrays = {
-            name: np.asarray(sampled_values[index + 2], dtype=float) for index, name in enumerate(output_names)
-        }
-        eligible = np.isfinite(values)
-        prepared_proxy = error_proxy.copy(new_array=np.ma.masked_invalid(values))
-    else:
-        # Point cosampling removes invalid rows while preserving their order for later pair indexes
-        point_sample = cast("PointCloudBase", sampled)
-        dataframe = point_sample.ds.compute() if hasattr(point_sample.ds, "compute") else point_sample.ds
-        values = dataframe["self"].to_numpy(dtype=float)
-        predictor_arrays = {
-            name: dataframe[output_name].to_numpy(dtype=float) for name, output_name in output_names.items()
-        }
-        eligible = np.ones(len(values), dtype=bool)
-        prepared_proxy = sampled.copy(new_array=values)
 
-    # Require enough common observations for a spread estimate or a spatial pair
-    if np.count_nonzero(eligible) < 2:
-        raise ValueError("At least two finite error proxy observations are required.")
-    return prepared_proxy, values, predictor_arrays, eligible
+def _difference_raster_values(data: Any, scale: float) -> Any:
+    """Replace the first raster band with the scaled difference of the first two bands."""
+
+    if is_dask_array(data):
+        import dask.array as da
+
+        difference = (data[0:1] - data[1:2]) / scale
+        return da.concatenate((difference, data[1:]), axis=0)
+
+    values = np.ma.asarray(data, dtype=float).copy()
+    values[0] = (values[0] - values[1]) / scale
+    return values
+
+
+def _difference_raster_tile(tile: RasterBase, scale: float) -> Raster:
+    """Calculate the difference band in one multiprocessing raster tile."""
+
+    from geoutils.raster import Raster
+
+    values = _difference_raster_values(tile.data, scale)
+    return Raster.from_array(values, tile.transform, tile.crs, nodata=tile.nodata, area_or_point=tile.area_or_point)
+
+
+def _difference_point_partition(dataframe: Any, scale: float) -> Any:
+    """Calculate the scaled difference within one point partition."""
+
+    result = dataframe.copy()
+    result["self"] = (dataframe["self"] - dataframe["other"]) / scale
+    return result
+
+
+def _difference_proxy(sampled: Any, scale: float, mp_config: MultiprocConfig | None, files: ExitStack) -> Any:
+    """Build a difference proxy while preserving eager, Dask, or multiprocessing execution."""
+
+    raster = _get_raster_interface(sampled)
+    if raster is not None:
+        if mp_config is not None:
+            from geoutils.multiproc import map_overlap
+
+            output_config = files.enter_context(mp_config.temporary())
+            return map_overlap(_difference_raster_tile, sampled, output_config, scale)
+
+        values = _difference_raster_values(sampled.data, scale)
+        if isinstance(sampled, xr.DataArray):
+            return sampled.copy(data=values, deep=False)
+        return sampled.copy(new_array=values)
+
+    points = _get_pointcloud_interface(sampled)
+    dataframe = points.ds
+    if hasattr(dataframe, "map_partitions"):
+        result = dataframe.map_partitions(_difference_point_partition, scale, meta=dataframe._meta)
+        return points._cast_pointcloud_output(result)
+    return points._cast_pointcloud_output(_difference_point_partition(dataframe, scale))
 
 
 ################################
@@ -127,97 +169,251 @@ def _prepare_proxy_inputs(
 ################################
 
 
+@dataclass(frozen=True)
+class _FiniteSpread:
+    """Ensure the user statistical spread estimator respects nodata/NaNs."""
+
+    estimator: Callable[[Any], Any]
+
+    @property
+    def __name__(self) -> str:
+        return getattr(self.estimator, "__name__", "spread")
+
+    def __call__(self, values: Any) -> float:
+        finite = np.ma.asarray(values, dtype=float).filled(np.nan)
+        return float(self.estimator(finite[np.isfinite(finite)]))
+
+
 def _estimate_total_magnitude(
-    values: NDArray[np.floating[Any]],
-    predictors: Mapping[str, NDArray[np.floating[Any]]],
-    eligible: NDArray[np.bool_],
+    sampled: Any,
+    output_names: Mapping[str, str],
     *,
     bins: Mapping[str, Any] | int | None,
     spread_estimator: Callable[[Any], Any],
     min_count: int,
-    outlier_factor: float | None,
     subsample: int | float,
     random_state: int | np.random.Generator | None,
-) -> tuple[ErrorMagnitude, Mapping[str, Any]]:
-    """Estimate a constant or variable total magnitude and its scaling diagnostics."""
+    mp_config: MultiprocConfig | None,
+) -> tuple[ErrorMagnitude, int]:
+    """
+    Estimate error magnitude from the statistical spread of error proxy array, optionally grouped by predictors.
 
-    # Validate statistical controls before invoking grouped reductions
+    This step supports Dask/MP through ``stats()``.
+    """
+
+    # Check inputs
     if min_count < 1:
         raise ValueError("min_count must be a positive integer.")
-    if outlier_factor is not None and (not np.isfinite(outlier_factor) or outlier_factor <= 0):
-        raise ValueError("outlier_factor must be finite and positive, or None.")
 
-    # Remove a constant bias before relating the remaining error spread to predictors
-    statistic = getattr(spread_estimator, "__name__", "spread")
-    centered = values - float(np.nanmedian(values[eligible]))
+    # Select the same finite errors for every statistics backend
+    finite_spread = _FiniteSpread(spread_estimator)
+    statistic = finite_spread.__name__
+    raster_interface = _get_raster_interface(sampled)
+    raster = raster_interface is not None
+    sampled_interface = raster_interface if raster else _get_pointcloud_interface(sampled)
+    value_selector = 1 if raster else "self"
+    valid_count = int(sampled_interface.stats("validcount", values=value_selector, mp_config=mp_config))
+    if valid_count < 2:
+        raise ValueError("At least two finite error proxy observations are required.")
+    grouped_subsample = 1 if isinstance(subsample, (int, np.integer)) and subsample >= valid_count else subsample
 
     # Use the direct spread when no variable magnitude was requested
-    if not predictors:
-        magnitude = float(spread_estimator(centered[eligible]))
-        if not np.isfinite(magnitude) or magnitude <= 0:
+    if not output_names:
+        constant_spread = float(
+            sampled_interface.stats(
+                finite_spread,
+                values=value_selector,
+                subsample=grouped_subsample,
+                random_state=random_state,
+                mp_config=mp_config,
+            )
+        )
+        if not np.isfinite(constant_spread) or constant_spread <= 0:
             raise ValueError("spread_estimator returned a non-positive or non-finite magnitude.")
-        return ErrorMagnitude.constant(magnitude), {"center": float(np.nanmedian(values[eligible])), "scale": 1.0}
+        return ErrorMagnitude.constant(constant_spread), valid_count
 
     # Expand one shared bin count or the default across all named predictors
     if bins is None:
-        grouped_bins = dict.fromkeys(predictors, 10)
+        grouped_bins = dict.fromkeys(output_names, 10)
     elif isinstance(bins, (int, np.integer)):
-        grouped_bins = {name: int(bins) for name in predictors}
+        grouped_bins = {name: int(bins) for name in output_names}
     else:
         grouped_bins = dict(bins)
-    if set(grouped_bins) != set(predictors):
+    if set(grouped_bins) != set(output_names):
         raise ValueError("bins must define every magnitude predictor and no unknown names.")
 
-    # Avoid asking the shared sampler for more observations than this fitted population contains
-    grouped_subsample = subsample
-    if isinstance(subsample, (int, np.integer)) and subsample >= np.count_nonzero(eligible):
-        grouped_subsample = 1
-
     # Keep unobserved predictor combinations so the fitted magnitude grid can fill their gaps
-    table = gu.stats.stats(
-        {"error": centered},
-        [spread_estimator],
-        by=dict(predictors),
+    predictor_specs = {
+        name: (sampled, index + 3 if raster else output_name)
+        for index, (name, output_name) in enumerate(output_names.items())
+    }
+    table = sampled_interface.stats(
+        finite_spread,
+        values={"error": value_selector},
+        by=predictor_specs,
         bins=grouped_bins,
-        mask=eligible,
         subsample=grouped_subsample,
         random_state=random_state,
         observed=False,
+        mp_config=mp_config,
     )
 
-    # Build an initial interpolation model using reliable group statistics
-    unscaled = ErrorMagnitude(
+    # Construct variable ErrorMagnitude from grouped statistics
+    magnitude = ErrorMagnitude(
         kind="variable",
-        predictor_names=tuple(predictors),
+        predictor_names=tuple(output_names),
         grouped_statistics=table,
         statistic=statistic,
         min_count=min_count,
     )
 
-    # Correct interpolation bias through a second spread estimate on standardized errors
-    initial = np.asarray(unscaled.predict(predictors), dtype=float)
-    standardized = centered[eligible] / initial[eligible]
-    finite = np.isfinite(standardized)
-
-    # Exclude extreme standardized errors before estimating the final multiplicative correction
-    if outlier_factor is not None and np.any(finite):
-        standardized_center = float(np.nanmedian(standardized[finite]))
-        preliminary_spread = float(spread_estimator(standardized[finite]))
-        finite &= np.abs(standardized - standardized_center) <= outlier_factor * preliminary_spread
-
-    # Rescale the predicted magnitudes so the retained standardized errors have unit spread
-    scale = float(spread_estimator(standardized[finite]))
-    if not np.isfinite(scale) or scale <= 0:
-        raise ValueError("The second magnitude scaling returned a non-positive or non-finite value.")
-    return replace(unscaled, scale=scale), {
-        "center": float(np.nanmedian(values[eligible])),
-        "scale": scale,
-        "retained_for_scaling": int(np.count_nonzero(finite)),
-    }
+    return magnitude, valid_count
 
 
 #################################
-# 3/ COMPONENT INITIALIZATION
+# 3/ CORRELATION STANDARDIZATION
+#################################
+
+
+def _standardized_raster_values(
+    data: Any,
+    output_names: Mapping[str, str],
+    magnitude: ErrorMagnitude,
+) -> NDArrayNum:
+    """Divide all values in an error proxy raster tile by the estimated error magnitude."""
+
+    bands = np.ma.asarray(data, dtype=float).filled(np.nan)
+    values = np.asarray(bands[0], dtype=float)
+    predictors = {name: np.asarray(bands[index + 2], dtype=float) for index, name in enumerate(output_names)}
+    local_magnitude = np.asarray(magnitude.predict(predictors), dtype=float)
+    return np.divide(
+        values,
+        local_magnitude,
+        out=np.full(values.shape, np.nan, dtype=float),
+        where=np.isfinite(local_magnitude) & (local_magnitude > 0),
+    )
+
+
+def _wrapper_standardize_raster_multiproc(
+    tile: RasterBase,
+    output_names: Mapping[str, str],
+    magnitude: ErrorMagnitude,
+) -> Raster:
+    """Wrapper for standardizing a raster tile for MP."""
+
+    from geoutils.raster import Raster
+
+    values = _standardized_raster_values(tile.data, output_names, magnitude)
+    return Raster.from_array(values, tile.transform, tile.crs, nodata=np.nan, area_or_point=tile.area_or_point)
+
+
+def _standardized_point_values(
+    dataframe: Any,
+    output_names: Mapping[str, str],
+    magnitude: ErrorMagnitude,
+) -> Any:
+    """Divide all values in an error proxy point cloud by the estimated error magnitude."""
+
+    values = dataframe["self"].to_numpy(dtype=float)
+    predictors = {name: dataframe[column].to_numpy(dtype=float) for name, column in output_names.items()}
+    local_magnitude = np.asarray(magnitude.predict(predictors), dtype=float)
+    values = np.divide(
+        values,
+        local_magnitude,
+        out=np.full(values.shape, np.nan, dtype=float),
+        where=np.isfinite(local_magnitude) & (local_magnitude > 0),
+    )
+    result = dataframe["self"].copy()
+    result.iloc[:] = values
+    return result
+
+
+def _standardized_point_partition(
+    dataframe: Any,
+    output_names: Mapping[str, str],
+    magnitude: ErrorMagnitude,
+) -> Any:
+    """Replace the proxy column within one lazy point partition."""
+
+    result = dataframe.copy()
+    result["self"] = _standardized_point_values(dataframe, output_names, magnitude)
+    return result
+
+
+def _standardize_proxy(
+    sampled: Any,
+    output_names: Mapping[str, str],
+    magnitude: ErrorMagnitude,
+    mp_config: MultiprocConfig | None,
+    temporary_files: ExitStack,
+) -> Any:
+    """
+    Standardize the error proxy used to estimate spatial correlation by its error magnitude (i.e. divide by it).
+
+    This function calls some helpers above to support chunked behaviour with MP.
+    Multiprocessing writes raster tiles to a temporary file, while Dask preserves lazy raster blocks or point
+    partitions.
+    """
+
+    raster = _is_raster(sampled)
+    point_sample: Any = None if raster else _get_pointcloud_interface(sampled)
+
+    # Multiprocessing: write temporary raster or point file with standardized error proxy
+    if mp_config is not None:
+        if raster:
+            from geoutils.multiproc import map_overlap
+
+            output_config = temporary_files.enter_context(mp_config.temporary())
+            return map_overlap(_wrapper_standardize_raster_multiproc, sampled, output_config, output_names, magnitude)
+
+        # Point cosampling already selected eager rows; a Dask point input stays lazy
+        dataframe = point_sample.ds
+        if not hasattr(dataframe, "map_partitions"):
+            standardized_values = _standardized_point_values(dataframe, output_names, magnitude)
+            return point_sample.copy(new_array=standardized_values)
+
+    # Dask: lazy division of the raster blocks or point partitions until the variogram runs
+    if raster:
+        data = sampled.data
+        if is_dask_array(data):
+            import dask.array as da
+
+            # Each raster block needs all bands to predict its local magnitude
+            data = data.rechunk({0: data.shape[0]})
+            standardized = da.map_blocks(
+                _standardized_raster_values,
+                data,
+                output_names,
+                magnitude,
+                dtype=float,
+                chunks=data.chunks[1:],
+                drop_axis=0,
+            )
+            return sampled.isel(band=0).copy(data=standardized, deep=False)
+    else:
+        dataframe = point_sample.ds
+        if hasattr(dataframe, "map_partitions"):
+            standardized = dataframe.map_partitions(
+                _standardized_point_partition,
+                output_names,
+                magnitude,
+                meta=dataframe._meta,
+            )
+            return point_sample._cast_pointcloud_output(standardized)
+
+    # Eager: return a copy with standardized raster cells or point values
+    if raster:
+        values = _standardized_raster_values(data, output_names, magnitude)
+        if isinstance(sampled, xr.DataArray):
+            return sampled.isel(band=0).copy(data=values, deep=False)
+        return sampled.copy(new_array=np.ma.masked_invalid(values))
+
+    standardized_values = _standardized_point_values(dataframe, output_names, magnitude)
+    return point_sample.copy(new_array=standardized_values)
+
+
+#################################
+# 4/ COMPONENT CONFIGURATION
 #################################
 
 
@@ -226,9 +422,9 @@ def _normalize_component_configuration(
     *,
     has_predictors: bool,
 ) -> list[dict[str, Any]]:
-    """Validate ordered component specifications for the variogram estimator."""
+    """Normalized the component specifications for the variogram estimator."""
 
-    # Use the common DEM model when callers provide terrain or quality predictors
+    # We use the common local heterosc. + long homosc. component model when callers provide predictors
     if components is None:
         if has_predictors:
             components = {
@@ -240,7 +436,7 @@ def _normalize_component_configuration(
     if not components:
         raise ValueError("components must define at least one named error contribution.")
 
-    # Normalize accessible aliases while preserving declared short to long order
+    # We normalize possible aliases, and ensure correlation ranges are always ordered from short to long
     normalized: list[dict[str, Any]] = []
     variable_count = 0
     for name, configuration in components.items():
@@ -250,7 +446,7 @@ def _normalize_component_configuration(
         if unknown:
             raise ValueError(f"Unknown configuration for component {name!r}: {sorted(unknown)!r}.")
 
-        # Resolve magnitude aliases and require predictors for a variable component
+        # We check for different magnitude aliases and require predictors for a variable magnitude
         magnitude = configuration.get("magnitude", "constant")
         if magnitude == "variable":
             magnitude = "heteroscedastic"
@@ -261,13 +457,13 @@ def _normalize_component_configuration(
             if not has_predictors:
                 raise ValueError("A heteroscedastic component requires at least one magnitude predictor.")
 
-        # Keep independent errors distinct from components that require a named correlation model
+        # We keep "independent" (no correlation) errors distinct from components with a variogram model name
         correlation = configuration.get("correlation")
         if correlation is not None and not isinstance(correlation, str):
             raise TypeError("Estimated component correlation must be a variogram model name or None.")
         normalized.append({"name": name, "magnitude": magnitude, "correlation": correlation})
 
-    # Limit fitting to the component decomposition supported by the current variogram estimator
+    # For now, we only support one heteroscedastic component
     if variable_count > 1:
         raise NotImplementedError(
             "Variogram estimation currently supports at most one heteroscedastic component; "
@@ -276,16 +472,21 @@ def _normalize_component_configuration(
     return normalized
 
 
-def _initialize_components(
+#################################
+# 5/ FITTED ERROR COMPONENTS
+#################################
+
+
+def _build_error_components(
     configuration: list[dict[str, Any]],
     total_magnitude: ErrorMagnitude,
     fitted_variogram: Variogram,
 ) -> list[ErrorComponent]:
-    """Convert standardized partial sills into component magnitude and correlation models."""
+    """Build error components from a fitted variogram and the total error magnitude."""
 
-    # Separate fitted structured models from their optional shared independent nugget
+    # Match fitted correlation terms to the requested components
     if fitted_variogram.model is None:
-        raise ValueError("A fitted variogram is required to initialize error components.")
+        raise ValueError("A fitted variogram is required to build error components.")
     fitted_model = fitted_variogram.model
     structured_models = list(fitted_model.components) if fitted_model.model_name == "sum" else [fitted_model]
     correlated = [item for item in configuration if item["correlation"] is not None]
@@ -295,7 +496,7 @@ def _initialize_components(
     if len(independent) > 1:
         raise ValueError("Only one independent component can be identified from a shared variogram nugget.")
 
-    # Order fitted contributions by spatial range because component declarations follow short to long range
+    # Sort ranges with their sills; requested model forms follow short-to-long order
     if any(model.effective_range is None for model in structured_models):
         raise ValueError("Each fitted correlation model needs a finite effective range.")
     fitted_ranges = np.array([float(cast(float, model.effective_range)) for model in structured_models])
@@ -308,7 +509,7 @@ def _initialize_components(
     ordered_ranges = fitted_ranges[fitted_order]
     ordered_sills = np.array([float(model.partial_sill or 0.0) for model in structured_models])[fitted_order]
 
-    # Associate ordered parameters with declared model forms and retain the fitted nugget separately
+    # Assign each ordered term to a correlated component and the nugget to independent noise
     model_by_name: dict[str, VariogramModel | None] = {}
     sill_by_name: dict[str, float] = {}
     model_position = 0
@@ -323,26 +524,29 @@ def _initialize_components(
                 partial_sill=float(ordered_sills[model_position]),
             )
             model_position += 1
+
+            # Correlated components exclude the shared independent nugget
             model_by_name[item["name"]] = replace(model, nugget=0.0)
             sill_by_name[item["name"]] = float(model.partial_sill or 0.0)
 
-    # Normalize variance shares only after all structured and independent contributions are assigned
+    # Sum fitted variance assigned to the requested components
     total_sill = sum(sill_by_name.values())
     if total_sill <= 0:
         raise ValueError("The fitted variogram has no positive component variance.")
 
-    # Derive initial magnitudes from normalized variance fractions
+    # Scale the standardized sill shares by total error variance in the source units
     reference_variance = total_magnitude.reference_value**2
     initial_variance = {
         item["name"]: reference_variance * sill_by_name[item["name"]] / total_sill for item in configuration
     }
     variable = next((item for item in configuration if item["magnitude"] == "heteroscedastic"), None)
     if variable is not None:
+        # Constant components contribute the same variance at every predictor value
         fixed_variance = sum(
             initial_variance[item["name"]] for item in configuration if item["magnitude"] == "constant"
         )
 
-        # Reserve at least five percent of representative variance for the variable component
+        # Cap fixed variance so the variable component has at least five percent at the reference magnitude
         maximum_fixed = 0.95 * reference_variance
         if fixed_variance > maximum_fixed:
             factor = maximum_fixed / fixed_variance
@@ -353,10 +557,10 @@ def _initialize_components(
     else:
         fixed_variance = 0.0
 
-    # Build immutable public components while keeping their fitted fractions as diagnostics
+    # Build components and record their fitted sill shares before any fixed-variance cap
     output: list[ErrorComponent] = []
     for item in configuration:
-        # Allocate the remaining local variance to the variable component and fixed scalars to the others
+        # The variable model subtracts fixed variance locally; constant magnitudes use square roots
         magnitude = (
             replace(total_magnitude, variance_offset=fixed_variance)
             if item["magnitude"] == "heteroscedastic"
@@ -376,348 +580,8 @@ def _initialize_components(
     return output
 
 
-#################################
-# 4/ CONDITIONAL PAIR REFINEMENT
-#################################
-
-
-def _refine_components_from_pairs(
-    error_proxy: RasterBase | PointCloudBase,
-    components: list[ErrorComponent],
-    total_magnitude: ErrorMagnitude,
-    predictor_arrays: Mapping[str, NDArray[np.floating[Any]]],
-    *,
-    mask: Any | None,
-    estimator: str | Callable[[Any], float],
-    n_pairs: int,
-    pair_sampling: Literal["loglag", "random_xy"],
-    n_lags: int,
-    min_lag: float | None,
-    max_lag: float | None,
-    pair_sampling_kwargs: Mapping[str, Any],
-    random_state: int | np.random.Generator | None,
-) -> tuple[list[ErrorComponent], Mapping[str, Any]]:
-    """
-    Refine component magnitudes and ranges using error pairs grouped by distance and local magnitude.
-
-    A variogram of standardized errors initializes the components, but different magnitudes at the two
-    locations change the pair semivariance. Compare robust observed semivariances with the full component
-    equation in groups of similar distance and magnitude. Constrain variance shares and ranges during fitting,
-    then retain grouped diagnostics while discarding the sampled pair arrays.
-    """
-
-    # Draw one temporary pair sample and recover total magnitudes at both endpoints
-    pairs = error_proxy.pairsample(
-        n_pairs=n_pairs,
-        sampling=pair_sampling,
-        min_distance=min_lag,
-        max_distance=max_lag,
-        mask=mask,
-        random_state=random_state,
-        **pair_sampling_kwargs,
-    )
-
-    # Extract pair distances, original values and indexes needed to evaluate both local magnitudes
-    distances = np.asarray(pairs["distance"], dtype=float)
-    endpoint_values = np.asarray(pairs["value"], dtype=float)
-    total_array = np.asarray(total_magnitude.predict(predictor_arrays), dtype=float)
-    indexes = np.asarray(pairs["index"], dtype=np.int64)
-
-    # Expand constant magnitudes directly because they do not occupy the source support
-    if total_array.ndim == 0:
-        endpoint_total = np.full(endpoint_values.shape, float(total_array), dtype=float)
-    elif pairs.attrs.get("source") == "raster":
-        rows = np.asarray(pairs["row"], dtype=np.int64)
-        columns = np.asarray(pairs["column"], dtype=np.int64)
-        endpoint_total = total_array[rows, columns]
-    else:
-        endpoint_total = total_array[indexes]
-
-    # Remove any interpolation failure before constructing robust conditional bins
-    differences = np.abs(endpoint_values[:, 0] - endpoint_values[:, 1])
-    valid = (
-        np.isfinite(distances)
-        & (distances > 0)
-        & np.isfinite(differences)
-        & np.all(np.isfinite(endpoint_total), axis=1)
-        & np.all(endpoint_total > 0, axis=1)
-    )
-
-    # Apply the same finite-pair selection to distances, differences and endpoint magnitudes
-    distances = distances[valid]
-    differences = differences[valid]
-    endpoint_total = endpoint_total[valid]
-    if len(distances) < 20:
-        return components, {"success": False, "message": "Too few finite pairs for conditional refinement."}
-
-    # Resolve the same robust estimator used for the ordinary empirical variogram
-    if callable(estimator):
-        estimator_function = estimator
-    else:
-        skgstat = import_optional("skgstat", package_name="scikit-gstat")
-        if not hasattr(skgstat.estimators, estimator):
-            raise ValueError(f"Unknown SciKit-GStat variogram estimator {estimator!r}.")
-        estimator_function = getattr(skgstat.estimators, estimator)
-
-    # Cross distance classes with total magnitude quantiles to expose component dependence
-    distance_edges = np.geomspace(float(np.min(distances)), float(np.max(distances)), n_lags + 1)
-    mean_magnitude = np.mean(endpoint_total, axis=1)
-
-    # Use magnitude quantiles to distinguish variable error spread within each distance class
-    magnitude_edges = np.unique(np.quantile(mean_magnitude, np.linspace(0, 1, 5)))
-    if len(magnitude_edges) < 2:
-        magnitude_edges = np.array([mean_magnitude.min(), np.nextafter(mean_magnitude.max(), np.inf)])
-    else:
-        magnitude_edges[-1] = np.nextafter(magnitude_edges[-1], np.inf)
-
-    # Assign pairs to the crossed distance and magnitude groups, including boundary values
-    distance_group = np.clip(np.digitize(distances, distance_edges, right=True) - 1, 0, n_lags - 1)
-    magnitude_group = np.clip(
-        np.digitize(mean_magnitude, magnitude_edges, right=False) - 1,
-        0,
-        len(magnitude_edges) - 2,
-    )
-    group_ids = distance_group * (len(magnitude_edges) - 1) + magnitude_group
-
-    # Retain groups large enough for stable robust empirical estimates
-    unique_groups, inverse, counts = np.unique(group_ids, return_inverse=True, return_counts=True)
-    retained_groups = unique_groups[counts >= 20]
-    selected = np.isin(group_ids, retained_groups)
-    distances = distances[selected]
-    differences = differences[selected]
-    endpoint_total = endpoint_total[selected]
-    group_ids = group_ids[selected]
-    unique_groups, inverse, counts = np.unique(group_ids, return_inverse=True, return_counts=True)
-    if len(unique_groups) < max(3, len(components)):
-        return components, {"success": False, "message": "Too few populated conditional groups for refinement."}
-
-    # Estimate robust semivariance independently in each populated conditional group
-    observed = np.array(
-        [float(estimator_function(differences[inverse == index])) for index in range(len(unique_groups))]
-    )
-
-    # Parameterize fixed variances so one variable component always remains physically valid
-    variable_index = next(
-        (
-            index
-            for index, component in enumerate(components)
-            if cast(ErrorMagnitude, component.magnitude).kind == "variable"
-        ),
-        None,
-    )
-
-    # Separate constant variance parameters from the component carrying spatially varying magnitude
-    fixed_indexes = [index for index in range(len(components)) if index != variable_index]
-    initial_variances = np.array(
-        [cast(ErrorMagnitude, component.magnitude).reference_value ** 2 for component in components]
-    )
-    magnitude_parameters: list[float] = []
-    if variable_index is not None and fixed_indexes:
-        # Bound fixed variance using a low local-variance quantile so it cannot exhaust the variable component
-        fixed_limit = float(np.quantile(endpoint_total.ravel() ** 2, 0.02))
-        shares = initial_variances[fixed_indexes] / fixed_limit
-        if np.sum(shares) >= 0.95:
-            shares *= 0.95 / np.sum(shares)
-
-        # Express variance shares as log ratios with a positive reserve for variable error
-        reserve = max(1 - float(np.sum(shares)), 1e-6)
-        magnitude_parameters = np.log(np.maximum(shares, 1e-12) / reserve).tolist()
-    elif variable_index is None and len(components) > 1:
-        fixed_limit = total_magnitude.reference_value**2
-
-        # Use relative shares that sum to the known total variance when every component is constant
-        shares = initial_variances / np.sum(initial_variances)
-        magnitude_parameters = np.log(np.maximum(shares[:-1], 1e-12) / max(shares[-1], 1e-12)).tolist()
-    else:
-        fixed_limit = total_magnitude.reference_value**2
-
-    # Constrain declared correlation ranges to ordered nonoverlapping intervals
-    correlated_indexes = [index for index, component in enumerate(components) if component.correlation is not None]
-    initial_ranges_list: list[float] = []
-    for index in correlated_indexes:
-        correlation = cast(VariogramModel, components[index].correlation)
-        if correlation.effective_range is None:
-            raise AssertionError("A fitted component correlation must define an effective range.")
-        initial_ranges_list.append(correlation.effective_range)
-    initial_ranges = np.asarray(initial_ranges_list, dtype=float)
-    minimum_distance = float(np.min(distances))
-    maximum_distance = float(np.max(distances))
-    if maximum_distance <= minimum_distance:
-        return components, {"success": False, "message": "Sampled pairs contain no usable distance range."}
-
-    # Keep initial ranges inside the observed domain and restore separation if a fit collapsed them
-    initial_ranges = np.clip(initial_ranges, minimum_distance, maximum_distance)
-    if len(initial_ranges) > 1 and np.any(np.diff(initial_ranges) <= np.finfo(float).eps * initial_ranges[:-1]):
-        initial_ranges = np.geomspace(minimum_distance, maximum_distance, len(initial_ranges) + 2)[1:-1]
-
-    # Separate neighboring fitted ranges at geometric midpoints and optimize in log-distance units
-    boundaries = [minimum_distance]
-    boundaries.extend(np.sqrt(initial_ranges[:-1] * initial_ranges[1:]).tolist())
-    boundaries.append(maximum_distance)
-    range_lower = np.log(np.maximum(np.asarray(boundaries[:-1]), np.finfo(float).eps))
-    range_upper = np.log(np.maximum(np.asarray(boundaries[1:]), np.asarray(boundaries[:-1]) * 1.0001))
-    initial_log_ranges = np.log(np.clip(initial_ranges, np.exp(range_lower), np.exp(range_upper)))
-
-    # Decode constrained magnitudes and ranges from one compact optimizer vector
-    n_magnitude_parameters = len(magnitude_parameters)
-
-    def decode(parameters: NDArray[np.floating[Any]]) -> tuple[NDArray[np.floating[Any]], NDArray[np.floating[Any]]]:
-        """Convert bounded optimizer parameters to physically valid component variances and positive ranges."""
-
-        # Start with the initial variance allocation and replace only fitted shares
-        component_variances = initial_variances.copy()
-        if variable_index is not None and fixed_indexes:
-            # Map log ratios to non-negative fixed variances below the available local variance limit
-            exponentials = np.exp(np.clip(parameters[:n_magnitude_parameters], -30, 30))
-            fixed_variances = fixed_limit * exponentials / (1 + np.sum(exponentials))
-            component_variances[fixed_indexes] = fixed_variances
-            component_variances[variable_index] = max(
-                total_magnitude.reference_value**2 - float(np.sum(fixed_variances)),
-                0.0,
-            )
-
-        # Normalize constant component shares to preserve their total variance
-        elif variable_index is None and len(components) > 1:
-            logits = np.r_[parameters[:n_magnitude_parameters], 0.0]
-            exponentials = np.exp(logits - np.max(logits))
-            component_variances = fixed_limit * exponentials / np.sum(exponentials)
-
-        # Recover positive spatial ranges from the remaining log-distance parameters
-        ranges = np.exp(parameters[n_magnitude_parameters:])
-        return component_variances, ranges
-
-    # Evaluate the exact endpoint magnitude equation before reducing predictions by group
-    skgstat = import_optional("skgstat", package_name="scikit-gstat")
-
-    def objective(parameters: NDArray[np.floating[Any]]) -> NDArray[np.floating[Any]]:
-        """Compare grouped observations with the predicted pair semivariance of the complete component model."""
-
-        # Recover the trial component model before evaluating its covariance at sampled pairs
-        component_variances, ranges = decode(parameters)
-        fixed_variance_sum = float(np.sum(component_variances[fixed_indexes]))
-        predicted_pairs = np.zeros(len(distances), dtype=float)
-        range_position = 0
-
-        # Evaluate separate local magnitudes at both pair locations for the variable component
-        for index, component in enumerate(components):
-            if index == variable_index:
-                first_magnitude = np.sqrt(np.maximum(endpoint_total[:, 0] ** 2 - fixed_variance_sum, 0.0))
-                second_magnitude = np.sqrt(np.maximum(endpoint_total[:, 1] ** 2 - fixed_variance_sum, 0.0))
-            else:
-                first_magnitude = second_magnitude = np.sqrt(component_variances[index])
-
-            # Evaluate unit sill correlation or the independent error limit
-            if component.correlation is None:
-                correlation = np.zeros(len(distances), dtype=float)
-            else:
-                model = cast(VariogramModel, component.correlation)
-                arguments = [ranges[range_position], 1.0]
-                range_position += 1
-                if model.model_name == "matern":
-                    arguments.append(float(cast(float, model.smoothness)))
-                elif model.model_name == "stable":
-                    arguments.append(float(cast(float, model.shape)))
-                correlation = 1 - np.asarray(
-                    getattr(skgstat.models, model.model_name)(distances, *arguments),
-                    dtype=float,
-                )
-
-            # Use half the difference variance: (sigma1**2 + sigma2**2 - 2*sigma1*sigma2*rho) / 2
-            predicted_pairs += 0.5 * (
-                first_magnitude**2 + second_magnitude**2 - 2 * first_magnitude * second_magnitude * correlation
-            )
-
-        # Compare robust observations with mean model predictions using count and scale weights
-        predicted = np.bincount(inverse, weights=predicted_pairs, minlength=len(unique_groups)) / counts
-        reference = max(float(np.nanmedian(observed)), float(np.finfo(float).eps))
-        scale = np.maximum(np.abs(observed), 0.1 * reference)
-        weight = np.sqrt(counts / np.median(counts))
-        return weight * (predicted - observed) / scale
-
-    # Fit all variance shares and ranges together with bounded robust least squares
-    initial_parameters = np.r_[magnitude_parameters, initial_log_ranges]
-    lower = np.r_[np.full(n_magnitude_parameters, -30.0), range_lower]
-    upper = np.r_[np.full(n_magnitude_parameters, 30.0), range_upper]
-    result = least_squares(
-        objective,
-        initial_parameters,
-        bounds=(lower, upper),
-        loss="soft_l1",
-        f_scale=1.0,
-    )
-    fitted_variances, fitted_ranges = decode(result.x)
-
-    # Retain one compact record per conditional bin for decomposition diagnostics
-    residual = objective(result.x)
-    reference = max(float(np.nanmedian(observed)), float(np.finfo(float).eps))
-    residual_scale = np.maximum(np.abs(observed), 0.1 * reference)
-    residual_weight = np.sqrt(counts / np.median(counts))
-    predicted = observed + residual * residual_scale / residual_weight
-
-    # Store observed and fitted semivariances with their mean distance, magnitude and pair count
-    conditional_statistics = pd.DataFrame(
-        {
-            "lag": np.bincount(inverse, weights=distances, minlength=len(unique_groups)) / counts,
-            "mean_magnitude": (
-                np.bincount(inverse, weights=np.mean(endpoint_total, axis=1), minlength=len(unique_groups)) / counts
-            ),
-            "semivariance": observed,
-            "fitted_semivariance": predicted,
-            "count": counts,
-        },
-        index=pd.Index(unique_groups, name="conditional_group"),
-    )
-
-    # Estimate local parameter uncertainty from the final robust least squares Jacobian
-    parameter_error = np.full(len(result.x), np.nan)
-    if result.jac.shape[0] > result.jac.shape[1]:
-        information = result.jac.T @ result.jac
-        if np.linalg.matrix_rank(information) == information.shape[0]:
-            residual_variance = 2 * result.cost / (result.jac.shape[0] - result.jac.shape[1])
-            parameter_error = np.sqrt(np.diag(np.linalg.inv(information) * residual_variance))
-
-    # Transfer optimized contributions back to immutable public component objects
-    fixed_variance_sum = float(np.sum(fitted_variances[fixed_indexes]))
-    refined: list[ErrorComponent] = []
-    range_position = 0
-    for index, component in enumerate(components):
-        magnitude = (
-            replace(total_magnitude, variance_offset=fixed_variance_sum)
-            if index == variable_index
-            else ErrorMagnitude.constant(np.sqrt(fitted_variances[index]))
-        )
-
-        # Update only correlated components with their fitted range, preserving independent components
-        fitted_correlation = cast(VariogramModel | None, component.correlation)
-        if fitted_correlation is not None:
-            fitted_correlation = replace(fitted_correlation, effective_range=float(fitted_ranges[range_position]))
-            range_position += 1
-        refined.append(
-            ErrorComponent(
-                component.name,
-                magnitude,
-                fitted_correlation,
-                metadata={**component.metadata, "refined": True},
-            )
-        )
-
-    # Retain optimizer convergence and grouped evidence without keeping raw observation pairs
-    diagnostics = {
-        "success": bool(result.success),
-        "message": str(result.message),
-        "cost": float(result.cost),
-        "optimality": float(result.optimality),
-        "conditional_group_count": int(len(unique_groups)),
-        "pair_count": int(len(distances)),
-        "parameters": result.x.tolist(),
-        "parameter_error": parameter_error.tolist(),
-        "conditional_statistics": conditional_statistics,
-    }
-    return refined, diagnostics
-
-
 ################################
-# 5/ COMPLETE ESTIMATION WORKFLOW
+# 6/ CORRELATION ESTIMATION
 ################################
 
 
@@ -751,17 +615,13 @@ def _representative_variogram(
     return replace(empirical, model=model, fitted_semivariance=model.variogram(empirical.lags))
 
 
-def _estimate_error_structure(
-    error_proxy: RasterBase | PointCloudBase,
+def _estimate_correlation(
+    standardized_proxy: Any,
+    configuration: list[dict[str, Any]],
+    total_magnitude: ErrorMagnitude,
+    valid_count: int,
     *,
-    predictors: Mapping[str, Any] | None,
-    components: Mapping[str, Mapping[str, Any]] | None,
-    mask: Any | None,
-    bins: Mapping[str, Any] | int | None,
-    spread_estimator: Callable[[Any], Any],
-    min_count: int,
-    outlier_factor: float | None,
-    subsample_magnitude: int | float,
+    correlated_models: list[str],
     variogram_estimator: str | Callable[[Any], float],
     n_pairs: int,
     pair_sampling: Literal["loglag", "random_xy"],
@@ -769,88 +629,28 @@ def _estimate_error_structure(
     min_lag: float | None,
     max_lag: float | None,
     n_runs: int,
-    fit_method: Literal["variogram"],
-    refine: bool,
     fit_kwargs: Mapping[str, Any] | None,
-    pair_sampling_kwargs: Mapping[str, Any] | None,
-    random_state: int | np.random.Generator | None,
-) -> ErrorStructure:
-    """Implement :meth:`ErrorStructure.estimate` without retaining spatial pairs."""
+    pair_options: Mapping[str, Any],
+    mp_config: MultiprocConfig | None,
+    random_state: int,
+) -> tuple[list[ErrorComponent], Variogram, list[str]]:
+    """Fit spatial correlation on error proxy using ``variogram()``."""
 
-    # Normalize configuration and aligned source arrays before statistical estimation
-    if fit_method != "variogram":
-        raise NotImplementedError("Only fit_method='variogram' is currently implemented.")
-    predictor_mapping = {} if predictors is None else dict(predictors)
-    configuration = _normalize_component_configuration(components, has_predictors=bool(predictor_mapping))
-    prepared_proxy, values, predictor_arrays, eligible = _prepare_proxy_inputs(error_proxy, predictor_mapping, mask)
-
-    # Draw separate seeds so magnitude estimation, variography and refinement are reproducible stages
-    rng = random_state if isinstance(random_state, np.random.Generator) else np.random.default_rng(random_state)
-    magnitude_seed = int(rng.integers(0, np.iinfo(np.int32).max))
-    variogram_seed = int(rng.integers(0, np.iinfo(np.int32).max))
-    refinement_seed = int(rng.integers(0, np.iinfo(np.int32).max))
-
-    # Estimate the total local magnitude before separating component variances
-    total_magnitude, magnitude_diagnostics = _estimate_total_magnitude(
-        values,
-        predictor_arrays,
-        eligible,
-        bins=bins,
-        spread_estimator=spread_estimator,
-        min_count=min_count,
-        outlier_factor=outlier_factor,
-        subsample=subsample_magnitude,
-        random_state=magnitude_seed,
-    )
-
-    # Finish after magnitude estimation when only independent errors were requested
-    correlated_models = [item["correlation"] for item in configuration if item["correlation"] is not None]
-    if not correlated_models:
-        if len(configuration) != 1:
-            raise ValueError("Only one independent component can be estimated without a spatial correlation model.")
-        independent_component = ErrorComponent(configuration[0]["name"], total_magnitude, None)
-        return ErrorStructure(
-            [independent_component],
-            fit_diagnostics={
-                "magnitude": dict(magnitude_diagnostics),
-                "refinement": {"success": None, "message": "No correlated component was requested."},
-                "identifiability": [],
-            },
-            metadata={
-                "fit_method": fit_method,
-                "spread_estimator": getattr(spread_estimator, "__name__", "callable"),
-                "variogram_estimator": None,
-                "component_configuration": configuration,
-                "total_magnitude": total_magnitude,
-                "n_runs": 0,
-            },
-        )
-
-    # Center before local standardization so varying magnitudes do not turn a constant bias into spatial structure
-    total_array = np.asarray(total_magnitude.predict(predictor_arrays), dtype=float)
-    standardized_values = np.full(values.shape, np.nan, dtype=float)
-    np.divide(
-        values - float(magnitude_diagnostics["center"]),
-        total_array,
-        out=standardized_values,
-        where=np.isfinite(total_array) & (total_array > 0),
-    )
-    standardized_proxy = prepared_proxy.copy(new_array=standardized_values)
-
-    # Fit the requested nested models through GeoUtils lightweight variography
+    # We fit the requested (potentially nested) models through GeoUtils lightweight variography
     fit_options = dict(fit_kwargs or {})
     independent_count = sum(item["correlation"] is None for item in configuration)
     if independent_count:
         fit_options.setdefault("use_nugget", True)
 
-    # Limit pair requests to the finite population so GeoUtils does not need to reduce them with a warning
-    pair_options = dict(pair_sampling_kwargs or {})
-    finite_count = int(np.count_nonzero(eligible & np.isfinite(total_array) & (total_array > 0)))
-    available_pairs = finite_count * (finite_count - 1) // 2
+    # We know valid count ahead, so we can limit it to avoid raising the underlying warning
+    available_pairs = valid_count * (valid_count - 1) // 2
     effective_n_pairs = min(n_pairs, available_pairs)
 
-    # Estimate the standardized variogram on the same selected error population
-    empirical = standardized_proxy.variogram(
+    # Estimate the standardized variogram with internal Dask/MP support
+    standardized_interface = _get_raster_interface(standardized_proxy)
+    if standardized_interface is None:
+        standardized_interface = _get_pointcloud_interface(standardized_proxy)
+    empirical = standardized_interface.variogram(
         n_pairs=effective_n_pairs,
         sampling=pair_sampling,
         estimator=variogram_estimator,
@@ -860,37 +660,19 @@ def _estimate_error_structure(
         n_runs=n_runs,
         model=correlated_models,
         fit_kwargs=fit_options,
-        random_state=variogram_seed,
+        random_state=random_state,
         mask=None,
+        mp_config=mp_config,
         **pair_options,
     )
-    initialized = _initialize_components(configuration, total_magnitude, empirical)
 
-    # Refine range and magnitude separation against conditional raw error pairs
-    if refine:
-        fitted_components, refinement_diagnostics = _refine_components_from_pairs(
-            prepared_proxy,
-            initialized,
-            total_magnitude,
-            predictor_arrays,
-            mask=None,
-            estimator=variogram_estimator,
-            n_pairs=effective_n_pairs,
-            pair_sampling=pair_sampling,
-            n_lags=n_lags,
-            min_lag=min_lag,
-            max_lag=max_lag,
-            pair_sampling_kwargs=pair_options,
-            random_state=refinement_seed,
-        )
-    else:
-        fitted_components = initialized
-        refinement_diagnostics = {"success": None, "message": "Conditional refinement was disabled."}
+    # Now, we inspect output components to warn if something looks fishy
+    fitted_components = _build_error_components(configuration, total_magnitude, empirical)
 
-    # Update displayed variogram predictions to match the final component decomposition
+    # Update variogram predictions to match the final component decomposition
     empirical = _representative_variogram(empirical, fitted_components)
 
-    # Report weak range separation and domain limited long range estimates explicitly
+    # We report weak range separation and domain limited long range estimates explicitly
     messages: list[str] = []
     ranges = [
         float(cast(float, cast(VariogramModel, component.correlation).effective_range))
@@ -900,20 +682,166 @@ def _estimate_error_structure(
     if len(ranges) > 1 and any(second / first < 1.5 for first, second in zip(ranges[:-1], ranges[1:])):
         messages.append("Some fitted correlation ranges overlap and their contributions may be weakly identified.")
 
-    # Flag a long correlation range near the sampled extent, where it may be difficult to distinguish from trend
+    # Finally, we flag a long correlation range near the sampled extent, where it may be difficult to distinguish from
+    # an actual trend in the data
     sampled_maximum = float(empirical.attrs.get("max_distance", np.nanmax(empirical.lags)))
     if ranges and np.isfinite(sampled_maximum) and ranges[-1] >= 0.9 * sampled_maximum:
         messages.append("The longest correlation range approaches the sampled extent and may represent a trend.")
     for message in messages:
         warnings.warn(message, UserWarning)
 
-    # Return only compact grouped statistics, variogram bins and optimizer summaries
+    return fitted_components, empirical, messages
+
+
+################################
+# 7/ COMPLETE ESTIMATION WORKFLOW
+################################
+
+
+def _estimate_error_structure(
+    error_proxy: RasterBase | PointCloudBase,
+    *,
+    other: Any | None,
+    other_precision: Literal["same", "negligible"],
+    predictors: Mapping[str, Any] | None,
+    components: Mapping[str, Mapping[str, Any]] | None,
+    mask: Any | None,
+    bins: Mapping[str, Any] | int | None,
+    spread_estimator: Callable[[Any], Any],
+    min_count: int,
+    subsample_magnitude: int | float,
+    variogram_estimator: str | Callable[[Any], float],
+    n_pairs: int,
+    pair_sampling: Literal["loglag", "random_xy"],
+    n_lags: int,
+    min_lag: float | None,
+    max_lag: float | None,
+    n_runs: int,
+    fit_method: Literal["variogram"],
+    fit_kwargs: Mapping[str, Any] | None,
+    pair_sampling_kwargs: Mapping[str, Any] | None,
+    mp_config: MultiprocConfig | None,
+    random_state: int | np.random.Generator | None,
+) -> ErrorStructure:
+    """
+    Parent function to estimate error structure.
+
+    See ErrorStructure.estimate() for parameter descriptions.
+
+    This function supports in-memory, Dask and MP execution through support in ``cosample()``, ``stats()`` and
+    ``variogram()``.
+
+    This error structure estimation was refactored from that of xDEM (which was method-based, and thus more
+    volatile with inputs and outputs).
+
+    Internal logic, in order:
+    - _prepare_proxy_inputs() aligns the data using ``cosample()``,
+    - _estimate_total_magnitude() estimates the variable magnitude using ``stats()``,
+    - _standardize_proxy() performs the standardization of variable errors using a short Dask/MP implementation,
+    - _estimate_correlation() estimates the correlation using ``variogram`` on the standardized error proxy.
+    """
+
+    # 1/ Check inputs
+    # For now, we only support fitting error covariance with a variogram
+    if fit_method != "variogram":
+        raise NotImplementedError("Only fit_method='variogram' is currently implemented.")
+    if other_precision not in ("same", "negligible"):
+        raise ValueError("other_precision must be 'same' or 'negligible'.")
+
+    # Normalize component configuration and run ``cosample`` on error proxy
+    predictor_mapping = {} if predictors is None else dict(predictors)
+    configuration = _normalize_component_configuration(components, has_predictors=bool(predictor_mapping))
+
+    # Draw separate RNG seeds so magnitude estimation and variography are both reproducible
+    rng = random_state if isinstance(random_state, np.random.Generator) else np.random.default_rng(random_state)
+    magnitude_seed = int(rng.integers(0, np.iinfo(np.int32).max))
+    variogram_seed = int(rng.integers(0, np.iinfo(np.int32).max))
+
+    pair_options = dict(pair_sampling_kwargs or {})
+    if "mp_config" in pair_options:
+        if mp_config is not None:
+            raise ValueError("Pass mp_config either directly or in pair_sampling_kwargs, not both.")
+        mp_config = pair_options.pop("mp_config")
+
+    # 2/ Run cosampling, grouped stats and variogram estimation (with direct Dask/MP support for large datasets)
+
+    # We keep MP intermediate files available until statistics and variogram are done
+    with ExitStack() as temporary_files:
+        cosample_config = temporary_files.enter_context(mp_config.temporary()) if mp_config is not None else None
+        sampled, output_names = _prepare_proxy_inputs(
+            error_proxy, predictor_mapping, mask, cosample_config, other, other_precision, temporary_files
+        )
+
+        # 2.1/ Estimate error magnitude from the error proxy
+        total_magnitude, valid_count = _estimate_total_magnitude(
+            sampled,
+            output_names,
+            bins=bins,
+            spread_estimator=spread_estimator,
+            min_count=min_count,
+            subsample=subsample_magnitude,
+            random_state=magnitude_seed,
+            mp_config=mp_config,
+        )
+
+        # If no correlation analysis was requested (assumed independent), return error structure immediately
+        # Otherwise, we continue with correlation estimation below
+        correlated_models = [item["correlation"] for item in configuration if item["correlation"] is not None]
+        if not correlated_models:
+            if len(configuration) != 1:
+                raise ValueError("Only one independent component can be estimated without a spatial correlation model.")
+            independent_component = ErrorComponent(configuration[0]["name"], total_magnitude, None)
+            return ErrorStructure(
+                [independent_component],
+                fit_diagnostics={
+                    "magnitude": {"valid_count": valid_count},
+                    "identifiability": [],
+                },
+                metadata={
+                    "fit_method": fit_method,
+                    "spread_estimator": getattr(spread_estimator, "__name__", "callable"),
+                    "variogram_estimator": None,
+                    "component_configuration": configuration,
+                    "total_magnitude": total_magnitude,
+                    "n_runs": 0,
+                },
+            )
+
+        # # 2.2/ We standardize variable errors before estimating spatial correlation
+        standardized_proxy = _standardize_proxy(
+            sampled,
+            output_names,
+            total_magnitude,
+            mp_config,
+            temporary_files,
+        )
+
+        # 2.3/ Fit the requested nested models through GeoUtils lightweight variography
+        fitted_components, empirical, messages = _estimate_correlation(
+            standardized_proxy,
+            configuration,
+            total_magnitude,
+            valid_count,
+            correlated_models=correlated_models,
+            variogram_estimator=variogram_estimator,
+            n_pairs=n_pairs,
+            pair_sampling=pair_sampling,
+            n_lags=n_lags,
+            min_lag=min_lag,
+            max_lag=max_lag,
+            n_runs=n_runs,
+            fit_kwargs=fit_kwargs,
+            pair_options=pair_options,
+            mp_config=mp_config,
+            random_state=variogram_seed,
+        )
+
+    # 3/ Construct final error structure
     return ErrorStructure(
         fitted_components,
         empirical_variogram=empirical,
         fit_diagnostics={
-            "magnitude": dict(magnitude_diagnostics),
-            "refinement": dict(refinement_diagnostics),
+            "magnitude": {"valid_count": valid_count},
             "identifiability": messages,
         },
         metadata={
@@ -937,9 +865,9 @@ def _refit_error_structure(
     correlation_models: str | Sequence[str] | None,
     fit_kwargs: Mapping[str, Any] | None,
 ) -> ErrorStructure:
-    """Refit retained variogram bins and update every dependent component contribution."""
+    """Refit variogram model only for the ErrorStructure."""
 
-    # Require compact fit metadata needed to rebuild component magnitudes consistently
+    # Check we still have the empirical variogram + component metadata required to refit
     if structure.empirical_variogram is None:
         raise ValueError("Refitting requires a retained empirical variogram.")
     configuration_value = structure.metadata.get("component_configuration")
@@ -948,7 +876,7 @@ def _refit_error_structure(
         raise ValueError("This error structure does not retain the estimation metadata required for refitting.")
     configuration = [dict(item) for item in configuration_value]
 
-    # Default to current models while preserving the declared short to long component order
+    # We default to current models, and ensure short to long correlation order
     correlated = [component for component in structure.components.values() if component.correlation is not None]
     models: str | list[str]
     if correlation_models is None:
@@ -958,7 +886,7 @@ def _refit_error_structure(
     else:
         models = list(correlation_models)
 
-    # Require the replacement models to describe the same number of correlated components
+    # The replacement model should describe the same number of correlated components
     expected = sum(item["correlation"] is not None for item in configuration)
     model_count = len(models.split("+")) if isinstance(models, str) else len(models)
     if model_count != expected:
@@ -976,73 +904,12 @@ def _refit_error_structure(
         models.split("+") if isinstance(models, str) else models,
     ):
         item["correlation"] = model_name
-    components = _initialize_components(configuration, total_magnitude, empirical)
+    components = _build_error_components(configuration, total_magnitude, empirical)
     empirical = _representative_variogram(empirical, components)
 
-    # Mark the absence of conditional pair refinement rather than retaining stale diagnostics
-    diagnostics = {
-        **structure.fit_diagnostics,
-        "refinement": {
-            "success": None,
-            "message": "Refit from empirical bins; call estimate again for conditional pair refinement.",
-        },
-    }
     return ErrorStructure(
         components,
         empirical_variogram=empirical,
-        fit_diagnostics=diagnostics,
+        fit_diagnostics=dict(structure.fit_diagnostics),
         metadata={**structure.metadata, "component_configuration": configuration},
     )
-
-
-############################
-# 6/ ERROR STANDARDIZATION
-############################
-
-
-def two_step_standardization(
-    dvalues: NDArrayf,
-    list_var: list[NDArrayf],
-    unscaled_error_fun: Callable[[tuple[ArrayLike, ...]], NDArrayf],
-    spread_statistic: Callable[[NDArrayf], np.floating[Any]] = gu.stats.nmad,
-    fac_spread_outliers: float | None = 7,
-) -> tuple[NDArrayf, Callable[[tuple[ArrayLike, ...]], NDArrayf]]:
-    """
-    Standardize the proxy differenced values using the modelled heteroscedasticity, re-scaled to the spread statistic,
-    and generate the final standardization function.
-
-    :param dvalues: Proxy values as array of size (N,) (i.e., differenced values where signal should be zero such as
-        elevation differences on stable terrain)
-    :param list_var: List of size (L) of explanatory variables array of size (N,)
-    :param unscaled_error_fun: Function of the spread with explanatory variables not yet re-scaled
-    :param spread_statistic: Statistic to be computed for the spread; defaults to nmad
-    :param fac_spread_outliers: Exclude outliers outside this spread after standardizing; pass None to ignore.
-
-    :return: Standardized values array of size (N,), Function to destandardize
-    """
-
-    # Standardize a first time with the function
-    zscores = dvalues / unscaled_error_fun(tuple(list_var))
-
-    # Set large outliers that might have been created by the standardization to NaN, central tendency should already be
-    # around zero so only need to take the absolute value
-    if fac_spread_outliers is not None:
-        if np.ma.isMaskedArray(zscores):
-            zscores[np.abs(zscores) > fac_spread_outliers * spread_statistic(zscores)] = np.ma.masked
-        else:
-            zscores[np.abs(zscores) > fac_spread_outliers * spread_statistic(zscores)] = np.nan
-
-    # Re-compute the spread statistic to re-standardize, as dividing by the function will not necessarily bring the
-    # z-score exactly equal to one due to approximations of N-D binning, interpolating and due to the outlier filtering
-    zscore_nmad = spread_statistic(zscores)
-
-    # Re-standardize
-    zscores /= zscore_nmad
-
-    # Define the exact function for de-standardization to pass as output
-    def error_fun(*args: tuple[ArrayLike, ...]) -> NDArrayf:
-        """Evaluate the corrected magnitude after calibrating the standardized error spread."""
-
-        return zscore_nmad * unscaled_error_fun(*args)
-
-    return zscores, error_fun

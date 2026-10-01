@@ -11,10 +11,8 @@ from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
-import pandas as pd
 import pytest
 import rasterio as rio
-import scipy
 from affine import Affine
 
 import geoutils as gu
@@ -1069,22 +1067,6 @@ class TestRasterReducerReferences:
 
 class TestReducerUncertainty:
     """Test module for reducer values and uncertainty from observation errors and covered areas."""
-
-    def test_filter__observation_error_weights(self) -> None:
-        """Checks that a mean filter uses observation variances when the reducer has an error model."""
-
-        # Increasing variances make high values contribute less than their neighbors
-        values = np.arange(64, dtype=float).reshape(8, 8)
-        variances = 1 + values
-        raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 8, 1, 1), crs=32631)
-        operator = Mean(neighborhood=GridNeighbours(size=3))
-        operator.error_structure = gu.ErrorStructure.from_gaussian(pd.DataFrame(np.diag(variances.ravel())))
-
-        # Independent errors give inverse-variance weights within each partial edge window
-        result = raster.filter(operator).to_nanarray()
-        numerator = scipy.ndimage.convolve(values / variances, np.ones((3, 3)), mode="constant", cval=0)
-        denominator = scipy.ndimage.convolve(1 / variances, np.ones((3, 3)), mode="constant", cval=0)
-        np.testing.assert_allclose(result, numerator / denominator, rtol=1e-14, atol=1e-14)
 
     def test_reduce_points__fractional_area_and_uncertainty(self) -> None:
         """Checks that a shifted one-cell window uses covered areas for its mean and uncertainty."""

@@ -83,24 +83,6 @@ class TestAnalyticalOperatorPropagation:
         assert summary.covariance is not None
         np.testing.assert_allclose(summary.covariance, expected_covariance)
 
-    def test_propagate__uses_gaussian_error_mean_and_covariance(self) -> None:
-        """Checks that an affine operator propagates finite Gaussian mean and covariance exactly."""
-
-        # Labelled Gaussian errors with nonzero means and covariance
-        labels = pd.Index(["a", "b"])
-        covariance = pd.DataFrame([[4.0, 1.0], [1.0, 9.0]], index=labels, columns=labels)
-        error_mean = pd.Series([1.0, -2.0], index=labels)
-        structure = gu.ErrorStructure.from_gaussian(covariance, mean=error_mean)
-        data = _local([10, 20], ["a", "b"], [[0, 0], [1, 0]])
-
-        # Check generalized least-squares weights and propagated moments
-        summary = gu.uncertainty.propagate(Mean(), data, structure, return_covariance=True)
-        weights = np.array([8 / 11, 3 / 11])
-        assert summary.estimate == pytest.approx(weights @ data.values)
-        assert summary.mean == pytest.approx(weights @ (data.values + error_mean))
-        assert summary.variance == pytest.approx(weights @ covariance @ weights)
-        assert summary.quantile(0.5).iloc[0] == pytest.approx(summary.mean)
-
     def test_propagate__aligns_grouped_magnitudes_by_source_id(self) -> None:
         """Checks that named predictors assign each source its own grouped error magnitude before averaging."""
 
@@ -300,16 +282,14 @@ class TestNumericalOperatorPropagation:
     def test_propagate__masked_source_stays_invalid_in_numerical_draws(self) -> None:
         """Checks that a masked finite value is excluded from source errors and every simulated reduction."""
 
-        # Masked finite value (first source only in error model)
+        # Masked finite value (only first source enters draws)
         values = np.ma.array([2.0, 100.0], mask=[False, True])
         data = LocalData(
             values=values,
             valid=np.ones(2, dtype=bool),
             source_ids=np.asarray(["used", "masked"]),
         )
-        labels = pd.Index(["used"])
-        zero_covariance = pd.DataFrame([[0.0]], index=labels, columns=labels)
-        errors = gu.ErrorStructure.from_gaussian(zero_covariance)
+        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 0)])
 
         # Check identical draws with zero error (square of unmasked value)
         summary = gu.uncertainty.propagate(
@@ -416,18 +396,15 @@ class TestPropagationSummary:
     def test_propagate__numerical_result_keeps_initial_model(self) -> None:
         """Checks that numerical output moments stay in the result while the source model stays unchanged."""
 
-        # Fixed errors: mean shift (1 - 2) / 2, zero variance
-        labels = pd.Index(["a", "b"])
-        covariance = pd.DataFrame(np.zeros((2, 2)), index=labels, columns=labels)
-        mean = pd.Series([1.0, -2.0], index=labels)
-        structure = gu.ErrorStructure.from_gaussian(covariance, mean=mean)
+        # Zero-mean, zero-variance errors leave source values unchanged
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 0)])
         data = LocalData(values=np.array([10.0, 20.0]), valid=np.ones(2, dtype=bool), source_ids=np.array(["a", "b"]))
 
-        # Check shifted output mean and original source model
+        # Check output moments and original source model
         summary = gu.uncertainty.propagate(Mean(), data, structure, method="numerical", n_samples=4)
         assert summary.error_structure is structure
         assert summary.estimate == pytest.approx(15)
-        assert summary.mean == pytest.approx(14.5)
+        assert summary.mean == pytest.approx(15)
         assert summary.std == pytest.approx(0)
         assert not hasattr(summary, "to_error_structure")
 
@@ -634,8 +611,7 @@ class TestCallablePropagation:
 
         # Independent named inputs for repeated-use calculation
         labels = pd.Index(["a", "b"])
-        covariance = pd.DataFrame(np.eye(2), index=labels, columns=labels)
-        structure = gu.ErrorStructure.from_gaussian(covariance)
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
         source = pd.Series([10.0, 20.0], index=labels)
 
         # Calculate difference/sum from same source draw

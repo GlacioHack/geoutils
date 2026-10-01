@@ -14,20 +14,25 @@ import geoutils as gu
 from geoutils.stats.variography import VariogramModel
 
 
-class TestRandomFieldSpatialSupport:
-    """Test module for random fields returned as rasters and point clouds."""
+class TestRandomField:
+    """
+    Test module for random fields.
 
-    def test_generate_random_field__keeps_raster_support_and_mask(self) -> None:
-        """Checks that generated fields have the same shape, coordinates, and missing cells as the raster."""
+    Tests for chunked backends (Dask/MP) are further below in TestRandomFieldChunked,
+    while errors/warnings raised are in TestRandomFieldErrors.
+    """
 
-        # Small raster with missing cell to check output mask
+    def test_generate_random_field__match_raster(self) -> None:
+        """Checks that random fields have the same shape, coordinates, and nodata as the input raster."""
+
+        # We create a synthetic raster and error structure
         mask = np.zeros((2, 3), dtype=bool)
         mask[0, 1] = True
         values = np.ma.masked_array(np.ones((2, 3)), mask=mask)
         raster = gu.Raster.from_array(values, transform=from_origin(10, 20, 2, 2), crs=32606)
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
 
-        # Compare values, grid and mask across all three APIs
+        # Check equal shapes/coords/nodata through all three APIs
         first = gu.uncertainty.random_field(structure, like=raster, random_state=5)
         second = structure.generate_random_field(raster, random_state=5)
         method_result = raster.random_field(structure, random_state=5)
@@ -37,48 +42,33 @@ class TestRandomFieldSpatialSupport:
         np.testing.assert_array_equal(first.data, second.data)
         np.testing.assert_array_equal(first.data, method_result.data)
 
-    def test_random_field__point_method_keeps_coordinates(self) -> None:
-        """Checks that PointCloud.random_field() replaces values without moving observation coordinates."""
+    def test_random_field__match_point(self) -> None:
+        """Checks that random_field has the same corrds as input point cloud."""
 
-        # Irregular points with independent unit errors
+        # A synthetic point cloud and error structure
         points = gu.PointCloud.from_xyz([0, 2, 1, 4], [1, 0, 3, 2], [10, 11, 12, 13], crs=32631)
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
 
-        # Compare point coordinates and values with function output
+        # Check they match
         result = points.random_field(structure, random_state=8)
         expected = gu.uncertainty.random_field(structure, like=points, random_state=8)
         np.testing.assert_array_equal(result.geometry.x, points.geometry.x)
         np.testing.assert_array_equal(result.geometry.y, points.geometry.y)
         np.testing.assert_array_equal(result.data, expected.data)
 
-    def test_random_field__point_method_uses_index_as_source_identity(self) -> None:
-        """Checks that a labelled Gaussian field binds to point identities rather than row positions."""
-
-        # Named points with fixed errors in reversed label order
-        points = gu.PointCloud.from_xyz([0, 1], [0, 1], [10, 20], crs=32631)
-        points.ds.index = pd.Index(["left", "right"])
-        labels = pd.Index(["right", "left"])
-        covariance = pd.DataFrame(np.zeros((2, 2)), index=labels, columns=labels)
-        mean = pd.Series([7.0, 3.0], index=labels)
-        structure = gu.ErrorStructure.from_gaussian(covariance, mean=mean)
-
-        # Check errors matched by label, returned in point order
-        result = points.random_field(structure, random_state=4)
-        np.testing.assert_array_equal(result.data, [3.0, 7.0])
-
     def test_random_field__duplicate_point_labels_use_row_identity(self) -> None:
         """Checks that duplicate point labels still draw independent errors for each observation."""
 
-        # Duplicate table labels cannot identify the two Gaussian source errors
+        # Duplicate table labels cannot identify the two source errors
         points = gu.PointCloud.from_xyz([0, 1], [0, 1], [10, 20], crs=32631)
         points.ds.index = pd.Index(["same", "same"])
-        labels = pd.Index([0, 1])
-        covariance = pd.DataFrame(np.zeros((2, 2)), index=labels, columns=labels)
-        structure = gu.ErrorStructure.from_gaussian(covariance, mean=pd.Series([2.0, 3.0], index=labels))
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
 
-        # Row numbers distinguish the fixed error of each point
+        # Row numbers distinguish the independent error of each point
         result = points.random_field(structure, random_state=4)
-        np.testing.assert_array_equal(result.data, [2, 3])
+        expected = structure.generate_random_field(source_ids=np.arange(2), random_state=4)
+        np.testing.assert_array_equal(result.data, expected)
+        assert result.data[0] != result.data[1]
 
     def test_random_field__raster_predictors_scale_error_by_location(self) -> None:
         """Checks that a raster predictor gives each pixel its own interpolated error magnitude."""
@@ -213,7 +203,7 @@ class TestRandomFieldChunked:
     def test_random_field__raster_chunk_invariance(self) -> None:
         """Checks that changing raster chunks does not change independent or correlated field realizations."""
 
-        # Independent + Gaussian components on chunked grid
+        # Independent + correlated components on chunked grid
         raster = gu.Raster.from_array(
             np.ones((6, 7)),
             transform=from_origin(0, 6, 2, 2),
@@ -230,7 +220,7 @@ class TestRandomFieldChunked:
         assert hasattr(lazy.data, "compute")
         assert lazy.data.chunks == ((4, 2), (3, 3, 1))
 
-        # Compare computed Dask field with eager result across chunk boundaries
+        # Compare exact equality of Dask field with eager result across chunk boundaries
         np.testing.assert_array_equal(np.asarray(lazy.compute()), expected.to_nanarray())
 
     @pytest.mark.skipif(find_spec("gstools") is None, reason="Requires GSTools")
@@ -307,19 +297,15 @@ class TestRandomFieldErrors:
             raster.random_field(structure, predictors={"slope": [0.0, 1.0]})
 
     def test_random_field__error_chunked_support(self) -> None:
-        """Checks that chunked fields require a raster, component errors, and the GSTools backend."""
+        """Checks that chunked fields require a raster and the GSTools backend."""
 
-        # Two points and a 2 x 2 raster for the three unsupported chunked combinations
+        # Two points and a 2 x 2 raster for unsupported chunked combinations
         points = gu.PointCloud.from_xyz([0, 1], [0, 1], [10, 20], crs=32631)
         raster = gu.Raster.from_array(np.ones((2, 2)), transform=from_origin(0, 2, 1, 1), crs=32606)
         component = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
-        labels = pd.Index(range(4))
-        gaussian = gu.ErrorStructure.from_gaussian(pd.DataFrame(np.eye(4), index=labels, columns=labels))
 
         # Check each requirement after binding the source error model
         with pytest.raises(ValueError, match="require a raster"):
             gu.uncertainty.random_field(component, like=points, chunksizes=(1, 1))
-        with pytest.raises(ValueError, match="require a component"):
-            raster.random_field(gaussian, chunksizes=(1, 1))
         with pytest.raises(ValueError, match="require the GSTools backend"):
             raster.random_field(component, chunksizes=(1, 1), backend="gpytorch")

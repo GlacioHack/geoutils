@@ -79,6 +79,12 @@ def assert_output_equal(output_pc: Any, output_ds: Any, use_allclose: bool = Fal
     elif isinstance(output_pc, pd.DataFrame):
         assert_frame_equal(output_pc, output_ds)
 
+    # For fitted error structures
+    elif isinstance(output_pc, gu.ErrorStructure):
+        assert isinstance(output_ds, gu.ErrorStructure)
+        assert output_pc.components == output_ds.components
+        assert output_pc.empirical_variogram == output_ds.empirical_variogram
+
     # For lightweight variogram records
     elif isinstance(output_pc, gu.Variogram):
         assert isinstance(output_ds, gu.Variogram)
@@ -151,6 +157,15 @@ class TestClassVsAccessorConsistency:
         ("subsample", {"subsample": 2, "random_state": 42}),
         ("cosample", {"other": "self", "subsample": 2, "random_state": 42}),
         (
+            "estimate_error_structure",
+            {
+                "other": PointCloud(ds.assign(b1=[0.0, 2.0, 1.0, 5.0]), data_column="b1"),
+                "other_precision": "negligible",
+                "components": {"measurement": {"magnitude": "constant", "correlation": None}},
+                "spread_estimator": np.std,
+            },
+        ),
+        (
             "pairsample",
             {"n_pairs": 4, "min_distance": 0.5, "max_distance": 2, "strategy": "kdtree", "random_state": 42},
         ),
@@ -209,9 +224,13 @@ class TestClassVsAccessorConsistency:
 
         args_pc = kwargs.copy()
         args_ds = kwargs.copy()
-        if args_pc.get("other") == "self":
+        if isinstance(args_pc.get("other"), str) and args_pc["other"] == "self":
             args_pc["other"] = pc
             args_ds["other"] = ds
+        elif isinstance(args_pc.get("other"), PointCloud):
+            other_ds = args_pc["other"].ds.copy()
+            other_ds.pc.set_data_column("b1")
+            args_ds["other"] = other_ds
         if args_pc.get("pc") == "self":
             args_pc["pc"] = pc
             args_ds["pc"] = ds

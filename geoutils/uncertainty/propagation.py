@@ -260,7 +260,6 @@ def _analytical_propagation(
         if row is None:
             continue
         indexes, weights = row
-        mean[position] += float(weights @ bound.error_mean[indexes])
 
         # For a weighted sum, each pair contributes weight_i × covariance_ij × weight_j to the variance
         covariance = bound.covariance_block(indexes, indexes)
@@ -526,7 +525,7 @@ def _propagate_callable(
     if (return_covariance or return_samples or quantiles) and selection.empty:
         raise ValueError("Select outputs with at when requesting covariance, samples or quantiles.")
 
-    # A spatial model draws one complete field; finite Gaussian arrays use their stored observation labels
+    # Draw one complete field for spatial data, or an aligned vector for arrays and series
     if isinstance(data, (RasterBase, PointCloudBase)):
 
         def draw_error(generator: np.random.Generator) -> Any:
@@ -840,12 +839,6 @@ def propagate(
 ############################################
 
 # Results from carrying source uncertainty through a calculation.
-
-
-def _as_output(values: NDArray[np.float64], *, scalar: bool) -> float | NDArray[np.float64]:
-    """Return a scalar when the uncertainty calculation received one LocalData object."""
-
-    return float(values[0]) if scalar else values.copy()
 
 
 def _numeric_values(value: Any) -> NDArray[np.float64]:
