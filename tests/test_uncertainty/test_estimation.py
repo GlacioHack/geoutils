@@ -316,6 +316,7 @@ class TestErrorStructureEstimationChunked:
         # Fit in memory before splitting both measured and reference inputs
         expected = source.estimate_error_structure(other, **options)
         if backend == "dask" and kind == "raster":
+            pytest.importorskip("dask")
             chunked_source = source.to_xarray().chunk({"x": 4, "y": 3})
             chunked_other = other.to_xarray().chunk({"x": 4, "y": 3})
             mp_config = None

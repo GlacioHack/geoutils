@@ -825,7 +825,7 @@ class TestPairSampleErrors:
         """Checks an error is raised when a Dask point mask has a different CRS or row order."""
 
         # We create lazy source and boolean mask with different partition sizes
-        import dask
+        dask = pytest.importorskip("dask")
 
         dgpd = pytest.importorskip("dask_geopandas")
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor

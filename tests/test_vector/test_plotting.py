@@ -28,7 +28,7 @@ class TestPlot:
         vector = gu.Vector(dataframe)
 
         # Draw the figure before comparing the final map and colorbar positions
-        ax, colorbar_ax = vector.plot(column="value", return_axes=True)
+        ax, colorbar_ax = vector.plot(column="value", ax="new", return_axes=True)
         assert colorbar_ax is not None
         ax.figure.canvas.draw()
         map_position = ax.get_position()
@@ -66,12 +66,12 @@ class TestPlot:
         vector = gu.Vector(dataframe)
 
         # Pass a CRS string through the same ref argument accepted by raster and point cloud plots
-        vector.plot(ref="EPSG:3857", add_cbar=False)
-        offsets = np.asarray(plt.gca().collections[0].get_offsets())
+        ax, _ = vector.plot(ref="EPSG:3857", add_cbar=False, ax="new", return_axes=True)
+        offsets = np.asarray(ax.collections[0].get_offsets())
 
         assert offsets[0, 0] > 100_000
         assert vector.crs.to_epsg() == 4326
-        plt.close()
+        plt.close(ax.figure)
 
     def test_plot__deprecated_ref_crs(self) -> None:
         """Checks that the old ref_crs argument warns and uses only the reference CRS."""
@@ -82,13 +82,12 @@ class TestPlot:
 
         # Check that ref_crs changes the CRS without using the reference bounds
         with pytest.warns(DeprecationWarning, match="Argument 'ref_crs' is deprecated"):
-            vector.plot(ref_crs=reference, add_cbar=False)
-        ax = plt.gca()
+            ax, _ = vector.plot(ref_crs=reference, add_cbar=False, ax="new", return_axes=True)
         offsets = np.asarray(ax.collections[0].get_offsets())
 
         assert offsets[0, 0] > 100_000
         assert ax.get_xlim()[0] > reference.bounds.right
-        plt.close()
+        plt.close(ax.figure)
 
         # Reject calls that pass both the old and new arguments
         with pytest.raises(TypeError, match="received both 'ref' and deprecated 'ref_crs'"):

@@ -1111,6 +1111,7 @@ class TestGridChunked:
         assert not output_file.exists()
 
 
+@pytest.mark.skipif(find_spec("dask") is None, reason="Requires Dask")
 class TestGriddingOperatorsChunked:
     """Test module for eager and lazy agreement when gridding operator neighborhoods."""
 
@@ -1173,6 +1174,7 @@ class TestGriddingOperatorsChunked:
         assert expected.raster_equal(multiproc_result, warn_failure_reason=True, strict_masked=False)
 
 
+@pytest.mark.skipif(find_spec("dask") is None, reason="Requires Dask")
 class TestPointNeighbourMethodsChunked:
     """Test module for lazy and multiprocessing grids with explicit neighborhoods and either numerical engine."""
 
@@ -1209,6 +1211,7 @@ class TestPointNeighbourMethodsChunked:
         np.testing.assert_array_equal(result.to_nanarray(), expected.to_nanarray())
 
 
+@pytest.mark.skipif(find_spec("dask") is None, reason="Requires Dask")
 @pytest.mark.skipif(find_spec("gstools") is None, reason="Requires GSTools")
 class TestKrigingPointsChunked:
     """Test module for lazy and multiprocessing kriging across chunk boundaries."""

@@ -702,6 +702,7 @@ class TestRasterFilterEdgeCases:
         assert np.all(np.isnan(filtered_max))
 
 
+@pytest.mark.skipif(find_spec("dask") is None, reason="Requires Dask")
 class TestFilterChunked:
     """Test module for filter values and loading behavior across Dask and multiprocessing tiles.
 

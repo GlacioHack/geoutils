@@ -1355,6 +1355,7 @@ class TestInterpPointsChunked:
         assert not dask_points.pc.is_loaded
 
 
+@pytest.mark.skipif(find_spec("dask") is None, reason="Requires Dask")
 class TestSamplingOperatorsChunked:
     """Test module for eager, Dask and multiprocessing agreement when sampling raster neighborhoods."""
 
@@ -1413,6 +1414,7 @@ class TestSamplingOperatorsChunked:
         np.testing.assert_array_equal(multiproc_result, expected)
 
 
+@pytest.mark.skipif(find_spec("dask") is None, reason="Requires Dask")
 class TestRegularInterpolationNeighboursChunked:
     """Test module for lazy raster sampling with explicit natural stencils at chunk boundaries."""
 
@@ -1444,6 +1446,7 @@ class TestRegularInterpolationNeighboursChunked:
             np.testing.assert_array_equal(computed, expected)
 
 
+@pytest.mark.skipif(find_spec("dask") is None, reason="Requires Dask")
 class TestReductionChunked:
     """Test module for reducer windows, callable reductions and lazy point output across Dask/MP chunks.
 
@@ -1578,6 +1581,7 @@ class TestReductionChunked:
                 np.testing.assert_array_equal(computed.index, points.index)
 
 
+@pytest.mark.skipif(find_spec("dask") is None, reason="Requires Dask")
 @pytest.mark.skipif(find_spec("gstools") is None, reason="Requires GSTools")
 class TestKrigingRasterChunked:
     """Test module for lazy and multiprocessing kriging across chunk boundaries."""

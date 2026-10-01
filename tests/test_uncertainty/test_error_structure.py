@@ -289,6 +289,8 @@ class TestErrorComponent:
     def test_init__uses_fitted_variogram_correlation(self) -> None:
         """Checks creation with variogram for correlation."""
 
+        pytest.importorskip("skgstat")
+
         # Synthetic variogram, with partial sill not normalized to 1
         model = VariogramModel("spherical", effective_range=10, partial_sill=4)
         variogram = gu.Variogram(
@@ -449,6 +451,7 @@ class TestErrorStructure:
     def test_plot_correlation(self) -> None:
         """Checks that correlation plot runs and contains the right axes/data."""
 
+        pytest.importorskip("skgstat")
         import_optional("matplotlib")
         import matplotlib.pyplot as plt
 

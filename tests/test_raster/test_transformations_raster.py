@@ -1394,6 +1394,7 @@ class TestReprojectionOperators:
         assert result.to_nanarray()[0, 0] == 2.0
 
 
+@pytest.mark.skipif(find_spec("dask") is None, reason="Requires Dask")
 class TestReprojectionOperatorsChunked:
     """
     Test module for eager and lazy agreement when reprojecting operator neighborhoods.

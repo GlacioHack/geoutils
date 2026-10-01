@@ -6,7 +6,6 @@ import pytest
 import rasterio as rio
 
 import geoutils as gu
-from geoutils._misc import import_optional
 from geoutils.operators.neighbours import GridNeighbours
 from geoutils.operators.reducer import Mean
 from geoutils.stats.variography import VariogramModel
@@ -23,7 +22,7 @@ class TestSpatialPropagation:
 
         # The first point is nearest in coordinate units, while the second is nearest in output-pixel units
         if engine == "numba":
-            import_optional("numba")
+            pytest.importorskip("numba")
         points = gu.PointCloud.from_xyz([0.0, 4.0], [1.0, 0.0], [10.0, 20.0], crs=32631)
         reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(0, 0, 10, 1), crs=32631)
         errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 0.5)])
@@ -40,6 +39,8 @@ class TestSpatialPropagation:
 
     def test_resample_at_points__correlated_fit(self) -> None:
         """Checks that a raster window uses correlated errors for both its mean and propagated variance."""
+
+        pytest.importorskip("skgstat")
 
         # Two-cell neighborhood with correlated errors (equal geometric weights)
         raster = gu.Raster.from_array(np.array([[10.0, 20.0]]), rio.transform.from_origin(0, 1, 1, 1), crs=32631)
@@ -79,6 +80,8 @@ class TestSpatialPropagation:
 
     def test_reproject__bilinear_keeps_geometric_coefficients(self) -> None:
         """Checks that bilinear interpolation uses geometric weights with spatially correlated errors."""
+
+        pytest.importorskip("skgstat")
 
         # Target halfway between four cells (bilinear weights 1/4 each)
         raster = gu.Raster.from_array(
@@ -139,7 +142,7 @@ class TestSpatialPropagationChunked:
         """Checks that chunked weighted reprojection stays lazy and agrees exactly with eager source IDs."""
 
         # Different values/errors per band to check source IDs across chunks
-        import_optional("dask")
+        pytest.importorskip("dask")
         from dask.callbacks import Callback
 
         values = np.arange(60.0, dtype=float).reshape(2, 5, 6)

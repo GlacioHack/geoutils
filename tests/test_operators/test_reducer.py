@@ -556,7 +556,7 @@ class TestFractionalReducerWindows:
     def test_filter__fractional_circle_area(self) -> None:
         """Checks that a fractional count measures circular area rather than the number of selected cells."""
 
-        # A five-cell circle has radius 2.5 pixels at the raster center
+        # A 5-pixel circle has radius 2.5 pixels
         raster = gu.Raster.from_array(np.ones((9, 9)), rio.transform.from_origin(0, 9, 1, 1), crs=32631)
         neighborhood = GridNeighbours(size=5, shape="circular")
         operator = Count(neighborhood=neighborhood)
@@ -564,8 +564,8 @@ class TestFractionalReducerWindows:
         touched = raster.filter(operator, coverage="all_touched").to_nanarray()[4, 4]
         count = raster.filter(operator).to_nanarray()[4, 4]
 
-        # The circular footprint uses a 512-sided polygon; compare its known area
-        # ExactExtract stores individual cell fractions in float32
+        # The circular footprint uses a 512-sided polygon (line densification)
+        # We compare its expected area
         expected_area = 512 * 2.5**2 * np.sin(2 * np.pi / 512) / 2
         assert area == pytest.approx(expected_area, rel=0, abs=1e-6)
         assert touched == 25
@@ -1325,4 +1325,4 @@ class TestFractionalReducerEdges:
         mean = raster.reduce_at_points(point, window=3, window_shape="circular", coverage="fractional", as_array=True)
         assert area == pytest.approx(2.25 * np.pi / 2, rel=1e-4)
         assert total == pytest.approx(8 * 2.25 * np.pi / 2, rel=1e-4)
-        assert mean == 8
+        assert mean == pytest.approx(8)

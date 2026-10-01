@@ -400,6 +400,7 @@ class TestVariogramConversion:
         """Checks that Variogram.plot() runs, and contains the right axis components."""
 
         pyplot = pytest.importorskip("matplotlib.pyplot")
+        pytest.importorskip("skgstat")
 
         # Synthetic variogram
         result = gu.Variogram(
