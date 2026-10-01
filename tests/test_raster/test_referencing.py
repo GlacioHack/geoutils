@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from affine import Affine
+from rasterio.transform import xy
 
 import geoutils as gu
 from geoutils import examples
@@ -208,3 +210,43 @@ class TestReferencing:
         xxgrid, yygrid = img.coords(grid=True, force_offset="ll")
         assert np.array_equal(xxgrid, np.repeat(xx0[np.newaxis, :], img.height, axis=0))
         assert np.array_equal(yygrid, np.flipud(np.repeat(yy0[:, np.newaxis], img.width, axis=1)))
+
+    @pytest.mark.parametrize("offset", ["ul", "center", "lr"])
+    def test_coords__rotated(self, offset: str) -> None:
+        """Checks that rotated raster coordinates match Rasterio at every pixel and offset."""
+
+        # We define a rotation in the transform
+        transform = Affine(2, 0.5, 10, 0.25, -2, 20)
+        raster = gu.Raster.from_array(np.ones((3, 4)), transform=transform, crs=32606)
+        rows, columns = np.indices(raster.shape)
+
+        # Then compare coordinate grids with Rasterio row/column transform
+        result_x, result_y = raster.coords(grid=True, force_offset=offset)
+        expected_x, expected_y = xy(transform, rows.ravel(), columns.ravel(), offset=offset)
+        np.testing.assert_array_equal(result_x, np.asarray(expected_x).reshape(raster.shape))
+        np.testing.assert_array_equal(result_y, np.asarray(expected_y).reshape(raster.shape))
+
+    def test_coords__rotated_point_interpretation(self) -> None:
+        """Checks that a rotated Point raster shifts coordinate grids by half a pixel."""
+
+        # Point interpretation shifts indexes before the affine transform
+        transform = Affine(2, 0.5, 10, 0.25, -2, 20)
+        raster = gu.Raster.from_array(np.ones((2, 3)), transform=transform, crs=32606, area_or_point="Point")
+        rows, columns = np.indices(raster.shape)
+
+        # Compare the shifted upper-left coordinates with Rasterio
+        result_x, result_y = raster.coords(grid=True, shift_area_or_point=True)
+        expected_x, expected_y = xy(transform, rows.ravel() - 0.5, columns.ravel() - 0.5, offset="ul")
+        np.testing.assert_array_equal(result_x, np.asarray(expected_x).reshape(raster.shape))
+        np.testing.assert_array_equal(result_y, np.asarray(expected_y).reshape(raster.shape))
+
+    def test_coords__error_rotated_without_grid(self) -> None:
+        """Checks an error is raised when rotated coordinates are requested as separate axes."""
+
+        # Rotation prevents X and Y from being represented by one axis each
+        transform = Affine(2, 0.5, 10, 0.25, -2, 20)
+        raster = gu.Raster.from_array(np.ones((2, 3)), transform=transform, crs=32606)
+
+        # Require the full coordinate grid instead of returning incomplete axes
+        with pytest.raises(ValueError, match="Rotated rasters require grid=True"):
+            raster.coords(grid=False, force_offset="center")

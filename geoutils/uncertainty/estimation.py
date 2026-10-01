@@ -94,7 +94,7 @@ def _prepare_proxy_inputs(
                 auxiliary[output_name] = predictor.to_numpy() if hasattr(predictor, "to_numpy") else predictor
                 auxiliary_at[output_name] = "self"
 
-    # Align the two measurements and predictors on finite, masked locations
+    # We sample the two datasets and predictors at valid locations inside the mask
     sampled = proxy.cosample(
         error_proxy if other is None else other,
         auxiliary=auxiliary or None,
@@ -123,7 +123,7 @@ def _difference_raster_values(data: Any, scale: float) -> Any:
     return values
 
 
-def _difference_raster_tile(tile: RasterBase, scale: float) -> Raster:
+def _wrapper_difference_raster_tile_multiproc(tile: RasterBase, scale: float) -> Raster:
     """Calculate the difference band in one multiprocessing raster tile."""
 
     from geoutils.raster import Raster
@@ -144,23 +144,51 @@ def _difference_proxy(sampled: Any, scale: float, mp_config: MultiprocConfig | N
     """Build a difference proxy while preserving eager, Dask, or multiprocessing execution."""
 
     raster = _get_raster_interface(sampled)
-    if raster is not None:
-        if mp_config is not None:
+    points = _get_pointcloud_interface(sampled) if raster is None else None
+
+    # Multiprocessing: raster tiles or ordered point chunks
+    if mp_config is not None:
+        if raster is not None:
             from geoutils.multiproc import map_overlap
 
             output_config = files.enter_context(mp_config.temporary())
-            return map_overlap(_difference_raster_tile, sampled, output_config, scale)
+            return map_overlap(_wrapper_difference_raster_tile_multiproc, sampled, output_config, scale)
 
+        import pandas as pd
+
+        from geoutils.multiproc.cluster import _map_bounded
+
+        assert points is not None
+        dataframe = points.ds
+        chunks = mp_config.chunks
+        if not isinstance(chunks, int):
+            raise ValueError("Point cloud multiprocessing requires an integer chunk size.")
+
+        # Difference point chunks in workers and restore their original row order
+        arguments = ((dataframe.iloc[start : start + chunks], scale) for start in range(0, len(dataframe), chunks))
+        result = pd.concat(part for _, part in _map_bounded(mp_config.cluster, _difference_point_partition, arguments))
+        return points._cast_pointcloud_output(result)
+
+    # Dask: preserve lazy raster blocks or point partitions
+    if raster is not None and is_dask_array(sampled.data):
+        values = _difference_raster_values(sampled.data, scale)
+        if isinstance(sampled, xr.DataArray):
+            return sampled.copy(data=values, deep=False)
+        return sampled.copy(new_array=values)
+    if points is not None and hasattr(points.ds, "map_partitions"):
+        dataframe = points.ds
+        result = dataframe.map_partitions(_difference_point_partition, scale, meta=dataframe._meta)
+        return points._cast_pointcloud_output(result)
+
+    # Eager: update a copy of the sampled raster or point cloud
+    if raster is not None:
         values = _difference_raster_values(sampled.data, scale)
         if isinstance(sampled, xr.DataArray):
             return sampled.copy(data=values, deep=False)
         return sampled.copy(new_array=values)
 
-    points = _get_pointcloud_interface(sampled)
+    assert points is not None
     dataframe = points.ds
-    if hasattr(dataframe, "map_partitions"):
-        result = dataframe.map_partitions(_difference_point_partition, scale, meta=dataframe._meta)
-        return points._cast_pointcloud_output(result)
     return points._cast_pointcloud_output(_difference_point_partition(dataframe, scale))
 
 

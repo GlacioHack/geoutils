@@ -21,4 +21,4 @@
 
 from geoutils.uncertainty.error_structure import ErrorComponent, ErrorMagnitude, ErrorStructure
 from geoutils.uncertainty.propagation import PropagationSummary, propagate
-from geoutils.uncertainty.random_field import RandomFieldBackend, random_field
+from geoutils.uncertainty.random_field import random_field

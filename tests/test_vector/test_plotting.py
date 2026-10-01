@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -38,6 +40,28 @@ class TestPlot:
         assert 0 <= gap < map_position.width / 2
         assert colorbar_position.height == pytest.approx(map_position.height)
         plt.close(ax.figure)
+
+    def test_plot__explicit_colorbar_axes_title(self) -> None:
+        """Checks that plot() uses supplied colorbar axes and title."""
+
+        # Synthetic point data
+        dataframe = gpd.GeoDataFrame({"value": [10, 20]}, geometry=gpd.points_from_xy([0, 1], [0, 1]), crs=32632)
+        vector = gu.Vector(dataframe)
+
+        # Axes to supply to the function
+        figure, (map_axes, colorbar_axes) = plt.subplots(1, 2)
+
+        # We plot and check the axes passed are used, as well as the colorbar
+        try:
+            returned_map, returned_colorbar = vector.plot(
+                column="value", ax=map_axes, cax=colorbar_axes, cbar_title="Value", return_axes=True
+            )
+
+            assert returned_map is map_axes
+            assert returned_colorbar is colorbar_axes
+            assert colorbar_axes.get_ylabel() == "Value"
+        finally:
+            plt.close(figure)
 
     def test_plot__match_reference_extent(self) -> None:
         """Checks that a reference object keeps its full extent after a larger vector overlay."""
@@ -92,3 +116,15 @@ class TestPlot:
         # Reject calls that pass both the old and new arguments
         with pytest.raises(TypeError, match="received both 'ref' and deprecated 'ref_crs'"):
             vector.plot(ref=3857, ref_crs=reference, add_cbar=False)
+
+    @pytest.mark.parametrize("axis", [0, "existing"])
+    def test_plot__error_invalid_axes(self, axis: Any) -> None:
+        """Checks an error is raised for invalid axes."""
+
+        # Synthetic point cloud
+        dataframe = gpd.GeoDataFrame(geometry=gpd.points_from_xy([0], [0]), crs=32632)
+        vector = gu.Vector(dataframe)
+
+        # Check for error with wrong axis
+        with pytest.raises(ValueError, match="ax must be a matplotlib.axes.Axes instance"):
+            vector.plot(ax=axis, add_cbar=False)

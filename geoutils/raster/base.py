@@ -1764,7 +1764,9 @@ class RasterBase(ABC):
         n_fields: int = 1,
         random_state: int | np.random.Generator | None = None,
         chunksizes: tuple[int, int] | None = None,
+        mp_config: MultiprocConfig | None = None,
         backend: Literal["gstools", "gpytorch"] = "gstools",
+        gpytorch_inducing_points: int | None = None,
     ) -> RasterType | list[RasterType]:
         """Generate one or more error fields across this raster.
 
@@ -1773,8 +1775,11 @@ class RasterBase(ABC):
         :param n_fields: Number of independent fields.
         :param random_state: Seed or generator used for reproducible fields.
         :param chunksizes: Optional lazy output chunk size. Every chunk uses the same seed for a component.
-        :param backend: Library used to draw correlated errors. GSTools supports regular grids and lazy chunks.
-        :returns: One raster when n_fields is one, otherwise a list of rasters.
+        :param mp_config: Worker, tile and output file settings for multiprocessing fields.
+        :param backend: Library used to draw correlated errors. Chunked GPyTorch fields use an inducing grid.
+        :param gpytorch_inducing_points: Target grid size for approximate GPyTorch fields; chunked fields default
+            to 256, while eager fields are exact unless a grid size is supplied.
+        :returns: One raster result when n_fields is one, otherwise a list. Dask results remain lazy.
         """
 
         from geoutils.uncertainty import random_field
@@ -1786,7 +1791,9 @@ class RasterBase(ABC):
             n_fields=n_fields,
             random_state=random_state,
             chunksizes=chunksizes,
+            mp_config=mp_config,
             backend=backend,
+            gpytorch_inducing_points=gpytorch_inducing_points,
         )
 
     @overload
@@ -1935,7 +1942,8 @@ class RasterBase(ABC):
         """
         Get coordinates (x,y) of all pixels in the raster.
 
-        :param grid: Whether to return mesh grids of coordinates matrices.
+        :param grid: Whether to return coordinate matrix, otherwise only X/Y axis coordinates. Required for rotated
+            rasters where X/Y axis coordinates do not suffice to represent grid coordinates.
         :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
             coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
             Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].

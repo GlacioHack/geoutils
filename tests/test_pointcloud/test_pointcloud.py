@@ -283,6 +283,43 @@ class TestPointCloud:
         with pytest.raises(AttributeError, match="Cannot load as filename is not set anymore.*"):
             pc.load()
 
+    @pytest.mark.parametrize("inplace", [False, True])
+    @pytest.mark.parametrize("use_z", [False, True])
+    @pytest.mark.parametrize("convert_coords", [False, True])
+    def test_astype__convert_coords(self, inplace: bool, use_z: bool, convert_coords: bool) -> None:
+        """Checks that astype() converts coordinates properly."""
+
+        # We use coordinates and values for which "rounding" to float32 would be visible
+        x = np.array([1.123456789, 2.987654321])
+        y = np.array([3.123456789, 4.987654321])
+        values = np.array([5.123456789, 6.987654321])
+        columns: dict[str, list[int] | NDArrayNum] = {"quality": [10, 20]}
+        if not use_z:
+            columns["height"] = values
+        source = gpd.GeoDataFrame(columns, geometry=gpd.points_from_xy(x, y, z=values if use_z else None), crs=32631)
+        pointcloud = gu.PointCloud(source, data_column=None if use_z else "height")
+        original = pointcloud.ds.copy()
+
+        # We run astype with coordinate conversion
+        converted = pointcloud.astype(np.float32, convert_coords=convert_coords, inplace=inplace)
+        output = pointcloud if inplace else converted
+
+        # We check converted values
+        if inplace:
+            assert converted is None
+        else:
+            assert isinstance(converted, gu.PointCloud)
+        assert output is not None
+        assert output.crs == pointcloud.crs
+        assert output.ds["quality"].tolist() == [10, 20]
+        np.testing.assert_array_equal(output.data, values.astype(np.float32))
+        expected_x = x.astype(np.float32) if convert_coords else x
+        expected_y = y.astype(np.float32) if convert_coords else y
+        np.testing.assert_array_equal(output.geometry.x.to_numpy(), expected_x)
+        np.testing.assert_array_equal(output.geometry.y.to_numpy(), expected_y)
+        if not inplace:
+            assert_geodataframe_equal(pointcloud.ds, original)
+
     def test_getitem_setitem(self) -> None:
         """Test the __getitem__ method ([]) for indexing and __setitem__ for index assignment."""
 

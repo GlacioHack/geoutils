@@ -7,6 +7,7 @@ import tempfile
 import warnings
 from importlib.util import find_spec
 from pathlib import Path
+from typing import Any
 
 import geopandas as gpd
 import numpy as np
@@ -254,6 +255,27 @@ class TestDistance:
         # Reject a distance that cannot define a finite, non-negative overlap
         with pytest.raises(ValueError, match="max_distance must be non-negative and finite"):
             raster.proximity(distance_unit="pixel", max_distance=max_distance)
+
+    @pytest.mark.parametrize(
+        "options,error_type,message",
+        [
+            ({"max_distance": True}, TypeError, "max_distance must be of type int or float"),
+            ({"max_distance": "2"}, TypeError, "max_distance must be of type int or float"),
+            ({"distance_unit": "meters"}, ValueError, "Distance unit must be either"),
+            ({"target_values": []}, ValueError, "target_values must contain at least one value"),
+        ],
+    )
+    def test_proximity__error_invalid_input_options(
+        self, options: dict[str, Any], error_type: type[Exception], message: str
+    ) -> None:
+        """Checks an error is raised for an invalid distance limit, unit, or target list."""
+
+        # Minimal synthetic input for proximity: two different values
+        raster = gu.Raster.from_array(np.array([[1, 0]], dtype=np.uint8), rio.transform.from_origin(0, 1, 1, 1), 32610)
+
+        # Check we raise error on invalid options
+        with pytest.raises(error_type, match=message):
+            raster.proximity(**options)
 
 
 @pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")

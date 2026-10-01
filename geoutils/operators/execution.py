@@ -128,7 +128,7 @@ def _reduce_grid_queries(
     if kernel is None:
         return None
 
-    # Direct convolution grows with the footprint; use a conservative crossover for sparse targets
+    # Direct convolution grows with the footprint (use a conservative crossover for sparse targets)
     # Sliding sums need only one pass per axis, regardless of rectangular window size
     if not np.all(kernel == 1) and len(rows) * 32768 < array.size * np.count_nonzero(kernel):
         return None

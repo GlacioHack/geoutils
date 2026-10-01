@@ -1404,7 +1404,10 @@ class PointCloudBase(VectorBase):
         predictors: Mapping[str, Any] | None = None,
         n_fields: int = 1,
         random_state: int | np.random.Generator | None = None,
+        chunksizes: int | None = None,
+        mp_config: MultiprocConfig | None = None,
         backend: Literal["gstools", "gpytorch"] = "gstools",
+        gpytorch_inducing_points: int | None = None,
     ) -> Any:
         """Generate one or more error fields at every point in this point cloud.
 
@@ -1412,8 +1415,12 @@ class PointCloudBase(VectorBase):
         :param predictors: Named magnitude predictors or point column names.
         :param n_fields: Number of independent fields.
         :param random_state: Seed or generator used for reproducible fields.
-        :param backend: Library used to draw correlated errors for all points together.
-        :returns: One point cloud when n_fields is one, otherwise a list of point clouds.
+        :param chunksizes: Target point rows per Dask partition; existing Dask partitions are used by default.
+        :param mp_config: Worker, row partition and output file settings for multiprocessing fields.
+        :param backend: Library used to draw correlated errors. Chunked GPyTorch fields use an inducing grid.
+        :param gpytorch_inducing_points: Target grid size for approximate GPyTorch fields; chunked fields default
+            to 256, while eager fields are exact unless a grid size is supplied.
+        :returns: One point cloud result when n_fields is one, otherwise a list. Dask results are lazy GeoDataFrames.
         """
 
         from geoutils.uncertainty import random_field
@@ -1424,5 +1431,8 @@ class PointCloudBase(VectorBase):
             predictors=predictors,
             n_fields=n_fields,
             random_state=random_state,
+            chunksizes=chunksizes,
+            mp_config=mp_config,
             backend=backend,
+            gpytorch_inducing_points=gpytorch_inducing_points,
         )

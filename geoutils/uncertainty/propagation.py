@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Carry source uncertainty through interpolation and reduction calculations."""
+"""Module for propagation of uncertainty, with a PropagationSummary class generic to numerical/analytical methods."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ Operator = Interpolator | Reducer
 
 
 ############################################
-# 1/ SOURCE DATA AND OUTPUT LABELS
+# 1/ HELPERS FOR SOURCE DATA AND OUTPUT LABELS
 ############################################
 
 

@@ -122,7 +122,7 @@ def _nodata_mask_distance(
 ) -> int | None:
     """Find how far to expand the nodata mask (None means no extra mask)."""
 
-    # GDAL checks the nearest source cell; higher-order propagation uses half the order, rounded up
+    # GDAL uses the nearest source cell, higher-order propagation uses half the order, rounded up
     if nodata_propagation == "ignore":
         base_distance = None
     elif nodata_propagation == "gdal":
@@ -130,7 +130,7 @@ def _nodata_mask_distance(
     else:
         base_distance = (order + 1) // 2
 
-    # Zero is also an explicit distance: mask the original nodata cells without expanding around them
+    # Zero can also be an user distance: mask the original nodata cells without expanding around them
     if dist_nodata_spread is not None:
         return _nodata_spread_distance(order=order, dist_nodata_spread=dist_nodata_spread)
     return base_distance

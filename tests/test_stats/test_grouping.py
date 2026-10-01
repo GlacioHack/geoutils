@@ -1568,6 +1568,37 @@ class TestGroupedStatsChunked:
 class TestGroupedStatsErrors:
     """Test module for errors and warnings raised by grouped statistics."""
 
+    @pytest.mark.parametrize(
+        ("selector", "error_type", "message"),
+        [
+            (1, TypeError, "must be a column name"),
+            ("missing", ValueError, "does not exist"),
+        ],
+    )
+    def test_stats__error_fractional_vector_column(
+        self, selector: int | str, error_type: type[Exception], message: str
+    ) -> None:
+        """Checks an error is raised for a fractional group column that is invalid or absent."""
+
+        # Create a synthetic raster/vector, both valid
+        raster = gu.Raster.from_array(np.ones((1, 1)), Affine(1, 0, 0, 0, -1, 1), 32631)
+        zones = gu.Vector(gpd.GeoDataFrame({"zone": ["inside"]}, geometry=[box(0, 0, 1, 1)], crs=32631))
+
+        # Raise error on wrong column selector
+        with pytest.raises(error_type, match=message):
+            raster.stats("mean", by={"zone": (zones, selector)}, fractional=True)
+
+    def test_stats__error_fractional_missing_label(self) -> None:
+        """Checks an error is raised when a fractional polygon group has a missing label."""
+
+        # We define a polygon that covers the raster cell but has no group label
+        raster = gu.Raster.from_array(np.ones((1, 1)), Affine(1, 0, 0, 0, -1, 1), 32631)
+        zones = gu.Vector(gpd.GeoDataFrame({"zone": [None]}, geometry=[box(0, 0, 1, 1)], crs=32631))
+
+        # Raise appropriate error
+        with pytest.raises(ValueError, match="group labels cannot be missing"):
+            raster.stats("mean", by={"zone": (zones, "zone")}, fractional=True)
+
     @pytest.mark.skipif(find_spec("flox") is not None, reason="Only runs if flox is missing.")
     def test_stats__error_missing_flox(self) -> None:
         """Checks that stats() reports a missing Flox installation when the Flox backend is requested."""

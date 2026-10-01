@@ -1707,7 +1707,8 @@ class TestResamplingEdgeCases:
             points, window=5, window_shape="circular", coverage="fractional", boundless=False, as_array=True
         )
         assert np.isnan(result[0])
-        assert result[1] == 1
+        # Fractional area weights can round a constant mean by a few ulps
+        assert result[1] == pytest.approx(1, abs=1e-12, rel=0)
 
     @pytest.mark.parametrize("method", [Mean(), np.nanmean])
     @pytest.mark.parametrize("fractional,masked", [(False, False), (False, True), (True, False)])

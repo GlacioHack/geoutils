@@ -288,389 +288,258 @@ class TestErrorStructureEstimation:
 
 
 class TestErrorStructureEstimationChunked:
-    """Test module for chunked error structure estimation with Dask/MP."""
-
-    @pytest.mark.parametrize("kind", ["raster", "point"])
-    @pytest.mark.parametrize("backend", ["dask", "multiproc"])
-    def test_estimate_error_structure__two_inputs_match_eager(self, kind: str, backend: str, tmp_path: Path) -> None:
-        """Checks that Dask/MP two-input estimates match eager estimates without loading the inputs."""
-
-        # Independent errors on 8 x 9 cells or 37 points; uneven chunks include a shorter final block
-        rng = np.random.default_rng(21)
-        values = rng.normal(size=(8, 9) if kind == "raster" else 37)
-        reference = np.full_like(values, 10.0)
-        measured = reference + values
-        if kind == "raster":
-            transform = Affine(10, 0, 0, 0, -10, 80)
-            source = gu.Raster.from_array(measured, transform, 32631, nodata=-9999)
-            other = gu.Raster.from_array(reference, transform, 32631, nodata=-9999)
-        else:
-            x = np.arange(len(values), dtype=float)
-            source = gu.PointCloud.from_xyz(x, np.zeros_like(x), measured, crs=32631)
-            other = gu.PointCloud.from_xyz(x, np.zeros_like(x), reference, crs=32631)
-        options: dict[str, Any] = {
-            "components": {"measurement": {"magnitude": "constant", "correlation": None}},
-            "spread_estimator": np.std,
-        }
-
-        # Fit in memory before splitting both measured and reference inputs
-        expected = source.estimate_error_structure(other, **options)
-        if backend == "dask" and kind == "raster":
-            pytest.importorskip("dask")
-            chunked_source = source.to_xarray().chunk({"x": 4, "y": 3})
-            chunked_other = other.to_xarray().chunk({"x": 4, "y": 3})
-            mp_config = None
-            assert not chunked_source.rst.is_loaded
-            assert not chunked_other.rst.is_loaded
-        elif backend == "dask":
-            dask_geopandas = pytest.importorskip("dask_geopandas")
-            from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
-
-            _register_dask_pointcloud_accessor()
-            chunked_source = dask_geopandas.from_geopandas(source.ds, npartitions=4, sort=False).pc
-            chunked_other = dask_geopandas.from_geopandas(other.ds, npartitions=4, sort=False).pc
-            chunked_source.data_column = source.data_column
-            chunked_other.data_column = other.data_column
-            mp_config = None
-            assert not chunked_source.is_loaded
-            assert not chunked_other.is_loaded
-        elif kind == "raster":
-            source_path = tmp_path / "measured.tif"
-            other_path = tmp_path / "reference.tif"
-            source.to_file(source_path)
-            other.to_file(other_path)
-            chunked_source = gu.Raster(source_path)
-            chunked_other = gu.Raster(other_path)
-            mp_config = MultiprocConfig(chunks=(3, 4))
-            assert not chunked_source.is_loaded
-            assert not chunked_other.is_loaded
-        else:
-            chunked_source = source
-            chunked_other = other
-            mp_config = MultiprocConfig(chunks=10)
-
-        # Compare estimates and check that Dask and file-backed inputs stay unloaded
-        source_interface = chunked_source.rst if backend == "dask" and kind == "raster" else chunked_source
-        result = source_interface.estimate_error_structure(chunked_other, mp_config=mp_config, **options)
-        assert result.predict_magnitude() == pytest.approx(expected.predict_magnitude(), abs=1e-12)
-        assert result.fit_diagnostics["magnitude"]["valid_count"] == values.size
-        if kind == "raster":
-            source_loaded = chunked_source.rst.is_loaded if backend == "dask" else chunked_source.is_loaded
-            other_loaded = chunked_other.rst.is_loaded if backend == "dask" else chunked_other.is_loaded
-            assert not source_loaded
-            assert not other_loaded
-        else:
-            assert chunked_source.is_loaded == (backend == "multiproc")
-            assert chunked_other.is_loaded == (backend == "multiproc")
+    """Test module for Dask/MP estimation across input types and error components."""
 
     @pytest.mark.parametrize("backend", ["dask", "multiproc"])
-    def test_estimate__raster_magnitude_matches_eager(self, backend: str, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("input_type", ["raster", "point", "point-point", "raster-point", "raster-raster"])
+    @pytest.mark.parametrize(
+        "components",
+        [
+            pytest.param({"measurement": {"magnitude": "constant", "correlation": None}}, id="constant"),
+            pytest.param({"measurement": {"magnitude": "heteroscedastic", "correlation": None}}, id="variable"),
+            pytest.param({"spatial": {"magnitude": "constant", "correlation": "spherical"}}, id="constant-correlation"),
+            pytest.param(
+                {"spatial": {"magnitude": "heteroscedastic", "correlation": "spherical"}},
+                id="variable-correlation",
+            ),
+            pytest.param(
+                {
+                    "measurement": {"magnitude": "constant", "correlation": None},
+                    "spatial": {"magnitude": "heteroscedastic", "correlation": "spherical"},
+                },
+                id="constant-plus-variable-correlation",
+            ),
+        ],
+    )
+    def test_estimate__chunked_inputs_and_components_match_eager(
+        self,
+        backend: str,
+        input_type: str,
+        components: dict[str, dict[str, Any]],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """
-        Checks that estimating error structure with a variable magnitude (but no correlation) with Dask/MP match eager
-        results exactly, and inputs stay unloaded.
+        Checks that Dask/MP estimates match eager components for raster and point inputs.
+
+        We vary:
+         - Dask vs Multiproc (and compare to eager)
+         - Input: single raster, single point (when directly an error proxy), or two points, two raster,
+           one point and one raster (when another variable to difference with),
+         - Error component definition: constant/variable magnitude, with/without correlation, and multiple components.
         """
 
-        # 1/ We create synthetic data with varying spread, one NaN, one outlier
+        from contextlib import ExitStack
+
+        # 1/ Synthetic variables
+        rows, columns = np.indices((12, 12))
+        quality = columns / 11
         rng = np.random.default_rng(31)
-        quality = np.broadcast_to(np.linspace(0, 1, 12), (12, 12)).copy()
-        values = 5 + (1 + quality) * rng.normal(size=quality.shape)
-        values[0, 0] = 1000
-        values[0, 1] = np.nan
+        errors = (1 + quality) * (np.sin(columns / 3) + np.cos(rows / 4) + 0.1 * rng.normal(size=quality.shape))
+        correlated = any(item["correlation"] is not None for item in components.values())
+        variable = any(item["magnitude"] == "heteroscedastic" for item in components.values())
+        # One outlier and NaN
+        if not correlated:
+            errors[0, 0] = 1000
+            errors[0, 1] = np.nan
+        reference = 10 + rows / 10 + columns / 20
+        source_kind, *other_kinds = input_type.split("-")
+        other_kind = other_kinds[0] if other_kinds else None
+        measured = reference + errors if other_kind is not None else errors
         transform = Affine(10, 0, 0, 0, -10, 120)
-        proxy = gu.Raster.from_array(values, transform, 32632, nodata=-9999)
-        predictor = gu.Raster.from_array(quality, transform, 32632, nodata=-9999)
+        raster_source = gu.Raster.from_array(measured, transform, 32632, nodata=-9999)
+        raster_reference = gu.Raster.from_array(reference, transform, 32632, nodata=-9999)
+        raster_predictor = gu.Raster.from_array(quality, transform, 32632, nodata=-9999)
+        # Point locations match raster pixel centers for exact gridding
+        x, y = raster_source.ij2xy(rows.ravel(), columns.ravel())
+        point_source = gu.PointCloud.from_xyz(x, y, measured.ravel(), crs=32632)
+        point_source.ds["quality"] = quality.ravel()
+        point_reference = gu.PointCloud.from_xyz(x, y, reference.ravel(), crs=32632)
+        source = raster_source if source_kind == "raster" else point_source
+        if other_kind == "raster":
+            other = raster_reference
+        elif other_kind == "point":
+            other = point_reference
+        else:
+            other = None
+        eager_predictors = {"quality": raster_predictor if source_kind == "raster" else "quality"} if variable else None
+        # We use a smaller sample size than data to also test subsampling
         options: dict[str, Any] = {
-            "components": {"measurement": {"magnitude": "heteroscedastic", "correlation": None}},
+            "components": components,
             "bins": 3,
             "min_count": 10,
             "spread_estimator": np.std,
-            "random_state": 4,
-        }
-
-        # And we estimate the error magnitude in-memory first, for later comparison
-        expected = gu.ErrorStructure.estimate(proxy, predictors={"quality": predictor}, **options)
-
-        # 2/ Now with chunked backends, Dask and MP
-        # We use uneven chunk size relative to data size on purpose, to test edge case there
-
-        # If with Dask, from lazy inputs
-        if backend == "dask":
-            pytest.importorskip("dask")
-            chunked_proxy = proxy.to_xarray().chunk({"x": 4, "y": 3})
-            chunked_predictor = predictor.to_xarray().chunk({"x": 4, "y": 3})
-            mp_config = None
-            assert not chunked_proxy.rst.is_loaded
-            assert not chunked_predictor.rst.is_loaded
-        # If with MP, from file inputs
-        else:
-            proxy_path = tmp_path / "proxy.tif"
-            predictor_path = tmp_path / "quality.tif"
-            proxy.to_file(proxy_path)
-            predictor.to_file(predictor_path)
-            chunked_proxy = gu.Raster(proxy_path)
-            chunked_predictor = gu.Raster(predictor_path)
-            mp_config = MultiprocConfig(chunks=(4, 4))
-            assert not chunked_proxy.is_loaded
-            assert not chunked_predictor.is_loaded
-
-        # We estimate the same error magnitude with either Dask or MP
-        result = gu.ErrorStructure.estimate(
-            chunked_proxy, predictors={"quality": chunked_predictor}, mp_config=mp_config, **options
-        )
-        # We check inputs are not loaded
-        proxy_loaded = chunked_proxy.rst.is_loaded if backend == "dask" else chunked_proxy.is_loaded
-        predictor_loaded = chunked_predictor.rst.is_loaded if backend == "dask" else chunked_predictor.is_loaded
-        assert not proxy_loaded
-        assert not predictor_loaded
-
-        # Finally, we check exact equality of eager vs chunked
-        valid = np.isfinite(values)
-        magnitude = result.components["measurement"].magnitude
-        eager_magnitude = expected.components["measurement"].magnitude
-        assert isinstance(magnitude, gu.ErrorMagnitude)
-        assert isinstance(eager_magnitude, gu.ErrorMagnitude)
-        assert magnitude.scale == 1.0
-        assert result.fit_diagnostics["magnitude"]["valid_count"] == np.count_nonzero(valid)
-        pd.testing.assert_frame_equal(magnitude.grouped_statistics, eager_magnitude.grouped_statistics)
-        predicted = result.predict_magnitude({"quality": quality})
-        expected_prediction = expected.predict_magnitude({"quality": quality})
-        np.testing.assert_allclose(predicted, expected_prediction, rtol=0, atol=1e-12)
-
-    @pytest.mark.parametrize("backend", ["dask", "multiproc"])
-    def test_estimate__raster_correlation_match_eager(self, backend: str, tmp_path: Path) -> None:
-        """
-        Checks that chunked estimation of error structure with variable magnitude + correlation with Dask/MP matches
-        eager results exactly, and keeps inputs unloaded.
-        """
-
-        pytest.importorskip("skgstat")
-
-        # 1/ Synthetic error proxy data
-        rng = np.random.default_rng(31)
-        quality = np.broadcast_to(np.linspace(0, 1, 12), (12, 12)).copy()
-        values = 5 + (1 + quality) * rng.normal(size=quality.shape)
-        transform = Affine(10, 0, 0, 0, -10, 120)
-        proxy = gu.Raster.from_array(values, transform, 32632, nodata=-9999)
-        predictor = gu.Raster.from_array(quality, transform, 32632, nodata=-9999)
-        # We'll use magnitude from 60 of 144 cells while sampling spatial pairs from the whole grid,
-        # to also test subsampling
-        options: dict[str, Any] = {
-            "components": {"spatial": {"magnitude": "heteroscedastic", "correlation": "spherical"}},
-            "bins": 3,
-            "min_count": 10,
-            "spread_estimator": np.std,
-            "subsample_magnitude": 60,
+            "subsample_magnitude": 60 if correlated else 1,
             "n_pairs": 300,
             "n_lags": 5,
             "pair_sampling": "random_xy",
             "random_state": 4,
         }
 
-        # And we estimate the error structure in memory
+        # We estimate the error structure in memory for comparison later
+        if correlated:
+            pytest.importorskip("skgstat")
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
-            expected = gu.ErrorStructure.estimate(proxy, predictors={"quality": predictor}, **options)
+            if other is None:
+                expected = gu.ErrorStructure.estimate(source, predictors=eager_predictors, **options)
+            else:
+                expected = source.estimate_error_structure(other, predictors=eager_predictors, **options)
 
-        # 2/ Same with Dask/MP, with lazy inputs or unloaded files
-        # We use uneven chunk size relative to data size on purpose, to test edge case there
+        # 2/ Chunked with Dask/MP, creating the same data lazy/on-file for raster or point
+        # We also use an uneven chunk size relative to datasize, to check for edge behaviour
+        chunked_other = None
+        chunked_predictor = None
+        input_states: list[tuple[Any, str]] = []
         if backend == "dask":
             pytest.importorskip("dask")
-            chunked_proxy = proxy.to_xarray().chunk({"x": 4, "y": 3})
-            chunked_predictor = predictor.to_xarray().chunk({"x": 4, "y": 3})
-            mp_config = None
-            assert not chunked_proxy.rst.is_loaded
-            assert not chunked_predictor.rst.is_loaded
-        else:
-            proxy_path = tmp_path / "proxy.tif"
-            predictor_path = tmp_path / "quality.tif"
-            proxy.to_file(proxy_path)
-            predictor.to_file(predictor_path)
-            chunked_proxy = gu.Raster(proxy_path)
-            chunked_predictor = gu.Raster(predictor_path)
-            mp_config = MultiprocConfig(chunks=(4, 4))
-            assert not chunked_proxy.is_loaded
-            assert not chunked_predictor.is_loaded
+            if source_kind == "raster":
+                chunked_source = source.to_xarray().chunk({"y": 5, "x": 4})
+                source_interface = chunked_source.rst
+            else:
+                dask_geopandas = pytest.importorskip("dask_geopandas")
+                from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
-        # Then we estimate the error structure
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
-            result = gu.ErrorStructure.estimate(
-                chunked_proxy, predictors={"quality": chunked_predictor}, mp_config=mp_config, **options
+                _register_dask_pointcloud_accessor()
+                chunked_source = dask_geopandas.from_geopandas(source.ds, npartitions=7, sort=False)
+                source_interface = chunked_source.pc
+                source_interface.data_column = source.data_column
+            mp_config = None
+
+            if other_kind == "raster":
+                chunked_other = other.to_xarray().chunk({"y": 5, "x": 4})
+                input_states.append((chunked_other.rst, "raster"))
+            elif other_kind == "point":
+                dask_geopandas = pytest.importorskip("dask_geopandas")
+                chunked_other = dask_geopandas.from_geopandas(other.ds, npartitions=7, sort=False)
+                chunked_other.pc.data_column = other.data_column
+                input_states.append((chunked_other.pc, "point"))
+            if variable and source_kind == "raster":
+                chunked_predictor = raster_predictor.to_xarray().chunk({"y": 5, "x": 4})
+                input_states.append((chunked_predictor.rst, "raster"))
+        else:
+            # If with MP, from file inputs
+            if source_kind == "raster":
+                source_path = tmp_path / "source.tif"
+                source.to_file(source_path)
+                chunked_source = gu.Raster(source_path)
+            else:
+                chunked_source = source
+            source_interface = chunked_source
+            mp_config = MultiprocConfig(chunks=(5, 4) if source_kind == "raster" else 23)
+
+            # Raster files must stay unloaded
+            if other_kind == "raster":
+                other_path = tmp_path / "other.tif"
+                other.to_file(other_path)
+                chunked_other = gu.Raster(other_path)
+                input_states.append((chunked_other, "raster"))
+            elif other_kind == "point":
+                chunked_other = other
+                input_states.append((chunked_other, "point"))
+            if variable and source_kind == "raster":
+                predictor_path = tmp_path / "quality.tif"
+                raster_predictor.to_file(predictor_path)
+                chunked_predictor = gu.Raster(predictor_path)
+                input_states.append((chunked_predictor, "raster"))
+
+        input_states.insert(0, (source_interface, source_kind))
+        for spatial_input, kind in input_states:
+            assert spatial_input.is_loaded == (backend == "multiproc" and kind == "point")
+        chunked_predictors = (
+            {"quality": chunked_predictor if source_kind == "raster" else "quality"} if variable else None
+        )
+
+        # For point-point, record MP point difference internally
+        submitted_chunks: list[int] = []
+        with ExitStack() as stack:
+            if backend == "multiproc" and input_type == "point-point" and not variable and not correlated:
+                from geoutils.multiproc.cluster import MpCluster
+                from geoutils.uncertainty.estimation import _difference_point_partition
+
+                cluster = stack.enter_context(MpCluster({"nb_workers": 2}))
+                mp_config = MultiprocConfig(chunks=23, cluster=cluster)
+                submit = cluster.submit
+
+                def record_submit(function: Any, *args: Any, **kwargs: Any) -> Any:
+                    if function is _difference_point_partition:
+                        submitted_chunks.append(len(args[0]))
+                    return submit(function, *args, **kwargs)
+
+                monkeypatch.setattr(cluster, "submit", record_submit)
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                if chunked_other is None:
+                    result = gu.ErrorStructure.estimate(
+                        source_interface, predictors=chunked_predictors, mp_config=mp_config, **options
+                    )
+                else:
+                    result = source_interface.estimate_error_structure(
+                        chunked_other, predictors=chunked_predictors, mp_config=mp_config, **options
+                    )
+
+        # 3/ We check exact equality across Dask/MP
+        for spatial_input, kind in input_states:
+            assert spatial_input.is_loaded == (backend == "multiproc" and kind == "point")
+        if submitted_chunks:
+            assert submitted_chunks == [23] * 6 + [5]
+        assert result.fit_diagnostics["magnitude"]["valid_count"] == np.count_nonzero(np.isfinite(errors))
+        assert list(result.components) == list(expected.components)
+
+        # Compare each component magnitude, including its grouped statistics
+        test_quality = {"quality": np.array([0.2, 0.8])} if variable else None
+        for name, expected_component in expected.components.items():
+            component = result.components[name]
+            magnitude = component.magnitude
+            eager_magnitude = expected_component.magnitude
+            assert isinstance(magnitude, gu.ErrorMagnitude)
+            assert isinstance(eager_magnitude, gu.ErrorMagnitude)
+            assert magnitude.kind == eager_magnitude.kind
+            if magnitude.kind == "variable":
+                assert isinstance(magnitude.grouped_statistics, pd.DataFrame)
+                assert isinstance(eager_magnitude.grouped_statistics, pd.DataFrame)
+                pd.testing.assert_frame_equal(magnitude.grouped_statistics, eager_magnitude.grouped_statistics)
+            np.testing.assert_allclose(
+                magnitude.predict(test_quality), eager_magnitude.predict(test_quality), rtol=0, atol=1e-12
             )
 
-        # We check inputs stay lazy or unloaded, and the right output types are generated
-        proxy_loaded = chunked_proxy.rst.is_loaded if backend == "dask" else chunked_proxy.is_loaded
-        predictor_loaded = chunked_predictor.rst.is_loaded if backend == "dask" else chunked_predictor.is_loaded
-        assert not proxy_loaded
-        assert not predictor_loaded
-        assert result.empirical_variogram is not None
-        assert expected.empirical_variogram is not None
-        assert isinstance(result.empirical_variogram.semivariance, np.ndarray)
-        result_table = result.components["spatial"].magnitude
-        expected_table = expected.components["spatial"].magnitude
-        assert isinstance(result_table, gu.ErrorMagnitude)
-        assert isinstance(expected_table, gu.ErrorMagnitude)
-        assert isinstance(result_table.grouped_statistics, pd.DataFrame)
-        assert isinstance(expected_table.grouped_statistics, pd.DataFrame)
+            # Compare fitted model parameters for correlated components
+            correlation = component.correlation
+            eager_correlation = expected_component.correlation
+            if eager_correlation is None:
+                assert correlation is None
+            else:
+                assert isinstance(correlation, VariogramModel)
+                assert isinstance(eager_correlation, VariogramModel)
+                assert correlation.model_name == eager_correlation.model_name
+                assert correlation.effective_range == pytest.approx(eager_correlation.effective_range, abs=1e-12)
+                assert correlation.partial_sill == pytest.approx(eager_correlation.partial_sill, abs=1e-12)
 
-        # 3/ We should have exact equality across backends, given that we used a random seed
-        test_quality = {"quality": np.array([0.2, 0.8])}
-        pd.testing.assert_frame_equal(result_table.grouped_statistics, expected_table.grouped_statistics)
-        np.testing.assert_allclose(result.predict_magnitude(test_quality), expected.predict_magnitude(test_quality))
-        np.testing.assert_array_equal(result.empirical_variogram.counts, expected.empirical_variogram.counts)
+        # Compare the full error structure and empirical variogram
         np.testing.assert_allclose(
-            result.empirical_variogram.lags, expected.empirical_variogram.lags, rtol=0, atol=1e-12
+            result.predict_magnitude(test_quality), expected.predict_magnitude(test_quality), rtol=0, atol=1e-12
         )
-        np.testing.assert_allclose(
-            result.empirical_variogram.semivariance, expected.empirical_variogram.semivariance, rtol=0, atol=1e-12
-        )
-
-    @pytest.mark.parametrize("backend", ["dask", "multiproc"])
-    def test_estimate__point_magnitude_matches_eager(self, backend: str) -> None:
-        """Checks that Dask/MP point magnitudes match eager results while inputs keep their loading state."""
-
-        # 1/ We create a point error proxy with varying spread, one NaN, one outlier
-        rng = np.random.default_rng(31)
-        quality = np.linspace(0, 1, 85)
-        values = 5 + (1 + quality) * rng.normal(size=len(quality))
-        values[0] = 1000
-        values[1] = np.nan
-        points = gu.PointCloud.from_xyz(np.arange(len(quality)), np.zeros(len(quality)), values, crs=32632)
-        points.ds["quality"] = quality
-
-        # And we estimate the error magnitude in-memory first, for later comparison
-        options: dict[str, Any] = {
-            "predictors": {"quality": "quality"},
-            "components": {"measurement": {"magnitude": "heteroscedastic", "correlation": None}},
-            "bins": 4,
-            "min_count": 8,
-            "spread_estimator": np.std,
-            "random_state": 4,
-        }
-        expected = gu.ErrorStructure.estimate(points, **options)
-
-        # 2/ Now with chunked backends, Dask and MP
-        # We use uneven chunk size relative to data size on purpose, to test edge case there
-        if backend == "dask":
-            dask_geopandas = pytest.importorskip("dask_geopandas")
-            from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
-
-            _register_dask_pointcloud_accessor()
-            source = dask_geopandas.from_geopandas(points.ds, npartitions=4, sort=False).pc
-            source.data_column = points.data_column
-            mp_config = None
-            assert not source.is_loaded
+        if not correlated:
+            assert result.empirical_variogram is None
+            assert expected.empirical_variogram is None
         else:
-            source = points
-            mp_config = MultiprocConfig(chunks=23)
-            assert source.is_loaded
-
-        # We estimate the same error magnitude with either Dask or MP
-        result = gu.ErrorStructure.estimate(source, mp_config=mp_config, **options)
-
-        # We check Dask input stays lazy and MP input stays loaded
-        assert source.is_loaded == (backend == "multiproc")
-
-        # 3/ Finally, we check exact equality between eager and chunked
-        valid = np.isfinite(values)
-        magnitude = result.components["measurement"].magnitude
-        eager_magnitude = expected.components["measurement"].magnitude
-        assert list(result.components) == list(expected.components) == ["measurement"]
-        assert result.components["measurement"].correlation is None
-        assert result.empirical_variogram is None
-        assert isinstance(magnitude, gu.ErrorMagnitude)
-        assert isinstance(eager_magnitude, gu.ErrorMagnitude)
-        assert magnitude.kind == eager_magnitude.kind == "variable"
-        assert magnitude.scale == 1.0
-        assert result.fit_diagnostics["magnitude"]["valid_count"] == np.count_nonzero(valid)
-        assert isinstance(magnitude.grouped_statistics, pd.DataFrame)
-        pd.testing.assert_frame_equal(magnitude.grouped_statistics, eager_magnitude.grouped_statistics)
-        predicted = result.predict_magnitude({"quality": quality})
-        expected_prediction = expected.predict_magnitude({"quality": quality})
-        np.testing.assert_array_equal(predicted, expected_prediction)
-
-    @pytest.mark.parametrize("backend", ["dask", "multiproc"])
-    def test_estimate__point_correlation_matches_eager(self, backend: str) -> None:
-        """Checks that Dask/MP point magnitude and correlation models match eager results."""
-
-        pytest.importorskip("skgstat")
-
-        # 1/ Synthetic point errors with spatial correlation
-        x, y = np.meshgrid(np.arange(10, dtype=float), np.arange(10, dtype=float))
-        noise = np.random.default_rng(17).normal(size=x.shape)
-        quality = x / 9
-        values = 5 + (1 + quality) * (np.sin(x / 3) + np.cos(y / 4) + 0.1 * noise)
-        points = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), values.ravel(), crs=32632)
-        points.ds["quality"] = quality.ravel()
-        options: dict[str, Any] = {
-            "predictors": {"quality": "quality"},
-            "components": {"spatial": {"magnitude": "heteroscedastic", "correlation": "spherical"}},
-            "bins": 3,
-            "min_count": 10,
-            "spread_estimator": np.std,
-            "subsample_magnitude": 60,
-            "n_pairs": 300,
-            "n_lags": 5,
-            "pair_sampling": "random_xy",
-            "random_state": 4,
-        }
-
-        # We estimate the error structure in memory
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
-            expected = gu.ErrorStructure.estimate(points, **options)
-
-        # 2/ Same with Dask/MP, using lazy partitions or loaded point chunks
-        # We use uneven chunk size relative to data size on purpose, to test edge case there
-        if backend == "dask":
-            dask_geopandas = pytest.importorskip("dask_geopandas")
-            from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
-
-            _register_dask_pointcloud_accessor()
-            source = dask_geopandas.from_geopandas(points.ds, npartitions=4, sort=False).pc
-            source.data_column = points.data_column
-            mp_config = None
-            assert not source.is_loaded
-        else:
-            source = points
-            mp_config = MultiprocConfig(chunks=23)
-            assert source.is_loaded
-
-        # Then we estimate the error structure with Dask/MP
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
-            result = gu.ErrorStructure.estimate(source, mp_config=mp_config, **options)
-
-        # We check Dask input stays lazy and MP input unloaded
-        assert source.is_loaded == (backend == "multiproc")
-        result_table = result.components["spatial"].magnitude
-        expected_table = expected.components["spatial"].magnitude
-        assert isinstance(result_table, gu.ErrorMagnitude)
-        assert isinstance(expected_table, gu.ErrorMagnitude)
-        assert isinstance(result_table.grouped_statistics, pd.DataFrame)
-        assert isinstance(expected_table.grouped_statistics, pd.DataFrame)
-        assert result.empirical_variogram is not None
-        assert expected.empirical_variogram is not None
-        assert isinstance(result.empirical_variogram.semivariance, np.ndarray)
-
-        # 3/ We check exact equality between Dask/MP and eager
-        test_quality = {"quality": np.array([0.2, 0.8])}
-        distances = np.array([0.0, 2.0, 5.0, 10.0])
-        result_correlation = result.components["spatial"].correlation
-        expected_correlation = expected.components["spatial"].correlation
-        assert list(result.components) == list(expected.components) == ["spatial"]
-        assert result_table.kind == expected_table.kind == "variable"
-        assert result.fit_diagnostics["magnitude"]["valid_count"] == values.size
-        assert isinstance(result_correlation, VariogramModel)
-        assert result_correlation == expected_correlation
-        pd.testing.assert_frame_equal(result_table.grouped_statistics, expected_table.grouped_statistics)
-        np.testing.assert_allclose(result.predict_magnitude(test_quality), expected.predict_magnitude(test_quality))
-        np.testing.assert_array_equal(result.predict_correlation(distances), expected.predict_correlation(distances))
-        np.testing.assert_array_equal(result.empirical_variogram.counts, expected.empirical_variogram.counts)
-        np.testing.assert_array_equal(result.empirical_variogram.lags, expected.empirical_variogram.lags)
-        np.testing.assert_array_equal(
-            result.empirical_variogram.semivariance, expected.empirical_variogram.semivariance
-        )
+            distances = np.array([0.0, 10.0, 40.0])
+            np.testing.assert_allclose(
+                result.predict_correlation(distances), expected.predict_correlation(distances), rtol=0, atol=1e-12
+            )
+            assert result.empirical_variogram is not None
+            assert expected.empirical_variogram is not None
+            np.testing.assert_array_equal(result.empirical_variogram.counts, expected.empirical_variogram.counts)
+            np.testing.assert_allclose(
+                result.empirical_variogram.lags, expected.empirical_variogram.lags, rtol=0, atol=1e-12
+            )
+            np.testing.assert_allclose(
+                result.empirical_variogram.semivariance,
+                expected.empirical_variogram.semivariance,
+                rtol=0,
+                atol=1e-12,
+            )
 
 
 class TestErrorStructureEstimationErrors:

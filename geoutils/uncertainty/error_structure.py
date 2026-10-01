@@ -28,126 +28,23 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import numpy as np
 import pandas as pd
 from numpy.typing import ArrayLike, NDArray
-from scipy.interpolate import RegularGridInterpolator, griddata
-from scipy.spatial import QhullError
 from scipy.spatial.distance import cdist
 from scipy.special import ndtri
 
 from geoutils._misc import import_optional
 from geoutils.stats.variography import Variogram, VariogramModel
+from geoutils.uncertainty.predictors import _grouped_interpolator
 
 if TYPE_CHECKING:
     from geoutils.multiproc import MultiprocConfig
+    from geoutils.uncertainty.random_field import GPyTorchInducingField
 
 __all__ = ["ErrorComponent", "ErrorMagnitude", "ErrorStructure"]
 
 
 ############################################
-# 1/ INTERPOLATION AND CORRELATION HELPERS
+# 1/ CORRELATION HELPERS
 ############################################
-
-
-def _grouped_interpolator(
-    table: pd.DataFrame,
-    *,
-    value_name: str,
-    statistic: str,
-    min_count: int,
-) -> Callable[[Mapping[str, Any]], NDArray[np.float64]]:
-    """
-    Interpolate grouped error statistics at new predictor values (e.g. slope/elevation).
-
-    This function is used to build an empirical model of heteroscedasticity from binned spread statistics,
-    and accepts any number of predictors (so is equivalent to a N-dimension interpolator)
-
-    Points inside the edge bins are interpolated linearly.
-    Points outside the edge bins are interpolated by nearest neighbours (to avoid unrealistic linear extrapolation
-    where few samples exist anyway).
-
-    This function was simplified from an old ``interpolate_nd_binning`` in xDEM.
-    """
-
-    # Input checks
-    predictor_names = tuple(table.index.names)
-    if not predictor_names or any(not isinstance(name, str) or not name for name in predictor_names):
-        raise ValueError("Grouped statistics must have named predictor index levels.")
-    if table.empty or table.index.has_duplicates:
-        raise ValueError("Grouped statistics must be non-empty and have unique group coordinates.")
-    levels = [table.index] if table.index.nlevels == 1 else list(table.index.levels)
-    coordinates: list[NDArray[np.float64]] = []
-    for name, level in zip(predictor_names, levels):
-        if isinstance(level, pd.IntervalIndex):
-            coordinate = level.mid.to_numpy(dtype=float)
-        elif np.issubdtype(level.dtype, np.number):
-            coordinate = level.to_numpy(dtype=float)
-        else:
-            raise TypeError(f"Predictor {name!r} must use continuous numeric groups.")
-        if coordinate.size == 0 or np.any(~np.isfinite(coordinate)) or np.any(np.diff(coordinate) <= 0):
-            raise ValueError(f"Predictor {name!r} must have finite, increasing group coordinates.")
-        coordinates.append(cast(NDArray[np.float64], coordinate))
-
-    # Some combinations of groups may be missing from the table: we add them as NaN in the full grid
-    # We also exclude estimates based on fewer than min_count observations
-    statistic_column = (value_name, statistic)
-    count_column = (value_name, "count")
-    if statistic_column not in table.columns or count_column not in table.columns:
-        raise ValueError(f"Grouped statistics must contain {statistic_column!r} and {count_column!r}.")
-    full_index: pd.Index = levels[0] if len(levels) == 1 else pd.MultiIndex.from_product(levels, names=predictor_names)
-    selected = table[statistic_column].where(table[count_column] >= min_count)
-    shape = tuple(len(coordinate) for coordinate in coordinates)
-    values = selected.reindex(full_index).to_numpy(dtype=float).reshape(shape)
-
-    # Fill gaps between valid groups linearly, then use the nearest group for any remaining gaps
-    coordinate_grid = np.meshgrid(*coordinates, indexing="ij")
-    points = np.column_stack([coordinate.ravel() for coordinate in coordinate_grid])
-    flat_values = values.ravel()
-    valid = np.isfinite(flat_values)
-    if not np.any(valid):
-        raise ValueError(f"No finite {statistic!r} remains after applying min_count={min_count}.")
-    if len(coordinates) == 1:
-        filled = np.interp(coordinates[0], points[valid, 0], flat_values[valid])
-    else:
-        filled = np.full(len(points), np.nan, dtype=float)
-        if np.count_nonzero(valid) >= len(coordinates) + 1:
-            try:
-                filled = np.asarray(griddata(points[valid], flat_values[valid], points, method="linear"), dtype=float)
-            except QhullError:
-                pass
-        missing = ~np.isfinite(filled)
-        if np.any(missing):
-            filled[missing] = griddata(points[valid], flat_values[valid], points[missing], method="nearest")
-
-    # Now that the group grid is complete, build an interpolator for new predictor values
-    interpolator = RegularGridInterpolator(
-        tuple(coordinates),
-        np.asarray(filled).reshape(shape),
-        method="linear",
-        bounds_error=False,
-        fill_value=None,
-    )
-
-    def evaluate(predictors: Mapping[str, Any]) -> NDArray[np.float64]:
-        """Calculate error magnitudes at the supplied predictors, in their shared array shape."""
-
-        # We use predictor names to avoid mixing up the order of dimensions
-        missing_names = set(predictor_names).difference(predictors)
-        if missing_names:
-            raise ValueError(f"Missing predictors: {sorted(missing_names)!r}.")
-        arrays = [np.asarray(predictors[name], dtype=float) for name in predictor_names]
-        broadcast = np.broadcast_arrays(*arrays)
-        prediction_points = np.column_stack([array.ravel() for array in broadcast])
-        finite = np.all(np.isfinite(prediction_points), axis=1)
-        result = np.full(len(prediction_points), np.nan, dtype=float)
-
-        # Beyond the sampled range, we use the nearest outer group center (to not extrapolate the error magnitude)
-        if np.any(finite):
-            bounded = prediction_points[finite].copy()
-            for index, coordinate in enumerate(coordinates):
-                bounded[:, index] = np.clip(bounded[:, index], coordinate[0], coordinate[-1])
-            result[finite] = interpolator(bounded)
-        return result.reshape(broadcast[0].shape)
-
-    return evaluate
 
 
 def _normalize_correlation_model(model: VariogramModel) -> VariogramModel:
@@ -328,6 +225,27 @@ class ErrorMagnitude:
             )
         else:
             raise ValueError("Magnitude kind must be 'constant' or 'variable'.")
+
+    def __getstate__(self) -> dict[str, Any]:
+        """Serialize the inputs used to rebuild a variable magnitude's interpolator."""
+
+        return {
+            "kind": self.kind,
+            "value": self.value,
+            "grouped_statistics": self.grouped_statistics,
+            "predictor_names": self.predictor_names,
+            "value_name": self.value_name,
+            "statistic": self.statistic,
+            "min_count": self.min_count,
+            "scale": self.scale,
+            "variance_offset": self.variance_offset,
+            "floor": self.floor,
+        }
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Rebuild the magnitude and its interpolator from saved constructor inputs."""
+
+        ErrorMagnitude.__init__(self, **state)
 
     @classmethod
     def constant(cls, value: float) -> ErrorMagnitude:
@@ -533,6 +451,21 @@ class ErrorComponent:
         object.__setattr__(self, "correlation", correlation)
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
 
+    def __getstate__(self) -> dict[str, Any]:
+        """Serialize component metadata as a plain dictionary."""
+
+        return {
+            "name": self.name,
+            "magnitude": self.magnitude,
+            "correlation": self.correlation,
+            "metadata": dict(self.metadata),
+        }
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restore the component and its read-only metadata."""
+
+        ErrorComponent.__init__(self, **state)
+
     def predict_magnitude(self, predictors: Mapping[str, Any] | None = None) -> float | NDArray[np.float64]:
         """
         Calculate error magnitude from this component.
@@ -640,6 +573,21 @@ class ErrorStructure:
         self.fit_diagnostics = MappingProxyType(dict(fit_diagnostics or {}))
         self.metadata = MappingProxyType(dict(metadata or {}))
 
+    def __getstate__(self) -> dict[str, Any]:
+        """Serialize the components and diagnostics without their read-only wrappers."""
+
+        return {
+            "components": tuple(self.components.values()),
+            "empirical_variogram": self.empirical_variogram,
+            "fit_diagnostics": dict(self.fit_diagnostics),
+            "metadata": dict(self.metadata),
+        }
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restore the complete model with read-only component and metadata mappings."""
+
+        ErrorStructure.__init__(self, **state)
+
     def __repr__(self) -> str:
         """Show the component names."""
 
@@ -650,6 +598,13 @@ class ErrorStructure:
         """Return the components by name, as a mapping that cannot be modified."""
 
         return self._components
+
+    def _drawing_model(self) -> ErrorStructure:
+        """Copy the components needed for random fields without fit diagnostics or metadata."""
+
+        return ErrorStructure(
+            [ErrorComponent(item.name, item.magnitude, item.correlation) for item in self.components.values()]
+        )
 
     @property
     def required_predictors(self) -> tuple[str, ...]:
@@ -671,18 +626,30 @@ class ErrorStructure:
         *,
         component: str | None = None,
         like: Any | None = None,
+        chunksizes: int | tuple[int, int] | None = None,
+        mp_config: MultiprocConfig | None = None,
     ) -> Any:
         """Calculate the error magnitude of one component or of all components together.
 
         :param predictors: Named values needed to calculate the component error magnitudes.
         :param component: Component name, or None to combine all components.
         :param like: Optional raster or point cloud whose type and support wrap the result.
-        :returns: A standard deviation, an array, or a spatial object matching like.
+        :param chunksizes: Dask raster tile size (rows, columns) or point rows per partition.
+        :param mp_config: Worker and output file settings for multiprocessing error maps.
+        :returns: A standard deviation, array, or spatial object matching like. Dask maps remain lazy and
+            multiprocessing maps are file-backed.
         """
 
         from geoutils._dispatch import _is_pointcloud, _is_raster
 
-        # Spatial predictors supply their numeric values while the optional output keeps the spatial support
+        if like is not None or chunksizes is not None or mp_config is not None:
+            from geoutils.uncertainty.predictors import predict_magnitude_map
+
+            return predict_magnitude_map(
+                self, predictors, component=component, like=like, chunksizes=chunksizes, mp_config=mp_config
+            )
+
+        # Spatial predictors supply their numeric values for direct array predictions
         values = predictors
         if predictors is not None:
             values = {
@@ -700,18 +667,7 @@ class ErrorStructure:
                 variance = variance + np.asarray(item.predict_magnitude(values)) ** 2
             result = np.sqrt(variance)
         array = np.asarray(result)
-        if like is None:
-            return float(array) if array.ndim == 0 else cast(NDArray[np.float64], array)
-        is_raster = _is_raster(like)
-        if not is_raster and not _is_pointcloud(like):
-            raise TypeError("like must be a GeoUtils raster or point cloud.")
-        support_shape = like.shape if is_raster else (like.point_count,)
-        array = np.broadcast_to(array, support_shape).astype(float, copy=True)
-        if is_raster:
-            support_values = np.ma.asarray(like.data, dtype=float)
-            support_mask = np.ma.getmaskarray(support_values) | ~np.isfinite(support_values.filled(np.nan))
-            array = np.ma.masked_array(array, mask=np.asarray(support_mask).squeeze() | ~np.isfinite(array))
-        return like.copy(new_array=array)
+        return float(array) if array.ndim == 0 else cast(NDArray[np.float64], array)
 
     def predict_variance(
         self,
@@ -869,24 +825,27 @@ class ErrorStructure:
         self,
         like: Any | None = None,
         *,
-        source_ids: ArrayLike | None = None,
         coordinates: ArrayLike | None = None,
         predictors: Mapping[str, Any] | None = None,
         n_fields: int = 1,
         random_state: int | np.random.Generator | None = None,
-        chunksizes: tuple[int, int] | None = None,
+        chunksizes: int | tuple[int, int] | None = None,
+        mp_config: MultiprocConfig | None = None,
         backend: Literal["gstools", "gpytorch"] = "gstools",
+        gpytorch_inducing_points: int | None = None,
     ) -> Any:
         """Generate one or more error fields over a raster, point cloud, or set of coordinates.
 
         :param like: Optional raster or point cloud defining coordinates and the returned spatial object.
-        :param source_ids: Unique observation IDs when like does not define the output locations.
-        :param coordinates: Spatial coordinates aligned with source_ids.
+        :param coordinates: Spatial coordinates for an array result when like is not supplied.
         :param predictors: Named values used to calculate each component's error magnitude.
         :param n_fields: Number of independent fields.
         :param random_state: Seed or generator used for reproducible fields.
-        :param chunksizes: Optional Dask raster chunk size (rows, columns) when using GSTools.
+        :param chunksizes: Dask raster tile size (rows, columns) or point rows per partition.
+        :param mp_config: Worker and output file settings for multiprocessing fields.
         :param backend: Library used to draw correlated components.
+        :param gpytorch_inducing_points: Target inducing grid size for approximate GPyTorch fields. Chunked fields
+            default to 256; passing a value for eager spatial input reproduces the chunked approximation.
         :returns: One field when n_fields is one, otherwise a list or stacked array of fields.
         """
 
@@ -894,14 +853,15 @@ class ErrorStructure:
 
         return random_field(
             self,
-            source_ids=source_ids,
             like=like,
             coordinates=coordinates,
             predictors=predictors,
             n_fields=n_fields,
             random_state=random_state,
             chunksizes=chunksizes,
+            mp_config=mp_config,
             backend=backend,
+            gpytorch_inducing_points=gpytorch_inducing_points,
         )
 
     # 4.3/ Estimate a reusable spatial model from observed errors
@@ -1360,18 +1320,35 @@ class BoundErrorStructure:
         random_coordinates: Any | None = None,
         mesh_type: str = "unstructured",
         field_shape: tuple[int, ...] | None = None,
+        component_seeds: tuple[int, ...] | None = None,
+        indexes: NDArray[np.int64] | None = None,
+        inducing_fields: tuple[GPyTorchInducingField | None, ...] | None = None,
     ) -> NDArray[np.float64]:
         """Draw errors for all observations together, with the model's spatial correlation.
 
         GSTools can evaluate a regular raster faster from separate X/Y axes. These optional axes only affect the
         random field calculation; covariance_block() uses the original spatial coordinates.
+        Component seeds and global indexes let separate chunks draw the same field at their own locations.
         """
 
+        if component_seeds is not None and len(component_seeds) != len(self._component_data):
+            raise ValueError("component_seeds must contain one seed per error component.")
+        if inducing_fields is not None and len(inducing_fields) != len(self._component_data):
+            raise ValueError("inducing_fields must contain one entry per error component.")
+        if indexes is None:
+            indexes = np.arange(self.size, dtype=np.int64)
+        elif np.shape(indexes) != (self.size,):
+            raise ValueError("indexes must contain one position per observation.")
+
         combined = np.zeros(self.size, dtype=float)
-        for component, magnitude in self._component_data:
-            seed = int(rng.integers(0, np.iinfo(np.uint32).max, dtype=np.uint32))
+        for component_index, (component, magnitude) in enumerate(self._component_data):
+            seed = (
+                int(rng.integers(0, np.iinfo(np.uint32).max, dtype=np.uint32))
+                if component_seeds is None
+                else component_seeds[component_index]
+            )
             if component.correlation is None:
-                unit_field = _indexed_standard_normal(seed, np.arange(self.size, dtype=np.int64))
+                unit_field = _indexed_standard_normal(seed, indexes)
             else:
                 correlation_model = component.correlation
                 if not isinstance(correlation_model, VariogramModel):
@@ -1388,7 +1365,12 @@ class BoundErrorStructure:
                     counts=np.empty(0, dtype=np.int64),
                     model=correlation_model,
                 )
-                if backend == "gstools":
+                inducing_field = None if inducing_fields is None else inducing_fields[component_index]
+                if backend == "gpytorch" and inducing_field is not None:
+                    from geoutils.uncertainty.random_field import _interpolate_inducing_field
+
+                    unit_field = _interpolate_inducing_field(inducing_field, coordinates)
+                elif backend == "gstools":
                     gstools_variogram = variogram.to_gstools(dim=coordinates.shape[1])
                     gstools = import_optional("gstools", extra_name="geostat")
 

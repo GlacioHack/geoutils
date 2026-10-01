@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
+import pickle
 from importlib.util import find_spec
+from pathlib import Path
 from typing import Any
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
 from numpy.typing import NDArray
+from rasterio.transform import from_origin
 
 import geoutils as gu
 from geoutils._misc import import_optional
+from geoutils.multiproc import MultiprocConfig
+from geoutils.multiproc.cluster import MpCluster
+from geoutils.raster.xr_accessor import RasterAccessor
 from geoutils.stats.variography import VariogramModel
 
 
@@ -201,6 +208,20 @@ class TestErrorMagnitude:
         assert magnitude.reference_value == pytest.approx((0.5 + np.sqrt(32)) / 2)
         pd.testing.assert_frame_equal(statistics, original)
 
+    def test_pickle__magnitude(self) -> None:
+        """Checks that an ErrorMagnitude can be pickled."""
+
+        # We create a synthetic error magnitude
+        statistics = pd.DataFrame({"std": [1.0, 3.0], "count": [20, 20]}, index=pd.Index([0.0, 30.0], name="slope"))
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
+
+        # Try to restore it from pickled
+        restored = pickle.loads(pickle.dumps(magnitude))
+
+        # Check equality
+        pd.testing.assert_frame_equal(restored.grouped_statistics, magnitude.grouped_statistics)
+        np.testing.assert_array_equal(restored.predict({"slope": [0.0, 15.0, 30.0]}), [1.0, 2.0, 3.0])
+
 
 class TestErrorMagnitudeErrors:
     """Test module for errors raised by ErrorMagnitude."""
@@ -304,6 +325,23 @@ class TestErrorComponent:
         assert component.predict_magnitude() == 2
         np.testing.assert_array_equal(component.predict_correlation([0.0, 10.0]), [1.0, 0.0])
 
+    def test_pickle__component(self) -> None:
+        """Checks that an ErrorComponent can be pickled."""
+
+        # We create a synthetic error component
+        correlation = VariogramModel("spherical", effective_range=10, partial_sill=1)
+        component = gu.ErrorComponent("spatial", 2.0, correlation, metadata={"source": "sample"})
+
+        # We try to restore the component from its pickle
+        restored = pickle.loads(pickle.dumps(component))
+
+        # We check equality and read-only metadata
+        assert restored.predict_magnitude() == 2.0
+        np.testing.assert_array_equal(restored.predict_correlation([0.0, 10.0]), [1.0, 0.0])
+        assert dict(restored.metadata) == {"source": "sample"}
+        with pytest.raises(TypeError):
+            restored.metadata["source"] = "changed"
+
 
 class TestErrorComponentErrors:
     """Test module for errors raised by ErrorComponent."""
@@ -352,6 +390,22 @@ class TestErrorStructure:
         assert isinstance(result, gu.Raster)
         np.testing.assert_array_equal(result.to_nanarray(), [[2.0, np.nan], [2.0, 2.0]])
         np.testing.assert_array_equal(raster.to_nanarray(), [[1.0, np.nan], [3.0, 4.0]])
+
+    def test_predict_magnitude__xarray_like(self) -> None:
+        """Checks that a magnitude map matches an xarray raster's grid and masked pixels."""
+
+        # A missing source pixel has no predicted error value
+        values = np.array([[1.0, np.nan, 3.0], [4.0, 5.0, 6.0]])
+        raster = RasterAccessor.from_array(values, transform=from_origin(10, 20, 2, 2), crs=32631)
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+
+        # Predict on the supplied grid and check coordinates and source values
+        result = structure.predict_magnitude(like=raster)
+        assert result.shape == raster.shape
+        assert result.rst.transform == raster.rst.transform
+        assert result.rst.crs == raster.rst.crs
+        np.testing.assert_array_equal(result.data, [[2.0, np.nan, 2.0], [2.0, 2.0, 2.0]])
+        np.testing.assert_array_equal(raster.data, values)
 
     def test_to_covariance_matrix__coincident_independence(self) -> None:
         """Checks that observations at the same coordinates have independent measurement errors."""
@@ -415,6 +469,42 @@ class TestErrorStructure:
         np.testing.assert_allclose(structure.predict_magnitude(predictors), [1.0, 2.0])
         covariance = structure.to_covariance_matrix(np.array([[0.0, 0.0], [1.0, 0.0]]), predictors=predictors)
         np.testing.assert_allclose(np.diag(covariance), [1.0, 4.0])
+
+    def test_pickle__error_structure(self) -> None:
+        """Checks that an ErrorStructure can be pickled."""
+
+        # We create a synthetic variable and constant components with an empirical variogram and fit details
+        statistics = pd.DataFrame({"std": [1.0, 3.0], "count": [20, 30]}, index=pd.Index([0.0, 30.0], name="slope"))
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
+        correlation = VariogramModel("spherical", effective_range=10, partial_sill=1)
+        empirical = gu.Variogram(
+            lags=np.array([0.0, 10.0]), semivariance=np.array([0.0, 1.0]), counts=np.array([5, 5]), model=correlation
+        )
+        structure = gu.ErrorStructure(
+            [
+                gu.ErrorComponent("terrain", magnitude, correlation, metadata={"group": "slope"}),
+                gu.ErrorComponent("noise", 0.5),
+            ],
+            empirical_variogram=empirical,
+            fit_diagnostics={"sample_count": 40},
+            metadata={"source": "example"},
+        )
+
+        # We try to restore the complete model from its pickle
+        restored = pickle.loads(pickle.dumps(structure))
+
+        # We check equality and order
+        assert list(restored.components) == ["terrain", "noise"]
+        np.testing.assert_allclose(
+            restored.predict_magnitude({"slope": [0.0, 15.0, 30.0]}), np.sqrt([1.25, 4.25, 9.25])
+        )
+        assert restored.components["terrain"].metadata == {"group": "slope"}
+        assert restored.fit_diagnostics == {"sample_count": 40}
+        assert restored.metadata == {"source": "example"}
+        assert restored.empirical_variogram is not None
+        np.testing.assert_array_equal(restored.empirical_variogram.semivariance, [0.0, 1.0])
+        with pytest.raises(TypeError):
+            restored.components["extra"] = gu.ErrorComponent("extra", 1.0)
 
     def test_iter_samples__adds_errors_to_source_values(self) -> None:
         """Checks that value samples add the same sampled errors to each source value."""
@@ -507,6 +597,193 @@ class TestErrorStructure:
             plt.close(panels["statistic"].figure)
 
 
+class TestErrorStructureChunked:
+    """Test module for Dask and multiprocessing error magnitude maps on raster and point support."""
+
+    def test_predict_magnitude__dask_raster_without_predictors(self) -> None:
+        """Checks that a constant magnitude leaves an existing Dask raster lazy and preserves its missing pixels."""
+
+        dask = pytest.importorskip("dask.array")
+
+        # The source has shorter final chunks and one pixel without data
+        values = np.ones((3, 4))
+        values[1, 2] = np.nan
+        transform = from_origin(0, 3, 1, 1)
+        eager = RasterAccessor.from_array(values, transform=transform, crs=32631)
+        lazy = RasterAccessor.from_array(dask.from_array(values, chunks=(2, 3)), transform=transform, crs=32631)
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+
+        # Predict in the source chunks without calculating the input
+        expected = structure.predict_magnitude(like=eager)
+        result = structure.predict_magnitude(like=lazy)
+        assert hasattr(lazy.data, "compute") and hasattr(result.data, "compute")
+        assert result.data.chunks == ((2, 1), (3, 1))
+
+        # Every computed chunk matches the eager map, including the missing pixel
+        np.testing.assert_array_equal(np.asarray(result.compute()), np.asarray(expected))
+
+    def test_predict_magnitude__multiband_raster_chunks(self) -> None:
+        """Checks that each band has its own predictor values and missing pixel mask across Dask tiles."""
+
+        pytest.importorskip("dask")
+
+        # Two bands have different missing pixels and predictor values on a 3 x 4 grid
+        mask = np.zeros((2, 3, 4), dtype=bool)
+        mask[0, 0, 0] = True
+        mask[1, 2, 3] = True
+        source = gu.Raster.from_array(
+            np.ma.masked_array(np.ones((2, 3, 4)), mask=mask), transform=from_origin(0, 3, 1, 1), crs=32631
+        )
+        quality = np.stack((np.zeros((3, 4)), np.ones((3, 4))))
+        statistics = pd.DataFrame({"std": [1.0, 2.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="quality"))
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", magnitude)])
+
+        # Predict whole bands and 2 x 3 tiles, leaving shorter final row and column chunks
+        expected = structure.predict_magnitude({"quality": quality}, like=source)
+        lazy = structure.predict_magnitude({"quality": quality}, like=source, chunksizes=(2, 3))
+        assert expected.shape == source.shape == lazy.rst.shape
+        assert expected.data.shape == source.data.shape == lazy.data.shape
+        assert hasattr(lazy.data, "compute")
+
+        # Each band carries its own magnitude and missing pixel
+        reference = np.where(mask, np.nan, np.where(quality == 0, 1.0, 2.0))
+        np.testing.assert_array_equal(expected.to_nanarray(), reference)
+        np.testing.assert_array_equal(np.asarray(lazy.compute()), reference)
+
+    def test_predict_magnitude__dask_predictors_select_lazy_output(self) -> None:
+        """Checks that Dask predictors produce lazy raster and point maps without explicit chunk sizes."""
+
+        dask = pytest.importorskip("dask.array")
+        pytest.importorskip("dask_geopandas")
+
+        # The same quality values predict an error from one to two on each spatial input
+        quality = np.linspace(0, 1, 7)
+        statistics = pd.DataFrame({"std": [1.0, 2.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="quality"))
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", magnitude)])
+        raster = gu.Raster.from_array(np.ones((2, 7)), transform=from_origin(0, 2, 1, 1), crs=32631)
+        points = gu.PointCloud.from_xyz(np.arange(7), np.arange(7), np.ones(7), crs=32631)
+
+        # Dask predictor chunks select lazy output even with eager source data
+        raster_predictor = dask.from_array(np.tile(quality, (2, 1)), chunks=(1, 3))
+        point_predictor = dask.from_array(quality, chunks=3)
+        raster_result = structure.predict_magnitude({"quality": raster_predictor}, like=raster)
+        point_result = structure.predict_magnitude({"quality": point_predictor}, like=points)
+        assert hasattr(raster_result.data, "compute") and not point_result.pc.is_loaded
+        assert raster_result.data.chunks == ((1, 1), (3, 3, 1))
+
+        # A scalar predictor also applies to every raster block
+        scalar_result = structure.predict_magnitude({"quality": 0.5}, like=raster, chunksizes=(1, 3))
+        assert hasattr(scalar_result.data, "compute")
+        np.testing.assert_array_equal(np.asarray(scalar_result.compute()), np.full((2, 7), 1.5))
+
+        # Computing both maps matches the same predictions on eager inputs
+        eager_raster = structure.predict_magnitude({"quality": np.tile(quality, (2, 1))}, like=raster)
+        eager_points = structure.predict_magnitude({"quality": quality}, like=points)
+        np.testing.assert_array_equal(np.asarray(raster_result.compute()), eager_raster.to_nanarray())
+        np.testing.assert_array_equal(point_result.compute()[points.data_column].to_numpy(), eager_points.data)
+
+    def test_predict_magnitude__raster_dask_mp_equal(self, tmp_path: Path) -> None:
+        """Checks that Dask and MP raster tiles predict the eager magnitude map without loading source files."""
+
+        pytest.importorskip("dask")
+
+        # Five rows and seven columns produce shorter edge tiles; a diagonal mask crosses tile boundaries
+        values = np.ma.masked_array(np.ones((5, 7)), mask=np.eye(5, 7, dtype=bool))
+        source = gu.Raster.from_array(values, transform=from_origin(0, 5, 1, 1), crs=32631, nodata=-9999)
+        quality = gu.Raster.from_array(
+            np.tile(np.linspace(0, 1, 7), (5, 1)), transform=source.transform, crs=source.crs
+        )
+        statistics = pd.DataFrame({"std": [1.0, 2.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="quality"))
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", magnitude)])
+        expected = structure.predict_magnitude({"quality": quality}, like=source)
+
+        # Read raster and predictor tiles from files while keeping both full rasters unloaded
+        source_path = tmp_path / "source.tif"
+        quality_path = tmp_path / "quality.tif"
+        source.to_file(source_path)
+        quality.to_file(quality_path)
+        file_source = gu.Raster(source_path)
+        file_quality = gu.Raster(quality_path)
+        lazy = structure.predict_magnitude({"quality": file_quality}, like=file_source, chunksizes=(3, 3))
+        assert not file_source.is_loaded and not file_quality.is_loaded
+        assert hasattr(lazy.data, "compute")
+        assert lazy.data.chunks == ((3, 2), (3, 3, 1))
+
+        # Worker tiles write a file-backed result without loading either complete input
+        with MpCluster({"nb_workers": 2}) as cluster:
+            config = MultiprocConfig(chunks=(3, 3), outfile=str(tmp_path / "magnitude.tif"), cluster=cluster)
+            multiproc = structure.predict_magnitude({"quality": file_quality}, like=file_source, mp_config=config)
+        assert not file_source.is_loaded and not file_quality.is_loaded and not multiproc.is_loaded
+
+        # Compare every valid pixel and masked edge with the eager result
+        np.testing.assert_array_equal(np.asarray(lazy.compute()), expected.to_nanarray())
+        np.testing.assert_array_equal(multiproc.to_nanarray(), expected.to_nanarray())
+
+    def test_predict_magnitude__point_dask_mp_equal(self, tmp_path: Path) -> None:
+        """Checks that Dask and MP point partitions predict the eager values in the same row order."""
+
+        dask_geopandas = pytest.importorskip("dask_geopandas")
+        from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
+
+        _register_dask_pointcloud_accessor()
+
+        # Seven ordered points split into 3/3/1 rows so the last partition checks array alignment
+        points = gu.PointCloud.from_xyz(np.arange(7), np.arange(7), np.ones(7), crs=32631)
+        points.ds["quality"] = np.linspace(0, 1, 7)
+        statistics = pd.DataFrame({"std": [1.0, 2.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="quality"))
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", magnitude)])
+        expected = structure.predict_magnitude({"quality": "quality"}, like=points)
+
+        # Existing Dask points and requested row chunks both return unloaded dataframes
+        dask_points = dask_geopandas.from_geopandas(points.ds, npartitions=3, sort=False)
+        dask_points.pc.data_column = points.data_column
+        lazy = structure.predict_magnitude({"quality": "quality"}, like=dask_points)
+        requested = structure.predict_magnitude({"quality": "quality"}, like=points, chunksizes=3)
+        assert not lazy.pc.is_loaded and not requested.pc.is_loaded
+        assert hasattr(lazy, "compute") and hasattr(requested, "compute")
+
+        # Read point rows from a file and write a file-backed result through workers
+        source_path = tmp_path / "points.gpkg"
+        points.to_file(source_path)
+        file_points = gu.PointCloud(source_path, data_column=points.data_column)
+        file_lazy = structure.predict_magnitude({"quality": "quality"}, like=file_points, chunksizes=3)
+        assert not file_points.is_loaded and not file_lazy.pc.is_loaded
+        with MpCluster({"nb_workers": 2}) as cluster:
+            config = MultiprocConfig(chunks=3, outfile=str(tmp_path / "magnitude.gpkg"), cluster=cluster)
+            multiproc = structure.predict_magnitude({"quality": "quality"}, like=file_points, mp_config=config)
+        assert not file_points.is_loaded and not multiproc.is_loaded
+
+        # Compare point values across all partitions and the saved output
+        for result in (lazy, requested, file_lazy):
+            np.testing.assert_array_equal(result.compute()[points.data_column].to_numpy(), expected.data)
+        np.testing.assert_array_equal(multiproc.data, expected.data)
+
+    def test_predict_magnitude__point_geometry_z_chunks(self) -> None:
+        """Checks that point magnitudes replace geometry Z when no data column is selected."""
+
+        pytest.importorskip("dask_geopandas")
+
+        # All seven points are 3D, with a shorter final partition of one row
+        x = np.arange(7, dtype=float)
+        y = np.array([0, 1, 0, 2, 1, 3, 2], dtype=float)
+        frame = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x, y, np.arange(7)), crs=32631)
+        points = gu.PointCloud(frame, data_column=None)
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+
+        # Both backends replace Z with the predicted magnitude without moving points
+        expected = structure.predict_magnitude(like=points)
+        lazy = structure.predict_magnitude(like=points, chunksizes=3)
+        assert not lazy.pc.is_loaded
+        result = lazy.compute()
+        np.testing.assert_array_equal(result.geometry.x, expected.geometry.x)
+        np.testing.assert_array_equal(result.geometry.y, expected.geometry.y)
+        np.testing.assert_array_equal(result.geometry.z, expected.geometry.z)
+
+
 class TestErrorStructureErrors:
     """Test module for errors/warnings of the ErrorStructure class."""
 
@@ -519,6 +796,21 @@ class TestErrorStructureErrors:
             assert structure.plot() == {}
         with pytest.raises(ValueError, match="No empirical variogram"):
             structure.plot_correlation()
+
+    @pytest.mark.parametrize("spatial_type, chunksizes", [("raster", 3), ("point", (2, 2))])
+    def test_predict_magnitude__error_invalid_chunks(self, spatial_type: str, chunksizes: Any) -> None:
+        """Checks an error is raised for a chunk size that does not match the spatial input."""
+
+        # A raster uses row/column tiles while a point cloud uses row counts
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        if spatial_type == "raster":
+            like = gu.Raster.from_array(np.ones((2, 2)), transform=from_origin(0, 2, 1, 1), crs=32631)
+        else:
+            like = gu.PointCloud.from_xyz([0, 1], [0, 1], [1, 1], crs=32631)
+
+        # The wrong chunk option cannot describe that input's output partitions
+        with pytest.raises(ValueError, match="chunk size"):
+            structure.predict_magnitude(like=like, chunksizes=chunksizes)
 
     @pytest.mark.parametrize(
         "options, message",

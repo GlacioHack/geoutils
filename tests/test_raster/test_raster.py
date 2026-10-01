@@ -127,6 +127,30 @@ class TestRaster:
         assert r_str == r.data.__str__()
         assert r_repr.split("data=")[1][:10] != "not_loaded"
 
+    @pytest.mark.parametrize("band_count", [1, 2])
+    def test_repr_html(self, band_count: int, tmp_path: pathlib.Path) -> None:
+        """Checks that HTML preview represents the data correctly."""
+
+        # We write a 2-band raster to file, and open with downsampling
+        first_band = np.arange(16).reshape(4, 4)
+        values = first_band if band_count == 1 else np.stack((first_band, first_band + 20))
+        filename = tmp_path / "preview.tif"
+        gu.Raster.from_array(values, rio.transform.from_origin(0, 4, 1, 1), 4326).to_file(filename)
+        raster = gu.Raster(filename, downsample=2)
+
+        # We trigger the representation, check it accounts for downsampling yet does not load
+        html = raster._repr_html_()
+        expected_shape = (2, 2) if band_count == 1 else (band_count, 2, 2)
+        assert "not_loaded; shape on disk" in html
+        assert f"will load {expected_shape}" in html
+        assert not raster.is_loaded
+
+        # After loading, it shows values
+        raster.load()
+        loaded_html = raster._repr_html_()
+        assert "not_loaded" not in loaded_html
+        assert "<b>data=</b>" in loaded_html
+
     @pytest.mark.parametrize("example", [landsat_b4_path, landsat_rgb_path, aster_dem_path])
     def test_info(self, example: str) -> None:
         """Test that the information summary is consistent with that of rasterio"""
@@ -342,6 +366,34 @@ class TestRaster:
         # Data should not be loaded and masks should be equal
         assert not r_notloaded.is_loaded
         assert np.array_equal(mask_notloaded, mask_loaded)
+
+    @pytest.mark.parametrize("bands", [2, [2, 3]])
+    def test_load_only_mask__selected_bands_downsample(self, bands: int | list[int]) -> None:
+        """Checks that selected band masks match loaded data after downsampling without loading the source."""
+
+        # Read a reduced mask from a multiband file with either one or two selected bands
+        source = gu.Raster(self.landsat_rgb_path, downsample=2)
+        selected_mask = source._load_only_mask(bands=bands)
+
+        # Compare with the mask of the same bands loaded as raster values
+        reference = gu.Raster(self.landsat_rgb_path, downsample=2, bands=bands)
+        expected_mask = np.ma.getmaskarray(reference.data)
+        assert np.array_equal(selected_mask, expected_mask)
+        assert not source.is_loaded
+
+    def test_load_only_mask__error_loaded_or_missing_name(self) -> None:
+        """Checks an error is raised when mask-only reading has no unloaded file to read."""
+
+        # A loaded raster already has its mask in memory
+        loaded = gu.Raster(self.landsat_b4_path, load_data=True)
+        with pytest.raises(ValueError, match="Data are already loaded"):
+            loaded._load_only_mask()
+
+        # Removing the filename leaves no source for a mask-only read
+        unnamed = gu.Raster(self.landsat_b4_path)
+        unnamed._name = None
+        with pytest.raises(AttributeError, match="Cannot load as name is not set anymore"):
+            unnamed._load_only_mask()
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_get_mask(self, example: str) -> None:
@@ -3221,6 +3273,21 @@ class TestArrayInterface:
             # This test is for when the NumPy function reduces the dimension to a single number
             else:
                 assert output_rst == output_ma
+
+    def test_array_function__warning_gradient(self) -> None:
+        """Checks that using np.gradient() on a multi-band raster warns and uses the first band."""
+
+        # Synthetic two-band raster
+        first_band = np.arange(9, dtype=float).reshape(3, 3)
+        second_band = first_band * 10
+        raster = gu.Raster.from_array(np.stack((first_band, second_band)), transform=self.transform, crs=None)
+
+        # Check warning and that result matches the first band gradient
+        with pytest.warns(UserWarning, match="first raster band only"):
+            gradients = np.gradient(raster)
+        expected = np.gradient(first_band)
+        for actual, reference in zip(gradients, expected):
+            np.testing.assert_array_equal(actual, reference)
 
     @pytest.mark.parametrize("arrfunc_str", handled_functions_2in)
     @pytest.mark.parametrize("dtype1", ["uint8", "int16", "float32"])
