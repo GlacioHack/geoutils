@@ -231,7 +231,7 @@ def _grouped_interpolator(
     for name, level in zip(predictor_names, levels):
         if isinstance(level, pd.IntervalIndex):
             coordinate = level.mid.to_numpy(dtype=float)
-        elif np.issubdtype(level.dtype, np.number):
+        elif pd.api.types.is_numeric_dtype(level.dtype) and not pd.api.types.is_bool_dtype(level.dtype):
             coordinate = level.to_numpy(dtype=float)
         else:
             raise TypeError(f"Predictor {name!r} must use continuous numeric groups.")
@@ -426,7 +426,7 @@ def _eager_point_magnitude(
 def _raster_dask_chunks(
     like: RasterBase, predictors: Mapping[str, Any] | None, chunksizes: tuple[int, int] | None
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
-    """Choose spatial output chunks from a request or an existing Dask array."""
+    """We determine output chunks from user input or the Dask array of the raster/point cloud in ``like`."""
 
     from geoutils.multiproc.chunked import normalize_chunks
     from geoutils.raster.base import RasterBase
@@ -454,7 +454,7 @@ def _raster_magnitude_block(
     component: str | None,
     nodata: float | int | None,
 ) -> NDArray[np.float64]:
-    """Predict one aligned Dask raster block from its source and predictor values."""
+    """Compute magnitude in one Dask raster block from predictor values."""
 
     predictors = dict(zip(predictor_names, predictor_values))
     predictors.update(scalar_predictors)
@@ -468,23 +468,22 @@ def _dask_raster_magnitude(
     component: str | None,
     chunksizes: tuple[int, int] | None,
 ) -> Any:
-    """Build lazy raster tiles with local predictor values and the source mask."""
+    """Predict error magnitude for Dask raster inputs."""
 
     import_optional("dask")
     import dask.array as da
 
     from geoutils.raster.xr_accessor import RasterAccessor
 
+    # 1/ Get output chunks to use, and map all predictors to those chunks
     chunks = _raster_dask_chunks(like, predictors, chunksizes)
     tile_size = (max(chunks[0]), max(chunks[1]))
     source = _raster_chunk_source(like, tile_size)
 
-    # Split only rows and columns; each block receives all bands
     source_chunks = tuple((int(length),) for length in source.shape[:-2]) + chunks
     source = source.rechunk(source_chunks) if is_dask_array(source) else da.from_array(source, chunks=source_chunks)
     predictor_data = _raster_chunk_predictors(like, predictors, tile_size)
 
-    # Match predictor blocks to source blocks, including shorter edge chunks and full-band blocks
     predictor_names: list[str] = []
     predictor_blocks: list[Any] = []
     scalar_predictors: dict[str, float] = {}
@@ -497,7 +496,7 @@ def _dask_raster_magnitude(
             predictor_names.append(name)
             predictor_blocks.append(array.rechunk(array_chunks))
 
-    # Pass scalar predictors once and matching array blocks to each map task
+    # 2/ Run map_blocks and build lazy output
     values = da.map_blocks(
         _raster_magnitude_block,
         source,
@@ -511,7 +510,6 @@ def _dask_raster_magnitude(
         meta=np.empty((0,) * source.ndim, dtype=np.float64),
     )
 
-    # Attach the original grid without computing any mapped block
     return RasterAccessor.from_array(
         values, transform=like.transform, crs=like.crs, nodata=like.nodata, area_or_point=like.area_or_point
     )
@@ -524,7 +522,7 @@ def _dask_point_magnitude(
     component: str | None,
     chunksize: int | None,
 ) -> Any:
-    """Build lazy point partitions with the same row order and location metadata."""
+    """Predict error magnitude for Dask point inputs."""
 
     import_optional("dask")
     import pandas as pd
@@ -564,11 +562,9 @@ def _dask_point_magnitude(
             like.ds, npartitions=max(1, int(np.ceil(like.point_count / chunksize))), sort=False
         )
 
-    # Attach supplied arrays by row position before running each point partition
+    # Attach arrays by row position
     source_attrs = _get_dataframe_attrs(dataframe)
     original_columns = list(dataframe.columns)
-
-    # Row counts also account for a shorter final partition
     lengths = _point_partition_lengths(dataframe)
     columns, arrays = _point_predictor_columns(like, predictors, size=sum(lengths))
     if arrays:
@@ -577,7 +573,7 @@ def _dask_point_magnitude(
     if like.data_column is not None:
         meta[like.data_column] = pd.Series([], dtype=np.float64)
 
-    # 2/ Predict each partition and rebuild the lazy point cloud
+    # 2/ Run map_partitions and build lazy output
     result = dataframe.map_partitions(
         _point_magnitude_rows,
         model,

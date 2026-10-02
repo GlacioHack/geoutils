@@ -277,14 +277,14 @@ class TestPredictorsChunked:
 
         pytest.importorskip("dask_geopandas")
 
-        # All seven points are 3D, with a shorter final partition of one row
+        # We use 3D points
         x = np.arange(7, dtype=float)
         y = np.array([0, 1, 0, 2, 1, 3, 2], dtype=float)
         frame = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x, y, np.arange(7)), crs=32631)
         points = gu.PointCloud(frame, data_column=None)
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
 
-        # Both backends replace Z with the predicted magnitude without moving points
+        # We check both in-memory and lazy write to Z
         expected = structure.predict_magnitude(like=points)
         lazy = structure.predict_magnitude(like=points, chunksizes=3)
         assert not lazy.pc.is_loaded
@@ -298,14 +298,14 @@ class TestPredictorsChunked:
 
         pytest.importorskip("dask_geopandas")
 
-        # Seven points split into 3/3/1 rows so the last partition also needs predictor values
+        # Synthetic inputs
         points = gu.PointCloud.from_xyz(np.arange(7), np.arange(7), np.ones(7), crs=32631)
         quality = np.linspace(0.0, 1.0, 7)
         statistics = pd.DataFrame({"std": [1.0, 2.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="quality"))
         magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", magnitude)])
 
-        # Eager points stay loaded while Dask output waits for computation
+        # Compute lazy/loaded
         expected = structure.predict_magnitude({"quality": quality}, like=points)
         lazy = structure.predict_magnitude({"quality": quality}, like=points, chunksizes=3)
         assert points.is_loaded and not lazy.pc.is_loaded
@@ -316,7 +316,7 @@ class TestPredictorsChunked:
             multiproc = structure.predict_magnitude({"quality": quality}, like=points, mp_config=config)
         assert points.is_loaded and not multiproc.is_loaded
 
-        # Both partitioned results match the eager values, including the final point
+        # All outputs should match exactly
         np.testing.assert_array_equal(lazy.compute()[points.data_column].to_numpy(), expected.data)
         np.testing.assert_array_equal(multiproc.data, expected.data)
 
