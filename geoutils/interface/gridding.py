@@ -111,6 +111,11 @@ def _gridding_nodata_spread(method: GriddingMethod, nodata_handling: NodataChoic
         if isinstance(method, (Interpolator, Reducer))
         else _resolve_gridding_operator(method, distance_power=2.0)
     )
+    if isinstance(operator, Reducer):
+        if nodata_handling is None:
+            nodata_handling = "ignore"
+        elif isinstance(nodata_handling, str) and nodata_handling.lower() == "nearest":
+            raise ValueError("Nearest-source nodata handling requires an Interpolator.")
     order = operator.interpolation_order if isinstance(operator, Interpolator) else None
     return _resolve_nodata_handling(nodata_handling=nodata_handling, order=order)[1]
 
@@ -168,10 +173,10 @@ def _grid_pointcloud(
         ``max`` are aliases for ``mean``, ``minimum`` and ``maximum``.
     :param dist_nodata_pixel: Maximum point distance or circular neighborhood radius, expressed in output pixels.
         A Reducer with PointNeighbours uses its configured point count or radius instead.
-    :param nodata_handling: ``"gdal"`` calculates from finite points, then masks an Interpolator's result when the
-        nearest source point is missing; a Reducer uses the finite result. ``"ignore"`` uses the available finite
-        values; ``"propagate"`` masks cells using a missing source. A non-negative integer or half-order choice
-        instead masks cells within that distance of missing source values.
+    :param nodata_handling: ``"nearest"`` calculates from finite points, then masks an Interpolator's result when the
+        nearest source point is missing. ``"ignore"`` uses available finite values; ``"propagate"`` masks cells
+        using a missing source. Reducers default to ``"ignore"`` and cannot use ``"nearest"``. A non-negative
+        integer or half-order choice masks cells within that distance of missing source values.
     :param grid_res: Grid resolution, used for chunks with a single row or column.
     :param distance_power: Distance exponent used for inverse-distance weighting (defaults to 2).
     :param min_points: Minimum number of finite points required inside a circular neighborhood (defaults to 1).
@@ -208,6 +213,11 @@ def _grid_pointcloud(
         raise ValueError("Circular gridding methods require a finite dist_nodata_pixel support radius.")
     if isinstance(min_points, bool) or not isinstance(min_points, (int, np.integer)) or min_points < 0:
         raise ValueError("Argument 'min_points' must be a non-negative integer.")
+    if isinstance(operator, Reducer):
+        if nodata_handling is None:
+            nodata_handling = "ignore"
+        elif isinstance(nodata_handling, str) and nodata_handling.lower() == "nearest":
+            raise ValueError("Nearest-source nodata handling requires an Interpolator.")
     order = operator.interpolation_order if isinstance(operator, Interpolator) else None
     propagation, spread_distance = _resolve_nodata_handling(nodata_handling=nodata_handling, order=order)
 
@@ -249,12 +259,12 @@ def _grid_pointcloud(
             engine=engine,
         )
 
-    # Interpolators check the nearest original point; reducers use the finite result under "gdal"
-    needs_nodata_mask = (propagation == "gdal" and isinstance(operator, Interpolator)) or (
+    # Interpolators check the nearest original point; reducers use their finite result
+    needs_nodata_mask = (propagation == "nearest" and isinstance(operator, Interpolator)) or (
         propagation == "propagate" and (not uses_local_method or operator.default_neighborhood is None)
     )
     if len(invalid_points) > 0 and needs_nodata_mask:
-        mask_propagation = cast(Literal["gdal", "propagate"], propagation)
+        mask_propagation = cast(Literal["nearest", "propagate"], propagation)
         _mask_grid_from_invalid_points(
             aligned_dem,
             source_points=source_points,
@@ -641,7 +651,13 @@ def _grid_pointcloud_to_raster(
         if isinstance(resampling, Reducer):
             _resolve_point_neighbours_for_reducer(resampling)
         if nodata_handling is None:
-            nodata_handling = config["interpolation_nodata_handling"]
+            nodata_handling = "ignore" if isinstance(resampling, Reducer) else config["interpolation_nodata_handling"]
+        if (
+            isinstance(resampling, Reducer)
+            and isinstance(nodata_handling, str)
+            and nodata_handling.lower() == "nearest"
+        ):
+            raise ValueError("Nearest-source nodata handling requires an Interpolator.")
         _gridding_nodata_spread(resampling, nodata_handling=nodata_handling)
 
     # Eager calls can use SciPy threads while each parallel output task stays single-threaded

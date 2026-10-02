@@ -66,7 +66,13 @@ from geoutils.multiproc.mparray import (
     _write_multiproc_result,
 )
 from geoutils.operators.execution import _evaluate_operator_batch, _resample_at_points
-from geoutils.operators.interpolator import Interpolator, Linear, Nearest, _regular_interpolation_method
+from geoutils.operators.interpolator import (
+    Interpolator,
+    Linear,
+    Nearest,
+    RasterConvolution,
+    _regular_interpolation_method,
+)
 from geoutils.operators.neighbours import (
     GridCoverage,
     GridNeighbours,
@@ -75,12 +81,17 @@ from geoutils.operators.neighbours import (
     _configure_grid_neighbours,
     _resolve_grid_neighbours_for_interpolator,
 )
-from geoutils.operators.nodata import NodataHandling, NodataPropagation, _validate_nodata_propagation
+from geoutils.operators.nodata import (
+    NodataHandling,
+    NodataPropagation,
+    _validate_nodata_propagation,
+)
 from geoutils.operators.overlap import (
     GridIntersection,
-    OverlapBackend,
+    RasterOverlapBackend,
     _corners_are_grid_aligned,
     _exactextract_operation,
+    _gdal_rectangle_weights,
     _grid_intersection_fractions_from_corners,
     _grid_intersection_local_data,
     _run_exactextract,
@@ -88,9 +99,13 @@ from geoutils.operators.overlap import (
 from geoutils.operators.reducer import (
     Maximum,
     Mean,
+    Median,
     Minimum,
+    Mode,
+    Quantile,
     Reducer,
     RegularReductionMethod,
+    RootMeanSquare,
     Sum,
     _reduce_overlap_batch,
 )
@@ -484,8 +499,9 @@ def _reproject_grid_operator(
     *,
     source_nodata: int | float | None,
     nodata_propagation: NodataPropagation,
-    overlap_backend: OverlapBackend = "auto",
+    overlap_backend: RasterOverlapBackend = "auto",
     coverage: GridCoverage | None = None,
+    area_weighting: Literal["diagonal_bounds", "intersection"] = "diagonal_bounds",
     source_index_offset: tuple[int, int] = (0, 0),
     global_source_shape: tuple[int, int] | None = None,
     source_band_offset: int = 0,
@@ -495,8 +511,10 @@ def _reproject_grid_operator(
 
     An Interpolator receives source cells around each transformed destination center.
     A Reducer without an explicit neighborhood uses the rectangular source window around a destination cell.
-    Coverage selects centers, all touched cells, or fractional overlap with the destination cell. With GridNeighbours,
-    it uses a fixed window around the cell containing each transformed destination center.
+    Coverage selects centers, all touched cells, or fractional overlap. By default, fractional statistics weight a
+    rectangle defined by two transformed diagonal corners, including source-edge weights beyond the raster boundary.
+    area_weighting="intersection" instead uses the clipped four-corner polygon. With GridNeighbours, a Reducer uses
+    a fixed window around the cell containing each transformed destination center.
 
     The input can be single or multi-band (2D/3D array shape), and might be only a chunk
     (Dask/MP chunked logic sends here).
@@ -522,6 +540,15 @@ def _reproject_grid_operator(
         (source_bands.shape[-2], source_bands.shape[-1]) if global_source_shape is None else global_source_shape
     )
     use_footprints = isinstance(operator, Reducer) and operator.default_neighborhood is None
+    batch_reducer = operator.error_structure is None and (
+        type(operator) in (Mean, Sum, Minimum, Maximum, RootMeanSquare)
+        or (type(operator) is Mode and not operator.weighted)
+        or (
+            type(operator) in (Median, Quantile)
+            and not cast(Quantile, operator).weighted
+            and cast(Quantile, operator).method in ("linear", "inverted_cdf")
+        )
+    )
     target_x, target_y, target_corners = _destination_grid_in_source_crs(
         dst_transform,
         dst_shape,
@@ -555,7 +582,7 @@ def _reproject_grid_operator(
     exactextract_operation: str | None = None
     if use_footprints:
         assert isinstance(operator, Reducer) and target_corners is not None
-        selected_coverage = "all_touched" if coverage is None else coverage
+        selected_coverage = "fractional" if coverage is None else coverage
         if selected_coverage not in ("center", "all_touched", "fractional"):
             raise ValueError("coverage must be 'center', 'all_touched' or 'fractional'.")
         # Map projected corners to source pixel coordinates to bound the source window
@@ -564,13 +591,22 @@ def _reproject_grid_operator(
         corner_rows = inverse.d * target_corners[..., 0] + inverse.e * target_corners[..., 1] + inverse.f
         lower_columns, upper_columns = corner_columns.min(axis=1), corner_columns.max(axis=1)
         lower_rows, upper_rows = corner_rows.min(axis=1), corner_rows.max(axis=1)
-        window_columns = np.stack((lower_columns, upper_columns, upper_columns, lower_columns), axis=1)
-        window_rows = np.stack((lower_rows, lower_rows, upper_rows, upper_rows), axis=1)
+        if selected_coverage == "fractional" and area_weighting == "diagonal_bounds" and type(operator) is not Sum:
+            # GDAL's average and order statistics weight a rectangle from two transformed diagonal corners
+            first_columns = np.minimum(corner_columns[:, 0], corner_columns[:, 2])
+            last_columns = np.maximum(corner_columns[:, 0], corner_columns[:, 2])
+            first_rows = np.minimum(corner_rows[:, 0], corner_rows[:, 2])
+            last_rows = np.maximum(corner_rows[:, 0], corner_rows[:, 2])
+            window_columns = np.stack((first_columns, last_columns, last_columns, first_columns), axis=1)
+            window_rows = np.stack((first_rows, first_rows, last_rows, last_rows), axis=1)
+        else:
+            window_columns = np.stack((lower_columns, upper_columns, upper_columns, lower_columns), axis=1)
+            window_rows = np.stack((lower_rows, lower_rows, upper_rows, upper_rows), axis=1)
         window_x = src_transform.a * window_columns + src_transform.b * window_rows + src_transform.c
         window_y = src_transform.d * window_columns + src_transform.e * window_rows + src_transform.f
         window_corners = np.stack((window_x, window_y), axis=-1)
-        # Fractional coverage uses the projected cell itself to measure source pixel areas
-        if selected_coverage == "fractional":
+        # Four-corner coverage and GDAL sum use the projected cell itself to measure source pixel areas
+        if selected_coverage == "fractional" and (area_weighting == "intersection" or type(operator) is Sum):
             window_corners = target_corners
         # Let ExactExtract calculate common statistics directly when its operation exactly matches the Reducer
         source_shape = (int(source_bands.shape[-2]), int(source_bands.shape[-1]))
@@ -583,11 +619,13 @@ def _reproject_grid_operator(
         direct_exactextract = (
             operator.error_structure is None
             and propagation != "propagate"
-            and overlap_backend != "shapely"
+            and overlap_backend in ("auto", "exactextract")
+            and (overlap_backend == "exactextract" or find_spec("numba") is None or np.prod(dst_shape) >= 100_000)
             and exactextract_operation is not None
             and exactextract_compatible
             and find_spec("exactextract") is not None
             and selected_coverage == "fractional"
+            and (area_weighting == "intersection" or type(operator) is Sum)
             and not _corners_are_grid_aligned(window_corners, src_transform)
         )
         if direct_exactextract:
@@ -600,7 +638,16 @@ def _reproject_grid_operator(
                 source_shape,
                 backend=overlap_backend,
             )
-            if selected_coverage == "center":
+            if selected_coverage == "fractional" and area_weighting == "diagonal_bounds" and type(operator) is not Sum:
+                reducer_overlap = _gdal_rectangle_weights(
+                    reducer_overlap,
+                    first_columns,
+                    last_columns,
+                    first_rows,
+                    last_rows,
+                    source_shape,
+                )
+            elif selected_coverage == "center":
                 # Keep source cells whose centers fall inside the rectangular source window
                 selected = []
                 for target_index in range(reducer_overlap.geometry_count):
@@ -656,7 +703,7 @@ def _reproject_grid_operator(
             )
         else:
             # Use the fixed source window or the window derived from each destination cell
-            handling = "ignore" if propagation == "gdal" else propagation
+            handling = "ignore" if propagation == "nearest" else propagation
             if isinstance(operator.default_neighborhood, GridNeighbours):
                 # Reuse point sampling so offsets, nodata rules and band IDs match resample_at_points()
                 neighborhood = operator.default_neighborhood
@@ -689,13 +736,13 @@ def _reproject_grid_operator(
                     values=np.asanyarray(source_band),
                     operation=exactextract_operation,
                 )
-            elif type(operator) in (Mean, Sum, Minimum, Maximum) and operator.error_structure is None:
-                # These built-ins can reduce all groups at once using the already calculated overlap fractions
+            elif batch_reducer:
+                # Reduce built-in statistics in groups without constructing one LocalData per destination cell
                 assert reducer_overlap is not None
                 band_output = _reduce_overlap_batch(
                     source_band,
                     reducer_overlap,
-                    cast(Mean | Sum | Minimum | Maximum, operator),
+                    operator,
                     nodata_propagation=handling,
                 )
             else:
@@ -741,7 +788,12 @@ def _combined_blocks_shape_transform(
     combined_shape = (minmaxs["max_ye"] - minmaxs["min_ys"], minmaxs["max_xe"] - minmaxs["min_xs"])
 
     # Shift source transform with start indexes to get the one for combined block location
-    combined_transform = src_geogrid.translate(xoff=minmaxs["min_xs"], yoff=-minmaxs["min_ys"]).transform
+    if src_geogrid.transform.b == 0 and src_geogrid.transform.d == 0:
+        combined_transform = src_geogrid.translate(xoff=minmaxs["min_xs"], yoff=-minmaxs["min_ys"]).transform
+    else:
+        combined_transform = src_geogrid.transform * rio.transform.Affine.translation(
+            minmaxs["min_xs"], minmaxs["min_ys"]
+        )
 
     # Compute relative block indexes that will be needed to reconstruct a square array in the delayed function,
     # by subtracting the minimum starting indices in X/Y
@@ -956,7 +1008,7 @@ def _reproject_per_block(
 
     if isinstance(kwargs["resampling"], (Interpolator, Reducer)):
         operator = kwargs["resampling"]
-        propagation = _validate_nodata_propagation(kwargs.get("nodata_propagation", "gdal"))
+        propagation = _validate_nodata_propagation(kwargs.get("nodata_propagation", "nearest"))
         # Error-model IDs refer to the full raster even when workers read a smaller source rectangle
         source_row, source_col = _xy2ij(
             src_transform.c,
@@ -978,6 +1030,7 @@ def _reproject_per_block(
             nodata_propagation=propagation,
             overlap_backend=kwargs.get("overlap_backend", "auto"),
             coverage=kwargs.get("coverage"),
+            area_weighting=kwargs.get("area_weighting", "diagonal_bounds"),
             source_index_offset=(int(round(np.asarray(source_row).item())), int(round(np.asarray(source_col).item()))),
             global_source_shape=combined_meta["global_source_shape"],
             source_band_offset=source_band_offset,
@@ -1284,11 +1337,12 @@ def _reproject(
     n_threads: int = 0,
     memory_limit: int = 64,
     mp_config: MultiprocConfig | None = None,
-    nodata_propagation: NodataPropagation = "gdal",
-    overlap_backend: OverlapBackend = "auto",
+    nodata_propagation: NodataPropagation | None = None,
+    overlap_backend: RasterOverlapBackend = "auto",
     window: int | None = None,
     window_shape: Literal["square", "circular"] | None = None,
     coverage: GridCoverage | None = None,
+    area_weighting: Literal["diagonal_bounds", "intersection"] = "diagonal_bounds",
 ) -> Any:
     """
     Reproject raster. See Raster.reproject() for details.
@@ -1314,11 +1368,21 @@ def _reproject(
 
     # 3/ Store georeferencing parameters and convert named methods to Rasterio's Resampling values
     is_operator = isinstance(resampling, (Interpolator, Reducer))
+    if area_weighting not in ("diagonal_bounds", "intersection"):
+        raise ValueError("area_weighting must be 'diagonal_bounds' or 'intersection'.")
+    if area_weighting == "intersection" and not isinstance(resampling, Reducer):
+        raise ValueError("Intersection area weighting requires a Reducer.")
+    if is_operator:
+        if nodata_propagation is None:
+            nodata_propagation = "nearest" if isinstance(resampling, Interpolator) else "ignore"
+        if isinstance(resampling, Reducer) and nodata_propagation.lower() == "nearest":
+            raise ValueError("Nearest-source nodata propagation requires an Interpolator.")
+        propagation = _validate_nodata_propagation(nodata_propagation)
     if isinstance(resampling, Interpolator) and (
         window is not None or window_shape is not None or coverage is not None
     ):
         raise ValueError("Source window options require a Reducer.")
-    if isinstance(resampling, Interpolator):
+    if isinstance(resampling, Interpolator) and not isinstance(resampling, RasterConvolution):
         regular_method = _regular_interpolation_method(resampling)
         if regular_method is not None:
             _check_regular_grid_neighbours(resampling, regular_method, warn=True)
@@ -1331,6 +1395,12 @@ def _reproject(
     elif isinstance(resampling, Reducer):
         if isinstance(resampling.default_neighborhood, PointNeighbours):
             raise ValueError("PointNeighbours applies to point sources; use GridNeighbours for raster cells.")
+        if area_weighting == "intersection" and coverage not in (None, "fractional"):
+            raise ValueError("Intersection area weighting requires coverage='fractional'.")
+        if area_weighting == "intersection" and (
+            resampling.default_neighborhood is not None or window is not None or window_shape is not None
+        ):
+            raise ValueError("Intersection area weighting requires a Reducer without a fixed neighborhood.")
         neighborhood = _configure_grid_neighbours(
             resampling.default_neighborhood,
             size=window,
@@ -1392,7 +1462,6 @@ def _reproject(
 
     # Apply an Interpolator or Reducer in GeoUtils because Rasterio only accepts its own Resampling values
     if is_operator and not mp_backend and not dask_backend:
-        propagation = _validate_nodata_propagation(nodata_propagation)
         dst_arr = _reproject_grid_operator(
             source_raster.data,
             src_transform=source_raster.transform,
@@ -1405,6 +1474,7 @@ def _reproject(
             nodata_propagation=propagation,
             overlap_backend=overlap_backend,
             coverage=coverage,
+            area_weighting=area_weighting,
         )
         # Use a mask for missing results when the requested integer data type cannot represent NaN
         output_dtype = np.dtype(dtype)
@@ -1424,12 +1494,15 @@ def _reproject(
         operator = cast(Interpolator | Reducer, resampling)
         if isinstance(operator.default_neighborhood, GridNeighbours):
             source_pixel_overlap = operator.default_neighborhood.overlap
+        elif isinstance(operator, RasterConvolution):
+            source_pixel_overlap = (operator.radius, operator.radius)
         reproj_kwargs.update(
             {
                 "resampling": operator,
-                "nodata_propagation": _validate_nodata_propagation(nodata_propagation),
+                "nodata_propagation": propagation,
                 "overlap_backend": overlap_backend,
                 "coverage": coverage,
+                "area_weighting": area_weighting,
                 "source_pixel_overlap": source_pixel_overlap,
             }
         )
@@ -1468,32 +1541,26 @@ def _crop_window(
 
     assert distance_unit in ["georeferenced", "pixel"], "distance_unit must be 'georeferenced' or 'pixel'"
 
-    # If using georeferenced unit, use bbox directly
-    if distance_unit == "georeferenced":
-        xmin, ymin, xmax, ymax = bbox
-    # Else, convert the pixel window's corners to coordinates
-    else:
+    # Pixel bounds already identify the exact source window, including on a rotated grid
+    if distance_unit == "pixel":
         colmin, rowmin, colmax, rowmax = bbox
-        (xmin, xmax), (ymax, ymin) = _ij2xy(
-            np.asarray([rowmin, rowmax]),
-            np.asarray([colmin, colmax]),
-            transform=source_raster.transform,
-            area_or_point=None,
-            shift_area_or_point=False,
-            force_offset="ul",
-        )
+        requested_window = rio.windows.Window(colmin, rowmin, colmax - colmin, rowmax - rowmin)
+        raster_window = rio.windows.Window(0, 0, source_raster.width, source_raster.height)
+        final_window = requested_window.intersection(raster_window).round_lengths().round_offsets()
+        new_transform = rio.windows.transform(final_window, source_raster.transform)
+        return final_window, new_transform
 
-    # Finding the intersection of requested bounds and original bounds, cropped to image shape
+    # Georeferenced bounds are converted to source pixel coordinates before clipping
+    xmin, ymin, xmax, ymax = bbox
     ref_win = rio.windows.from_bounds(xmin, ymin, xmax, ymax, transform=source_raster.transform)
     self_win = rio.windows.from_bounds(*source_raster.bbox, transform=source_raster.transform).crop(
         *source_raster.shape
     )
     final_window = ref_win.intersection(self_win).round_lengths().round_offsets()
 
-    # Update bounds and transform accordingly
-    new_xmin, new_ymin, new_xmax, new_ymax = rio.windows.bounds(final_window, transform=source_raster.transform)
-    tfm = rio.transform.from_origin(new_xmin, new_ymax, *source_raster.res)
-    return final_window, tfm
+    # Translate the full affine transform so rotation and shear survive the crop
+    new_transform = rio.windows.transform(final_window, source_raster.transform)
+    return final_window, new_transform
 
 
 def _crop(

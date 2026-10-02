@@ -996,7 +996,7 @@ def _cosample(
         radius and minimum of three finite points for circular methods. Other options include "distance_power" for
         IDW and "engine" ("scipy" or "numba"). Set output locations and method with at and grid_method.
     :param resample_kwargs: Options for Raster.interp_points(), e.g. {"nodata_handling": "ignore"}. The choices are
-        "gdal", "ignore", "propagate", a half-order rule, or a non-negative distance in pixels.
+        "nearest", "ignore", "propagate", a half-order rule, or a non-negative distance in pixels.
         Set locations, band and method with the corresponding cosample() arguments.
     :param align: Handling of mismatched grids or coordinate systems: "raise" an error, or "reproject" to match at.
         Point inputs must still share the same ordered coordinates when sampled at points.

@@ -188,7 +188,7 @@ class TestRaster:
         # Test stats param
         nb_lines = len(r.info(verbose=False).split("\n"))
         output_with_stats = r.info(stats=True, verbose=False)
-        stats = r.get_stats()
+        stats = r.stats()
         output_with_stats_split = output_with_stats.split("\n")
         nb_lines_with_stats = len(output_with_stats_split)
 
@@ -201,18 +201,18 @@ class TestRaster:
                 assert output_with_stats_split[nb_lines + 2 + s].startswith(stat)
                 assert f"{stats[stat]:.2f}" in output_with_stats_split[nb_lines + 2 + s]
         else:
-            assert nb_lines + r.count * len(r.get_stats(band=1)) + r.count + 2 == nb_lines_with_stats
+            assert nb_lines + r.count * len(r.stats(values=1)) + r.count + 2 == nb_lines_with_stats
             start = nb_lines + 2
             for band in range(r.count):
-                assert output_with_stats_split[start + band * len(r.get_stats(band=1)) + band] == f"Band {band + 1}:"
-                stats_band = r.get_stats(band=band + 1)
+                assert output_with_stats_split[start + band * len(r.stats(values=1)) + band] == f"Band {band + 1}:"
+                stats_band = r.stats(values=band + 1)
                 for s, stat in enumerate(stats_band.keys()):
-                    assert output_with_stats_split[start + band * len(r.get_stats(band=1)) + band + 1 + s].startswith(
+                    assert output_with_stats_split[start + band * len(r.stats(values=1)) + band + 1 + s].startswith(
                         stat
                     )
                     assert (
                         f"{stats_band[stat]:.2f}"
-                        in output_with_stats_split[start + band * len(r.get_stats(band=1)) + band + 1 + s]
+                        in output_with_stats_split[start + band * len(r.stats(values=1)) + band + 1 + s]
                     )
 
     def test_load(self) -> None:
@@ -688,7 +688,8 @@ class TestRaster:
         else:
             new_dtype = "uint8"
 
-        rst.data = rst.data.astype(new_dtype)
+        with np.errstate(invalid="ignore"):
+            rst.data = rst.data.astype(new_dtype)
 
         # Check that setting data with a different shape results in an error
         new_shape = (1, 25)
@@ -1191,7 +1192,8 @@ class TestRaster:
             warnings.filterwarnings(
                 "ignore", message="Unmasked values equal to the nodata value*", category=UserWarning
             )
-            r2 = r.copy(new_array=r_arr.astype(dtype=new_dtype))
+            with np.errstate(invalid="ignore"):
+                r2 = r.copy(new_array=r_arr.astype(dtype=new_dtype))
         assert r2.dtype == new_dtype
 
         # However, the new nodata will differ if casting was done
@@ -1203,9 +1205,11 @@ class TestRaster:
         # The copy should fail if the data type is not compatible
         if np.promote_types(r.dtype, new_dtype) != new_dtype and r.nodata is not None:
             with pytest.warns(UserWarning, match="Unmasked values equal to the nodata value*"):
-                r.copy(new_array=r_arr.astype(dtype=new_dtype), cast_nodata=False)
+                with np.errstate(invalid="ignore"):
+                    r.copy(new_array=r_arr.astype(dtype=new_dtype), cast_nodata=False)
         else:
-            r2 = r.copy(new_array=r_arr.astype(dtype=new_dtype), cast_nodata=False)
+            with np.errstate(invalid="ignore"):
+                r2 = r.copy(new_array=r_arr.astype(dtype=new_dtype), cast_nodata=False)
             assert r2.dtype == new_dtype
 
         # Test loading mechanism
@@ -2532,8 +2536,9 @@ class TestArithmetic:
 
         # Test with zeros values (e.g. division)
         r1 = self.r1
-        r3 = getattr(r1, op)(r2_zero)
-        assert np.all(r3.data == getattr(r1.data, op)(r2_zero.data))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            r3 = getattr(r1, op)(r2_zero)
+            assert np.all(r3.data == getattr(r1.data, op)(r2_zero.data))
         if np.sum(r3.data.mask) == 0:
             assert r3.nodata == r2_zero.nodata
         else:

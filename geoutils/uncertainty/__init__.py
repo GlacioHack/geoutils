@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Spatial error models and tools for carrying uncertainty through calculations."""
+"""Module for estimating, storing and propagating uncertainty through spatial operations."""
 
 # ruff: noqa: F401
 

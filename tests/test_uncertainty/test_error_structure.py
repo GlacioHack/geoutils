@@ -9,7 +9,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import pytest
-from numpy.typing import NDArray
 
 import geoutils as gu
 from geoutils._misc import import_optional
@@ -590,83 +589,3 @@ class TestErrorStructureErrors:
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
         with pytest.raises(ValueError, match=message):
             list(structure.iter_samples(**options))  # type: ignore[arg-type]
-
-
-class TestBoundErrorStructure:
-    """Test module for the BoundErrorStructure class."""
-
-    def test_bind__independent_observations(self) -> None:
-        """Checks that binding two observations gives their independent covariance matrix."""
-
-        # Two named observations with constant measurement errors
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
-        bound = structure.bind(["left", "right"])
-
-        # Variance of two squared on the diagonal and zero covariance elsewhere
-        assert bound.size == 2
-        np.testing.assert_array_equal(bound.source_ids, ["left", "right"])
-        np.testing.assert_array_equal(bound.covariance_block([0, 1], [0, 1]), np.diag([4, 4]))
-
-    def test_bind__tuple_source_ids_remain_distinct(self) -> None:
-        """Checks that tuple source IDs identify two independent observations in a bound model."""
-
-        # Tuple IDs for two independent observations
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
-        source_ids = [(1, "a"), (2, "b")]
-
-        # Check diagonal covariance with each tuple treated as one ID
-        bound = structure.bind(source_ids)
-        covariance = bound.covariance_block([0, 1], [0, 1])
-        np.testing.assert_array_equal(covariance, np.diag([4.0, 4.0]))
-
-
-class TestBoundErrorStructureErrors:
-    """Test module for errors/warnings in the BoundErrorStructure class."""
-
-    @pytest.mark.parametrize(
-        "source_ids, message",
-        [
-            (np.array([[0, 1]]), "one-dimensional"),
-            ([0, 0], "each source_id once"),
-            ([[0]], "hashable IDs"),
-        ],
-    )
-    def test_bind__error_invalid_source_ids(self, source_ids: object, message: str) -> None:
-        """Checks that bound observations have unique, hashable, one-dimensional source IDs."""
-
-        # Independent errors still need distinct identities to form a covariance matrix
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
-        with pytest.raises(ValueError, match=message):
-            structure.bind(source_ids)  # type: ignore[arg-type]
-
-    @pytest.mark.parametrize("coordinates", [np.array([0.0, 1.0]), np.array([[0.0], [np.nan]])])
-    def test_bind__error_invalid_coordinates(self, coordinates: NDArray[np.float64]) -> None:
-        """Checks that source coordinates have one finite row per observation."""
-
-        # Coordinate shape and finite values are checked before a spatial model draws errors
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
-        with pytest.raises(ValueError, match="coordinates must be finite with shape"):
-            structure.bind(["a", "b"], coordinates=coordinates)
-
-    def test_bind__error_invalid_predictor(self) -> None:
-        """Checks that variable error magnitudes receive one slope per bound observation."""
-
-        # Magnitudes depend on slope at two independent observations
-        statistics = pd.DataFrame({"nmad": [1.0, 2.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="slope"))
-        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
-        structure = gu.ErrorStructure([gu.ErrorComponent("terrain", magnitude)])
-
-        # Missing and wrong-length slope values cannot define both magnitudes
-        with pytest.raises(ValueError, match="Missing predictors"):
-            structure.bind(["a", "b"])
-        with pytest.raises(ValueError, match="must be scalar or contain one value per source"):
-            structure.bind(["a", "b"], predictors={"slope": [0.0, 0.5, 1.0]})
-
-    def test_covariance_block__error_outside_source(self) -> None:
-        """Checks that covariance blocks reject indexes outside the bound observations."""
-
-        # Two source IDs permit positions zero and one only
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
-        bound = structure.bind(["a", "b"])
-        with pytest.raises(ValueError, match="outside the selected source"):
-            bound.covariance_block([2], [0])

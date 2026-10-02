@@ -69,7 +69,7 @@ def validate_interpolation_method(interpolation_method: bool | str | int) -> str
 
 def validate_nodata_handling(nodata_handling: bool | str | int) -> str | int:
     """Validate how interpolation handles missing source values."""
-    valid_choices = ["gdal", "ignore", "propagate", "half_order_up", "half_order_down"]
+    valid_choices = ["nearest", "ignore", "propagate", "half_order_up", "half_order_down"]
     if isinstance(nodata_handling, str):
         if nodata_handling.lower() in valid_choices:
             return nodata_handling.lower()

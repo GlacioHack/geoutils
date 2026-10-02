@@ -302,7 +302,7 @@ def _field_draws(
     ]
 
 
-def _draw_bound_chunk(
+def _draw_error_chunk(
     model: ErrorStructure,
     indexes: NDArray[np.int64],
     coordinates: NDArray[np.float64],
@@ -315,12 +315,17 @@ def _draw_bound_chunk(
     backend: Literal["gstools", "gpytorch"] = "gstools",
     inducing_fields: tuple[GPyTorchInducingField | None, ...] | None = None,
 ) -> NDArray[np.float64]:
-    """Bind one chunk and evaluate its shared GSTools or GPyTorch realization."""
+    """Draw one chunk from shared GSTools or GPyTorch random values."""
 
     if backend == "gpytorch" and inducing_fields is None:
         raise ValueError("Chunked GPyTorch fields require a shared inducing grid.")
-    bound = model.bind(indexes, coordinates=coordinates, predictors=predictors)
-    return bound.draw_error(
+    from geoutils.uncertainty.error_structure import _draw_source_errors, _prepare_source_errors
+
+    locations, component_data = _prepare_source_errors(model, len(indexes), coordinates, predictors)
+    return _draw_source_errors(
+        len(indexes),
+        locations,
+        component_data,
         np.random.default_rng(0),
         backend=backend,
         component_seeds=component_seeds,
@@ -348,9 +353,9 @@ def _eager_random_fields(
     backend: Literal["gstools", "gpytorch"],
     gpytorch_inducing_points: int | None,
 ) -> Any:
-    """Read complete locations, draw each field, and wrap spatial outputs."""
+    """Derive random fields in-memory."""
 
-    # A raster or point cloud supplies all output locations and determines the returned object type
+    # The ``like`` raster or point cloud defines output support, and returned object type (Xarray/Pandas or GeoUtils)
     if like is not None:
         source_ids, coordinates, spatial_shape, random_coordinates, mesh_type = _spatial_support(like)
         predictors = _spatial_predictors(like, predictors, size=int(np.prod(spatial_shape)))
@@ -373,15 +378,20 @@ def _eager_random_fields(
         random_coordinates = None
         mesh_type = "unstructured"
 
-    bound = error_structure.bind(source_ids, coordinates=coordinates, predictors=predictors)
+    from geoutils.uncertainty.error_structure import _draw_source_errors, _prepare_source_errors
 
-    # An explicit inducing grid lets eager inputs reproduce the same approximate chunked field
+    locations, component_data = _prepare_source_errors(error_structure, len(source_ids), coordinates, predictors)
+
+    # When using GPyTorch, we need to induce a grid for the in-memory field to match chunked output
     if backend == "gpytorch" and gpytorch_inducing_points is not None:
         assert like is not None
-        indexes = np.arange(bound.size, dtype=np.int64)
+        indexes = np.arange(len(source_ids), dtype=np.int64)
         fields = np.vstack(
             [
-                bound.draw_error(
+                _draw_source_errors(
+                    len(source_ids),
+                    locations,
+                    component_data,
                     np.random.default_rng(0),
                     backend=backend,
                     component_seeds=seeds,
@@ -398,7 +408,10 @@ def _eager_random_fields(
         rng = np.random.default_rng(random_state)
         fields = np.vstack(
             [
-                bound.draw_error(
+                _draw_source_errors(
+                    len(source_ids),
+                    locations,
+                    component_data,
                     rng,
                     backend=backend,
                     random_coordinates=random_coordinates,
@@ -421,7 +434,7 @@ def _eager_random_fields(
 ############################################
 
 
-def _draw_raster_tile(
+def _wrapper_draw_raster_tile(
     source_values: Any,
     predictor_values: Mapping[str, Any],
     model: ErrorStructure,
@@ -435,7 +448,7 @@ def _draw_raster_tile(
     backend: Literal["gstools", "gpytorch"],
     inducing_fields: tuple[GPyTorchInducingField | None, ...] | None,
 ) -> NDArray[np.float64]:
-    """Draw one raster tile using global pixel positions and the field's component seeds."""
+    """Wrapper for Dask backend to draw a random field over a raster tile."""
 
     from geoutils.stats.variography import VariogramModel
 
@@ -462,7 +475,7 @@ def _draw_raster_tile(
             for component in model.components.values()
         )
     )
-    field = _draw_bound_chunk(
+    field = _draw_error_chunk(
         model,
         indexes,
         coordinates,
@@ -488,7 +501,7 @@ def _chunked_raster_fields_dask(
     backend: Literal["gstools", "gpytorch"],
     gpytorch_inducing_points: int | None,
 ) -> Any:
-    """Build lazy raster tiles from source and predictor chunks."""
+    """Derive random fields per rastr tile lazily with Dask backend."""
 
     import_optional("dask")
     import dask
@@ -522,7 +535,7 @@ def _chunked_raster_fields_dask(
                     name: value if np.isscalar(value) else value[row_slice, column_slice]
                     for name, value in predictor_data.items()
                 }
-                delayed = dask.delayed(_draw_raster_tile)(
+                delayed = dask.delayed(_wrapper_draw_raster_tile)(
                     source[..., row_slice, column_slice],
                     tile_predictors,
                     model,
@@ -561,7 +574,7 @@ def _draw_point_rows(
     backend: Literal["gstools", "gpytorch"],
     inducing_fields: tuple[GPyTorchInducingField | None, ...] | None,
 ) -> Any:
-    """Draw errors at one consecutive group of point rows."""
+    """Derive random field for point rows: This helper is shared between MP and Dask."""
 
     if len(dataframe) == 0:
         return dataframe.copy()
@@ -572,7 +585,7 @@ def _draw_point_rows(
         name: dataframe[value].to_numpy() if isinstance(value, str) else value
         for name, value in predictor_columns.items()
     }
-    values = _draw_bound_chunk(
+    values = _draw_error_chunk(
         model, indexes, coordinates, predictors, component_seeds, backend=backend, inducing_fields=inducing_fields
     )
     output = dataframe.copy()
@@ -585,7 +598,7 @@ def _draw_point_rows(
     return output
 
 
-def _draw_point_partition_dask(
+def _wrapper_draw_point_partition_dask(
     dataframe: Any,
     model: ErrorStructure,
     predictor_columns: Mapping[str, str | float],
@@ -597,7 +610,7 @@ def _draw_point_partition_dask(
     inducing_fields: tuple[GPyTorchInducingField | None, ...] | None,
     partition_info: dict[str, Any] | None = None,
 ) -> Any:
-    """Draw one Dask point partition using its global row offset."""
+    """Wrapper for Dask backend to draw a random field over a point partition."""
 
     if partition_info is None:
         raise RuntimeError("Dask did not provide the point partition number.")
@@ -619,7 +632,7 @@ def _chunked_point_fields_dask(
     backend: Literal["gstools", "gpytorch"],
     gpytorch_inducing_points: int | None,
 ) -> Any:
-    """Draw lazy point partitions while preserving their source row order."""
+    """Derive random fields per point partition lazily with Dask backend."""
 
     import_optional("dask")
     import pandas as pd
@@ -667,7 +680,7 @@ def _chunked_point_fields_dask(
     draws = _field_draws(error_structure, like, n_fields, random_state, backend, gpytorch_inducing_points)
     for seeds, inducing_fields in draws:
         result = dataframe.map_partitions(
-            _draw_point_partition_dask,
+            _wrapper_draw_point_partition_dask,
             model,
             predictor_columns,
             seeds,
@@ -693,7 +706,7 @@ def _chunked_point_fields_dask(
 
 
 def _field_multiproc_config(mp_config: MultiprocConfig, field_index: int, n_fields: int) -> MultiprocConfig:
-    """Give each multiprocessing field its own output file."""
+    """We give each multiprocessing field its own output file."""
 
     from geoutils.multiproc import MultiprocConfig
 
@@ -706,7 +719,7 @@ def _field_multiproc_config(mp_config: MultiprocConfig, field_index: int, n_fiel
     )
 
 
-def _draw_raster_tile_multiproc(
+def _wrapper_draw_raster_tile_multiproc(
     tile: RasterBase,
     model: ErrorStructure,
     predictors: Mapping[str, Any] | None,
@@ -716,7 +729,7 @@ def _draw_raster_tile_multiproc(
     backend: Literal["gstools", "gpytorch"],
     inducing_fields: tuple[GPyTorchInducingField | None, ...] | None,
 ) -> Any:
-    """Draw one worker raster tile using its position in the full source grid."""
+    """Wrapper for MP backend to draw a random field over a raster tile."""
 
     from geoutils.multiproc.mparray import _load_raster_tile
     from geoutils.raster import Raster
@@ -737,7 +750,7 @@ def _draw_raster_tile_multiproc(
                 predictor.data if hasattr(predictor, "data") and not isinstance(predictor, np.ndarray) else predictor
             )
             tile_predictors[name] = value[..., bounds[0] : bounds[1], bounds[2] : bounds[3]]
-    values = _draw_raster_tile(
+    values = _wrapper_draw_raster_tile(
         tile.data,
         tile_predictors,
         model,
@@ -771,7 +784,7 @@ def _chunked_raster_fields_multiproc(
     backend: Literal["gstools", "gpytorch"],
     gpytorch_inducing_points: int | None,
 ) -> Any:
-    """Write worker-drawn raster tiles to one file per field."""
+    """Derive random fields per raster tile and write to file with MP backend."""
 
     from geoutils.multiproc import map_overlap
 
@@ -783,7 +796,7 @@ def _chunked_raster_fields_multiproc(
         output_config = _field_multiproc_config(mp_config, index, n_fields)
         fields.append(
             map_overlap(
-                _draw_raster_tile_multiproc,
+                _wrapper_draw_raster_tile_multiproc,
                 like,
                 output_config,
                 model,
@@ -798,7 +811,7 @@ def _chunked_raster_fields_multiproc(
     return fields[0] if n_fields == 1 else fields
 
 
-def _draw_point_partition_multiproc(
+def _wrapper_draw_point_partition_multiproc(
     dataframe: Any,
     model: ErrorStructure,
     predictor_columns: Mapping[str, str | float],
@@ -810,7 +823,7 @@ def _draw_point_partition_multiproc(
     backend: Literal["gstools", "gpytorch"],
     inducing_fields: tuple[GPyTorchInducingField | None, ...] | None,
 ) -> Any:
-    """Draw a worker point partition and remove temporary predictor columns."""
+    """Wrapper for MP backend to draw a random field over a point partition."""
 
     source = dataframe.copy()
     for name, values in predictor_arrays.items():
@@ -832,7 +845,7 @@ def _chunked_point_fields_multiproc(
     backend: Literal["gstools", "gpytorch"],
     gpytorch_inducing_points: int | None,
 ) -> Any:
-    """Draw point row groups in workers and write ordered GeoPackage outputs."""
+    """Derive random fields per point partition and write to file with MP backend."""
 
     from geoutils.multiproc.cluster import _map_bounded
     from geoutils.pointcloud.loading import _load_pointcloud_rows
@@ -887,7 +900,7 @@ def _chunked_point_fields_multiproc(
 
             saved = []
             tasks = arguments(seeds, inducing_fields)
-            for index, result in _map_bounded(output_config.cluster, _draw_point_partition_multiproc, tasks):
+            for index, result in _map_bounded(output_config.cluster, _wrapper_draw_point_partition_multiproc, tasks):
                 saved.append(_stage_pointcloud_partition(result, Path(directory) / f"field_{index}.pkl"))
             output = _write_pointcloud_partitions(
                 output_path,
@@ -920,8 +933,8 @@ def random_field(
     random_state: int | np.random.Generator | None = None,
     chunksizes: int | tuple[int, int] | None = None,
     mp_config: MultiprocConfig | None = None,
-    backend: Literal["gstools", "gpytorch"] = "gstools",
-    gpytorch_inducing_points: int | None = None,
+    backend: Literal["gstools", "gpytorch"] = "gpytorch",
+    gpytorch_inducing_points: int | Literal["auto"] | None = "auto",
 ) -> Any:
     """
     Generate random correlated error fields.
@@ -946,10 +959,9 @@ def random_field(
         Requires an Xarray raster or Dask GeoDataFrame so the result has the same type as the input.
     :param mp_config: Worker and output file settings for multiprocessing fields. Xarray rasters and Dask
         GeoDataFrames cannot use multiprocessing because its output has a different type.
-    :param backend: Library used to draw correlated errors. GSTools supports chunked calculation; GPyTorch draws
-        exact eager fields or approximate chunked fields from an inducing grid.
-    :param gpytorch_inducing_points: Target number of inducing grid points for approximate GPyTorch fields. Chunked
-        GPyTorch defaults to 256. Pass a value with eager spatial inputs to reproduce a chunked realization.
+    :param backend: Library used to draw correlated errors; GPyTorch is the default.
+    :param gpytorch_inducing_points: Target grid size for approximate GPyTorch fields. The default, "auto", uses
+        256 points for spatial inputs and an exact draw for plain coordinates. Pass None for an exact eager draw.
     :returns: With like, a result of the same spatial object type, or a list when n_fields > 1. Dask results remain
         lazy. Multiprocessing Raster and PointCloud results are file-backed. Without like, an array of shape
         (n_observations,) or (n_fields, n_observations).
@@ -960,6 +972,8 @@ def random_field(
         raise TypeError("error_structure must be an ErrorStructure.")
     if backend not in {"gstools", "gpytorch"}:
         raise ValueError("Random-field backend must be 'gstools' or 'gpytorch'.")
+    if gpytorch_inducing_points == "auto":
+        gpytorch_inducing_points = 256 if backend == "gpytorch" and like is not None else None
     if gpytorch_inducing_points is not None:
         if backend != "gpytorch":
             raise ValueError("gpytorch_inducing_points requires the GPyTorch backend.")
@@ -974,7 +988,6 @@ def random_field(
     if isinstance(n_fields, (bool, np.bool_)) or not isinstance(n_fields, (int, np.integer)) or n_fields < 1:
         raise ValueError("n_fields must be a positive integer.")
 
-    # Use the accessor behind an Xarray or GeoDataFrame input to preserve its public result type
     from geoutils.pointcloud.base import PointCloudBase
     from geoutils.raster.base import RasterBase
 

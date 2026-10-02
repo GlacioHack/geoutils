@@ -686,7 +686,7 @@ class TestPointReducerEngines:
     @pytest.mark.parametrize(
         "neighborhood", [PointNeighbours(k=3), PointNeighbours(radius=1.1), PointNeighbours(k=3, radius=1.1)]
     )
-    @pytest.mark.parametrize("nodata_handling", ["ignore", "gdal", "propagate"])
+    @pytest.mark.parametrize("nodata_handling", ["ignore", "propagate"])
     def test_grid__numba_matches_scipy_for_explicit_neighborhoods(
         self,
         operator_type: type[Reducer],
@@ -807,7 +807,7 @@ _GDAL_REDUCER_CASES = [
     (Minimum(), rio.enums.Resampling.min),
     (Maximum(), rio.enums.Resampling.max),
     (RootMeanSquare(), rio.enums.Resampling.rms),
-    (Mode(weighted=False, tie_break="first"), rio.enums.Resampling.mode),
+    (Mode(weighted=False, tie_break="first_to_mode"), rio.enums.Resampling.mode),
     (Median(method="inverted_cdf"), rio.enums.Resampling.med),
     (Quantile(0.25, method="inverted_cdf"), rio.enums.Resampling.q1),
     (Quantile(0.75, method="inverted_cdf"), rio.enums.Resampling.q3),
@@ -844,8 +844,8 @@ class TestRasterReducerCoverage:
         fractional = source.reproject(reference, resampling=operator, coverage="fractional")
         fixed = source.reproject(reference, resampling=operator, window=1, coverage="all_touched")
         assert default is not None and center is not None and fractional is not None and fixed is not None
-        # All touched uses all cells
-        assert default.data[0, 0] == np.sum(values)
+        # Default uses fractional areas
+        assert default.data[0, 0] == pytest.approx(fractional.data[0, 0])
         # Center selects one
         assert center.data[0, 0] == values[0, 0]
         # Fractional uses areas
@@ -861,6 +861,25 @@ class TestRasterReducerReferences:
 
     Reprojection grids, source IDs and chunked execution are covered in test_raster/test_transformations_raster.py.
     """
+
+    def test_reproject__mode_tie_matches_gdal(self) -> None:
+        """Checks that GDAL mode selects the value that first reaches the tied winning count."""
+
+        # Both two-by-two output cells tie, but the second source value reaches two occurrences first
+        values = np.array([[2, 3, 4, 5], [3, 2, 5, 4]], dtype=float)
+        source = gu.Raster.from_array(values, rio.transform.from_origin(0, 2, 1, 1), crs=32632)
+        reference = gu.Raster.from_array(np.zeros((1, 2)), rio.transform.from_origin(0, 2, 2, 2), crs=32632)
+
+        # Match GDAL's tie rule while preserving the separate first-source rule of Mode(tie_break="first")
+        expected = source.reproject(reference, resampling="mode")
+        actual = source.reproject(
+            reference,
+            resampling=Mode(weighted=False, tie_break="first_to_mode"),
+            coverage="fractional",
+        )
+        assert expected is not None and actual is not None
+        np.testing.assert_array_equal(actual.to_nanarray(), expected.to_nanarray())
+        np.testing.assert_array_equal(actual.to_nanarray(), [[3, 5]])
 
     def test_reduce_points__fractional_window_matches_gdal(self) -> None:
         """Checks that a shifted three-cell window gives the same area-weighted mean as GDAL."""
@@ -910,7 +929,7 @@ class TestRasterReducerReferences:
         # Compare the GeoUtils mean to GDAL average; 51 / 8 gives the upper value, and the lower value is nodata
         gdal_average = source.reproject(reference, resampling=rio.enums.Resampling.average)
         geoutils_average = source.reproject(
-            reference, resampling=Mean(), nodata_propagation="gdal", overlap_backend=overlap_backend
+            reference, resampling=Mean(), nodata_propagation="ignore", overlap_backend=overlap_backend
         )
         assert gdal_average is not None and geoutils_average is not None
         np.testing.assert_allclose(gdal_average.to_nanarray(), [[6.375], [np.nan]], equal_nan=True)

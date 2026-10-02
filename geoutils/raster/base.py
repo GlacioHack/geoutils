@@ -74,7 +74,7 @@ from geoutils.multiproc import MultiprocConfig
 from geoutils.operators.interpolator import Interpolator, Kriging, KrigingBackend
 from geoutils.operators.neighbours import GridCoverage, _build_kriging_grid_neighbours
 from geoutils.operators.nodata import NodataChoice, NodataPropagation
-from geoutils.operators.overlap import OverlapBackend
+from geoutils.operators.overlap import OverlapBackend, RasterOverlapBackend
 from geoutils.operators.reducer import Reducer
 from geoutils.operators.weighting import _with_error_structure
 from geoutils.projtools import (
@@ -380,7 +380,10 @@ class RasterBase(ABC):
             raise ValueError("Type of nodata not understood, must be float or int.")
 
         if new_nodata is not None:
-            if not rio.dtypes.can_cast_dtype(new_nodata, self.dtype):
+            # Rasterio may probe an invalid cast before rejecting incompatible nodata
+            with np.errstate(invalid="ignore", over="ignore"):
+                compatible = rio.dtypes.can_cast_dtype(new_nodata, self.dtype)
+            if not compatible:
                 raise ValueError(f"Nodata value {new_nodata} incompatible with self.dtype {self.dtype}.")
 
         if self._is_xr:
@@ -1559,12 +1562,13 @@ class RasterBase(ABC):
         n_threads: int = 0,
         memory_limit: int = 64,
         mp_config: MultiprocConfig | None = None,
-        nodata_propagation: NodataPropagation = "gdal",
-        overlap_backend: OverlapBackend = "auto",
+        nodata_propagation: NodataPropagation | None = None,
+        overlap_backend: RasterOverlapBackend = "auto",
         error_structure: ErrorStructure | None = None,
         window: int | None = None,
         window_shape: Literal["square", "circular"] | None = None,
         coverage: GridCoverage | None = None,
+        area_weighting: Literal["diagonal_bounds", "intersection"] = "diagonal_bounds",
     ) -> RasterType | None:
         """
         Reproject raster to a different geotransform (resolution, bounds) and/or coordinate reference system (CRS).
@@ -1591,9 +1595,8 @@ class RasterBase(ABC):
             not exist, will use GDAL's default.
         :param dtype: Destination data type of array.
         :param resampling: A Rasterio resampling method or a custom Interpolator or Reducer. Existing methods can be
-            passed as strings and continue to use Rasterio. By default, a Reducer uses cells touched by the
-            rectangular source window enclosing each projected destination cell. With GridNeighbours, it uses a
-            fixed window around the transformed destination center.
+            passed as strings and continue to use Rasterio. By default, a Reducer weights source cells by their
+            covered area. With GridNeighbours, it uses a fixed window around the transformed destination center.
             Defaults to bilinear.
             Can be configured with the global setting geoutils.config["reprojection_method"].
             See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
@@ -1604,16 +1607,24 @@ class RasterBase(ABC):
         :param n_threads: Number of threads. Defaults to (os.cpu_count() - 1).
         :param memory_limit: Memory limit in MB for warp operations. Larger values may perform better.
         :param mp_config: Configuration object containing chunk size, output file path, and an optional cluster.
-        :param nodata_propagation: How invalid source values affect a custom Interpolator or Reducer. ``gdal`` omits
-            invalid values during the calculation and follows the nearest source cell for interpolation.
-        :param overlap_backend: Library used to calculate overlap for a Reducer. ``auto`` uses ExactExtract when it is
-            installed and compatible, and otherwise uses Shapely; the other options select one explicitly.
+        :param nodata_propagation: How invalid source values affect a custom Interpolator or Reducer. By default,
+            an Interpolator excludes invalid neighbors and masks a destination whose nearest source cell is invalid;
+            a Reducer excludes invalid source cells and returns nodata if none are valid. ``ignore`` excludes invalid
+            values without the nearest-cell mask; ``propagate`` returns nodata if any contributing value is invalid.
+            ``nearest`` explicitly requests the default Interpolator rule.
+        :param overlap_backend: Method used to calculate a Reducer's cell overlap. ``auto`` uses Numba for small
+            unaligned grids when installed, then ExactExtract when installed, or Shapely. ``numba``, ``exactextract``
+            and ``shapely`` select one explicitly. Aligned grids use direct overlap lengths.
         :param error_structure: Optional observation error model used for weighting and fitting.
             Use geoutils.uncertainty.propagate() to calculate output uncertainty.
         :param window: Odd source window size for a Reducer, overriding its configured neighborhood.
         :param window_shape: Square or circular source window for a Reducer.
-        :param coverage: Select cells by center, include all touched cells, or weight by covered area. With no fixed
-            neighborhood, reproject() uses all touched cells by default.
+        :param coverage: Select cells by center, include all touched cells, or weight by covered area. Without a fixed
+            neighborhood, the default is ``fractional``.
+        :param area_weighting: For fractional reductions, ``diagonal_bounds`` weights the rectangle between two
+            transformed diagonal corners. At the source boundary, its outer row or column also receives weight for
+            the area extending beyond the raster. ``intersection`` weights only the overlap of each source cell with
+            the transformed four-corner destination polygon. Sums use the polygon in either mode.
 
         :returns: Reprojected raster.
         """
@@ -1645,6 +1656,7 @@ class RasterBase(ABC):
             window=window,
             window_shape=window_shape,
             coverage=coverage,
+            area_weighting=area_weighting,
         )
         return_copy, data, transformed, crs, nodata = reprojected
 
@@ -1765,8 +1777,8 @@ class RasterBase(ABC):
         random_state: int | np.random.Generator | None = None,
         chunksizes: tuple[int, int] | None = None,
         mp_config: MultiprocConfig | None = None,
-        backend: Literal["gstools", "gpytorch"] = "gstools",
-        gpytorch_inducing_points: int | None = None,
+        backend: Literal["gstools", "gpytorch"] = "gpytorch",
+        gpytorch_inducing_points: int | Literal["auto"] | None = "auto",
     ) -> RasterType | list[RasterType]:
         """Generate one or more error fields across this raster.
 
@@ -1777,8 +1789,8 @@ class RasterBase(ABC):
         :param chunksizes: Lazy output chunk size for an Xarray raster. Every chunk uses the same seed for a component.
         :param mp_config: Worker, tile and output file settings for a Raster.
         :param backend: Library used to draw correlated errors. Chunked GPyTorch fields use an inducing grid.
-        :param gpytorch_inducing_points: Target grid size for approximate GPyTorch fields; chunked fields default
-            to 256, while eager fields are exact unless a grid size is supplied.
+        :param gpytorch_inducing_points: Target grid size for approximate GPyTorch fields. "auto" uses 256 points
+            for eager and chunked rasters; None requests an exact eager draw.
         :returns: One result of the same raster type, or a list when n_fields is greater than one.
         """
 
@@ -2068,10 +2080,10 @@ class RasterBase(ABC):
             'splinef2d'. String methods use the existing SciPy array functions. A custom Interpolator defines the
             calculation for source cells at fixed GridNeighbours offsets. Defaults to the configured interpolation
             method.
-        :param nodata_handling: ``"gdal"`` masks values whose nearest source cell is missing; ``"ignore"`` uses
+        :param nodata_handling: ``"nearest"`` masks values whose nearest source cell is missing; ``"ignore"`` uses
             available finite cells; ``"propagate"`` masks values using a missing source cell. A non-negative integer
             or half-order choice instead masks cells within that distance of missing source values. Defaults to
-            geoutils.config["interpolation_nodata_handling"], which is ``"gdal"`` unless changed.
+            geoutils.config["interpolation_nodata_handling"], which is ``"nearest"`` unless changed.
         :param band: Band to use (from 1 to self.count).
         :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster
             CRS.
@@ -2211,8 +2223,8 @@ class RasterBase(ABC):
         :param band: Source band number, starting at one.
         :param input_latlon: Convert tuple coordinates from longitude/latitude to the raster CRS.
         :param as_array: Return values rather than a point cloud at the requested coordinates.
-        :param nodata_handling: How missing source values affect the result. Reducers omit them by default, including
-            with ``"gdal"``. A distance choice also masks results near missing source cells.
+        :param nodata_handling: How missing source values affect the result. Reducers omit them by default. A distance
+            choice also masks results near missing source cells.
         :param error_structure: Optional observation error model used for weighting and fitting.
             Use geoutils.uncertainty.propagate() to calculate output uncertainty.
         :param window: Optional odd window size for a reducer, overriding its configured neighborhood for this call.
@@ -2967,7 +2979,7 @@ class RasterBase(ABC):
             "distance_power" for IDW and "engine" ("scipy" or "numba").
             Set locations and method with at and grid_method.
         :param resample_kwargs: Options for Raster.interp_points(), e.g. {"nodata_handling": "ignore"}. The choices are
-            "gdal", "ignore", "propagate", a half-order rule, or a non-negative distance in pixels.
+            "nearest", "ignore", "propagate", a half-order rule, or a non-negative distance in pixels.
             Set locations, band and method with the corresponding cosample() arguments.
         :param align: Handling of mismatched grids or coordinate systems: "raise" an error, or "reproject" to match at.
             Point inputs must still share the same ordered coordinates when sampled at points.

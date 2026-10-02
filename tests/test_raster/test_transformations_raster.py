@@ -23,12 +23,15 @@ from geoutils.exceptions import InvalidCRSError, InvalidGridError
 from geoutils.multiproc import MultiprocConfig
 from geoutils.multiproc.cluster import MpCluster
 from geoutils.operators import GridNeighbours, Interpolator, PointNeighbours, Reducer
-from geoutils.operators.interpolator import Linear, Nearest
+from geoutils.operators.interpolator import Linear, Nearest, RasterConvolution
 from geoutils.operators.reducer import (
     Maximum,
     Mean,
     Median,
     Minimum,
+    Mode,
+    Quantile,
+    RootMeanSquare,
     Sum,
 )
 from geoutils.projtools import _get_bounds_projected
@@ -82,6 +85,7 @@ class TestTransformation:
     test_data = [[landsat_b4_path, everest_outlines_path], [aster_dem_path, aster_outlines_path]]
 
     @pytest.mark.parametrize("data", test_data)
+    @pytest.mark.filterwarnings("ignore:Argument 'inplace' is deprecated:DeprecationWarning")
     def test_crop(self, data: list[str]) -> None:
         """Test for crop method, also called by square brackets through __getitem__"""
 
@@ -284,6 +288,31 @@ class TestTransformation:
         assert cropped.raster_equal(expected, strict_masked=True)
         assert not source.is_loaded
 
+    def test_icrop__rotated_grid(self, tmp_path: Any) -> None:
+        """Checks that pixel cropping preserves the values and affine transform of a rotated raster."""
+
+        # Write a rotated raster so both loaded and deferred pixel crops use the same source values
+        values = np.arange(72, dtype=np.int16).reshape(8, 9)
+        transform = Affine.translation(500_000, 5_100_000) * Affine.rotation(10) * Affine.scale(100, -100)
+        raster = gu.Raster.from_array(values, transform=transform, crs=32632, nodata=-9999)
+        source_path = tmp_path / "rotated_crop.tif"
+        raster.to_file(source_path)
+        unloaded = gu.Raster(source_path)
+
+        # The crop starts at source column 2 and row 1, with a shorter output in both axes
+        loaded_crop = raster.icrop((2, 1, 7, 6))
+        deferred_crop = unloaded.icrop((2, 1, 7, 6))
+        assert loaded_crop is not None and deferred_crop is not None
+        assert not unloaded.is_loaded
+        assert not deferred_crop.is_loaded
+
+        # Check both crops use the exact source pixel slice and its translated rotated grid
+        expected_transform = transform * Affine.translation(2, 1)
+        assert loaded_crop.transform == expected_transform
+        assert deferred_crop.transform == expected_transform
+        np.testing.assert_array_equal(loaded_crop.to_nanarray(), values[1:6, 2:7])
+        np.testing.assert_array_equal(deferred_crop.to_nanarray(), values[1:6, 2:7])
+
     def test_clip(self) -> None:
         """Checks that clip() is masking cells outside the given geometry."""
 
@@ -378,6 +407,7 @@ class TestTransformation:
         assert result.raster_equal(expected, strict_masked=True)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
+    @pytest.mark.filterwarnings("ignore:Argument 'inplace' is deprecated:DeprecationWarning")
     def test_reproject(self, example: str) -> None:
 
         # Reference raster to be used
@@ -672,6 +702,7 @@ class TestMaskGeotransformations:
     mask_everest = gu.Vector(everest_outlines_path).create_mask(gu.Raster(landsat_b4_path))
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])
+    @pytest.mark.filterwarnings("ignore:Argument 'inplace' is deprecated:DeprecationWarning")
     def test_crop(self, mask: gu.Raster) -> None:
         # Test with same bounds -> should be the same #
 
@@ -790,6 +821,7 @@ class TestMaskGeotransformations:
         np.testing.assert_array_equal(np.ma.getmaskarray(output.data), values[1:4, 1:5] == 255)
 
     @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])
+    @pytest.mark.filterwarnings("ignore:Argument 'inplace' is deprecated:DeprecationWarning")
     def test_reproject(self, mask: gu.Raster) -> None:
         # Reproject with nearest neighbor resampling
 
@@ -1220,12 +1252,12 @@ class TestReprojectionOperators:
         ],
         ids=["square", "circular", "offsets"],
     )
-    @pytest.mark.parametrize("nodata_propagation", ["gdal", "ignore", "propagate"])
+    @pytest.mark.parametrize("nodata_propagation", ["ignore", "propagate"])
     def test_reproject__matches_resample_at_points(
         self,
         operator_type: type[Reducer],
         neighborhood: GridNeighbours,
-        nodata_propagation: Literal["gdal", "ignore", "propagate"],
+        nodata_propagation: Literal["ignore", "propagate"],
     ) -> None:
         """
         Checks that reducer reprojection matches resampling at points on complex (rotated) grids,
@@ -1388,10 +1420,227 @@ class TestReprojectionOperators:
         raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 2, 1, 1), crs=32631, nodata=-9999)
         reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(0.5, 1.5, 1, 1), crs=32631)
 
-        # Area reduction with GDAL propagation only uses finite values to derive the mean
-        result = raster.reproject(reference, resampling=PropagatingMeanReducer(), nodata_propagation="gdal")
+        # Default area reduction only uses finite values to derive the mean
+        result = raster.reproject(reference, resampling=PropagatingMeanReducer())
         assert result is not None
         assert result.to_nanarray()[0, 0] == 2.0
+
+
+class TestReprojectionGDALOperators:
+    """Test module for GDAL agreement with our own interpolators/reducers."""
+
+    def test_reproject__default_interpolator_nodata(self) -> None:
+        """Checks that interpolation masks the nearest NaN cell by default, like GDAL."""
+
+        # Synthetic raster with a missing cell
+        values = np.array([[np.nan, 2.0], [3.0, 4.0]])
+        source = gu.Raster.from_array(values, rio.transform.from_origin(0, 2, 1, 1), crs=32632, nodata=-9999)
+        reference = gu.Raster.from_array(
+            np.zeros((1, 1)), rio.transform.from_origin(0.25, 1.75, 1, 1), crs=32632, nodata=-9999
+        )
+
+        # GDAL "bilinear" should equal default/"nearest" with Linear(), but not "ignore"
+        default = source.reproject(reference, resampling=Linear())
+        nearest = source.reproject(reference, resampling=Linear(), nodata_propagation="nearest")
+        ignored = source.reproject(reference, resampling=Linear(), nodata_propagation="ignore")
+        expected = source.reproject(reference, resampling="bilinear")
+        assert default is not None and nearest is not None and ignored is not None and expected is not None
+        assert np.isnan(default.to_nanarray()[0, 0])
+        np.testing.assert_array_equal(default.to_nanarray(), nearest.to_nanarray())
+        np.testing.assert_array_equal(default.to_nanarray(), expected.to_nanarray())
+        assert np.isfinite(ignored.to_nanarray()[0, 0])
+
+    def test_reproject__gdal_mean_weights_outside_source(self) -> None:
+        """Checks that GDAL and fractional means use their distinct source-edge weights."""
+
+        # The destination covers both rows and columns but starts half a cell beyond the source
+        values = np.array([[1.0, 3.0], [10.0, 30.0]])
+        source = gu.Raster.from_array(values, rio.transform.from_origin(0, 2, 1, 1), crs=32632, nodata=-9999)
+        reference = gu.Raster.from_array(
+            np.zeros((1, 1)), rio.transform.from_origin(-0.5, 2.5, 2, 2), crs=32632, nodata=-9999
+        )
+
+        # GDAL weights the outer row/column by 1.5, while true covered area clips them to 1
+        gdal = source.reproject(reference, resampling="average")
+        matched = source.reproject(reference, resampling=Mean())
+        fractional = source.reproject(reference, resampling=Mean(), area_weighting="intersection")
+
+        # Weighted means are 4.875 with GDAL's extended edge and 6.667 with clipped area
+        assert gdal is not None and matched is not None and fractional is not None
+        np.testing.assert_allclose(matched.to_nanarray(), gdal.to_nanarray(), rtol=0, atol=1e-12)
+        np.testing.assert_allclose(matched.to_nanarray(), [[4.875]], rtol=0, atol=1e-12)
+        np.testing.assert_allclose(fractional.to_nanarray(), [[20 / 3]], rtol=0, atol=1e-12)
+
+    def test_reproject__interior_diagonal_bounds_differ_from_polygon(self) -> None:
+        """Checks that rotated interior cells use different diagonal bounds and polygon area weights."""
+
+        # Rotate destination cells inside the source raster, away from its outer boundary
+        rows, columns = np.indices((20, 20))
+        values = (rows**2 + 3 * columns**2).astype(float)
+        source_transform = rio.transform.from_origin(0, 20, 1, 1)
+        source = gu.Raster.from_array(values, source_transform, crs=32632, nodata=-9999)
+        target_transform = source_transform * Affine.translation(6, 5) * Affine.rotation(12) * Affine.scale(1.1)
+        reference = gu.Raster.from_array(np.zeros((6, 6)), target_transform, crs=32632, nodata=-9999)
+
+        # Compare the diagonal rectangle with the actual four-corner polygon
+        expected = source.reproject(reference, resampling="average")
+        bounds = source.reproject(reference, resampling=Mean())
+        polygon = source.reproject(reference, resampling=Mean(), area_weighting="intersection")
+        assert expected is not None and bounds is not None and polygon is not None
+        np.testing.assert_allclose(bounds.to_nanarray(), expected.to_nanarray(), rtol=0, atol=1e-10)
+        assert np.max(np.abs(bounds.to_nanarray()[1:-1, 1:-1] - polygon.to_nanarray()[1:-1, 1:-1])) > 0.01
+
+    @pytest.mark.parametrize(
+        ("method", "operator"),
+        [
+            ("nearest", Nearest()),
+            ("bilinear", Linear()),
+            ("cubic", RasterConvolution("cubic")),
+            ("cubic_spline", RasterConvolution("cubic_spline")),
+            ("lanczos", RasterConvolution("lanczos")),
+            ("average", Mean()),
+            ("sum", Sum()),
+            ("min", Minimum()),
+            ("max", Maximum()),
+            ("rms", RootMeanSquare()),
+            ("mode", Mode(weighted=False, tie_break="first_to_mode")),
+            ("med", Median(method="inverted_cdf")),
+            ("q1", Quantile(0.25, method="inverted_cdf")),
+            ("q3", Quantile(0.75, method="inverted_cdf")),
+        ],
+    )
+    @pytest.mark.parametrize("geometry", ["shifted", "different_crs", "rotated", "rotated_different_crs"])
+    def test_reproject__operator_matches_gdal(
+        self, method: str, operator: Interpolator | Reducer, geometry: str
+    ) -> None:
+        """Checks that GeoUtils operators agree with GDAL on shifted, projected, and rotated grids."""
+
+        # We create a synthetic raster with varied values and one NaN
+        rows, columns = np.indices((30, 30))
+        values = (columns * 0.7 + rows * 0.2 + (columns * rows % 7) * 1.3).astype(np.float64)
+        values[11, 13] = np.nan
+        source_transform = rio.transform.from_origin(500_000, 5_100_000, 100, 100)
+        if geometry in ("rotated", "rotated_different_crs"):
+            source_transform = Affine.translation(500_000, 5_100_000) * Affine.rotation(10) * Affine.scale(100, -100)
+        source = gu.Raster.from_array(values, transform=source_transform, crs=32632, nodata=-9999)
+
+        # We define different "references" for destination: same CRS, different CRS, rotated
+        if geometry in ("different_crs", "rotated_different_crs"):
+            reference = source.reproject(crs=4326, grid_size=(30, 30), resampling="nearest")
+        elif geometry == "rotated":
+            shift, scale = (2.17, 1.37) if isinstance(operator, Interpolator) else (2.0, 2.0)
+            transform = source_transform * Affine.translation(shift, shift) * Affine.scale(scale, scale)
+            reference = gu.Raster.from_array(np.zeros((12, 12)), transform=transform, crs=32632, nodata=-9999)
+        else:
+            transform = rio.transform.from_origin(500_350, 5_099_650, 120, 130)
+            reference = gu.Raster.from_array(np.zeros((12, 12)), transform=transform, crs=32632, nodata=-9999)
+        assert reference is not None
+
+        # We reproject with both GDAL method and operator
+        expected = source.reproject(reference, resampling=method)
+        actual = source.reproject(reference, resampling=operator)
+
+        # We check almost equality
+        assert expected is not None and actual is not None
+        expected_values = expected.to_nanarray()
+        actual_values = actual.to_nanarray()
+        assert np.array_equal(np.isnan(actual_values), np.isnan(expected_values))
+        np.testing.assert_allclose(actual_values, expected_values, rtol=0, atol=1e-4)
+
+    def test_reproject__error_intersection_area_with_fixed_window(self) -> None:
+        """Checks an error is raised for polygon area weighting with a fixed reducer window."""
+
+        # A fixed window selects source cells independently of the destination footprint
+        source = gu.Raster.from_array(np.ones((5, 5)), rio.transform.from_origin(0, 5, 1, 1), crs=32632)
+        reference = gu.Raster.from_array(np.zeros((2, 2)), rio.transform.from_origin(0, 5, 2, 2), crs=32632)
+
+        # Polygon area weighting only applies to a reducer's destination-cell neighborhood
+        with pytest.raises(ValueError, match="Intersection area weighting requires"):
+            source.reproject(reference, resampling=Mean(), area_weighting="intersection", window=3)
+
+    def test_reproject__error_intersection_area_without_fractional_coverage(self) -> None:
+        """Checks an error is raised for polygon area weighting without fractional coverage."""
+
+        # Polygon area weights need a destination footprint
+        source = gu.Raster.from_array(np.ones((5, 5)), rio.transform.from_origin(0, 5, 1, 1), crs=32632)
+        reference = gu.Raster.from_array(np.zeros((2, 2)), rio.transform.from_origin(0, 5, 2, 2), crs=32632)
+
+        # Polygon intersection cannot be combined with whole-cell selection
+        with pytest.raises(ValueError, match="requires coverage='fractional'"):
+            source.reproject(reference, resampling=Mean(), area_weighting="intersection", coverage="all_touched")
+
+
+class TestReprojectionOverlapBackends:
+    """Test module for matching raster-cell coverage across Numba, ExactExtract, and Shapely."""
+
+    @pytest.mark.parametrize("geometry", ["shifted", "rotated", "sheared", "different_crs"])
+    @pytest.mark.parametrize("backend", ["auto", "numba", "exactextract"])
+    @pytest.mark.parametrize(
+        ("coverage", "area_weighting"),
+        [
+            ("fractional", "intersection"),
+            ("fractional", "diagonal_bounds"),
+            ("center", "diagonal_bounds"),
+            ("all_touched", "diagonal_bounds"),
+        ],
+    )
+    @pytest.mark.parametrize("propagation", ["ignore", "propagate"])
+    @pytest.mark.parametrize("operator", [Mean(), Quantile(0.25, method="inverted_cdf")])
+    def test_reproject__overlap_backends_agree(
+        self,
+        geometry: str,
+        backend: str,
+        coverage: Literal["fractional", "center", "all_touched"],
+        area_weighting: Literal["diagonal_bounds", "intersection"],
+        propagation: Literal["ignore", "propagate"],
+        operator: Reducer,
+    ) -> None:
+        """Checks that raster overlap methods agree for coverage, nodata, and source grid transforms."""
+
+        if backend in ("numba", "exactextract"):
+            pytest.importorskip(backend)
+
+        # Vary source values and include nodata so coverage and valid-area weighting both matter
+        rows, columns = np.indices((24, 24))
+        values = (rows * 0.4 + columns * 0.7 + (rows * columns % 5)).astype(float)
+        values[8, 9] = np.nan
+        source_transform = rio.transform.from_origin(500_000, 5_100_000, 100, 100)
+        if geometry == "rotated":
+            source_transform = Affine.translation(500_000, 5_100_000) * Affine.rotation(13) * Affine.scale(100, -100)
+        elif geometry == "sheared":
+            source_transform = Affine(100, 17, 500_000, 7, -100, 5_100_000)
+        source = gu.Raster.from_array(values, transform=source_transform, crs=32632, nodata=-9999)
+
+        # Place unaligned destination cells in the source, or transform their corners from another CRS
+        if geometry == "different_crs":
+            reference = source.reproject(crs=4326, grid_size=(18, 18), resampling="nearest")
+        else:
+            target_transform = source_transform * Affine.translation(1.3, 2.1) * Affine.rotation(4) * Affine.scale(1.25)
+            reference = gu.Raster.from_array(np.zeros((12, 12)), transform=target_transform, crs=32632, nodata=-9999)
+        assert reference is not None
+
+        # Shapely is the geometry reference for direct and fraction-based reductions
+        expected = source.reproject(
+            reference,
+            resampling=operator,
+            coverage=coverage,
+            area_weighting=area_weighting,
+            nodata_propagation=propagation,
+            overlap_backend="shapely",
+        )
+        actual = source.reproject(
+            reference,
+            resampling=operator,
+            coverage=coverage,
+            area_weighting=area_weighting,
+            nodata_propagation=propagation,
+            overlap_backend=backend,
+        )
+        assert expected is not None and actual is not None
+        expected_values = expected.to_nanarray()
+        actual_values = actual.to_nanarray()
+        assert np.array_equal(np.isnan(actual_values), np.isnan(expected_values))
+        np.testing.assert_allclose(actual_values, expected_values, rtol=0, atol=1e-5)
 
 
 @pytest.mark.skipif(find_spec("dask") is None, reason="Requires Dask")
@@ -1421,7 +1670,18 @@ class TestReprojectionOperatorsChunked:
         # Check exact quality
         np.testing.assert_array_equal(np.asarray(lazy_result.compute()).squeeze(), expected.to_nanarray())
 
-    @pytest.mark.parametrize("operator", [Nearest(), Linear(), Mean(), Mean(neighborhood=GridNeighbours(size=3))])
+    @pytest.mark.parametrize(
+        "operator",
+        [
+            Nearest(),
+            Linear(),
+            RasterConvolution("cubic"),
+            RasterConvolution("cubic_spline"),
+            RasterConvolution("lanczos"),
+            Mean(),
+            Mean(neighborhood=GridNeighbours(size=3)),
+        ],
+    )
     def test_reproject__crs_chunk_invariance(self, tmp_path: Any, operator: Interpolator | Reducer) -> None:
         """Checks that reprojection across CRS with operators is consistent across eager, Dask and MP execution."""
 
@@ -1460,6 +1720,56 @@ class TestReprojectionOperatorsChunked:
         else:
             np.testing.assert_array_equal(dask_values, expected.to_nanarray())
             np.testing.assert_array_equal(mp_values, expected.to_nanarray())
+
+    @pytest.mark.parametrize("backend", ["numba", "exactextract", "shapely"])
+    @pytest.mark.parametrize("source_angle", [0, 10, 60])
+    @pytest.mark.parametrize("area_weighting", ["intersection", "diagonal_bounds"])
+    def test_reproject__overlap_backend_chunk_invariance(
+        self, tmp_path: Any, backend: str, source_angle: int, area_weighting: Literal["diagonal_bounds", "intersection"]
+    ) -> None:
+        """Checks weighted reprojection across eager, Dask, and MP with north-up or rotated sources."""
+
+        pytest.importorskip(backend)
+
+        # Split an 8x9 source into chunks of 3x4, leaving shorter final row and column chunks
+        rows, columns = np.indices((8, 9))
+        values = (rows * 0.4 + columns * 0.7).astype(float)
+        values[3, 4] = np.nan
+        transform = Affine.translation(500_000, 5_100_000) * Affine.rotation(source_angle) * Affine.scale(100, -100)
+        raster = gu.Raster.from_array(values, transform=transform, crs=32632, nodata=-9999)
+        source_path = tmp_path / "overlap_source.tif"
+        raster.to_file(source_path)
+        target_transform = transform * Affine.translation(0.8, 1.2) * Affine.rotation(3) * Affine.scale(1.35)
+        reference = gu.Raster.from_array(np.zeros((5, 6)), target_transform, crs=32632, nodata=-9999)
+
+        # Calculate the same weighted mean without chunks, with Dask, and with multiprocessing
+        options = {
+            "resampling": Mean(),
+            "coverage": "fractional",
+            "area_weighting": area_weighting,
+            "overlap_backend": backend,
+        }
+        expected = raster.reproject(reference, **options)
+        lazy_source = open_raster(source_path, chunks={"y": 3, "x": 4})
+        lazy_result = lazy_source.rst.reproject(ref=reference, **options)
+        unloaded_source = gu.Raster(source_path)
+        mp_config = MultiprocConfig(chunks=(3, 4), outfile=str(tmp_path / f"{backend}-overlap.tif"))
+        mp_result = unloaded_source.reproject(reference, mp_config=mp_config, **options)
+
+        # Both chunked inputs and outputs stay unloaded until values are requested
+        assert expected is not None and mp_result is not None
+        assert not lazy_source._in_memory
+        assert not lazy_result._in_memory
+        assert hasattr(lazy_result.data, "compute")
+        assert not unloaded_source.is_loaded
+        assert not mp_result.is_loaded
+
+        # Weight sums can change slightly when the source is split across chunks
+        expected_values = expected.to_nanarray()
+        dask_values = np.asarray(lazy_result.compute()).squeeze()
+        mp_values = mp_result.to_nanarray()
+        np.testing.assert_allclose(dask_values, expected_values, rtol=0, atol=2e-7)
+        np.testing.assert_allclose(mp_values, expected_values, rtol=0, atol=2e-7)
 
     @pytest.mark.parametrize(
         "neighborhood",
@@ -1511,6 +1821,29 @@ class TestReprojectionOperatorsChunked:
 
 class TestReprojectionErrors:
     """Test module reprojection errors."""
+
+    def test_reproject__error_removed_nodata_rule(self) -> None:
+        """Checks an error is raised for the removed gdal nodata rule."""
+
+        # Request a custom interpolator so reproject() validates its nodata rule
+        raster = gu.Raster.from_array(np.ones((3, 3)), rio.transform.from_origin(0, 3, 1, 1), crs=32631)
+        reference = gu.Raster.from_array(np.zeros((2, 2)), rio.transform.from_origin(0, 3, 1.5, 1.5), crs=32631)
+        options: dict[str, Any] = {"nodata_propagation": "gdal"}
+
+        # The former spelling is not a nodata behavior
+        with pytest.raises(ValueError, match="nodata_propagation must be one of"):
+            raster.reproject(reference, resampling=Linear(), **options)
+
+    def test_reproject__error_nearest_with_reducer(self) -> None:
+        """Checks an error is raised for nearest-source nodata masking with a reducer."""
+
+        # A reducer calculates from intersected source cells
+        raster = gu.Raster.from_array(np.ones((3, 3)), rio.transform.from_origin(0, 3, 1, 1), crs=32631)
+        reference = gu.Raster.from_array(np.zeros((2, 2)), rio.transform.from_origin(0, 3, 1.5, 1.5), crs=32631)
+
+        # The nearest nodata rule applies to interpolators
+        with pytest.raises(ValueError, match="requires an Interpolator"):
+            raster.reproject(reference, resampling=Mean(), nodata_propagation="nearest")
 
     @pytest.mark.parametrize(
         "example", [examples.get_path_test("everest_landsat_b4"), examples.get_path_test("exploradores_aster_dem")]

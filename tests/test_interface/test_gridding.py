@@ -232,7 +232,7 @@ class TestPointCloud:
         )
         assert np.count_nonzero(np.isnan(result)) == expected_invalid
 
-    def test_grid_pc__zero_distance_replaces_gdal_rule(self) -> None:
+    def test_grid_pc__zero_distance_replaces_nearest_rule(self) -> None:
         """Checks that zero-distance masking leaves a nearby cell valid even when GDAL would mask it."""
 
         # The missing point is nearest to both output cells, while the finite point can supply their values
@@ -242,15 +242,15 @@ class TestPointCloud:
         )
         grid_coords = (np.array([0.0, 0.4]), np.array([0.0]))
 
-        # GDAL masks both cells, but a zero-pixel distance masks only the cell at the missing point
-        gdal_result, _ = _grid_pointcloud(
+        # Nearest masks both cells, but a zero-pixel distance masks only the cell at the missing point
+        nearest_result, _ = _grid_pointcloud(
             point_cloud,
             grid_coords=grid_coords,
             grid_res=(0.4, 1.0),
             data_column_name="z",
             resampling="nearest",
             dist_nodata_pixel=np.inf,
-            nodata_handling="gdal",
+            nodata_handling="nearest",
         )
         zero_distance_result, _ = _grid_pointcloud(
             point_cloud,
@@ -261,7 +261,7 @@ class TestPointCloud:
             dist_nodata_pixel=np.inf,
             nodata_handling=0,
         )
-        assert np.isnan(gdal_result).all()
+        assert np.isnan(nearest_result).all()
         assert np.isnan(zero_distance_result[0, 0])
         assert zero_distance_result[0, 1] == 5.0
 
@@ -342,7 +342,7 @@ class TestPointCloud:
             )
 
     def test_grid__propagates_reducer_uncertainty(self) -> None:
-        """Checks that requesting uncertainty leaves grid() values unchanged and accounts for shared source points."""
+        """Checks that grid() leaves values unchanged and calculates each neighborhood's uncertainty."""
 
         # Arrange six independent observations on the same two-by-three grid requested for the output
         x, y = np.meshgrid(np.arange(3, dtype=float), np.arange(2, dtype=float))
@@ -366,16 +366,13 @@ class TestPointCloud:
             points.grid,
             error_structure=source_error,
             operation_kwargs={"grid_coords": grid_coords, "resampling": "mean", "dist_nodata_pixel": 1.1},
-            return_covariance=True,
         )
         # The local weighted calculation and vectorized mean can differ by rounding in their summation order
         np.testing.assert_allclose(nominal.to_nanarray(), expected.to_nanarray(), rtol=1e-14)
         np.testing.assert_array_equal(summary.estimate.to_nanarray(), nominal.to_nanarray())
 
         # The top-left mean uses three points and the top-middle mean uses four; two points contribute to both
-        assert summary.covariance is not None
         np.testing.assert_allclose(summary.variance.to_nanarray().reshape(-1)[:2], [4 / 3, 1])
-        assert summary.covariance.iloc[0, 1] == pytest.approx(2 / 3)
 
 
 class TestGridOperatorExecution:
@@ -546,22 +543,22 @@ class TestGriddingOperators:
     """Test module for point neighborhoods, custom gridding operators, missing values and uncertainty."""
 
     @pytest.mark.parametrize("operator", [PropagatingLocalMeanInterpolator(), PropagatingMeanReducer()])
-    def test_grid__gdal_overrides_operator_default(self, operator: Interpolator | Reducer) -> None:
-        """Checks that point gridding calculates from finite values before applying its GDAL spatial rule."""
+    def test_grid__default_overrides_operator_rule(self, operator: Interpolator | Reducer) -> None:
+        """Checks that point gridding calculates from finite values before applying its nodata rule."""
 
         # The output center coincides with a valid point and has one nearby point with nodata
         points = gu.PointCloud.from_xyz([0.5, 1.5], [0.5, 0.5], [2.0, np.nan], crs=32631)
         reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(0, 1, 1, 1), crs=32631)
 
         # The closest point is valid, so the nodata point does not mask this output cell
-        result = points.grid(ref=reference, resampling=operator, nodata_handling="gdal")
+        result = points.grid(ref=reference, resampling=operator)
         assert result.to_nanarray()[0, 0] == 2.0
 
     @pytest.mark.parametrize(
         ("operator", "interpolate"),
         [(PropagatingLocalMeanInterpolator(), True), (PropagatingMeanReducer(), False)],
     )
-    def test_grid__gdal_follows_custom_operator_class(
+    def test_grid__default_follows_custom_operator_class(
         self, operator: Interpolator | Reducer, interpolate: bool
     ) -> None:
         """Checks that a custom point interpolator masks a missing nearest point while a reducer omits it."""
@@ -571,7 +568,7 @@ class TestGriddingOperators:
         reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(0, 1, 1, 1), crs=32631)
 
         # A two-pixel radius includes the finite point for the reducer; only interpolation masks the output
-        result = points.grid(ref=reference, resampling=operator, dist_nodata_pixel=2.0, nodata_handling="gdal")
+        result = points.grid(ref=reference, resampling=operator, dist_nodata_pixel=2.0)
         value = result.to_nanarray()[0, 0]
         if interpolate:
             assert np.isnan(value)
@@ -710,7 +707,7 @@ class TestGridOperatorNodata:
     """Test module for spatial nodata masks and contributions selected by operator neighborhoods."""
 
     @pytest.mark.parametrize("method", ["nearest", "linear", "cubic", "idw", "mean"])
-    def test_grid__gdal_follows_operator_class(self, method: str) -> None:
+    def test_grid__default_follows_operator_class(self, method: str) -> None:
         """Checks that point-grid interpolators mask a missing nearest point and a reducer uses finite points."""
 
         # Four finite corners can fill the center by every method, while the center observation is missing
@@ -725,12 +722,23 @@ class TestGridOperatorNodata:
         # All calculations find five from finite points; only the interpolators then mask the missing center
         options: dict[str, Any] = {"grid_coords": grid_coords, "resampling": method, "dist_nodata_pixel": 2.0}
         ignored = points.grid(**options, nodata_handling="ignore").to_nanarray()
-        gdal = points.grid(**options, nodata_handling="gdal").to_nanarray()
+        default = points.grid(**options).to_nanarray()
         assert ignored[1, 0] == pytest.approx(5.0)
         if method == "mean":
-            assert gdal[1, 0] == pytest.approx(5.0)
+            assert default[1, 0] == pytest.approx(5.0)
         else:
-            assert np.isnan(gdal[1, 0])
+            assert np.isnan(default[1, 0])
+
+    def test_grid__error_nearest_with_reducer(self) -> None:
+        """Checks an error is raised for nearest-point masking with a reducer."""
+
+        # A reducer calculates from a group of source points
+        points = gu.PointCloud.from_xyz([0.0, 1.0], [0.0, 0.0], [1.0, 2.0], crs=32631)
+        grid_coords = (np.array([0.0, 1.0]), np.array([0.0, 1.0]))
+
+        # The nearest rule applies to interpolators
+        with pytest.raises(ValueError, match="requires an Interpolator"):
+            points.grid(grid_coords=grid_coords, resampling=Mean(), nodata_handling="nearest")
 
 
 @pytest.mark.skipif(find_spec("gstools") is None, reason="Requires GSTools")
@@ -1014,7 +1022,7 @@ class TestGridChunked:
 
     @pytest.mark.parametrize(
         ("nodata_handling", "resampling"),
-        [("propagate", "mean"), (2, "mean"), ("gdal", "idw"), ("gdal", "mean")],
+        [("propagate", "mean"), (2, "mean"), ("nearest", "idw"), ("ignore", "mean")],
     )
     def test_grid__nodata_propagation_chunked_backends(
         self, tmp_path: Path, nodata_handling: NodataChoice, resampling: GriddingMethod

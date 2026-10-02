@@ -30,7 +30,7 @@ class TestNodataHandling:
     @pytest.mark.parametrize(
         ("choice", "order", "expected"),
         [
-            ("gdal", 1, ("gdal", None)),
+            ("nearest", 1, ("nearest", None)),
             ("ignore", None, ("ignore", None)),
             ("propagate", None, ("propagate", None)),
             (0, None, ("ignore", 0)),
@@ -43,14 +43,14 @@ class TestNodataHandling:
         self, choice: NodataChoice, order: int | None, expected: tuple[str, int | None]
     ) -> None:
         """
-        Checks that each nodata handling behaves properly: separate "gdal/ignore/propagate" rules with spread
+        Checks that each nodata handling behaves properly: separate "nearest/ignore/propagate" rules with spread
         distance.
         """
 
         # Check resolved as expected
         assert _resolve_nodata_handling(choice, order) == expected
 
-    @pytest.mark.parametrize("choice,order", [(True, 1), (-1, 1), ("unknown", 1), ("half_order_up", None)])
+    @pytest.mark.parametrize("choice,order", [(True, 1), (-1, 1), ("gdal", 1), ("unknown", 1), ("half_order_up", None)])
     def test_resolve_nodata_handling__error(self, choice: str | int, order: int | None) -> None:
         """Checks invalid distances or rules raise an error."""
 

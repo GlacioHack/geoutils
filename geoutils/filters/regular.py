@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import math
+import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal, overload
 
@@ -143,9 +144,11 @@ def _reduce_grid_array(
         if engine == "numba":
             output = _median_filter_numba(missing_values, side, numba_footprint)
         else:
-            output = generic_filter_scipy(
-                missing_values, np.nanmedian, footprint=footprint, mode="constant", cval=np.nan
-            )
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="All-NaN slice encountered", category=RuntimeWarning)
+                output = generic_filter_scipy(
+                    missing_values, np.nanmedian, footprint=footprint, mode="constant", cval=np.nan
+                )
     else:
         extrema = []
         for maximum in (False, True) if type(operator) is Range else (type(operator) is Maximum,):
@@ -334,7 +337,9 @@ def _apply_median_filter_2d(
     nans = np.isnan(array)
 
     if engine == "scipy":
-        median_vals = generic_filter_scipy(array, np.nanmedian, size=size, mode="constant", cval=np.nan)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="All-NaN slice encountered", category=RuntimeWarning)
+            median_vals = generic_filter_scipy(array, np.nanmedian, size=size, mode="constant", cval=np.nan)
         return np.where(nans, array, median_vals)
 
     else:

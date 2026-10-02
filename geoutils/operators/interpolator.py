@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from collections.abc import Callable, Sequence
+from math import pi, sin
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
 
 import numpy as np
@@ -132,7 +133,7 @@ class Interpolator:
                 value_at_target, x_slope, y_slope = np.linalg.lstsq(plane_terms, data.values, rcond=None)[0]
                 return float(value_at_target)
 
-        predicted = raster.interp_points((x, y), method=LocalPlane(), as_array=True)
+        predicted = raster.interp_at_points((x, y), method=LocalPlane(), as_array=True)
 
     A linear interpolator should implement coefficients() to support weights and uncertainty propagation.
     As an example below, a simple inverse-distance interpolation can be naturally written as a weighted sum:
@@ -650,6 +651,149 @@ class Cubic(ScipyInterpolator):
         super().__init__(method="cubic", neighborhood=neighborhood)
 
 
+@_jit(nopython=True, cache=True)
+def _convolution_weight(distance: float, kernel: int) -> float:
+    """Return a cubic convolution, cubic B-spline, or Lanczos kernel weight."""
+
+    distance = abs(distance)
+    if kernel == 0:
+        if distance < 1:
+            return 1 - 2.5 * distance**2 + 1.5 * distance**3
+        if distance < 2:
+            return 2 - 4 * distance + 2.5 * distance**2 - 0.5 * distance**3
+        return 0.0
+    if kernel == 1:
+        if distance < 1:
+            return (4 - 6 * distance**2 + 3 * distance**3) / 6
+        if distance < 2:
+            return (2 - distance) ** 3 / 6
+        return 0.0
+    if distance >= 3:
+        return 0.0
+    if distance < 1e-12:
+        return 1.0
+    return (sin(pi * distance) / (pi * distance)) * (sin(pi * distance / 3) / (pi * distance / 3))
+
+
+@_jit(nopython=True, cache=True)
+def _convolve_raster_points(
+    values: NDArrayNum,
+    source_rows: NDArrayNum,
+    source_columns: NDArrayNum,
+    kernel: int,
+    propagate_nodata: bool,
+    require_center: bool,
+) -> NDArrayNum:
+    """Apply one separable convolution kernel at each regular-grid coordinate."""
+
+    height, width = values.shape
+    output = np.full(len(source_rows), np.nan, dtype=np.float64)
+    radius = 3 if kernel == 2 else 2
+    for target in range(len(output)):
+        row = source_rows[target]
+        column = source_columns[target]
+        if not np.isfinite(row) or not np.isfinite(column):
+            continue
+        nearest_row = int(np.floor(row + 0.5))
+        nearest_column = int(np.floor(column + 0.5))
+        if nearest_row < 0 or nearest_row >= height or nearest_column < 0 or nearest_column >= width:
+            continue
+        if require_center and not np.isfinite(values[nearest_row, nearest_column]):
+            continue
+
+        # Only valid cells contribute; divide by their total kernel weight near edges or nodata
+        row_start = int(np.floor(row)) + 1 - radius
+        column_start = int(np.floor(column)) + 1 - radius
+        incomplete_stencil = (
+            row_start < 0 or column_start < 0 or row_start + 2 * radius > height or column_start + 2 * radius > width
+        )
+        weighted_sum = 0.0
+        weight_sum = 0.0
+        invalid = False
+        for source_row in range(row_start, row_start + 2 * radius):
+            if source_row < 0 or source_row >= height:
+                continue
+            row_weight = _convolution_weight(row - source_row, kernel)
+            for source_column in range(column_start, column_start + 2 * radius):
+                if source_column < 0 or source_column >= width:
+                    continue
+                weight = row_weight * _convolution_weight(column - source_column, kernel)
+                value = values[source_row, source_column]
+                if np.isfinite(value):
+                    weighted_sum += weight * value
+                    weight_sum += weight
+                else:
+                    invalid = True
+        if kernel == 0 and require_center and (invalid or incomplete_stencil):
+            # GDAL uses bilinear values when missing cells interrupt the cubic stencil
+            row_base = int(np.floor(row))
+            column_base = int(np.floor(column))
+            weighted_sum = 0.0
+            weight_sum = 0.0
+            for source_row in range(row_base, row_base + 2):
+                if source_row < 0 or source_row >= height:
+                    continue
+                row_weight = 1 - abs(row - source_row)
+                for source_column in range(column_base, column_base + 2):
+                    if source_column < 0 or source_column >= width:
+                        continue
+                    value = values[source_row, source_column]
+                    if np.isfinite(value):
+                        weight = row_weight * (1 - abs(column - source_column))
+                        weighted_sum += weight * value
+                        weight_sum += weight
+        if weight_sum != 0 and not (propagate_nodata and invalid):
+            output[target] = weighted_sum / weight_sum
+    return output
+
+
+class RasterConvolution(Interpolator):
+    """Interpolate a raster with GDAL-compatible cubic or Lanczos convolution.
+
+    Use RasterConvolution("cubic"), RasterConvolution("cubic_spline"), or RasterConvolution("lanczos") in
+    Raster.reproject() or Raster.interp_at_points(). The regular raster grid defines the kernel spacing; this
+    interpolator does not apply to irregular point clouds. Cubic() remains SciPy's separate cubic spline method.
+    """
+
+    _uses_error_covariance = False
+
+    def __init__(self, kernel: Literal["cubic", "cubic_spline", "lanczos"]) -> None:
+        """Select the GDAL-style convolution kernel for a regular raster.
+
+        :param kernel: Cubic convolution, cubic B-spline, or Lanczos windowed sinc.
+        """
+
+        if kernel not in ("cubic", "cubic_spline", "lanczos"):
+            raise ValueError("Raster convolution kernel must be 'cubic', 'cubic_spline', or 'lanczos'.")
+        super().__init__()
+        self.kernel = kernel
+        self.radius = 3 if kernel == "lanczos" else 2
+
+    def predict(self, data: LocalData) -> float:
+        """Require a regular raster grid for convolution instead of irregular observations."""
+
+        raise TypeError("RasterConvolution requires a regular raster grid.")
+
+    def _interpolate_grid(
+        self,
+        values: NDArrayNum,
+        rows: NDArrayNum,
+        columns: NDArrayNum,
+        nodata_propagation: NodataPropagation,
+    ) -> NDArrayNum:
+        """Interpolate array values at source row/column coordinates measured from cell centers."""
+
+        kernel_code = {"cubic": 0, "cubic_spline": 1, "lanczos": 2}[self.kernel]
+        return _convolve_raster_points(
+            values,
+            np.asarray(rows, dtype=np.float64).reshape(-1),
+            np.asarray(columns, dtype=np.float64).reshape(-1),
+            kernel_code,
+            nodata_propagation == "propagate",
+            nodata_propagation == "nearest",
+        )
+
+
 # 1.3/ Select an interpolator from a method name
 ##############################################
 
@@ -867,7 +1011,7 @@ def _interpolate_array_band(
     if nodata_propagation == "propagate":
         # A propagated output is invalid when any weighted source value is invalid
         output[weights < 1 - np.finfo(np.float32).eps] = np.nan
-    elif nodata_propagation == "gdal":
+    elif nodata_propagation == "nearest":
         # GDAL invalidates an output when its nearest source cell is invalid
         invalid_center = map_coordinates(
             (~valid).astype(np.uint8),
@@ -917,7 +1061,7 @@ def _interpn_interpolator(
     bounds_error: bool = False,
     dist_nodata_spread: NodataSpread | None = None,
     method: ScipyInterpolationMethod | None = None,
-    nodata_propagation: NodataPropagation = "gdal",
+    nodata_propagation: NodataPropagation = "nearest",
 ) -> Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]:
     """
     Create a SciPy interpolator and apply the chosen nodata rule.
@@ -975,7 +1119,7 @@ def _interpn_interpolator(
         """Interpolate the mask, choosing the same cell as GDAL when a point is equally close to two cells."""
 
         assert interp_mask is not None
-        if propagation != "gdal" or dist_nodata_spread is not None:
+        if propagation != "nearest" or dist_nodata_spread is not None:
             return interp_mask(xi)
 
         # When a query lies exactly between cells, shift it toward the cell that GDAL selects

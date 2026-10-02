@@ -157,7 +157,8 @@ class TestClassVsAccessorConsistency:
     # The full list of methods is used a posteriori to check all were tested across multiple tests
     methods = [k for k, v in RasterBase.__dict__.items() if not k.startswith("_") and not isinstance(v, property)]
     # Ignore deprecated methods (already tested through their new name)
-    methods = [m for m in methods if m not in ["get_nanarray", "to_points", "save", "interp_points", "reduce_points"]]
+    methods = [m for m in methods if m not in ["get_nanarray", "to_points", "save", "interp_points", "reduce_points",
+                                               "get_stats"]]
 
     # List of properties that WILL load the input dataset (only one does, the data itself)
     properties_input_load = ["data"]
@@ -394,7 +395,6 @@ class TestClassVsAccessorConsistency:
         ("fill_nodata", {"max_search_distance": 3}),
         ("stats", {}),
         ("stats", {"by": {"group": 1}, "bins": {"group": 2}, "statistics": "mean"}),
-        ("get_stats", {}),
         # 2.2. In-place methods
         ("load", {}),
     ]

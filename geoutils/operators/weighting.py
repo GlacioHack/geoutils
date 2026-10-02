@@ -39,14 +39,14 @@ def _local_error_data(
 ) -> LocalData:
     """Attach observation covariance in the neighborhood's value order.
 
-    Repeated source IDs describe the same observation. Bind the model to each distinct observation once,
-    then repeat its covariance rows and columns wherever that observation occurs in the neighborhood.
+    Repeated source IDs describe the same observation. Calculate covariance for each distinct observation,
+    then repeat its rows and columns wherever that observation occurs in the neighborhood.
     """
 
     if error_structure is None or data.error_covariance is not None or len(data.values) == 0:
         return data
 
-    # Coordinates and IDs must describe the same distinct observations when binding the error model
+    # Coordinates and IDs must describe the same distinct observations
     valid = data._valid_values()
     if not np.any(valid):
         return data
@@ -63,7 +63,11 @@ def _local_error_data(
             aligned_predictors[name] = values
         else:
             raise ValueError("Spatial magnitude predictors must be scalars or mappings keyed by source ID.")
-    bound = error_structure.bind(unique.to_numpy(), coordinates=coordinates, predictors=aligned_predictors)
+    from geoutils.uncertainty.error_structure import _prepare_source_errors, _source_covariance_matrix
+
+    locations, component_data = _prepare_source_errors(error_structure, len(unique), coordinates, aligned_predictors)
     covariance = np.zeros((len(data.values), len(data.values)))
-    covariance[np.ix_(valid, valid)] = bound.covariance_block(positions, positions)
+    covariance[np.ix_(valid, valid)] = _source_covariance_matrix(
+        unique.to_numpy(), locations, component_data, positions
+    )
     return replace(data, error_covariance=covariance)

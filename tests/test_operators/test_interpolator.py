@@ -32,6 +32,7 @@ from geoutils.operators.interpolator import (
     Kriging,
     Linear,
     Nearest,
+    RasterConvolution,
     ScipyInterpolationMethod,
     ScipyInterpolator,
     _get_dist_nodata_spread,
@@ -215,7 +216,7 @@ class TestInterpolatorRegular:
         np.testing.assert_array_equal(result, expected)
 
     @pytest.mark.parametrize("method,size", [("nearest", 3), ("linear", 3), ("slinear", 3), ("pchip", 5)])
-    @pytest.mark.parametrize("nodata_handling", ["ignore", "gdal", "propagate"])
+    @pytest.mark.parametrize("nodata_handling", ["ignore", "nearest", "propagate"])
     def test_resample_at_points__extra_offsets_preserve_regular_method(
         self, method: ScipyInterpolationMethod, size: int, nodata_handling: NodataChoice
     ) -> None:
@@ -497,7 +498,7 @@ class TestPointInterpolationAccuracy:
         assert np.isnan(values[1, 1])
 
     @pytest.mark.parametrize("explicit_neighborhood", [False, True])
-    def test_grid__idw_gdal_masks_missing_nearest_with_either_neighborhood(self, explicit_neighborhood: bool) -> None:
+    def test_grid__idw_nearest_masks_missing_with_either_neighborhood(self, explicit_neighborhood: bool) -> None:
         """Checks that IDW masks a missing nearest point with default or explicit neighbors."""
 
         # The missing point sits at X=0, while the finite point at X=0.5 can supply that output cell
@@ -508,10 +509,10 @@ class TestPointInterpolationAccuracy:
 
         # IDW calculates six from the finite point, then the nearest-point rule masks the result
         options: dict[str, Any] = {"grid_coords": grid_coords, "resampling": operator, "dist_nodata_pixel": 1.1}
-        gdal = points.grid(**options, nodata_handling="gdal").to_nanarray()
+        nearest = points.grid(**options, nodata_handling="nearest").to_nanarray()
         ignored = points.grid(**options, nodata_handling="ignore").to_nanarray()
         propagated = points.grid(**options, nodata_handling="propagate").to_nanarray()
-        assert np.isnan(gdal[1, 0])
+        assert np.isnan(nearest[1, 0])
         assert ignored[1, 0] == 6.0
         assert np.isnan(propagated[1, 0])
 
@@ -889,7 +890,7 @@ class TestPointInterpolationEngines:
     @pytest.mark.parametrize(
         "neighborhood", [PointNeighbours(k=3), PointNeighbours(radius=1.1), PointNeighbours(k=3, radius=1.1)]
     )
-    @pytest.mark.parametrize("nodata_handling", ["ignore", "gdal", "propagate"])
+    @pytest.mark.parametrize("nodata_handling", ["ignore", "nearest", "propagate"])
     def test_grid__numba_matches_scipy_for_explicit_neighborhoods(
         self,
         operator_type: type[Interpolator],
@@ -1063,6 +1064,30 @@ class TestRasterInterpolationGDAL:
         actual = raster.reproject(reference, resampling=Linear())
         assert expected is not None and actual is not None
         np.testing.assert_allclose(actual.to_nanarray(), expected.to_nanarray())
+
+    @pytest.mark.parametrize("kernel", ["cubic", "cubic_spline", "lanczos"])
+    @pytest.mark.parametrize("shift", [(0.2, 0.2), (0.5, 0.5), (-0.2, 0.35)])
+    def test_reproject__convolution_matches_gdal_at_edges(
+        self, kernel: Literal["cubic", "cubic_spline", "lanczos"], shift: tuple[float, float]
+    ) -> None:
+        """Checks that convolution uses GDAL values and validity near raster edges and one missing cell."""
+
+        # A full-size shifted destination covers partial boundary stencils and the missing center's neighbors
+        values = np.arange(81, dtype=np.float64).reshape(9, 9)
+        values[4, 4] = np.nan
+        source = gu.Raster.from_array(values, rio.transform.from_origin(0, 9, 1, 1), crs=4326, nodata=-9999)
+        reference = gu.Raster.from_array(
+            np.zeros((9, 9)), Affine.translation(*shift) * source.transform, crs=4326, nodata=-9999
+        )
+
+        # Compare complete arrays because GDAL changes cubic to bilinear at incomplete stencils
+        expected = source.reproject(reference, resampling=kernel)
+        actual = source.reproject(reference, resampling=RasterConvolution(kernel))
+        assert expected is not None and actual is not None
+        expected_values = expected.to_nanarray()
+        actual_values = actual.to_nanarray()
+        assert np.array_equal(np.isnan(actual_values), np.isnan(expected_values))
+        np.testing.assert_allclose(actual_values, expected_values, rtol=0, atol=1e-12)
 
 
 class TestPointInterpolationGDAL:
@@ -1438,7 +1463,7 @@ class TestRegularInterpolationUncertainty:
 
     @pytest.mark.parametrize("method", ["nearest", "linear", "slinear", "cubic", "quintic", "pchip", "splinef2d"])
     @pytest.mark.parametrize("missing", [False, True])
-    @pytest.mark.parametrize("nodata_handling", ["ignore", "gdal", "propagate"])
+    @pytest.mark.parametrize("nodata_handling", ["ignore", "nearest", "propagate"])
     def test_resample_at_points__zero_error_uses_original_method(
         self, method: ScipyInterpolationMethod, missing: bool, nodata_handling: NodataChoice
     ) -> None:

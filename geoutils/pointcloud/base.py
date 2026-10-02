@@ -937,7 +937,7 @@ class PointCloudBase(VectorBase):
             "distance_power" for IDW and "engine" ("scipy" or "numba").
             Set locations and method with at and grid_method.
         :param resample_kwargs: Options for Raster.interp_points(), e.g. {"nodata_handling": "ignore"}. The choices are
-            "gdal", "ignore", "propagate", a half-order rule, or a non-negative distance in pixels.
+            "nearest", "ignore", "propagate", a half-order rule, or a non-negative distance in pixels.
             Set locations, band and method with the corresponding cosample() arguments.
         :param align: Handling of mismatched grids or coordinate systems: "raise" an error, or "reproject" to match at.
             Point inputs must still share the same ordered coordinates when sampled at points.
@@ -1284,10 +1284,11 @@ class PointCloudBase(VectorBase):
             A Reducer configured with PointNeighbours uses its point count or radius in coordinate units instead.
         :param nodata: Nodata value of the output raster.
         :param data_column: Point value column to grid. None uses the active point values.
-        :param nodata_handling: ``"gdal"`` calculates from finite points, then masks an Interpolator's result when
-            the nearest source point is missing; a Reducer uses the finite result. ``"ignore"`` uses available finite
-            values; ``"propagate"`` masks cells using a missing source. A non-negative integer or half-order choice
-            instead masks cells within that distance of missing source values. Defaults to the configured choice.
+        :param nodata_handling: ``"nearest"`` calculates from finite points, then masks an Interpolator's result when
+            the nearest source point is missing. ``"ignore"`` uses available finite values; ``"propagate"`` masks
+            cells using a missing source. Reducers default to ``"ignore"`` and cannot use ``"nearest"``. A
+            non-negative integer or half-order choice masks cells within that distance of missing source values.
+            Interpolators default to the configured choice.
         :param distance_power: Distance exponent used for inverse-distance weighting.
         :param min_points: Minimum number of finite points required inside a circular neighborhood.
         :param engine: Calculation engine, either ``scipy`` or ``numba``.
@@ -1406,8 +1407,8 @@ class PointCloudBase(VectorBase):
         random_state: int | np.random.Generator | None = None,
         chunksizes: int | None = None,
         mp_config: MultiprocConfig | None = None,
-        backend: Literal["gstools", "gpytorch"] = "gstools",
-        gpytorch_inducing_points: int | None = None,
+        backend: Literal["gstools", "gpytorch"] = "gpytorch",
+        gpytorch_inducing_points: int | Literal["auto"] | None = "auto",
     ) -> Any:
         """Generate one or more error fields at every point in this point cloud.
 
@@ -1418,8 +1419,8 @@ class PointCloudBase(VectorBase):
         :param chunksizes: Target point rows per Dask partition for a Dask GeoDataFrame.
         :param mp_config: Worker, row partition and output file settings for multiprocessing fields.
         :param backend: Library used to draw correlated errors. Chunked GPyTorch fields use an inducing grid.
-        :param gpytorch_inducing_points: Target grid size for approximate GPyTorch fields; chunked fields default
-            to 256, while eager fields are exact unless a grid size is supplied.
+        :param gpytorch_inducing_points: Target grid size for approximate GPyTorch fields. "auto" uses 256 points
+            for eager and chunked point clouds; None requests an exact eager draw.
         :returns: One result of the same point cloud type, or a list when n_fields is greater than one.
         """
 

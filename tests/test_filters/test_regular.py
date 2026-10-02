@@ -726,7 +726,7 @@ class TestFilterChunked:
         values[:, 5, 6] = np.nan
         raster = gu.Raster.from_array(values, rio.transform.from_origin(100, 200, 2, 3), crs=32631, nodata=np.nan)
         path = tmp_path / "reducer-filter.tif"
-        raster.save(path)
+        raster.to_file(path)
         lazy = gu.open_raster(path, chunks={"band": 1, "x": 7, "y": 5})
         source = gu.Raster(path)
         options = {
@@ -755,6 +755,7 @@ class TestFilterChunked:
     @pytest.mark.parametrize("path_index", [0, 2])
     @pytest.mark.parametrize("method", ["gaussian", "median", "mean", "min", "max"])
     @pytest.mark.parametrize("size", [3, 7])
+    @pytest.mark.filterwarnings("ignore:All-NaN slice encountered:RuntimeWarning")
     def test_filter_chunked_backends_equal(
         self,
         tmp_path: Any,

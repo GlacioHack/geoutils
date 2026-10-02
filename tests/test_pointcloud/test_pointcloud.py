@@ -803,8 +803,9 @@ class TestArithmetic:
 
         # Test with zeros values (e.g. division)
         pc1 = self.pc1
-        pc3 = getattr(pc1, op)(pc2_zero)
-        assert np.all(pc3.data == getattr(pc1.data, op)(pc2_zero.data))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            pc3 = getattr(pc1, op)(pc2_zero)
+            assert np.all(pc3.data == getattr(pc1.data, op)(pc2_zero.data))
 
         # Test with a numpy array
         pc1 = self.pc1_f32

@@ -120,6 +120,8 @@ class TestClassVsAccessorConsistency:
     # Get all PointCloudBase public properties and methods, ensures we test everything even with API changes
     properties = [k for k, v in PointCloudBase.__dict__.items() if not k.startswith("_") and isinstance(v, property)]
     methods = [k for k, v in PointCloudBase.__dict__.items() if not k.startswith("_") and not isinstance(v, property)]
+    # Ignore deprecated methods (already tested through their new name)
+    methods = [m for m in methods if m not in ["get_stats"]]
 
     @pytest.mark.parametrize("prop", properties)
     def test_properties__equality_and_loading(self, prop: str) -> None:
@@ -152,7 +154,6 @@ class TestClassVsAccessorConsistency:
         ("georeferenced_coords_equal", {"pc": "self"}),
         ("stats", {}),
         ("stats", {"by": {"group": "b2"}, "bins": {"group": 2}, "statistics": "mean"}),
-        ("get_stats", {}),
         ("plot", {"max_points": 2, "add_cbar": False}),
         ("subsample", {"subsample": 2, "random_state": 42}),
         ("cosample", {"other": "self", "subsample": 2, "random_state": 42}),
@@ -542,8 +543,8 @@ class TestAccessorDask:
 
         # Statistics compute a small dictionary without loading the accessor source
         assert_output_equal(
-            pc.get_stats(["mean", "max", "valid_count"]),
-            ds.pc.get_stats(["mean", "max", "valid_count"]),
+            pc.stats(["mean", "max", "valid_count"]),
+            ds.pc.stats(["mean", "max", "valid_count"]),
         )
         assert not ds.pc.is_loaded
 

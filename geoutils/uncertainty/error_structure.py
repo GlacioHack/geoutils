@@ -760,27 +760,10 @@ class ErrorStructure:
 
         # Observation indexes serve as IDs, so independent errors only contribute to the diagonal
         source_ids = np.arange(len(coordinate_array))
-        bound = self.bind(source_ids, coordinates=coordinate_array, predictors=predictors)
-        return bound.covariance_block(source_ids, source_ids)
+        locations, component_data = _prepare_source_errors(self, len(source_ids), coordinate_array, predictors)
+        return _source_covariance_matrix(source_ids, locations, component_data, source_ids)
 
-    # 4.2/ Apply the model to observations and draw random errors
-
-    def bind(
-        self,
-        source_ids: ArrayLike,
-        *,
-        coordinates: ArrayLike | None = None,
-        predictors: Mapping[str, Any] | None = None,
-    ) -> BoundErrorStructure:
-        """Match this error model to a set of observations for repeated uncertainty calculations.
-
-        :param source_ids: Unique observation IDs, in the order used for coordinates/predictors.
-        :param coordinates: Array of shape (n_observations, n_dimensions), required for correlated components.
-        :param predictors: Named predictor values, each scalar or with one value per observation.
-        :returns: An object with covariance_block() and draw_error() methods for these observations.
-        """
-
-        return bind_error_structure(self, source_ids=source_ids, coordinates=coordinates, predictors=predictors)
+    # 4.2/ Draw random errors at selected observations
 
     def iter_samples(
         self,
@@ -810,15 +793,16 @@ class ErrorStructure:
         if kind not in {"error", "value"}:
             raise ValueError("kind must be 'error' or 'value'.")
 
-        bound = self.bind(source_ids, coordinates=coordinates, predictors=predictors)
-        nominal_values = np.zeros(bound.size, dtype=float) if nominal is None else np.asarray(nominal, dtype=float)
-        if nominal_values.shape != (bound.size,):
+        ids = _normalize_source_ids(source_ids)
+        locations, component_data = _prepare_source_errors(self, len(ids), coordinates, predictors)
+        nominal_values = np.zeros(len(ids), dtype=float) if nominal is None else np.asarray(nominal, dtype=float)
+        if nominal_values.shape != (len(ids),):
             raise ValueError("nominal must contain one value per source observation.")
 
         # Yield one complete draw at a time so we do not store every simulation in memory
         rng = np.random.default_rng(random_state)
         for _ in range(int(n_samples)):
-            error = bound.draw_error(rng)
+            error = _draw_source_errors(len(ids), locations, component_data, rng)
             yield error if kind == "error" else nominal_values + error
 
     def generate_random_field(
@@ -831,8 +815,8 @@ class ErrorStructure:
         random_state: int | np.random.Generator | None = None,
         chunksizes: int | tuple[int, int] | None = None,
         mp_config: MultiprocConfig | None = None,
-        backend: Literal["gstools", "gpytorch"] = "gstools",
-        gpytorch_inducing_points: int | None = None,
+        backend: Literal["gstools", "gpytorch"] = "gpytorch",
+        gpytorch_inducing_points: int | Literal["auto"] | None = "auto",
     ) -> Any:
         """Generate one or more error fields over a raster, point cloud, or set of coordinates.
 
@@ -845,8 +829,8 @@ class ErrorStructure:
         :param chunksizes: Dask raster tile size (rows, columns) or point rows per partition.
         :param mp_config: Worker and output file settings for multiprocessing fields.
         :param backend: Library used to draw correlated components.
-        :param gpytorch_inducing_points: Target inducing grid size for approximate GPyTorch fields. Chunked fields
-            default to 256; passing a value for eager spatial input reproduces the chunked approximation.
+        :param gpytorch_inducing_points: Target grid size for approximate GPyTorch fields. "auto" uses 256 points
+            for spatial inputs and an exact draw for plain coordinates; None requests an exact eager draw.
         :returns: One field when n_fields is one, otherwise a list or stacked array of fields.
         """
 
@@ -1128,7 +1112,7 @@ class ErrorStructure:
         return axes
 
     def info(self, *, verbose: bool = True) -> str | None:
-        """Summarize the reusable model without displaying bound source observations.
+        """Summarize the reusable error model and its components.
 
         :param verbose: Whether to print the summary instead of returning it.
         :returns: Summary string when verbose is False.
@@ -1247,178 +1231,160 @@ def _indexed_standard_normal(seed: int, indexes: NDArray[np.int64]) -> NDArray[n
 ############################################
 
 
-@dataclass(frozen=True)
-class BoundErrorStructure:
+def _source_covariance_matrix(
+    source_ids: NDArray[Any],
+    source_coordinates: NDArray[np.float64] | None,
+    component_data: tuple[tuple[ErrorComponent, NDArray[np.float64]], ...],
+    indexes: ArrayLike,
+) -> NDArray[np.float64]:
+    """Calculate covariance among the observations used by one output."""
+
+    size = len(source_ids)
+
+    # Select source observations for this output
+    selected = np.asarray(indexes, dtype=np.int64).reshape(-1)
+    if np.any(selected < 0) or np.any(selected >= size):
+        raise ValueError("Covariance indexes are outside the selected source observations.")
+    # For independent errors, only the same source ID is correlated with itself
+    # Two observations at identical coordinates still have independent errors if their IDs differ
+    covariance = np.zeros((len(selected), len(selected)), dtype=float)
+    distances_by_dimensions: dict[tuple[int, ...] | None, NDArray[np.float64]] = {}
+    for component, magnitude in component_data:
+        if component.correlation is None:
+            correlation = source_ids[selected, None] == source_ids[selected][None, :]
+        else:
+            correlation_model = component.correlation
+            if not isinstance(correlation_model, VariogramModel):
+                raise AssertionError("A validated error component must contain a VariogramModel.")
+            if source_coordinates is None:
+                raise AssertionError("A correlated component requires source coordinates.")
+
+            # Some models use only selected coordinates (e.g. horizontal distance without elevation)
+            active_dims = correlation_model.active_dims
+            selected_coordinates = source_coordinates[selected]
+            if active_dims is not None:
+                selected_coordinates = selected_coordinates[:, active_dims]
+
+            # Components using the same coordinates can reuse their pairwise distances
+            distances = distances_by_dimensions.get(active_dims)
+            if distances is None:
+                distances = cdist(selected_coordinates, selected_coordinates)
+                distances_by_dimensions[active_dims] = distances
+            correlation = component.predict_correlation(distances)
+
+        # Covariance = first error magnitude × second error magnitude × correlation; independent components add up
+        covariance += magnitude[selected, None] * magnitude[selected][None, :] * correlation
+    return covariance
+
+
+def _draw_source_errors(
+    size: int,
+    source_coordinates: NDArray[np.float64] | None,
+    component_data: tuple[tuple[ErrorComponent, NDArray[np.float64]], ...],
+    rng: np.random.Generator,
+    *,
+    backend: Literal["gstools", "gpytorch"] = "gstools",
+    random_coordinates: Any | None = None,
+    mesh_type: str = "unstructured",
+    field_shape: tuple[int, ...] | None = None,
+    component_seeds: tuple[int, ...] | None = None,
+    indexes: NDArray[np.int64] | None = None,
+    inducing_fields: tuple[GPyTorchInducingField | None, ...] | None = None,
+) -> NDArray[np.float64]:
+    """Draw errors for all observations together, with the model's spatial correlation.
+
+    GSTools can evaluate a regular raster faster from separate X/Y axes. These optional axes only affect the
+    random field calculation; covariance uses the original spatial coordinates.
+    Component seeds and global indexes let separate chunks draw the same field at their own locations.
     """
-    Bind error structure calculations to a specific set of observations.
 
-    ErrorStructure.bind() creates this object after checking source IDs/coordinates and calculating error magnitudes.
-    covariance_block() returns covariance for selected observations; draw_error() samples their errors together.
-    """
+    if component_seeds is not None and len(component_seeds) != len(component_data):
+        raise ValueError("component_seeds must contain one seed per error component.")
+    if inducing_fields is not None and len(inducing_fields) != len(component_data):
+        raise ValueError("inducing_fields must contain one entry per error component.")
+    if indexes is None:
+        indexes = np.arange(size, dtype=np.int64)
+    elif np.shape(indexes) != (size,):
+        raise ValueError("indexes must contain one position per observation.")
 
-    source_ids: NDArray[Any]
-    coordinates: NDArray[np.float64] | None
-    _component_data: tuple[tuple[ErrorComponent, NDArray[np.float64]], ...] = ()
-    predictors: Mapping[str, NDArray[np.float64]] = field(default_factory=lambda: MappingProxyType({}))
+    combined = np.zeros(size, dtype=float)
+    for component_index, (component, magnitude) in enumerate(component_data):
+        seed = (
+            int(rng.integers(0, np.iinfo(np.uint32).max, dtype=np.uint32))
+            if component_seeds is None
+            else component_seeds[component_index]
+        )
+        if component.correlation is None:
+            unit_field = _indexed_standard_normal(seed, indexes)
+        else:
+            correlation_model = component.correlation
+            if not isinstance(correlation_model, VariogramModel):
+                raise AssertionError("A validated error component must contain a VariogramModel.")
+            if source_coordinates is None:
+                raise AssertionError("A correlated component requires source coordinates.")
 
-    @property
-    def size(self) -> int:
-        """Return the number of distinct source observations."""
-
-        return len(self.source_ids)
-
-    def covariance_block(self, rows: ArrayLike, columns: ArrayLike) -> NDArray[np.float64]:
-        """Calculate part of the covariance matrix without allocating the complete matrix."""
-
-        # Select source rows/columns for this covariance block
-        row_indexes = np.asarray(rows, dtype=np.int64).reshape(-1)
-        column_indexes = np.asarray(columns, dtype=np.int64).reshape(-1)
-        if (
-            np.any(row_indexes < 0)
-            or np.any(row_indexes >= self.size)
-            or np.any(column_indexes < 0)
-            or np.any(column_indexes >= self.size)
-        ):
-            raise ValueError("Covariance block indexes are outside the selected source observations.")
-        # For independent errors, only the same source ID is correlated with itself
-        # Two observations at identical coordinates still have independent errors if their IDs differ
-        covariance = np.zeros((len(row_indexes), len(column_indexes)), dtype=float)
-        distances_by_dimensions: dict[tuple[int, ...] | None, NDArray[np.float64]] = {}
-        for component, magnitude in self._component_data:
-            if component.correlation is None:
-                correlation = self.source_ids[row_indexes, None] == self.source_ids[column_indexes][None, :]
-            else:
-                correlation_model = component.correlation
-                if not isinstance(correlation_model, VariogramModel):
-                    raise AssertionError("A validated error component must contain a VariogramModel.")
-                if self.coordinates is None:
-                    raise AssertionError("A bound correlated component must contain coordinates.")
-
-                # Some models use only selected coordinates (e.g. horizontal distance without elevation)
-                active_dims = correlation_model.active_dims
-                row_coordinates = self.coordinates[row_indexes]
-                column_coordinates = self.coordinates[column_indexes]
-                if active_dims is not None:
-                    row_coordinates = row_coordinates[:, active_dims]
-                    column_coordinates = column_coordinates[:, active_dims]
-
-                # Components using the same coordinates can reuse their pairwise distances
-                distances = distances_by_dimensions.get(active_dims)
-                if distances is None:
-                    distances = cdist(row_coordinates, column_coordinates)
-                    distances_by_dimensions[active_dims] = distances
-                correlation = component.predict_correlation(distances)
-
-            # Covariance = first error magnitude × second error magnitude × correlation; independent components add up
-            covariance += magnitude[row_indexes, None] * magnitude[column_indexes][None, :] * correlation
-        return covariance
-
-    def draw_error(
-        self,
-        rng: np.random.Generator,
-        *,
-        backend: Literal["gstools", "gpytorch"] = "gstools",
-        random_coordinates: Any | None = None,
-        mesh_type: str = "unstructured",
-        field_shape: tuple[int, ...] | None = None,
-        component_seeds: tuple[int, ...] | None = None,
-        indexes: NDArray[np.int64] | None = None,
-        inducing_fields: tuple[GPyTorchInducingField | None, ...] | None = None,
-    ) -> NDArray[np.float64]:
-        """Draw errors for all observations together, with the model's spatial correlation.
-
-        GSTools can evaluate a regular raster faster from separate X/Y axes. These optional axes only affect the
-        random field calculation; covariance_block() uses the original spatial coordinates.
-        Component seeds and global indexes let separate chunks draw the same field at their own locations.
-        """
-
-        if component_seeds is not None and len(component_seeds) != len(self._component_data):
-            raise ValueError("component_seeds must contain one seed per error component.")
-        if inducing_fields is not None and len(inducing_fields) != len(self._component_data):
-            raise ValueError("inducing_fields must contain one entry per error component.")
-        if indexes is None:
-            indexes = np.arange(self.size, dtype=np.int64)
-        elif np.shape(indexes) != (self.size,):
-            raise ValueError("indexes must contain one position per observation.")
-
-        combined = np.zeros(self.size, dtype=float)
-        for component_index, (component, magnitude) in enumerate(self._component_data):
-            seed = (
-                int(rng.integers(0, np.iinfo(np.uint32).max, dtype=np.uint32))
-                if component_seeds is None
-                else component_seeds[component_index]
+            # Draw the field using only the coordinates that this component depends on
+            active_dims = correlation_model.active_dims
+            coordinates = source_coordinates if active_dims is None else source_coordinates[:, active_dims]
+            variogram = Variogram(
+                lags=np.empty(0),
+                semivariance=np.empty(0),
+                counts=np.empty(0, dtype=np.int64),
+                model=correlation_model,
             )
-            if component.correlation is None:
-                unit_field = _indexed_standard_normal(seed, indexes)
-            else:
-                correlation_model = component.correlation
-                if not isinstance(correlation_model, VariogramModel):
-                    raise AssertionError("A validated error component must contain a VariogramModel.")
-                if self.coordinates is None:
-                    raise AssertionError("A bound correlated component must contain coordinates.")
+            inducing_field = None if inducing_fields is None else inducing_fields[component_index]
+            if backend == "gpytorch" and inducing_field is not None:
+                from geoutils.uncertainty.random_field import _interpolate_inducing_field
 
-                # Draw the field using only the coordinates that this component depends on
-                active_dims = correlation_model.active_dims
-                coordinates = self.coordinates if active_dims is None else self.coordinates[:, active_dims]
-                variogram = Variogram(
-                    lags=np.empty(0),
-                    semivariance=np.empty(0),
-                    counts=np.empty(0, dtype=np.int64),
-                    model=correlation_model,
+                unit_field = _interpolate_inducing_field(inducing_field, coordinates)
+            elif backend == "gstools":
+                gstools_variogram = variogram.to_gstools(dim=coordinates.shape[1])
+                gstools = import_optional("gstools", extra_name="geostat")
+
+                positions = (
+                    tuple(coordinates[:, dimension] for dimension in range(coordinates.shape[1]))
+                    if random_coordinates is None
+                    else random_coordinates
                 )
-                inducing_field = None if inducing_fields is None else inducing_fields[component_index]
-                if backend == "gpytorch" and inducing_field is not None:
-                    from geoutils.uncertainty.random_field import _interpolate_inducing_field
+                unit_field = np.asarray(
+                    gstools.SRF(gstools_variogram.model, seed=seed)(positions, mesh_type=mesh_type), dtype=float
+                )
+                if mesh_type == "structured":
+                    if field_shape is None or len(field_shape) != 2:
+                        raise ValueError("Structured random fields require a two-dimensional field_shape.")
+                    # GSTools uses X/Y order, whereas raster arrays use rows/columns
+                    unit_field = unit_field.T
+            else:
+                torch = import_optional("torch", extra_name="gp")
+                gpytorch = import_optional("gpytorch", extra_name="gp")
+                gpytorch_variogram = variogram.to_gpytorch(
+                    active_dims=tuple(range(coordinates.shape[1])),
+                    trainable=False,
+                )
+                coordinate_tensor = torch.as_tensor(coordinates.copy(), dtype=torch.float64)
+                covariance = gpytorch_variogram.kernel(coordinate_tensor)
 
-                    unit_field = _interpolate_inducing_field(inducing_field, coordinates)
-                elif backend == "gstools":
-                    gstools_variogram = variogram.to_gstools(dim=coordinates.shape[1])
-                    gstools = import_optional("gstools", extra_name="geostat")
+                # Independent noise adds variance to each observation (the covariance diagonal)
+                if gpytorch_variogram.noise > 0:
+                    diagonal = torch.full((size,), gpytorch_variogram.noise, dtype=torch.float64)
+                    covariance = covariance.add_diagonal(diagonal)
+                distribution = gpytorch.distributions.MultivariateNormal(
+                    torch.zeros(size, dtype=torch.float64), covariance
+                )
 
-                    positions = (
-                        tuple(coordinates[:, dimension] for dimension in range(coordinates.shape[1]))
-                        if random_coordinates is None
-                        else random_coordinates
-                    )
-                    unit_field = np.asarray(
-                        gstools.SRF(gstools_variogram.model, seed=seed)(positions, mesh_type=mesh_type), dtype=float
-                    )
-                    if mesh_type == "structured":
-                        if field_shape is None or len(field_shape) != 2:
-                            raise ValueError("Structured random fields require a two-dimensional field_shape.")
-                        # GSTools uses X/Y order, whereas raster arrays use rows/columns
-                        unit_field = unit_field.T
-                else:
-                    torch = import_optional("torch", extra_name="gp")
-                    gpytorch = import_optional("gpytorch", extra_name="gp")
-                    gpytorch_variogram = variogram.to_gpytorch(
-                        active_dims=tuple(range(coordinates.shape[1])),
-                        trainable=False,
-                    )
-                    coordinate_tensor = torch.as_tensor(coordinates.copy(), dtype=torch.float64)
-                    covariance = gpytorch_variogram.kernel(coordinate_tensor)
+                # Use a local generator so drawing a field does not change PyTorch's global random state
+                generator = torch.Generator(device=coordinate_tensor.device)
+                generator.manual_seed(seed)
+                base_samples = torch.randn(size, dtype=torch.float64, generator=generator)
+                with torch.no_grad(), gpytorch.settings.fast_computations(covar_root_decomposition=False):
+                    unit_field = distribution.rsample(base_samples=base_samples).detach().cpu().numpy()
+            unit_field = unit_field.reshape(-1)
+            if unit_field.shape != (size,):
+                raise RuntimeError("The covariance library returned a field with the wrong number of values.")
 
-                    # Independent noise adds variance to each observation (the covariance diagonal)
-                    if gpytorch_variogram.noise > 0:
-                        diagonal = torch.full((self.size,), gpytorch_variogram.noise, dtype=torch.float64)
-                        covariance = covariance.add_diagonal(diagonal)
-                    distribution = gpytorch.distributions.MultivariateNormal(
-                        torch.zeros(self.size, dtype=torch.float64), covariance
-                    )
-
-                    # Use a local generator so drawing a field does not change PyTorch's global random state
-                    generator = torch.Generator(device=coordinate_tensor.device)
-                    generator.manual_seed(seed)
-                    base_samples = torch.randn(self.size, dtype=torch.float64, generator=generator)
-                    with torch.no_grad(), gpytorch.settings.fast_computations(covar_root_decomposition=False):
-                        unit_field = distribution.rsample(base_samples=base_samples).detach().cpu().numpy()
-                unit_field = unit_field.reshape(-1)
-                if unit_field.shape != (self.size,):
-                    raise RuntimeError("The covariance library returned a field with the wrong number of values.")
-
-            # Scale this unit-variance field by its error magnitude, then add it to the other components
-            combined += magnitude * unit_field
-        return combined
+        # Scale this unit-variance field by its error magnitude, then add it to the other components
+        combined += magnitude * unit_field
+    return combined
 
 
 ############################################
@@ -1426,14 +1392,14 @@ class BoundErrorStructure:
 ############################################
 
 
-def _bind_components(
+def _component_magnitudes(
     structure: ErrorStructure,
     *,
-    source_ids: NDArray[Any],
+    size: int,
     coordinates: NDArray[np.float64] | None,
     predictors: Mapping[str, NDArray[np.float64]],
-) -> BoundErrorStructure:
-    """Calculate each component's error magnitude and prepare its covariance calculation."""
+) -> tuple[tuple[ErrorComponent, NDArray[np.float64]], ...]:
+    """Calculate each component's error magnitude at the selected observations."""
 
     component_data: list[tuple[ErrorComponent, NDArray[np.float64]]] = []
     for component in structure.components.values():
@@ -1443,7 +1409,7 @@ def _bind_components(
 
         # Constant magnitudes apply to every observation; variable magnitudes must supply one value for each
         try:
-            magnitude = np.broadcast_to(predicted, (len(source_ids),)).astype(float, copy=True)
+            magnitude = np.broadcast_to(predicted, (size,)).astype(float, copy=True)
         except ValueError as exception:
             raise ValueError(
                 f"Component {component.name!r} magnitude shape {predicted.shape} cannot match the source observations."
@@ -1453,42 +1419,34 @@ def _bind_components(
         magnitude.setflags(write=False)
         component_data.append((component, magnitude))
 
-    return BoundErrorStructure(
-        source_ids=source_ids,
-        coordinates=coordinates,
-        _component_data=tuple(component_data),
-        predictors=predictors,
-    )
+    return tuple(component_data)
 
 
 ############################################
-# 8/ MATCH AN ERROR MODEL TO OBSERVATIONS
+# 8/ PREPARE ERRORS AT SOURCE OBSERVATIONS
 ############################################
 
 
-def bind_error_structure(
+def _prepare_source_errors(
     structure: ErrorStructure,
-    *,
-    source_ids: ArrayLike,
+    size: int,
     coordinates: ArrayLike | None = None,
     predictors: Mapping[str, Any] | None = None,
-) -> BoundErrorStructure:
-    """Match an ErrorStructure to unique source IDs and optional spatial coordinates.
+) -> tuple[NDArray[np.float64] | None, tuple[tuple[ErrorComponent, NDArray[np.float64]], ...]]:
+    """Check source coordinates and predictors, then calculate component error magnitudes.
 
-    _normalize_source_ids(), _normalize_coordinates() and _normalize_predictors() check the inputs.
-    _bind_components() then calculates each component's error magnitude at those locations.
+    _normalize_coordinates() and _normalize_predictors() check the inputs.
+    _component_magnitudes() then calculates each component's error magnitude at those locations.
     """
 
     if not isinstance(structure, ErrorStructure):
         raise TypeError("structure must be an ErrorStructure.")
-    normalized_ids = _normalize_source_ids(source_ids)
-    normalized_coordinates = _normalize_coordinates(coordinates, len(normalized_ids))
-    normalized_predictors = _normalize_predictors(
-        predictors, required=structure.required_predictors, size=len(normalized_ids)
-    )
-    return _bind_components(
+    normalized_coordinates = _normalize_coordinates(coordinates, size)
+    normalized_predictors = _normalize_predictors(predictors, required=structure.required_predictors, size=size)
+    component_data = _component_magnitudes(
         structure,
-        source_ids=normalized_ids,
+        size=size,
         coordinates=normalized_coordinates,
         predictors=normalized_predictors,
     )
+    return normalized_coordinates, component_data

@@ -719,7 +719,6 @@ class TestStatsUncertainty:
             values,
             Mean(),
             error_structure=source_error,
-            uncertainty_kwargs={"return_covariance": True},
         )
         assert nominal == np.mean(values)
         np.testing.assert_array_equal(summary.estimate, [np.mean(values)])
@@ -728,8 +727,6 @@ class TestStatsUncertainty:
         weights = np.full(values.size, 1 / values.size)
         expected_variance = np.sum((2 * weights) ** 2)
         np.testing.assert_allclose(summary.variance, [expected_variance])
-        assert summary.covariance is not None
-        np.testing.assert_allclose(summary.covariance, [[expected_variance]])
 
     def test_stats__propagates_independently(self) -> None:
         """Checks that two value arrays have separate error propagation."""
@@ -745,15 +742,12 @@ class TestStatsUncertainty:
             values,
             Mean(),
             error_structure=source_error,
-            uncertainty_kwargs={"return_covariance": True},
         )
         assert nominal == {name: np.mean(array) for name, array in values.items()}
         np.testing.assert_array_equal(summary.estimate, [np.mean(first), np.mean(second)])
 
         # We check output uncertainty
         np.testing.assert_allclose(summary.variance, [2, 2])
-        assert summary.covariance is not None
-        np.testing.assert_allclose(summary.covariance, np.diag([2, 2]))
 
     def test_stats__propagates_grouped_mean(self) -> None:
         """Checks that grouped stats() propagates uncertainty properly."""
@@ -771,17 +765,14 @@ class TestStatsUncertainty:
             values,
             Mean(),
             error_structure=source_error,
-            uncertainty_kwargs={"return_covariance": True},
             by=by,
             categories=categories,
         )
         pd.testing.assert_frame_equal(nominal, expected)
         np.testing.assert_array_equal(summary.estimate, [2.0, 8.0])
 
-        # We check error propag: each group mean has variance of 4 / 2, and distinct ID so 0 cross-group covariance
+        # Each group mean has variance 4 / 2 from its two independent values
         np.testing.assert_allclose(summary.variance, [2.0, 2.0])
-        assert summary.covariance is not None
-        np.testing.assert_allclose(summary.covariance, np.diag([2.0, 2.0]))
 
     @pytest.mark.parametrize(
         ("statistics", "option", "message", "error"),

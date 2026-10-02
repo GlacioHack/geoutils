@@ -551,7 +551,7 @@ def _prepare_grid_neighbours_data(
     values_mask = np.ma.getmaskarray(array) if np.ma.isMaskedArray(array) else None
     local_inputs = []
     handling: NodataHandling | None
-    if nodata_propagation == "gdal":
+    if nodata_propagation == "nearest":
         handling = "ignore"
     else:
         handling = nodata_propagation

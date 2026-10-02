@@ -33,12 +33,20 @@ from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
 from geoutils.operators.base import LocalData
 
+try:
+    from numba import njit
+except ImportError:
+    njit = None
+
+_jit = njit(cache=True) if njit is not None else lambda function: function
+
 if TYPE_CHECKING:
     from geoutils.operators.reducer import Reducer
 
 # Ignore tiny apparent overlaps caused by rounding when two edges only touch
 _MIN_FRACTION = np.finfo(np.float64).eps * 64
 OverlapBackend = Literal["auto", "exactextract", "shapely"]
+RasterOverlapBackend = Literal["auto", "numba", "exactextract", "shapely"]
 
 
 ######################################
@@ -612,7 +620,14 @@ def _run_exactextract(
             raise ValueError("ExactExtract reduction requires a two-dimensional value array.")
         if operation is None:
             raise ValueError("An ExactExtract reduction requires an operation name.")
-        raster_source = NumPyRasterSource(values, *extent)
+        # ExactExtract does not consistently honor NumPy masks, so pass missing cells as an explicit nodata value
+        if np.ma.isMaskedArray(values):
+            floating_values = values if np.issubdtype(values.dtype, np.floating) else values.astype(np.float64)
+            raster_values = np.ma.filled(floating_values, np.nan)
+        else:
+            raster_values = values
+        nodata = np.nan if np.issubdtype(raster_values.dtype, np.floating) else None
+        raster_source = NumPyRasterSource(raster_values, *extent, nodata=nodata)
         operations = [operation]
         writer = _ScalarWriter()
 
@@ -804,35 +819,146 @@ def _grid_intersection_fractions(
 ###########################################################################
 
 
+@_jit
+def _pixel_square_overlap(
+    corners: NDArrayNum, row: int, column: int, polygon: NDArrayNum, scratch: NDArrayNum
+) -> float:
+    """Clip a quadrilateral to one unit source cell and return the covered fraction."""
+
+    polygon[:4] = corners
+    count = 4
+
+    # Clip against the left, right, upper and lower sides of the source cell
+    for side in range(4):
+        axis = 0 if side < 2 else 1
+        bound = (column if side == 0 else column + 1) if axis == 0 else (row if side == 2 else row + 1)
+        lower = side == 0 or side == 2
+        next_count = 0
+        for index in range(count):
+            previous_index = count - 1 if index == 0 else index - 1
+            previous_x = polygon[previous_index, 0]
+            previous_y = polygon[previous_index, 1]
+            current_x = polygon[index, 0]
+            current_y = polygon[index, 1]
+            previous_coordinate = previous_x if axis == 0 else previous_y
+            current_coordinate = current_x if axis == 0 else current_y
+            previous_inside = previous_coordinate >= bound if lower else previous_coordinate <= bound
+            current_inside = current_coordinate >= bound if lower else current_coordinate <= bound
+            if previous_inside != current_inside:
+                fraction = (bound - previous_coordinate) / (current_coordinate - previous_coordinate)
+                scratch[next_count, 0] = previous_x + fraction * (current_x - previous_x)
+                scratch[next_count, 1] = previous_y + fraction * (current_y - previous_y)
+                next_count += 1
+            if current_inside:
+                scratch[next_count, 0] = current_x
+                scratch[next_count, 1] = current_y
+                next_count += 1
+        polygon, scratch = scratch, polygon
+        count = next_count
+        if count == 0:
+            return 0.0
+
+    # Shoelace area is the overlap fraction because each source cell has unit area
+    signed_area = 0.0
+    for index in range(1, count - 1):
+        first_x = polygon[index, 0] - polygon[0, 0]
+        first_y = polygon[index, 1] - polygon[0, 1]
+        second_x = polygon[index + 1, 0] - polygon[0, 0]
+        second_y = polygon[index + 1, 1] - polygon[0, 1]
+        signed_area += first_x * second_y - second_x * first_y
+    return min(abs(signed_area) * 0.5, 1.0)
+
+
+@_jit
+def _pixel_quadrilateral_intersections(
+    columns: NDArrayNum, rows: NDArrayNum, height: int, width: int
+) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum, NDArrayNum]:
+    """Collect source cells and areas intersected by quadrilaterals in pixel coordinates."""
+
+    geometry_count = len(columns)
+    starts = np.zeros(geometry_count, dtype=np.int64)
+    stops = np.zeros(geometry_count, dtype=np.int64)
+    lefts = np.zeros(geometry_count, dtype=np.int64)
+    rights = np.zeros(geometry_count, dtype=np.int64)
+    capacity = 0
+
+    # Bound each quadrilateral in source pixels to size the candidate cell arrays
+    for target in range(geometry_count):
+        min_row = np.inf
+        max_row = -np.inf
+        min_column = np.inf
+        max_column = -np.inf
+        valid = True
+        for vertex in range(4):
+            row = rows[target, vertex]
+            column = columns[target, vertex]
+            if not np.isfinite(row) or not np.isfinite(column):
+                valid = False
+                break
+            if row < min_row:
+                min_row = row
+            if row > max_row:
+                max_row = row
+            if column < min_column:
+                min_column = column
+            if column > max_column:
+                max_column = column
+        if not valid:
+            continue
+        starts[target] = max(0, int(np.floor(min_row)))
+        stops[target] = min(height, int(np.ceil(max_row)))
+        lefts[target] = max(0, int(np.floor(min_column)))
+        rights[target] = min(width, int(np.ceil(max_column)))
+        capacity += max(0, stops[target] - starts[target]) * max(0, rights[target] - lefts[target])
+
+    output_rows = np.empty(capacity, dtype=np.int64)
+    output_columns = np.empty(capacity, dtype=np.int64)
+    output_fractions = np.empty(capacity, dtype=np.float64)
+    offsets = np.zeros(geometry_count + 1, dtype=np.int64)
+    corners = np.empty((4, 2), dtype=np.float64)
+    polygon = np.empty((12, 2), dtype=np.float64)
+    scratch = np.empty((12, 2), dtype=np.float64)
+    count = 0
+
+    # Clip only candidate cells, recording positive overlap areas in destination order
+    for target in range(geometry_count):
+        for vertex in range(4):
+            corners[vertex, 0] = columns[target, vertex]
+            corners[vertex, 1] = rows[target, vertex]
+        for row in range(starts[target], stops[target]):
+            for column in range(lefts[target], rights[target]):
+                fraction = _pixel_square_overlap(corners, row, column, polygon, scratch)
+                if fraction > _MIN_FRACTION:
+                    output_rows[count] = row
+                    output_columns[count] = column
+                    output_fractions[count] = fraction
+                    count += 1
+        offsets[target + 1] = count
+    return offsets, output_rows[:count], output_columns[:count], output_fractions[:count]
+
+
 def _grid_intersection_fractions_from_corners(
     corners: NDArrayNum,
     transform: rio.transform.Affine,
     shape: tuple[int, int],
     *,
     batch_size: int = 4096,
-    backend: OverlapBackend = "auto",
+    backend: RasterOverlapBackend = "auto",
 ) -> GridIntersection:
     """Calculate covered fractions from the four corners of each destination cell.
 
-    When destination cells follow the source grid's row/column directions, their covered area is simply the product
-    of the overlap lengths along each axis. We can use _candidate_cells() and calculate these lengths directly.
-    Other cell shapes go through _grid_intersection_fractions() for polygon intersections.
-
-    We check alignment in source pixel coordinates with _pixel_corners_are_aligned(), so the direct calculation also
-    works when both grids share a rotation. It does not use Shapely or ExactExtract for intersections, regardless of
-    backend. _assemble_grid_intersection() groups the covered cells in destination order.
-
-    For unaligned corners, we build Shapely polygons and pass them to _grid_intersection_fractions(). Its automatic
-    choice uses ExactExtract when installed on a north-up source grid, and Shapely otherwise; backend can request
-    either library explicitly. The Shapely polygon construction here does not determine which library calculates
-    the intersections.
+    For cells aligned with the source grid, we multiply the row and column overlap lengths. Otherwise Numba clips
+    each quadrilateral, or ExactExtract and Shapely intersect polygons on a unit-pixel grid. An affine change
+    preserves covered fractions, so all three methods work with rotated or sheared source grids. Numba handles only
+    four-corner raster footprints; general polygons use _grid_intersection_fractions().
 
     :param corners: Four ordered coordinate pairs per footprint, with shape (n_geometries, 4, 2).
     :param transform: Affine mapping from source grid-cell corners to footprint coordinates.
     :param shape: Source grid height and width.
     :param batch_size: Maximum number of aligned footprints expanded in one batch.
-    :param backend: Library used for unaligned footprints, following _grid_intersection_fractions(). Aligned footprints
-        always use direct overlap lengths.
+    :param backend: Method for unaligned footprints. Auto uses Numba for fewer than 100,000 cells when installed,
+        then ExactExtract when installed, or Shapely. Other values select one explicitly. Aligned footprints always
+        use direct overlap lengths.
     :returns: Source rows, columns and covered fractions grouped by destination cell.
     """
 
@@ -841,15 +967,40 @@ def _grid_intersection_fractions_from_corners(
     corner_array = np.asarray(corners, dtype=np.float64)
     if corner_array.ndim != 3 or corner_array.shape[1:] != (4, 2):
         raise ValueError("Grid-intersection corners must have shape (n_geometries, 4, 2).")
+    if backend not in ("auto", "numba", "exactextract", "shapely"):
+        raise ValueError("Raster overlap backend must be 'auto', 'numba', 'exactextract' or 'shapely'.")
 
     # Work in source pixel coordinates: two rotated grids can still follow the same row/column directions
     inverse = ~transform
     pixel_columns = inverse.a * corner_array[..., 0] + inverse.b * corner_array[..., 1] + inverse.c
     pixel_rows = inverse.d * corner_array[..., 0] + inverse.e * corner_array[..., 1] + inverse.f
+    # Snap transformed grid lines back to integer pixels before tiny rounding errors create extra cells
+    pixel_columns = np.where(
+        np.abs(pixel_columns - np.rint(pixel_columns)) < 1e-8, np.rint(pixel_columns), pixel_columns
+    )
+    pixel_rows = np.where(np.abs(pixel_rows - np.rint(pixel_rows)) < 1e-8, np.rint(pixel_rows), pixel_rows)
     aligned = _pixel_corners_are_aligned(pixel_columns, pixel_rows)
     if not aligned:
-        polygons = np.asarray(shapely.polygons(corner_array), dtype=object)
-        return _grid_intersection_fractions(polygons, transform, shape, batch_size=batch_size, backend=backend)
+        if backend == "numba" and njit is None:
+            raise ImportError("Numba overlap requires numba.")
+        if backend == "numba" or (backend == "auto" and njit is not None and len(corner_array) < 100_000):
+            offsets, rows, columns, fractions = _pixel_quadrilateral_intersections(
+                pixel_columns, pixel_rows, shape[0], shape[1]
+            )
+            return GridIntersection(offsets, rows, columns, fractions)
+
+        # Affine changes preserve covered fractions, so both polygon libraries use the same unit-pixel grid
+        virtual_corners = np.stack((pixel_columns, shape[0] - pixel_rows), axis=-1)
+        virtual_transform = rio.transform.from_origin(0, shape[0], 1, 1)
+        polygons = np.asarray(shapely.polygons(virtual_corners), dtype=object)
+        polygon_backend: OverlapBackend = "auto"
+        if backend == "exactextract":
+            polygon_backend = "exactextract"
+        elif backend == "shapely":
+            polygon_backend = "shapely"
+        return _grid_intersection_fractions(
+            polygons, virtual_transform, shape, batch_size=batch_size, backend=polygon_backend
+        )
 
     # 2/ Calculate overlap lengths for aligned cells
 
@@ -898,3 +1049,49 @@ def _grid_intersection_fractions_from_corners(
         selected_columns,
         selected_fractions,
     )
+
+
+def _gdal_rectangle_weights(
+    overlap: GridIntersection,
+    left: NDArrayNum,
+    right: NDArrayNum,
+    top: NDArrayNum,
+    bottom: NDArrayNum,
+    shape: tuple[int, int],
+) -> GridIntersection:
+    """Match GDAL's relative rectangle weights at the edge of a source raster.
+
+    GDAL clips the source cell indexes to the raster but calculates boundary weights from the original, unclipped
+    rectangle. An edge cell can therefore have a weight above one. Scale each destination group's weights together
+    so they fit GridIntersection's fraction range without changing weighted means or root mean squares.
+    """
+
+    # Repeat each destination ID once per contributing source cell
+    target_ids = np.repeat(np.arange(overlap.geometry_count), np.diff(overlap.offsets))
+    if len(target_ids) == 0:
+        return overlap
+    columns = overlap.columns
+    rows = overlap.rows
+
+    # GDAL gives a single cell along an axis unit weight, even when it covers only part of the rectangle
+    first_column = np.maximum(np.floor(left + 1e-10).astype(np.int64), 0)[target_ids]
+    last_column = np.minimum(np.ceil(right - 1e-10).astype(np.int64), shape[1])[target_ids]
+    first_row = np.maximum(np.floor(top + 1e-10).astype(np.int64), 0)[target_ids]
+    last_row = np.minimum(np.ceil(bottom - 1e-10).astype(np.int64), shape[0])[target_ids]
+    column_weights = np.where(
+        columns == first_column,
+        np.where(last_column == first_column + 1, 1.0, 1.0 - (left[target_ids] - first_column)),
+        np.where(columns == last_column - 1, 1.0 - (last_column - right[target_ids]), 1.0),
+    )
+    row_weights = np.where(
+        rows == first_row,
+        np.where(last_row == first_row + 1, 1.0, 1.0 - (top[target_ids] - first_row)),
+        np.where(rows == last_row - 1, 1.0 - (last_row - bottom[target_ids]), 1.0),
+    )
+
+    # GDAL can assign more than unit weight to an edge cell when the rectangle extends past the source
+    weights = column_weights * row_weights
+    group_maximum = np.zeros(overlap.geometry_count, dtype=np.float64)
+    np.maximum.at(group_maximum, target_ids, weights)
+    fractions = weights / np.maximum(group_maximum[target_ids], 1.0)
+    return GridIntersection(overlap.offsets, rows, columns, fractions)

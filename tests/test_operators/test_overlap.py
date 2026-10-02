@@ -1,5 +1,8 @@
 """Test exact polygon intersections with cells of a regular grid."""
 
+from importlib.util import find_spec
+from typing import Literal
+
 import numpy as np
 import pytest
 import rasterio as rio
@@ -119,6 +122,57 @@ class TestGridIntersectionFractions:
         np.testing.assert_array_equal(actual.rows, expected.rows)
         np.testing.assert_array_equal(actual.columns, expected.columns)
         np.testing.assert_allclose(actual.fractions, expected.fractions)
+
+    @pytest.mark.parametrize("angle", [11, 29])
+    @pytest.mark.parametrize("backend", ["auto", "numba", "exactextract"])
+    def test_grid_intersection_fractions__rotated_quadrilaterals(
+        self, angle: int, backend: Literal["auto", "numba", "exactextract"]
+    ) -> None:
+        """Checks that every raster overlap method matches Shapely on a rotated grid."""
+
+        if backend in ("numba", "exactextract"):
+            pytest.importorskip(backend)
+
+        # Large coordinates expose cancellation while unequal cell widths give several partial overlaps
+        transform = Affine.translation(500_000, 5_100_000) * Affine.rotation(angle) * Affine.scale(100, -150)
+        pixel_corners = np.array(
+            [
+                [[1.2, 2.1], [3.4, 2.3], [3.1, 4.2], [1.0, 3.7]],
+                [[3.5, 3.0], [5.4, 2.7], [5.2, 4.8], [3.2, 5.1]],
+            ]
+        )
+        x = transform.a * pixel_corners[..., 0] + transform.b * pixel_corners[..., 1] + transform.c
+        y = transform.d * pixel_corners[..., 0] + transform.e * pixel_corners[..., 1] + transform.f
+        corners = np.stack((x, y), axis=-1)
+
+        # Compare each polygon's covered cells and fractions after sorting the backend's cell order
+        expected = _grid_intersection_fractions_from_corners(corners, transform, (7, 7), backend="shapely")
+        actual = _grid_intersection_fractions_from_corners(corners, transform, (7, 7), backend=backend)
+        np.testing.assert_array_equal(actual.offsets, expected.offsets)
+        for geometry_index in range(len(corners)):
+            expected_rows, expected_columns, expected_fractions = expected.for_geometry(geometry_index)
+            actual_rows, actual_columns, actual_fractions = actual.for_geometry(geometry_index)
+            expected_ids = expected_rows * 7 + expected_columns
+            actual_ids = actual_rows * 7 + actual_columns
+            expected_order = np.argsort(expected_ids)
+            actual_order = np.argsort(actual_ids)
+            np.testing.assert_array_equal(actual_ids[actual_order], expected_ids[expected_order])
+            tolerance = 5e-8 if backend == "exactextract" else 1e-10
+            np.testing.assert_allclose(
+                actual_fractions[actual_order], expected_fractions[expected_order], rtol=0, atol=tolerance
+            )
+
+    @pytest.mark.skipif(find_spec("numba") is not None, reason="Only runs if numba is missing.")
+    def test_grid_intersection_fractions__error_missing_numba(self) -> None:
+        """Checks an error is raised for an explicit Numba backend when Numba is unavailable."""
+
+        # Unaligned footprint reaches the optional Numba overlap method
+        transform = rio.transform.from_origin(0, 2, 1, 1)
+        corners = np.array([[[0.2, 1.8], [1.8, 1.6], [1.6, 0.2], [0.2, 0.4]]])
+
+        # Explicit selection must report the missing dependency instead of silently changing methods
+        with pytest.raises(ImportError, match="Numba overlap requires numba"):
+            _grid_intersection_fractions_from_corners(corners, transform, (2, 2), backend="numba")
 
 
 class TestExactExtract:

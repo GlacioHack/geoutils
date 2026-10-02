@@ -461,8 +461,8 @@ class TestGroupedStats:
                 overlap_backend="shapely",
             )
 
-    def test_stats__fractional_covar(self) -> None:
-        """Checks that overlapping fractional are properly used when propagating covariance."""
+    def test_stats__fractional_error(self) -> None:
+        """Checks that overlapping fractional groups each get the correct mean uncertainty."""
 
         # Two overlapping geometries, one containing 4 quarter cells, one the right column
         raster = gu.Raster.from_array(
@@ -486,19 +486,12 @@ class TestGroupedStats:
             fractional=True,
             overlap_backend="shapely",
             error_structure=errors,
-            uncertainty_kwargs={"return_covariance": True},
         )
         # Center mean: (1 + 2 + 3 + 4) / 4 = 2.5; right mean: (2 + 4) / 2 = 3
         np.testing.assert_allclose(nominal[("band_1", "Mean")], [2.5, 3])
 
-        # Center weights are 0.25; right weights are 0.5
-        assert summary.covariance is not None
-        # Each source has unit variance, so we sum products of mean weights
-        # (center, center): four cells give 4 * 0.25 * 0.25 = 0.25
-        # (center, right): two shared cells give 2 * 0.25 * 0.5 = 0.25
-        # (right, center): the same cells give 2 * 0.5 * 0.25 = 0.25
-        # (right, right): two cells give 2 * 0.5 * 0.5 = 0.5
-        np.testing.assert_allclose(summary.covariance, [[0.25, 0.25], [0.25, 0.5]])
+        # Four equal weights give variance 1/4; two equal weights give variance 1/2
+        np.testing.assert_allclose(summary.variance, [0.25, 0.5])
 
     def test_stats__fractional_exactextract_matches_shapely(self) -> None:
         """Checks that optional ExactExtract and Shapely produce the same fractional grouped statistics."""

@@ -35,11 +35,10 @@ NodataHandling = Literal["ignore", "propagate"]
 
 # Public options for nodata propagation
 # "ignore" and "propagate": same as above
-# "gdal": (for interpolators) sets nodata to targets whose nearest source is nodata
-#         (for reducers) sets nodata to points with neighbourhood without sufficient source data
+# "nearest": mask an interpolated target when its nearest source is nodata
 # integer of value X: output is set to nodata if within X pixels from a nodata
 # "half_order_up/down": same as above, but distance depends on interpolation order (only for Interpolators)
-NodataPropagation = Literal["gdal", "ignore", "propagate"]
+NodataPropagation = Literal["nearest", "ignore", "propagate"]
 NodataSpread = Literal["half_order_up", "half_order_down"] | int
 NodataChoice = NodataPropagation | NodataSpread
 
@@ -58,16 +57,16 @@ def _resolve_nodata_handling(
     choice = config["interpolation_nodata_handling"] if nodata_handling is None else nodata_handling
     if isinstance(choice, str):
         choice = choice.lower()
-    if choice in ("gdal", "ignore", "propagate"):
+    if choice in ("nearest", "ignore", "propagate"):
         return cast(NodataPropagation, choice), None
     if isinstance(choice, str) and choice not in ("half_order_up", "half_order_down"):
         raise ValueError(
-            "nodata_handling must be 'gdal', 'ignore', 'propagate', 'half_order_up', "
+            "nodata_handling must be 'nearest', 'ignore', 'propagate', 'half_order_up', "
             "'half_order_down' or a non-negative integer."
         )
     if isinstance(choice, bool) or not isinstance(choice, (str, int)) or (isinstance(choice, int) and choice < 0):
         raise ValueError(
-            "nodata_handling must be 'gdal', 'ignore', 'propagate', 'half_order_up', "
+            "nodata_handling must be 'nearest', 'ignore', 'propagate', 'half_order_up', "
             "'half_order_down' or a non-negative integer."
         )
     return "ignore", _nodata_spread_distance(order=order, dist_nodata_spread=cast(NodataSpread, choice))
@@ -84,8 +83,8 @@ def _validate_nodata_propagation(nodata_propagation: str) -> NodataPropagation:
 
     # Lowercase string values so public methods accept the same spelling variants
     normalized = nodata_propagation.lower()
-    if normalized not in ("gdal", "ignore", "propagate"):
-        raise ValueError("nodata_propagation must be one of 'gdal', 'ignore' or 'propagate'.")
+    if normalized not in ("nearest", "ignore", "propagate"):
+        raise ValueError("nodata_propagation must be one of 'nearest', 'ignore' or 'propagate'.")
     return cast(NodataPropagation, normalized)
 
 
@@ -122,10 +121,10 @@ def _nodata_mask_distance(
 ) -> int | None:
     """Find how far to expand the nodata mask (None means no extra mask)."""
 
-    # GDAL uses the nearest source cell, higher-order propagation uses half the order, rounded up
+    # Nearest masks the source cell under the target; propagation extends by half the interpolation order
     if nodata_propagation == "ignore":
         base_distance = None
-    elif nodata_propagation == "gdal":
+    elif nodata_propagation == "nearest":
         base_distance = 0
     else:
         base_distance = (order + 1) // 2
@@ -192,7 +191,7 @@ def _mask_grid_from_invalid_points(
     res_y: float,
     radius: float,
     method: str | None,
-    nodata_propagation: Literal["gdal", "propagate"],
+    nodata_propagation: Literal["nearest", "propagate"],
 ) -> None:
     """
     Mask output cells affected by invalid source values, following the selected nodata rule.
@@ -204,7 +203,7 @@ def _mask_grid_from_invalid_points(
     :param res_x: Positive output resolution along X.
     :param res_y: Positive output resolution along Y.
     :param radius: Maximum support distance expressed in output pixels.
-    :param method: Built-in gridding method for ``"propagate"``. Custom Interpolators use None under ``"gdal"``.
+    :param method: Built-in gridding method for ``"propagate"``. Custom Interpolators use None under ``"nearest"``.
     :param nodata_propagation: Whether to mask cells with an invalid nearest source or any invalid source used by
         the method.
     """
@@ -218,7 +217,7 @@ def _mask_grid_from_invalid_points(
 
     x_coords, y_coords = grid_coords
     queries = _build_grid_queries(x_coords, y_coords)
-    if nodata_propagation == "gdal":
+    if nodata_propagation == "nearest":
         # Every Interpolator uses the original nearest point for this mask, regardless of its calculation method
         nearest_validity = _nearest_source_validity(source_points, source_valid, queries)
         array[~nearest_validity.reshape(array.shape)] = np.nan

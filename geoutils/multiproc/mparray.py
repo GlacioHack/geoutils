@@ -334,7 +334,15 @@ def _remove_tile_padding(raster_shape: tuple[int, int], raster_tile: Raster, til
     colmax = colmin + int(tile[3] - tile[2])
 
     # Crop back to the destination block without changing its output bounds
-    raster_tile.icrop(bbox=(colmin, rowmin, colmax, rowmax), inplace=True)
+    cropped = raster_tile.icrop(bbox=(colmin, rowmin, colmax, rowmax))
+    assert cropped is not None
+
+    # Update only pixel data and grid for loaded tiles so custom metadata survives the crop
+    if raster_tile.is_loaded:
+        raster_tile._data = cropped.data
+        raster_tile.transform = cropped.transform
+    else:
+        raster_tile.__dict__.update(cropped.__dict__)
 
 
 def _apply_func_block(

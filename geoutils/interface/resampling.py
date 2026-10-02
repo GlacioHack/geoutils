@@ -39,6 +39,7 @@ from geoutils.multiproc.mparray import block_bounds_from_chunks
 from geoutils.operators.execution import _resample_at_points as _resample_array_at_points
 from geoutils.operators.interpolator import (
     Interpolator,
+    RasterConvolution,
     RegularInterpolationMethod,
     ScipyInterpolator,
     _interp_output_dtype,
@@ -111,7 +112,7 @@ def _interpolate_array(
     dst_transform: rio.transform.Affine,
     dst_shape: tuple[int, int] | None = None,
     method: Literal["nearest", "linear", "bilinear"] = "linear",
-    nodata_propagation: NodataPropagation = "gdal",
+    nodata_propagation: NodataPropagation = "nearest",
 ) -> NDArrayNum:
     """
     Interpolate an array onto another grid in the same coordinate reference system.
@@ -197,7 +198,7 @@ def _interp_points_base(
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
-    nodata_propagation: NodataPropagation = "gdal",
+    nodata_propagation: NodataPropagation = "nearest",
     *,
     return_interpolator: Literal[False] = False,
     array_indices: tuple[NDArrayNum, NDArrayNum] | None = None,
@@ -219,7 +220,7 @@ def _interp_points_base(
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
-    nodata_propagation: NodataPropagation = "gdal",
+    nodata_propagation: NodataPropagation = "nearest",
     *,
     return_interpolator: Literal[True],
     array_indices: tuple[NDArrayNum, NDArrayNum] | None = None,
@@ -241,7 +242,7 @@ def _interp_points_base(
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
-    nodata_propagation: NodataPropagation = "gdal",
+    nodata_propagation: NodataPropagation = "nearest",
     *,
     return_interpolator: bool = False,
     array_indices: tuple[NDArrayNum, NDArrayNum] | None = None,
@@ -262,7 +263,7 @@ def _interp_points_base(
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
     shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
-    nodata_propagation: NodataPropagation = "gdal",
+    nodata_propagation: NodataPropagation = "nearest",
     return_interpolator: bool = False,
     array_indices: tuple[NDArrayNum, NDArrayNum] | None = None,
     source_index_offset: tuple[int, int] = (0, 0),
@@ -299,6 +300,38 @@ def _interp_points_base(
 
     # Check the public missing-data option before passing it to a built-in or custom method
     propagation = _validate_nodata_propagation(nodata_propagation)
+
+    if isinstance(method, RasterConvolution):
+        # GDAL-style kernels use source pixel spacing, including on a rotated raster grid
+        def interpolate_convolution(x: NDArrayNum, y: NDArrayNum) -> NDArrayNum:
+            """Sample a regular raster with the selected separable convolution kernel."""
+
+            if array_indices is None:
+                rows, columns = _xy2ij(
+                    x,
+                    y,
+                    transform=transform,
+                    area_or_point=area_or_point,
+                    shift_area_or_point=shift_area_or_point,
+                    op=np.float64,
+                )
+                rows, columns = rows - 0.5, columns - 0.5
+            else:
+                rows, columns = array_indices
+            return method._interpolate_grid(array, rows, columns, propagation)
+
+        if return_interpolator:
+
+            def point_interpolator(xi: tuple[NDArrayNum, NDArrayNum]) -> NDArrayNum:
+                """Accept array-axis coordinate order from the prepared interpolator API."""
+
+                return interpolate_convolution(np.asarray(xi[1]), np.asarray(xi[0]))
+
+            return point_interpolator
+
+        if points is None:
+            raise ValueError("Raster convolution requires target points.")
+        return interpolate_convolution(np.asarray(points[0]), np.asarray(points[1]))
 
     # Built-in Interpolators use the existing SciPy array functions, which preserves their numerical behavior
     method_name = _regular_interpolation_method(method)
@@ -1112,6 +1145,8 @@ def _prepare_resampling_options(
         order = None
         if nodata_handling is None:
             nodata_handling = "ignore"
+        elif isinstance(nodata_handling, str) and nodata_handling.lower() == "nearest":
+            raise ValueError("Nearest-source nodata handling requires an Interpolator.")
     else:
         if window is not None or window_shape is not None:
             raise ValueError("Window reduction requires a Reducer or callable.")

@@ -926,7 +926,7 @@ def _refit_error_structure(
         options.setdefault("use_nugget", True)
     empirical = structure.empirical_variogram.fit(models, **options)
 
-    # Update component definitions before reallocating their magnitudes from the refitted variogram
+    # We finally update component definitions before reallocating their magnitudes from the refitted variogram
     for item, model_name in zip(
         [item for item in configuration if item["correlation"] is not None],
         models.split("+") if isinstance(models, str) else models,

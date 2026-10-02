@@ -1,4 +1,4 @@
-"""Tests for random error fields over rasters or point clouds."""
+"""Tests for random error fields over rasters or point clouds, with GSTools/GPytorch backends."""
 
 from __future__ import annotations
 
@@ -88,6 +88,32 @@ class TestRandomField:
         assert len(fields) == n_fields
         assert all(type(field) is type(source) for field in fields)
 
+    @pytest.mark.skipif(find_spec("gpytorch") is None or find_spec("torch") is None, reason="Requires GPyTorch")
+    def test_random_field__default_gpytorch(self) -> None:
+        """Checks that every public random-field API uses GPyTorch by default."""
+
+        # Small correlated model with raster, point, and plain coordinate inputs
+        correlation = VariogramModel("gaussian", effective_range=3, partial_sill=1)
+        structure = gu.ErrorStructure([gu.ErrorComponent("spatial", 1, correlation)])
+        raster = gu.Raster.from_array(np.ones((2, 2)), transform=from_origin(0, 2, 1, 1), crs=32606)
+        points = gu.PointCloud.from_xyz([0, 1, 2], [0, 1, 0], [1, 1, 1], crs=32606)
+        coordinates = np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 0.0]])
+
+        # Compare default calls through each entry point with the explicit GPyTorch backend
+        raster_expected = gu.uncertainty.random_field(structure, like=raster, random_state=8, backend="gpytorch")
+        point_expected = gu.uncertainty.random_field(structure, like=points, random_state=8, backend="gpytorch")
+        array_expected = gu.uncertainty.random_field(
+            structure, coordinates=coordinates, random_state=8, backend="gpytorch"
+        )
+        np.testing.assert_array_equal(raster.random_field(structure, random_state=8).data, raster_expected.data)
+        np.testing.assert_array_equal(points.random_field(structure, random_state=8).data, point_expected.data)
+        np.testing.assert_array_equal(
+            structure.generate_random_field(raster, random_state=8).data, raster_expected.data
+        )
+        np.testing.assert_array_equal(
+            gu.uncertainty.random_field(structure, coordinates=coordinates, random_state=8), array_expected
+        )
+
     def test_random_field__duplicate_point(self) -> None:
         """Checks the edge case of duplicate points: should still have independent errors."""
 
@@ -162,7 +188,7 @@ class TestRandomField:
         structure = gu.ErrorStructure([gu.ErrorComponent("spatial", 1, correlation)])
 
         # We check the random field repeats across rows at the same X coords
-        result = raster.random_field(structure, random_state=7)
+        result = raster.random_field(structure, random_state=7, backend="gstools")
         np.testing.assert_array_equal(result.to_nanarray()[0], result.to_nanarray()[1])
 
     @pytest.mark.skipif(find_spec("gstools") is None, reason="Requires GSTools")
@@ -175,8 +201,8 @@ class TestRandomField:
         structure = gu.ErrorStructure([gu.ErrorComponent("spatial", 2, correlation)])
 
         # Check field size and reproducibility with same seed
-        first = gu.uncertainty.random_field(structure, coordinates=coordinates, random_state=3)
-        second = gu.uncertainty.random_field(structure, coordinates=coordinates, random_state=3)
+        first = gu.uncertainty.random_field(structure, coordinates=coordinates, random_state=3, backend="gstools")
+        second = gu.uncertainty.random_field(structure, coordinates=coordinates, random_state=3, backend="gstools")
         assert first.shape == (8,)
         np.testing.assert_array_equal(first, second)
 
@@ -215,7 +241,7 @@ class TestRandomField:
         raster_coordinates = np.column_stack((np.ravel(x), np.ravel(y)))
 
         # Compare the raster result with a draw at exactly the same coordinates
-        raster_field = raster.random_field(structure, random_state=9, backend="gpytorch")
+        raster_field = raster.random_field(structure, random_state=9, backend="gpytorch", gpytorch_inducing_points=None)
         coordinate_field = gu.uncertainty.random_field(
             structure, coordinates=raster_coordinates, random_state=9, backend="gpytorch"
         )
@@ -482,7 +508,7 @@ class TestRandomFieldChunked:
         structure = gu.ErrorStructure([gu.ErrorComponent("spatial", 1, correlation)])
 
         # We should have exact equality of all 3 because of the default inducing grid
-        expected = source.rst.random_field(structure, random_state=4, backend="gpytorch", gpytorch_inducing_points=256)
+        expected = source.rst.random_field(structure, random_state=4, backend="gpytorch")
         delegated = structure.generate_random_field(
             like=source, random_state=4, backend="gpytorch", gpytorch_inducing_points=256
         )

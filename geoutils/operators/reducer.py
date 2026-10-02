@@ -488,20 +488,22 @@ class Mode(Reducer):
         self,
         *,
         weighted: bool = True,
-        tie_break: Literal["first", "smallest", "largest"] = "largest",
+        tie_break: Literal["first", "first_to_mode", "smallest", "largest"] = "largest",
         neighborhood: GridNeighbours | PointNeighbours | None = None,
     ) -> None:
         """Choose whether to count with weights and how to resolve ties.
 
         :param weighted: Whether to add the supplied sample and area/length weights rather than count observations.
         :param tie_break: Which value to return if several have the same count: the first in the input order,
-            the smallest, or the largest.
+            the first to reach the winning count (GDAL's rule), the smallest, or the largest.
         :param neighborhood: Raster cells or point observations to select for spatial reduction.
         """
 
         super().__init__(neighborhood=neighborhood)
-        if tie_break not in {"first", "smallest", "largest"}:
-            raise ValueError("Mode tie_break must be 'first', 'smallest' or 'largest'.")
+        if tie_break not in {"first", "first_to_mode", "smallest", "largest"}:
+            raise ValueError("Mode tie_break must be 'first', 'first_to_mode', 'smallest' or 'largest'.")
+        if weighted and tie_break == "first_to_mode":
+            raise ValueError("Mode tie_break='first_to_mode' requires weighted=False.")
         self.weighted = bool(weighted)
         self.tie_break = tie_break
         self.accepts_sample_weights = self.weighted
@@ -519,6 +521,11 @@ class Mode(Reducer):
             return float(candidates[0])
         if self.tie_break == "largest":
             return float(candidates[-1])
+
+        if self.tie_break == "first_to_mode":
+            # The earliest last occurrence reaches the winning count first
+            last_indices = [np.flatnonzero(data.values == candidate)[-1] for candidate in candidates]
+            return float(candidates[int(np.argmin(last_indices))])
 
         # Find the first source occurrence among tied values, matching GDAL's documented mode tie behavior
         candidate_indices = np.flatnonzero(np.isin(data.values, candidates))
@@ -699,7 +706,7 @@ def _can_reduce_arrays(reducer: Reducer) -> bool:
 def _reduce_overlap_batch(
     array: NDArrayNum,
     overlap: GridIntersection,
-    operator: Mean | Sum | Minimum | Maximum,
+    operator: Reducer,
     *,
     nodata_propagation: NodataHandling | None,
 ) -> NDArrayNum:
@@ -979,6 +986,9 @@ def _reduce_grouped_values(
     output = np.zeros(target_count, dtype=np.float64) if reducer_type is Count else np.full(target_count, np.nan)
     finite_target_indexes = target_indexes[finite]
     finite_values = values[finite]
+    if len(finite_values) == 0:
+        output[~eligible] = np.nan
+        return output
     selected_weights = None if weights is None else weights[finite]
     weight_sums = (
         finite_counts
@@ -1030,17 +1040,52 @@ def _reduce_grouped_values(
             minlength=target_count,
         )
         output[eligible] = distance_sums[eligible] / weight_sums[eligible]
-    elif reducer_type is Median:
-        # Sort by target + value, then average the two middle values for each neighbourhood
-        # For an odd number of values, both middle positions refer to the same value
+    elif reducer_type in (Median, Quantile):
+        # Sort each destination's valid values once, then select its requested order statistic
         order = np.lexsort((finite_values, finite_target_indexes))
         sorted_values = finite_values[order]
         counts = np.bincount(finite_target_indexes, minlength=target_count)
         starts = np.concatenate(([0], np.cumsum(counts[:-1])))
         selected = np.flatnonzero(eligible)
-        lower = starts[selected] + (counts[selected] - 1) // 2
-        upper = starts[selected] + counts[selected] // 2
-        output[selected] = (sorted_values[lower] + sorted_values[upper]) / 2
+        if isinstance(reducer, Quantile) and reducer.method == "inverted_cdf":
+            positions = np.maximum(np.ceil(reducer.q * counts[selected]).astype(int) - 1, 0)
+            output[selected] = sorted_values[starts[selected] + positions]
+        elif reducer_type is Median and reducer.method == "linear":
+            # Even groups average the two central cells; odd groups select their common center
+            lower = starts[selected] + (counts[selected] - 1) // 2
+            upper = starts[selected] + counts[selected] // 2
+            output[selected] = (sorted_values[lower] + sorted_values[upper]) / 2
+        else:
+            raise TypeError(f"Unsupported batch quantile method: {reducer.method}")
+    elif reducer_type is Mode and not reducer.weighted:
+        # Count runs of equal values within each destination, preserving the first source in ties
+        order = np.lexsort((finite_values, finite_target_indexes))
+        sorted_targets = finite_target_indexes[order]
+        sorted_values = finite_values[order]
+        run_start = np.r_[True, (sorted_targets[1:] != sorted_targets[:-1]) | (sorted_values[1:] != sorted_values[:-1])]
+        run_first = np.flatnonzero(run_start)
+        run_lengths = np.diff(np.r_[run_first, len(sorted_values)])
+        run_targets = sorted_targets[run_first]
+        largest_count = np.zeros(target_count, dtype=int)
+        np.maximum.at(largest_count, run_targets, run_lengths)
+        tied = run_lengths == largest_count[run_targets]
+        if reducer.tie_break in ("first", "first_to_mode"):
+            # Source positions identify the first value or the first value to reach the winning count
+            source_order = np.full(len(run_first), -1, dtype=int)
+            if reducer.tie_break == "first":
+                source_order[:] = len(finite_values)
+                np.minimum.at(source_order, np.cumsum(run_start) - 1, order)
+            else:
+                np.maximum.at(source_order, np.cumsum(run_start) - 1, order)
+            winner_order = np.lexsort((source_order[tied], run_targets[tied]))
+        elif reducer.tie_break == "smallest":
+            winner_order = np.lexsort((sorted_values[run_first[tied]], run_targets[tied]))
+        else:
+            winner_order = np.lexsort((-sorted_values[run_first[tied]], run_targets[tied]))
+        winners = np.flatnonzero(tied)[winner_order]
+        first_per_target = np.r_[True, run_targets[winners][1:] != run_targets[winners][:-1]]
+        selected_winners = winners[first_per_target]
+        output[run_targets[selected_winners]] = sorted_values[run_first[selected_winners]]
     else:
         raise TypeError(f"Reducer {reducer_type.__name__} does not have a vectorized point-filter implementation.")
 

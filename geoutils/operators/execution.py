@@ -231,7 +231,7 @@ def _resample_at_points(
 
     # Dense built-in reductions reuse the raster filters when the array contains only source cells
     coordinates = (np.atleast_1d(points[0]), np.atleast_1d(points[1]))
-    handling: NodataHandling | None = "ignore" if nodata_propagation == "gdal" else nodata_propagation
+    handling: NodataHandling | None = "ignore" if nodata_propagation == "nearest" else nodata_propagation
     full_shape = array.shape if source_shape is None else source_shape
     within_source = all(
         0 <= offset and offset + length <= full
@@ -283,7 +283,7 @@ def _resample_at_points(
             source_index_offset=source_index_offset,
             source_shape=source_shape,
         )
-        handling = "ignore" if nodata_propagation == "gdal" else nodata_propagation
+        handling = "ignore" if nodata_propagation == "nearest" else nodata_propagation
     else:
         # Ordinary neighborhoods select complete source cells by row/column offset
         local_inputs, handling, source_rows, source_cols = _prepare_grid_neighbours_data(
@@ -310,7 +310,7 @@ def _resample_at_points(
         invalid |= np.ma.getmaskarray(array)
 
     # GDAL nodata propagation uses the nearest cell under an interpolated target
-    mask_distance = 0 if nodata_propagation == "gdal" and isinstance(operator, Interpolator) else None
+    mask_distance = 0 if nodata_propagation == "nearest" and isinstance(operator, Interpolator) else None
     if dist_nodata_spread is not None:
         mask_distance = _nodata_spread_distance(
             order=operator.interpolation_order if isinstance(operator, Interpolator) else None,
@@ -378,9 +378,9 @@ def _grid_from_points(
     # 2/ Leave cells without selected points as NaN, then fill the cells we can calculate
     output = np.full((len(grid_coords[1]), len(grid_coords[0])), np.nan, dtype=np.float64)
     if local_inputs:
-        # GDAL nodata propagation uses finite values
+        # Nearest-point masking uses finite values for the calculation
         handling: NodataHandling | None
-        if nodata_propagation == "gdal":
+        if nodata_propagation == "nearest":
             handling = "ignore"
         else:
             handling = nodata_propagation

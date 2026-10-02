@@ -135,11 +135,16 @@ LARGE_DATA_CASES = {
 def format_api_label(operation: Operation, case: Case) -> str:
     """Format an operation call from its execution options."""
 
+    # A declared call spells out operator arguments without constructing optional implementations during discovery
+    if operation.label_options and all(f"api_{name}" in case.labels for name in operation.label_options):
+        arguments = ", ".join(f"{name}={case.labels[f'api_{name}']}" for name in operation.label_options)
+        return f"{operation.public_call_name}({arguments})"
+
     # Build the public options once so labels remain aligned with the measured call
     values = {**case.options, "operation": operation.name}
     options = operation.option_builder(case, RuntimeConfig(workload=values))
 
     # Keep only options chosen by the operation for concise report labels
     selected = ((name, options[name]) for name in operation.label_options if name in options)
-    arguments = ", ".join(f"{name}={value!r}" for name, value in selected)
+    arguments = ", ".join(f"{name}={case.labels.get(f'api_{name}', repr(value))}" for name, value in selected)
     return f"{operation.public_call_name}({arguments})"

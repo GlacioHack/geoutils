@@ -67,6 +67,8 @@ class TestConfig:
             match="'bilinear' is not a valid*",
         ):
             gu.config["interpolation_nodata_handling"] = "bilinear"
+        with pytest.raises(ValueError, match="'gdal' is not a valid"):
+            gu.config["interpolation_nodata_handling"] = "gdal"
 
         # Leave the configured nodata handling at its initial GDAL-compatible default
         gu.config["interpolation_nodata_handling"] = default_handling

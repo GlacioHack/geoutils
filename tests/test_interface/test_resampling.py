@@ -337,7 +337,7 @@ class TestResampling:
         assert np.array_equal(lrl2, lrl3, equal_nan=True)
 
     def test_reduce_points__propagates_reducer_uncertainty(self) -> None:
-        """Checks that requesting uncertainty leaves reduce_points() values unchanged and accounts for shared cells."""
+        """Checks that reduce_points() leaves values unchanged and calculates each window's uncertainty."""
 
         # Place two three-by-three windows one column apart so six source pixels contribute to both means
         values = np.arange(25, dtype=float).reshape(5, 5)
@@ -354,15 +354,12 @@ class TestResampling:
             raster.reduce_at_points,
             error_structure=source_error,
             operation_kwargs={"reducer_function": Mean(), "window": 3, "as_array": True, "points": (x, y)},
-            return_covariance=True,
         )
         np.testing.assert_array_equal(nominal, expected)
         np.testing.assert_array_equal(summary.estimate, expected)
 
-        # Each mean uses nine weights of 1/9; the covariance between means comes from their six shared cells
-        expected_covariance = np.array([[4 / 9, 24 / 81], [24 / 81, 4 / 9]])
-        assert summary.covariance is not None
-        np.testing.assert_allclose(summary.covariance, expected_covariance)
+        # Each mean uses nine independent source cells with weights of 1/9
+        np.testing.assert_allclose(summary.variance, [4 / 9, 4 / 9])
 
     @pytest.mark.parametrize(("method", "expected_variance"), [("nearest", 4.0), ("linear", 1.5625)])
     def test_interp_points__propagates_string_method_uncertainty(self, method: str, expected_variance: float) -> None:
@@ -487,7 +484,7 @@ class TestSamplingOperators:
         assert np.all(np.isnan(spread_result))
 
     @pytest.mark.parametrize("operator", [PropagatingLocalMeanInterpolator(), PropagatingMeanReducer()])
-    def test_resample_at_points__gdal_overrides_operator_default(self, operator: Interpolator | Reducer) -> None:
+    def test_resample_at_points__default_overrides_operator_rule(self, operator: Interpolator | Reducer) -> None:
         """Checks that GDAL's spatial rule omits nearby nodata despite a custom operator's propagate default."""
 
         # The valid center has eight nearby cells, one of which is nodata
@@ -497,14 +494,14 @@ class TestSamplingOperators:
         point = (np.array([1.5]), np.array([1.5]))
 
         # The requested center is valid, so both spatial calls calculate from the eight finite cells
-        result = raster.resample_at_points(point, operator, as_array=True, nodata_handling="gdal")
+        result = raster.resample_at_points(point, operator, as_array=True)
         np.testing.assert_array_equal(result, [1.0])
 
     @pytest.mark.parametrize(
         ("operator", "interpolate"),
         [(PropagatingLocalMeanInterpolator(), True), (PropagatingMeanReducer(), False)],
     )
-    def test_resample_at_points__gdal_follows_custom_operator_class(
+    def test_resample_at_points__default_follows_custom_operator_class(
         self, operator: Interpolator | Reducer, interpolate: bool
     ) -> None:
         """Checks that a custom interpolator masks a missing source cell while a custom reducer omits it."""
@@ -516,7 +513,7 @@ class TestSamplingOperators:
         point = (np.array([1.5]), np.array([1.5]))
 
         # Both operators calculate one from finite cells, but only interpolation masks the center
-        result = raster.resample_at_points(point, operator, as_array=True, nodata_handling="gdal")
+        result = raster.resample_at_points(point, operator, as_array=True)
         value = np.asarray(result).item()
         if interpolate:
             assert np.isnan(value)
@@ -649,15 +646,26 @@ class TestResampleOperatorNodata:
         # Every finite source is one; only interpolation then masks the missing center cell
         options: dict[str, Any] = {"as_array": True}
         ignored = raster.resample_at_points(points, operator, nodata_handling="ignore", **options)
-        gdal = raster.resample_at_points(points, operator, nodata_handling="gdal", **options)
+        default = raster.resample_at_points(points, operator, **options)
         propagated = raster.resample_at_points(points, operator, nodata_handling="propagate", **options)
         np.testing.assert_allclose(ignored, [1.0, 1.0], rtol=0, atol=1e-15)
         if interpolate:
-            assert np.isnan(gdal[0])
+            assert np.isnan(default[0])
         else:
-            assert gdal[0] == pytest.approx(1.0, rel=0, abs=1e-15)
-        assert gdal[1] == pytest.approx(1.0, rel=0, abs=1e-15)
+            assert default[0] == pytest.approx(1.0, rel=0, abs=1e-15)
+        assert default[1] == pytest.approx(1.0, rel=0, abs=1e-15)
         assert np.all(np.isnan(propagated))
+
+    def test_resample_at_points__error_nearest_with_reducer(self) -> None:
+        """Checks an error is raised for nearest-source masking with a reducer."""
+
+        # A reducer uses finite cells rather than one nearest source cell
+        raster = gu.Raster.from_array(np.ones((3, 3)), rio.transform.from_origin(0, 3, 1, 1), crs=32631)
+        point = (np.array([1.5]), np.array([1.5]))
+
+        # The nearest rule applies to interpolators
+        with pytest.raises(ValueError, match="requires an Interpolator"):
+            raster.resample_at_points(point, Mean(), nodata_handling="nearest")
 
 
 @pytest.mark.skipif(find_spec("gstools") is None, reason="Requires GSTools")
@@ -762,11 +770,11 @@ class TestInterpPointsChunked:
     @pytest.mark.parametrize(
         "method,nodata_handling",
         [
-            ("nearest", "gdal"),
+            ("nearest", "nearest"),
             ("linear", "ignore"),
             ("linear", 0),
             ("linear", "propagate"),
-            ("cubic", "gdal"),
+            ("cubic", "nearest"),
             ("cubic", 0),
         ],
     )
@@ -1134,7 +1142,7 @@ class TestInterpPointsChunked:
             assert np.allclose(out_raster_np, out_dask_np, equal_nan=True, rtol=1e-6, atol=0.0)
             assert np.allclose(out_raster_np, out_mp_np, equal_nan=True, rtol=1e-6, atol=0.0)
 
-    @pytest.mark.parametrize("nodata_handling", ["gdal", "ignore", "propagate"])
+    @pytest.mark.parametrize("nodata_handling", ["nearest", "ignore", "propagate"])
     def test_interp_points__nodata_policies_backends(
         self,
         nodata_handling: NodataChoice,
@@ -1741,7 +1749,7 @@ class TestResamplingEdgeCases:
                 np.testing.assert_array_equal(np.ma.getmaskarray(result), [True, False, True])
 
     def test_resample_at_points__reducer_nodata_distance(self) -> None:
-        """Checks that a reducer omits nodata under GDAL and masks nearby cells with a distance choice."""
+        """Checks that a reducer omits nodata by default and masks nearby cells with a distance choice."""
 
         # Make the center cell missing and query it together with the cell to its right
         values = np.ones((5, 5), dtype=float)
@@ -1751,10 +1759,10 @@ class TestResamplingEdgeCases:
 
         # Omitting the missing cell leaves two means of one; a distance choice masks both targets
         ignored = raster.resample_at_points(points, Mean(), as_array=True, nodata_handling="ignore")
-        gdal = raster.resample_at_points(points, Mean(), as_array=True, nodata_handling="gdal")
+        default = raster.resample_at_points(points, Mean(), as_array=True)
         spread = raster.resample_at_points(points, Mean(), as_array=True, nodata_handling=1)
         np.testing.assert_array_equal(ignored, [1, 1])
-        np.testing.assert_array_equal(gdal, [1, 1])
+        np.testing.assert_array_equal(default, [1, 1])
         assert np.all(np.isnan(spread))
 
     @pytest.mark.parametrize("operator", [Mean(), Nearest()])
