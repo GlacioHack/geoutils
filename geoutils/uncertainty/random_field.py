@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
+from geoutils._dispatch import _get_pointcloud_interface, _get_raster_interface
 from geoutils._misc import import_optional
 from geoutils.uncertainty.error_structure import ErrorStructure
 from geoutils.uncertainty.predictors import (
@@ -911,7 +912,7 @@ def _chunked_point_fields_multiproc(
 
 def random_field(
     error_structure: ErrorStructure,
-    like: RasterBase | PointCloudBase | None = None,
+    like: Any | None = None,
     *,
     coordinates: ArrayLike | None = None,
     predictors: Mapping[str, Any] | None = None,
@@ -936,20 +937,22 @@ def random_field(
     - GPyTorch, which reuses a shared inducing grid for chunk invariance.
 
     :param error_structure: Error model defined by magnitude and correlation components.
-    :param like: Optional raster or point cloud defining coordinates, output locations, and result type.
+    :param like: Optional Raster, Xarray DataArray, PointCloud, or GeoDataFrame defining output locations and type.
     :param coordinates: Array of shape (n_observations, n_dimensions), in the correlation model's distance units.
     :param predictors: Named values used to calculate each component's error magnitude (e.g. slope or elevation).
     :param n_fields: Number of independent fields.
     :param random_state: Seed or generator used for reproducible fields.
     :param chunksizes: Dask raster chunk size as (rows, columns), or target point rows per Dask partition.
-    :param mp_config: Worker and output file settings for multiprocessing fields.
+        Requires an Xarray raster or Dask GeoDataFrame so the result has the same type as the input.
+    :param mp_config: Worker and output file settings for multiprocessing fields. Xarray rasters and Dask
+        GeoDataFrames cannot use multiprocessing because its output has a different type.
     :param backend: Library used to draw correlated errors. GSTools supports chunked calculation; GPyTorch draws
         exact eager fields or approximate chunked fields from an inducing grid.
     :param gpytorch_inducing_points: Target number of inducing grid points for approximate GPyTorch fields. Chunked
         GPyTorch defaults to 256. Pass a value with eager spatial inputs to reproduce a chunked realization.
-    :returns: With like, a raster or point cloud result, or a list when n_fields > 1. Dask results remain lazy and
-        multiprocessing results are file-backed. Without like, an array of shape (n_observations,) or
-        (n_fields, n_observations).
+    :returns: With like, a result of the same spatial object type, or a list when n_fields > 1. Dask results remain
+        lazy. Multiprocessing Raster and PointCloud results are file-backed. Without like, an array of shape
+        (n_observations,) or (n_fields, n_observations).
     """
 
     # 1/ Input checks
@@ -970,11 +973,19 @@ def random_field(
             raise ValueError("An inducing grid requires a raster or point cloud defining spatial bounds.")
     if isinstance(n_fields, (bool, np.bool_)) or not isinstance(n_fields, (int, np.integer)) or n_fields < 1:
         raise ValueError("n_fields must be a positive integer.")
-    if like is not None and coordinates is not None:
-        raise ValueError("coordinates must be omitted when like defines the output locations.")
 
+    # Use the accessor behind an Xarray or GeoDataFrame input to preserve its public result type
     from geoutils.pointcloud.base import PointCloudBase
     from geoutils.raster.base import RasterBase
+
+    if like is not None and not isinstance(like, (RasterBase, PointCloudBase)):
+        raster = _get_raster_interface(like)
+        point = _get_pointcloud_interface(like) if raster is None else None
+        like = raster if raster is not None else point
+        if like is None or not isinstance(like, (RasterBase, PointCloudBase)):
+            raise TypeError("like must be a GeoUtils raster or point cloud.")
+    if like is not None and coordinates is not None:
+        raise ValueError("coordinates must be omitted when like defines the output locations.")
 
     if like is not None and not isinstance(like, (RasterBase, PointCloudBase)):
         raise TypeError("like must be a GeoUtils raster or point cloud.")
@@ -987,6 +998,15 @@ def random_field(
             isinstance(chunksizes, bool) or not isinstance(chunksizes, int) or chunksizes <= 0
         ):
             raise ValueError("Point cloud chunk size must be a positive integer.")
+        if isinstance(like, RasterBase) and not like._is_xr:
+            raise ValueError("Dask raster chunks require an Xarray input.")
+        if isinstance(like, PointCloudBase) and not like._is_dask:
+            raise ValueError("Dask point chunks require a Dask GeoDataFrame input.")
+    if mp_config is not None:
+        if isinstance(like, RasterBase) and like._is_xr:
+            raise ValueError("Multiprocessing raster fields require a Raster input.")
+        if isinstance(like, PointCloudBase) and like._is_dask:
+            raise ValueError("Multiprocessing point fields require a PointCloud or GeoDataFrame input.")
     dask_raster = isinstance(like, RasterBase) and like._is_xr and hasattr(like.data, "compute")
     dask_points = isinstance(like, PointCloudBase) and like._is_dask
     chunked = chunksizes is not None or mp_config is not None or dask_raster or dask_points

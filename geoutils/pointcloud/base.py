@@ -112,7 +112,7 @@ class PointCloudBase(VectorBase):
         """Whether all point geometries have a Z coordinate."""
 
         if self._is_dask:
-            return False
+            return _get_dataframe_attrs(self.ds).get("geometry_type") in ("Point Z", "3D Point")
         if not self.is_loaded:
             return getattr(self, "_geometry_type", None) in ("Point Z", "3D Point")
         return bool(self.ds.geometry.has_z.all()) if len(self.ds.geometry) > 0 else False
@@ -1415,12 +1415,12 @@ class PointCloudBase(VectorBase):
         :param predictors: Named magnitude predictors or point column names.
         :param n_fields: Number of independent fields.
         :param random_state: Seed or generator used for reproducible fields.
-        :param chunksizes: Target point rows per Dask partition; existing Dask partitions are used by default.
+        :param chunksizes: Target point rows per Dask partition for a Dask GeoDataFrame.
         :param mp_config: Worker, row partition and output file settings for multiprocessing fields.
         :param backend: Library used to draw correlated errors. Chunked GPyTorch fields use an inducing grid.
         :param gpytorch_inducing_points: Target grid size for approximate GPyTorch fields; chunked fields default
             to 256, while eager fields are exact unless a grid size is supplied.
-        :returns: One point cloud result when n_fields is one, otherwise a list. Dask results are lazy GeoDataFrames.
+        :returns: One result of the same point cloud type, or a list when n_fields is greater than one.
         """
 
         from geoutils.uncertainty import random_field

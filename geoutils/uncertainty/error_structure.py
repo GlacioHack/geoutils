@@ -836,7 +836,8 @@ class ErrorStructure:
     ) -> Any:
         """Generate one or more error fields over a raster, point cloud, or set of coordinates.
 
-        :param like: Optional raster or point cloud defining coordinates and the returned spatial object.
+        :param like: Optional Raster, Xarray DataArray, PointCloud, or GeoDataFrame defining the result locations and
+            type.
         :param coordinates: Spatial coordinates for an array result when like is not supplied.
         :param predictors: Named values used to calculate each component's error magnitude.
         :param n_fields: Number of independent fields.

@@ -1774,12 +1774,12 @@ class RasterBase(ABC):
         :param predictors: Named magnitude predictors aligned with this raster.
         :param n_fields: Number of independent fields.
         :param random_state: Seed or generator used for reproducible fields.
-        :param chunksizes: Optional lazy output chunk size. Every chunk uses the same seed for a component.
-        :param mp_config: Worker, tile and output file settings for multiprocessing fields.
+        :param chunksizes: Lazy output chunk size for an Xarray raster. Every chunk uses the same seed for a component.
+        :param mp_config: Worker, tile and output file settings for a Raster.
         :param backend: Library used to draw correlated errors. Chunked GPyTorch fields use an inducing grid.
         :param gpytorch_inducing_points: Target grid size for approximate GPyTorch fields; chunked fields default
             to 256, while eager fields are exact unless a grid size is supplied.
-        :returns: One raster result when n_fields is one, otherwise a list. Dask results remain lazy.
+        :returns: One result of the same raster type, or a list when n_fields is greater than one.
         """
 
         from geoutils.uncertainty import random_field
