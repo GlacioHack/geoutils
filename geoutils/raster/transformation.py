@@ -360,7 +360,7 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
     )
     # If Rasterio is recent enough version, force tolerance to 0 to avoid deformations on chunks
     # See: https://github.com/rasterio/rasterio/issues/2433#issuecomment-2786157846
-    if Version(rio.__version__) >= Version("1.4.4"):
+    if Version(rio.__version__) >= Version("1.5.0"):
         reproj_kwargs.update({"tolerance": 0})
 
     # Pop dtype and dst_shape arguments that don't exist in Rasterio, and are only used above
