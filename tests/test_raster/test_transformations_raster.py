@@ -1515,6 +1515,10 @@ class TestReprojectionGDALOperators:
     ) -> None:
         """Checks that GeoUtils operators agree with GDAL on shifted, projected, and rotated grids."""
 
+        # Older Rasterio fixes GDAL's CRS approximation at 0.125 pixels, so it cannot provide an exact reference
+        if geometry in ("different_crs", "rotated_different_crs") and Version(rio.__version__) < Version("1.4.4"):
+            pytest.skip("Exact GDAL CRS transforms require Rasterio 1.4.4 or newer.")
+
         # We create a synthetic raster with varied values and one NaN
         rows, columns = np.indices((30, 30))
         values = (columns * 0.7 + rows * 0.2 + (columns * rows % 7) * 1.3).astype(np.float64)
