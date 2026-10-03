@@ -76,6 +76,27 @@ class TestPointCloudLoading:
         assert no_parts.crs == empty_parts.crs == empty.crs
         assert "height" in empty_parts.columns
 
+    def test_concat_point_parts__read_only_geometry(self) -> None:
+        """Checks that read-only geometries can be concatenated."""
+
+        # We simulate a Dask partition with geometry array that cannot be modified
+        part = gpd.GeoDataFrame(
+            {"height": [1.0, 2.0]},
+            geometry=gpd.points_from_xy([0.0, 1.0], [0.0, 0.0]),
+            crs=32631,
+        ).rename_geometry("location")
+        part.geometry.array._data.flags.writeable = False
+
+        # We concetenate two partitions
+        joined = _concat_point_parts([part, part], crs=part.crs)
+
+        # We check the geometry column, repeated values, and read-only source
+        assert joined.geometry.name == "location"
+        assert joined.crs == part.crs
+        assert not part.geometry.array._data.flags.writeable
+        np.testing.assert_array_equal(joined.geometry.x, [0.0, 1.0, 0.0, 1.0])
+        np.testing.assert_array_equal(joined["height"], [1.0, 2.0, 1.0, 2.0])
+
     def test_load_pointcloud_bounds__file_ranges(self, tmp_path: Path) -> None:
         """Checks that a lazy point file reads inclusive bounds or all rows for unbounded support."""
 

@@ -50,6 +50,7 @@ from geoutils.operators.reducer import (
     _can_reduce_arrays,
     _reduce_point_groups_numba,
 )
+from geoutils.projtools import _affine_matmul
 
 if TYPE_CHECKING:
     import geopandas as gpd
@@ -102,7 +103,7 @@ def _reduce_grid_queries(
     # Sparse queries cost less than calculating a result at every source cell
     if len(points[0]) < max(32, array.size / 4096):
         return None
-    cols, rows = ~transform * points
+    cols, rows = _affine_matmul(~transform, points)
     cells_row, cells_col = np.floor(rows).astype(np.int64), np.floor(cols).astype(np.int64)
     neighbors = neighborhood if neighborhood is not None else GridNeighbours(size=1)
     if fractional_window is not None:

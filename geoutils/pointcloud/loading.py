@@ -73,7 +73,9 @@ def _concat_point_parts(parts: list[gpd.GeoDataFrame], crs: Any = None) -> gpd.G
 
     # Pandas 3 can expose read-only geometry arrays from Dask partitions to GeoPandas
     independent_parts = [part.copy() for part in non_empty]
-    return gpd.GeoDataFrame(pd.concat(independent_parts, ignore_index=False), geometry="geometry", crs=crs)
+    return gpd.GeoDataFrame(
+        pd.concat(independent_parts, ignore_index=False), geometry=non_empty[0].geometry.name, crs=crs
+    )
 
 
 def _source_dataframe(source_pointcloud: Any) -> gpd.GeoDataFrame | Any | None:

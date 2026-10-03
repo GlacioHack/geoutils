@@ -163,7 +163,7 @@ def _open_downsampled_raster(source: rio.io.DatasetReader, downsample: float) ->
     # Define the requested grid from the native raster rather than from the selected overview
     width = max(1, int(np.floor(source.width / downsample)))
     height = max(1, int(np.floor(source.height / downsample)))
-    transform = source.transform * affine.Affine.scale(downsample)
+    transform = projtools._affine_matmul(source.transform, affine.Affine.scale(downsample))
 
     # Keep the selected overview open while the virtual raster resamples it to the requested grid
     with ExitStack() as stack:
@@ -791,8 +791,8 @@ def _combined_blocks_shape_transform(
     if src_geogrid.transform.b == 0 and src_geogrid.transform.d == 0:
         combined_transform = src_geogrid.translate(xoff=minmaxs["min_xs"], yoff=-minmaxs["min_ys"]).transform
     else:
-        combined_transform = src_geogrid.transform * rio.transform.Affine.translation(
-            minmaxs["min_xs"], minmaxs["min_ys"]
+        combined_transform = projtools._affine_matmul(
+            src_geogrid.transform, rio.transform.Affine.translation(minmaxs["min_xs"], minmaxs["min_ys"])
         )
 
     # Compute relative block indexes that will be needed to reconstruct a square array in the delayed function,

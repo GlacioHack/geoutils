@@ -65,7 +65,7 @@ from geoutils.operators.nodata import (
 )
 from geoutils.operators.reducer import Mean, Reducer, _CallableReducer
 from geoutils.operators.weighting import _with_error_structure
-from geoutils.projtools import reproject_from_latlon
+from geoutils.projtools import _affine_matmul, reproject_from_latlon
 from geoutils.raster.referencing import _bbox, _coords, _res, _xy2ij
 
 # Kriging needs a fitted model, so callers pass a Kriging object through the Interpolator choice
@@ -1220,7 +1220,7 @@ def _prepare_resampling_points(
 
         if isinstance(operator, Reducer):
             # Reducers use containing cells, without shifting the pixel interpretation
-            j, i = ~transform * (x, y)
+            j, i = _affine_matmul(~transform, (x, y))
         else:
             i, j = _xy2ij(
                 x,

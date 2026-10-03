@@ -51,6 +51,7 @@ from geoutils.operators.reducer import (
     _can_reduce_arrays,
     _jit,
 )
+from geoutils.projtools import _affine_matmul
 from geoutils.raster.array import _as_bands, _masked_raster_data, _processing_mask
 
 if TYPE_CHECKING:
@@ -875,7 +876,7 @@ def _dask_filter(
             ]
             row, col = starts[-2:]
             options["source_index_offset"] = (row, col)
-            options["transform"] = kwargs["transform"] * Affine.translation(col, row)
+            options["transform"] = _affine_matmul(kwargs["transform"], Affine.translation(col, row))
             options["band"] = starts[0] + 1 if array.ndim == 3 else 1
         return _filter_base(block, method=method, size=size, **options)
 
@@ -918,7 +919,7 @@ def _multiproc_filter_block(
     nan_block = block.to_nanarray()
     if isinstance(method, Reducer):
         kwargs = kwargs.copy()
-        col, row = ~kwargs["transform"] * (block.transform.c, block.transform.f)
+        col, row = _affine_matmul(~kwargs["transform"], (block.transform.c, block.transform.f))
         kwargs["source_index_offset"] = (int(round(row)), int(round(col)))
         kwargs["transform"] = block.transform
     filtered_block = _filter_base(nan_block, method=method, size=size, **kwargs)

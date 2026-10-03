@@ -46,7 +46,7 @@ from geoutils.operators.reducer import (
     _can_reduce_arrays,
     _reduce_grouped_values,
 )
-from geoutils.pointcloud.loading import _load_pointcloud_bounds, _load_pointcloud_rows
+from geoutils.pointcloud.loading import _concat_point_parts, _load_pointcloud_bounds, _load_pointcloud_rows
 
 if TYPE_CHECKING:
     import geopandas as gpd
@@ -432,13 +432,10 @@ def _filter_dask_point_partition(
 ) -> gpd.GeoDataFrame:
     """Combine nearby source points from several partitions and filter one target partition."""
 
-    import geopandas as gpd
-    import pandas as pd
-
     # Combine only the source rows inside each partition's expanded target bounds
     nonempty_parts = [part for part in source_parts if len(part) > 0]
     if nonempty_parts:
-        sources = gpd.GeoDataFrame(pd.concat(nonempty_parts), geometry=targets.geometry.name, crs=targets.crs)
+        sources = _concat_point_parts(nonempty_parts, crs=targets.crs)
     else:
         sources = targets.iloc[:0]
 

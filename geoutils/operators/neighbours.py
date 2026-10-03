@@ -39,6 +39,7 @@ from geoutils.operators.overlap import (
     _grid_intersection_fractions_from_corners,
     _grid_intersection_local_data,
 )
+from geoutils.projtools import _affine_matmul
 
 if TYPE_CHECKING:
     import geopandas as gpd
@@ -465,12 +466,12 @@ def _grid_window_kernel(
         angles = np.linspace(0, 2 * np.pi, 512, endpoint=False)
         radius = size / 2
         corners = np.column_stack((center_col + radius * np.cos(angles), center_row + radius * np.sin(angles)))
-        x, y = transform * (corners[:, 0], corners[:, 1])
+        x, y = _affine_matmul(transform, (corners[:, 0], corners[:, 1]))
         overlap = _grid_intersection_fractions(shapely.polygons(np.column_stack((x, y))[None]), transform, array_shape)
     else:
         corners = np.array([[-1, -1], [1, -1], [1, 1], [-1, 1]]) * size / 2
         corners += (center_col, center_row)
-        x, y = transform * (corners[:, 0], corners[:, 1])
+        x, y = _affine_matmul(transform, (corners[:, 0], corners[:, 1]))
         overlap = _grid_intersection_fractions_from_corners(np.column_stack((x, y))[None], transform, array_shape)
     kernel = np.zeros(array_shape, dtype=float)
     kernel[overlap.rows, overlap.columns] = overlap.fractions

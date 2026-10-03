@@ -34,6 +34,7 @@ from geoutils._dispatch import (
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, NDArrayBool, NDArrayNum
 from geoutils.interface.gridding import GriddingMethod
+from geoutils.projtools import _affine_matmul
 from geoutils.raster.array import _selected_raster_data
 from geoutils.sampling.subsampling import _sample_valid_indices
 from geoutils.sampling.subsampling import _subsample as _subsample_values
@@ -528,7 +529,7 @@ def _wrapper_cosample_raster_block_mp(
         arrays[name] = _selected_raster_data(window, band)
 
     # Find this tile's first row and column in the complete output grid
-    column, row = (~support.transform) * (tile.transform.c, tile.transform.f)
+    column, row = _affine_matmul(~support.transform, (tile.transform.c, tile.transform.f))
     row, column = int(round(row)), int(round(column))
 
     # Crop raster masks or slice array masks to this tile; vector masks are evaluated using coordinates

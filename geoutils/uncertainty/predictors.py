@@ -32,6 +32,7 @@ from scipy.spatial import QhullError
 
 from geoutils._dispatch import _get_pointcloud_interface, _get_raster_interface, is_dask_array, is_dask_dataframe
 from geoutils._misc import import_optional
+from geoutils.projtools import _affine_matmul
 
 if TYPE_CHECKING:
     from geoutils.multiproc import MultiprocConfig
@@ -608,7 +609,7 @@ def _wrapper_raster_magnitude_tile_multiproc(
     from geoutils.raster.base import RasterBase
 
     # Locate tile on the full raster grid
-    column_start, row_start = ~(transform) * (tile.transform.c, tile.transform.f)
+    column_start, row_start = _affine_matmul(~transform, (tile.transform.c, tile.transform.f))
     row_start, column_start = int(round(row_start)), int(round(column_start))
     bounds = np.array([row_start, row_start + tile.shape[0], column_start, column_start + tile.shape[1]])
     tile_predictors: dict[str, Any] = {}

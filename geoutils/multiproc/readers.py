@@ -22,6 +22,7 @@ import rasterio as rio
 
 from geoutils._dispatch import _get_pointcloud_interface, _get_raster_interface
 from geoutils._misc import import_optional
+from geoutils.projtools import _affine_matmul
 from geoutils.raster.array import get_mask_from_array
 
 if TYPE_CHECKING:
@@ -253,7 +254,7 @@ class _BlockReader:
             raster = _get_raster_interface(self.support)
             if raster is not None:
                 rows, columns = self.slices
-                transform = raster.transform * Affine.translation(columns.start, rows.start)
+                transform = _affine_matmul(raster.transform, Affine.translation(columns.start, rows.start))
                 support = Raster.from_array(
                     np.zeros(self.shape, dtype=bool), transform, raster.crs, area_or_point=raster.area_or_point
                 )
