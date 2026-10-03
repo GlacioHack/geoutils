@@ -1499,8 +1499,14 @@ class TestReductionChunked:
         assert not unloaded.is_loaded
         assert unloaded.bands == (1, 2)
         assert isinstance(mp_result, np.ndarray)
-        np.testing.assert_array_equal(lazy_result.compute(), expected)
-        np.testing.assert_array_equal(mp_result, expected)
+        computed = lazy_result.compute()
+        if fractional:
+            # Fractional area sums can differ slightly when chunks change the addition order
+            np.testing.assert_allclose(computed, expected, rtol=0, atol=1e-12)
+            np.testing.assert_allclose(mp_result, expected, rtol=0, atol=1e-12)
+        else:
+            np.testing.assert_array_equal(computed, expected)
+            np.testing.assert_array_equal(mp_result, expected)
 
     @pytest.mark.parametrize("masked", [False, True])
     @pytest.mark.parametrize("boundless", [False, True])
