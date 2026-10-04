@@ -92,7 +92,7 @@ class TestPredictors:
         np.testing.assert_array_equal(points.data, [10, 10, 10])
 
     def test_predict_magnitude__selected_component(self) -> None:
-        """Checks that selecting one error strucutre component excludes the others."""
+        """Checks that selecting one error structure component excludes the others."""
 
         # We create a synthetic error structure and raster
         raster = gu.Raster.from_array(np.ones((1, 3)), transform=from_origin(0, 1, 1, 1), crs=32631)

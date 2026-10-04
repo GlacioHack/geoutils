@@ -615,7 +615,6 @@ class TestRandomFieldErrors:
         """Checks an error is raised for mismatched input/output types."""
 
         # In-memory objects cannot return a Dask/MP object
-        raster = gu.Raster.from_array(np.ones((2, 2)), transform=from_origin(0, 2, 1, 1), crs=32606)
         points = gu.PointCloud.from_xyz([0, 1], [0, 1], [10, 20], crs=32631)
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
 
