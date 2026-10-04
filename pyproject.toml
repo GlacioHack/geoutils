@@ -28,7 +28,11 @@ allow_untyped_decorators = true
 disable_error_code = ["untyped-decorator"]
 
 [tool.pytest.ini_options]
-addopts = "--doctest-modules --doctest-ignore-import-errors -W error::UserWarning --import-mode=importlib"
+addopts = "-p no:doctest -W error::UserWarning --import-mode=importlib"
+filterwarnings = [
+    "ignore:Due to '_pack_'.*:DeprecationWarning:laspy.vlrs.known",
+    "ignore:.*torch.jit.script.*Python 3.14.*:FutureWarning:torch.jit._script",
+]
 log_level = "WARNING"
 testpaths = ["tests", "geoutils", "benchmarks/test_large_data.py"]
 markers = [

@@ -115,6 +115,7 @@ raster_vector_point
 distance_ops
 stats
 filters
+operators
 ```
 
 ```{toctree}

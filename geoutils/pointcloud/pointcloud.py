@@ -464,20 +464,20 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         """
 
         out_data = self.data.astype(dtype)
+        output = self if inplace else self.copy(new_array=out_data)
 
         if inplace:
-            self._data = out_data  # type: ignore
-            if convert_coords:
-                self.ds.geometry.x = self.ds.geometry.x.values.astype(dtype)
-                self.ds.geometry.y = self.ds.geometry.y.values.astype(dtype)
-            return None
-        else:
-            if convert_coords:
-                x = self.ds.geometry.x.values.astype(dtype)
-                y = self.ds.geometry.y.values.astype(dtype)
-                return self.from_xyz(x=x, y=y, z=out_data, crs=self.crs, data_column=self.data_column)
-            else:
-                return self.copy(new_array=out_data)
+            output.data = out_data
+
+        if convert_coords:
+            # Replace the geometry with converted X/Y while preserving its Z values and other columns
+            geometry = output.geometry
+            x = geometry.x.to_numpy().astype(dtype)
+            y = geometry.y.to_numpy().astype(dtype)
+            z = geometry.z.to_numpy() if output._has_z else None
+            output.ds.geometry = gpd.points_from_xy(x=x, y=y, z=z, crs=output.crs)
+
+        return None if inplace else output
 
     def to_las(
         self,

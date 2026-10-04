@@ -41,6 +41,7 @@ from geoutils.multiproc.chunked import (
     normalize_chunks,
 )
 from geoutils.multiproc.mparray import MultiprocConfig
+from geoutils.projtools import _affine_matmul
 from geoutils.raster.referencing import _cast_nodata
 
 if TYPE_CHECKING:
@@ -1551,7 +1552,7 @@ def _polygonize_block_geometry_halo(
     xe = min(shape[1], xe0 + halo)
 
     # Halo transform: global -> halo local origin
-    t_halo = tiling_transform * rio.Affine.translation(xs, ys)
+    t_halo = _affine_matmul(tiling_transform, rio.Affine.translation(xs, ys))
     b_halo = {"ys": ys, "ye": ye, "xs": xs, "xe": xe}
 
     values, mask, _ = reader.read_block(b_halo, tiling_transform=tiling_transform)

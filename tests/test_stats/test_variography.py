@@ -7,6 +7,7 @@ import subprocess
 import sys
 from importlib.util import find_spec
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -73,6 +74,49 @@ class TestVariogramStorage:
             "bin_edge",
             "fitted_semivariance",
         }
+
+    def test_to_dataframe(self) -> None:
+        """Checks that the export to dataframe contains all data."""
+
+        # We create a 2-bin variogram with optional uncertainty, bin edges, and fit parameters
+        result = gu.Variogram(
+            lags=np.array([1.0, 2.0]),
+            semivariance=np.array([0.2, 0.5]),
+            counts=np.array([10, 8]),
+            semivariance_error=np.array([0.02, 0.03]),
+            bin_lower_edges=np.array([0.5, 1.5]),
+            bin_edges=np.array([1.5, 2.5]),
+            fitted_semivariance=np.array([0.25, 0.45]),
+        )
+
+        # We export, then compare the table with input
+        table = result.to_dataframe()
+        assert result.semivariance_error is not None
+        assert result.bin_lower_edges is not None and result.bin_edges is not None
+        assert result.fitted_semivariance is not None
+        assert list(table.columns) == [
+            "lag",
+            "semivariance",
+            "count",
+            "semivariance_error",
+            "bin_lower_edge",
+            "bin_edge",
+            "fitted_semivariance",
+        ]
+        np.testing.assert_array_equal(
+            table.to_numpy(),
+            np.column_stack(
+                (
+                    result.lags,
+                    result.semivariance,
+                    result.counts,
+                    result.semivariance_error,
+                    result.bin_lower_edges,
+                    result.bin_edges,
+                    result.fitted_semivariance,
+                )
+            ),
+        )
 
     def test_from_pairs_discards_pair_data(self) -> None:
         """Checks that from_pairs() keeps per-distance results and releases individual pairs."""
@@ -225,6 +269,7 @@ class TestVariogramEstimation:
         assert result.attrs["n_runs"] == n_runs
 
         # Check that sampling error is absent for one run and follows the usual standard error for repeated runs
+        assert result.semivariance_error is not None
         if n_runs == 1:
             assert np.all(np.isnan(result.semivariance_error))
         else:
@@ -307,6 +352,90 @@ class TestVariogramConversion:
         assert result.correlation(0) == 1
         assert result.correlation(np.zeros((2, 3))).shape == (2, 3)
 
+    @pytest.mark.parametrize("model_name,smoothness", [("gaussian", None), ("exponential", None), ("matern", 1.5)])
+    def test_to_gpytorch__covar(self, model_name: str, smoothness: float | None) -> None:
+        """Checks that converting to GPyTorch kernel works properly to estimate covariance."""
+
+        torch = pytest.importorskip("torch")
+        pytest.importorskip("gpytorch")
+
+        # We create a variogram
+        result = gu.Variogram.from_model(
+            model_name, effective_range=6, partial_sill=2, nugget=0.1, smoothness=smoothness
+        )
+        positions = np.array([0.0, 1.0, 3.0])
+        distances = np.abs(np.subtract.outer(positions, positions))
+        expected = result.covariance(distances) - np.where(distances == 0, 0.1, 0.0)
+
+        # Convert to covariance in GPyTorch, compare to ours
+        converted = result.to_gpytorch(trainable=False)
+        tensor = torch.as_tensor(positions[:, None], dtype=torch.float64)
+        actual = converted.kernel(tensor).to_dense().detach().numpy()
+        np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-6)
+        assert converted.noise == pytest.approx(0.1)
+        assert all(not parameter.requires_grad for parameter in converted.kernel.parameters())
+
+    @pytest.mark.parametrize("combination", ["sum", "product"])
+    def test_to_gpytorch__covar_combined(self, combination: str) -> None:
+        """Checks GPyTorch export for sum/multiplied kernels."""
+
+        torch = pytest.importorskip("torch")
+        pytest.importorskip("gpytorch")
+
+        # We combine components as sum/products
+        first = gu.Variogram.from_model("gaussian", effective_range=6, partial_sill=2)
+        second = gu.Variogram.from_model("exponential", effective_range=3, partial_sill=3)
+        result = gu.Variogram.combine(first, second, combination=combination, nugget=0.2)
+        positions = np.array([0.0, 1.0, 2.0])
+        distances = np.abs(np.subtract.outer(positions, positions))
+        expected = result.covariance(distances) - np.where(distances == 0, 0.2, 0.0)
+
+        # Check equality of covariance
+        converted = result.to_gpytorch(trainable=False)
+        actual = converted.kernel(torch.as_tensor(positions[:, None], dtype=torch.float64)).to_dense().detach().numpy()
+        np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-6)
+        assert converted.noise == pytest.approx(0.2)
+
+    def test_plot(self) -> None:
+        """Checks that Variogram.plot() runs, and contains the right axis components."""
+
+        pyplot = pytest.importorskip("matplotlib.pyplot")
+        pytest.importorskip("skgstat")
+
+        # Synthetic variogram
+        result = gu.Variogram(
+            lags=np.array([1.0, 2.0, 3.0]),
+            semivariance=np.array([0.3, 0.7, 1.2]),
+            counts=np.array([8, 10, 9]),
+            semivariance_error=np.array([0.1, 0.2, 0.1]),
+            model=VariogramModel("gaussian", effective_range=4, partial_sill=2),
+        )
+
+        # We check component exists and the right data is plotted
+        axes = result.plot()
+        assert axes.get_xlabel() == "Lag distance"
+        assert axes.get_ylabel() == "Semivariance"
+        assert len(axes.lines) >= 2
+        np.testing.assert_allclose(axes.lines[-1].get_ydata()[0], result.variogram(0))
+        pyplot.close(axes.figure)
+
+    def test_combine__flattens_nested_sum_and_uses_one_nugget(self) -> None:
+        """Checks that combining a summed model adds its components properly, including nugget."""
+
+        # We define 4 base models with different partial sills
+        # We add a nugger to the inner sum
+        first = VariogramModel("gaussian", effective_range=4, partial_sill=1)
+        second = VariogramModel("exponential", effective_range=8, partial_sill=2)
+        third = VariogramModel("spherical", effective_range=12, partial_sill=3)
+        inner = VariogramModel.combine([first, second], combination="sum", nugget=0.25)
+
+        # We check that combining the inner sum replaces nugget properly, and flattens the three models
+        combined = VariogramModel.combine([inner, third], combination="sum", nugget=0.5)
+        assert combined.model_name == "sum"
+        assert combined.components == (first, second, third)
+        assert combined.nugget == 0.5
+        assert combined.sill == np.sum([1, 2, 3]) + 0.5
+
     def test_product_model_multiplies_covariances(self) -> None:
         """Checks that a product model multiplies component covariances and keeps one nugget."""
 
@@ -343,6 +472,32 @@ class TestVariogramConversion:
         assert result.backend_object is None
         assert kept.backend_object is not None
         assert kept.without_backend().backend_object is None
+
+    def test_from_skgstat__summed_model(self) -> None:
+        """Checks that importing a two-model SciKit-GStat models respects both ranges and sills + the nugget."""
+
+        skgstat = pytest.importorskip("skgstat")
+
+        # Fit two models directly with SciKit-GStat class
+        coordinates = np.arange(30, dtype=float)[:, None]
+        values = np.sin(coordinates[:, 0] / 3)
+        backend = skgstat.Variogram(coordinates, values, model="gaussian+spherical", n_lags=6, use_nugget=True)
+
+        # Import model
+        result = gu.Variogram.from_skgstat(backend)
+
+        # Check we imported the right partial sills, ranges and nugget
+        assert result.model is not None and result.model.model_name == "sum"
+        assert [component.model_name for component in result.model.components] == ["gaussian", "spherical"]
+        coefficients = np.asarray(backend.cof)
+        ranges = np.asarray([component.effective_range for component in result.model.components], dtype=float)
+        sills = np.asarray([component.partial_sill for component in result.model.components], dtype=float)
+        np.testing.assert_allclose(ranges, coefficients[[0, 2]])
+        np.testing.assert_allclose(sills, coefficients[[1, 3]])
+        assert result.model.nugget == pytest.approx(coefficients[4])
+        assert result.backend_object is None
+        assert result.fitted_semivariance is not None
+        np.testing.assert_allclose(result.fitted_semivariance, backend.fitted_model(result.lags))
 
     @pytest.mark.parametrize("model_name,smoothness", [("gaussian", None), ("exponential", None), ("matern", 1.5)])
     def test_gstools_conversion_matches_skgstat(self, model_name: str, smoothness: float | None) -> None:
@@ -436,6 +591,27 @@ class TestVariogramErrors:
         with pytest.raises(ValueError, match="read-only"):
             result.lags[0] = 3
 
+    @pytest.mark.parametrize(
+        "options, message",
+        [
+            ({"lags": np.array([[1.0, 2.0]])}, "one-dimensional"),
+            ({"semivariance": np.array([0.2])}, "equal lengths"),
+            ({"counts": np.array([2, -1])}, "cannot be negative"),
+            ({"bin_edges": np.array([1.0])}, "bin_edges.*aligned"),
+        ],
+    )
+    def test_variogram__error_invalid_bin_arrays(self, options: dict[str, NDArrayNum], message: str) -> None:
+        """Checks an error is raised for inconsistent variogram input arrays."""
+
+        # We create valid arrays, and will update with an invalid array at once below
+        arrays: dict[str, Any] = {
+            "lags": np.array([1.0, 2.0]),
+            "semivariance": np.array([0.2, 0.5]),
+            "counts": np.array([3, 4]),
+        }
+        with pytest.raises(ValueError, match=message):
+            gu.Variogram(**(arrays | options))
+
     def test_from_pairs__error_distance_dimensions(self) -> None:
         """Checks that from_pairs() rejects distances that do not provide one value per pair."""
 
@@ -446,6 +622,32 @@ class TestVariogramErrors:
 
         # Reject the incompatible dimensions before estimating semivariance
         with pytest.raises(ValueError, match="Variable 'distance' in argument ``pairs`` must have dimensions"):
+            gu.Variogram.from_pairs(pairs)
+
+    @pytest.mark.parametrize("case", ["missing_values", "wrong_endpoints", "zero_distances"])
+    def test_from_pairs__error_invalid_pair_values(self, case: str) -> None:
+        """Checks an error is raised when pairs don't have two endpoint or positive distances."""
+
+        # We define 3 pairs with valid endpoints/distances
+        values = np.array([[1.0, 2.0], [2.0, 4.0], [3.0, 6.0]])
+        pairs = xr.Dataset({"value": (("pair", "endpoint"), values), "distance": ("pair", [1.0, 2.0, 3.0])})
+
+        # We remove or reshape endpoint values, or make distance wrong
+        if case == "missing_values":
+            pairs = pairs.drop_vars("value")
+            error_type: type[Exception] = TypeError
+            message = "containing 'distance' and 'value'"
+        elif case == "wrong_endpoints":
+            pairs = pairs.isel(endpoint=[0])
+            error_type = ValueError
+            message = "length two"
+        else:
+            pairs["distance"] = ("pair", [0.0, 0.0, 0.0])
+            error_type = ValueError
+            message = "no finite observations with positive distance"
+
+        # Check error
+        with pytest.raises(error_type, match=message):
             gu.Variogram.from_pairs(pairs)
 
     @pytest.mark.parametrize("n_runs", [0, -1, 1.5, True])
@@ -472,3 +674,56 @@ class TestVariogramErrors:
         # Check the clear error for this unsupported conversion
         with pytest.raises(NotImplementedError, match="different dimensions"):
             combined.to_gstools(dim=3)
+
+    @pytest.mark.parametrize(
+        "changes, message",
+        [
+            ({"partial_sill": -1}, "partial sill"),
+            ({"model_name": "unknown"}, "Unsupported variogram model"),
+            ({"effective_range": 0}, "effective range"),
+            ({"nugget": -1}, "nugget"),
+            ({"smoothness": 0}, "smoothness"),
+            ({"shape": 0}, "shape"),
+            ({"active_dims": (0, 0)}, "active_dims"),
+            ({"model_name": "stable"}, "requires a shape"),
+        ],
+    )
+    def test_variogram_model__error(self, changes: dict[str, object], message: str) -> None:
+        """Checks errors for VariogramModel creation."""
+
+        # We create valid options, and we substitute an invalid option for each case
+        options: dict[str, object] = {"model_name": "gaussian", "effective_range": 2, "partial_sill": 1}
+        options.update(changes)
+
+        # Should raise error
+        with pytest.raises(ValueError, match=message):
+            VariogramModel(**options)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        "case, message", [("one", "at least two"), ("nested", "Nested sum"), ("nugget", "omit nuggets")]
+    )
+    def test_variogram_model__error_invalid_composition(self, case: str, message: str) -> None:
+        """Checks an error is raised for invalid variogram model composiition."""
+
+        # We define two base models
+        first = VariogramModel("gaussian", effective_range=4, partial_sill=1)
+        second = VariogramModel("exponential", effective_range=8, partial_sill=2)
+
+        if case == "one":
+            # A sum needs at least two components
+            components: tuple[VariogramModel, ...] = (first,)
+        elif case == "nested":
+            # A sum cannot directly contain another sum, combine() flattens it first
+            components = (VariogramModel.combine([first, second], combination="sum"), second)
+        else:
+            # Component nuggets must be specified once on the parent sum
+            components = (first, VariogramModel("exponential", effective_range=8, partial_sill=2, nugget=0.5))
+        with pytest.raises(ValueError, match=message):
+            VariogramModel("sum", components=components)
+
+    def test_correlation__error_zerosill(self) -> None:
+        """Checks that a model with zero sill has no defined correlation."""
+
+        result = gu.Variogram.from_model("gaussian", effective_range=2, partial_sill=0)
+        with pytest.raises(ValueError, match="zero sill"):
+            result.correlation(1)

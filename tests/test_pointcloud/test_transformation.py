@@ -321,6 +321,9 @@ class TestTransformationChunked:
         assert not source.is_loaded
 
     @pytest.mark.parametrize("target_crs", [32633, 4326])
+    @pytest.mark.filterwarnings(
+        "ignore:File .* has GPKG application_id, but non conformant file extension:RuntimeWarning"
+    )
     def test_reproject__reference_and_default_output_format(self, target_crs: int, tmp_path: Path) -> None:
         """Checks that ref= sets the CRS and an output without a suffix becomes an unloaded GeoPackage."""
 

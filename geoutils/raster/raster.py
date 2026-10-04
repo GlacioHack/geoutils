@@ -1613,7 +1613,9 @@ class Raster(RasterBase):
 
             # Check that data type change will not result in a loss of information
             if self.is_loaded:
-                preserves_values = rio.dtypes.can_cast_dtype(self.data, target_dtype)
+                # Masked cells can hold NaNs during Rasterio's cast check
+                with np.errstate(invalid="ignore", over="ignore"):
+                    preserves_values = rio.dtypes.can_cast_dtype(self.data, target_dtype)
             else:
                 preserves_values = np.can_cast(self.dtype, target_dtype, casting="safe")
             if not preserves_values:
@@ -1632,7 +1634,9 @@ class Raster(RasterBase):
                 output._nodata = None if target_dtype == np.bool_ else _default_nodata(target_dtype)
             return None if inplace else output
 
-        out_data = self.data.astype(target_dtype)
+        # Masked NaNs do not affect the converted values
+        with np.errstate(invalid="ignore"):
+            out_data = self.data.astype(target_dtype)
 
         if inplace:
             self._data = out_data  # type: ignore

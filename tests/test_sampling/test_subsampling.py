@@ -1231,6 +1231,29 @@ class TestRasterSubsample:
         assert sampled.data_column == converted.data_column
         assert sampled.ds.equals(converted.ds)
 
+    def test_to_pointcloud__bands_offsets(self) -> None:
+        """Checks that selected bands and cell offsets behave properly during conversion to point cloud."""
+
+        # We create a synthetic raster
+        values = np.arange(8).reshape(2, 2, 2)
+        raster = gu.Raster.from_array(values, from_origin(0, 2, 1, 1), crs=32633)
+
+        # We use the second band as point values and save the first under its own name
+        points = raster.to_pointcloud(
+            data_column_name="height",
+            data_band=2,
+            auxiliary_data_bands=[1],
+            auxiliary_column_names=["first"],
+            force_pixel_offset="center",
+        )
+
+        # We check values and coordinates
+        assert list(points.ds.columns) == ["height", "first", "geometry"]
+        np.testing.assert_array_equal(points.ds["height"], values[1].ravel())
+        np.testing.assert_array_equal(points.ds["first"], values[0].ravel())
+        np.testing.assert_array_equal(points.ds.geometry.x, [0.5, 1.5, 0.5, 1.5])
+        np.testing.assert_array_equal(points.ds.geometry.y, [1.5, 1.5, 0.5, 0.5])
+
     def test_subsample__accessor_returns_geodataframe(self) -> None:
         """Checks that an eager raster accessor returns a GeoDataFrame by default."""
 
@@ -1836,6 +1859,31 @@ class TestSubsampleErrors:
         # Reject the reserved name before constructing the dataframe
         with pytest.raises(ValueError, match="must be unique"):
             raster.subsample(1, bands={"geometry": 1})
+
+    @pytest.mark.parametrize(
+        "options,message",
+        [
+            ({"data_column_name": 1}, "Data column name must be a string"),
+            ({"data_band": 0}, "Data band number must be an integer between"),
+            ({"auxiliary_column_names": ["first"]}, "Passing auxiliary column names requires"),
+            ({"auxiliary_data_bands": [3]}, "Auxiliary data band numbers must be between"),
+            ({"auxiliary_data_bands": [1]}, "Main data band 1 should not be listed"),
+            (
+                {"data_column_name": "height", "auxiliary_data_bands": [2], "auxiliary_column_names": ["height"]},
+                "Point cloud data column names must be unique",
+            ),
+            ({"force_pixel_offset": "side"}, "Unknown pixel offset"),
+        ],
+    )
+    def test_to_pointcloud__error_invalid_options(self, options: dict[str, Any], message: str) -> None:
+        """Checks an error is raised for invalid band, column, or pixel offset options."""
+
+        # Two bands permit a separate main and auxiliary column
+        raster = gu.Raster.from_array(np.arange(8).reshape(2, 2, 2), from_origin(0, 2, 1, 1), crs=32633)
+
+        # Reject options that cannot define valid point values or coordinates
+        with pytest.raises(ValueError, match=message):
+            raster.to_pointcloud(**options)
 
     @pytest.mark.parametrize("source_kind", ["point", "raster"])
     @pytest.mark.parametrize("as_array", [False, True])

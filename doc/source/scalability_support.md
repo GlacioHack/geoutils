@@ -74,14 +74,14 @@ The **memory usage** column lists the number of input chunks loaded in memory fo
   - {bdg-success}`Chunked`
   - {bdg-secondary}`In-memory`
   - ~1
-* - {meth}`~geoutils.Raster.interp_points`
+* - {meth}`~geoutils.Raster.interp_at_points`
   - {bdg-success}`Chunked`
   - {bdg-secondary}`In-memory`
   - ~1
-* - {meth}`~geoutils.Raster.reduce_points`
+* - {meth}`~geoutils.Raster.reduce_at_points`
+  - {bdg-success}`Chunked`
   - {bdg-secondary}`In-memory`
-  - {bdg-secondary}`In-memory`
-  - —
+  - ~1
 
 * - <span class="gu-table-section">Raster ⟶ Vector</span>
   -
@@ -124,6 +124,10 @@ The **memory usage** column lists the number of input chunks loaded in memory fo
   - {bdg-secondary}`In-memory`
   - {bdg-secondary}`In-memory`
   - —
+* - {meth}`~geoutils.PointCloud.filter`
+  - {bdg-success}`Chunked`
+  - {bdg-success}`Chunked`
+  - ~1 point partition and nearby points within the search radius
 
 * - <span class="gu-table-section">Point ⟶ Raster</span>
   -

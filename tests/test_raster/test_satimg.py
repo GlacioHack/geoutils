@@ -214,3 +214,77 @@ class TestSatImg:
         assert attrs7[0] == "Landsat 7"
         assert attrs7[1] == "ETM+"
         assert attrs7[-1] == datetime.datetime(2000, 10, 30)
+
+    @pytest.mark.parametrize(
+        ("filename", "platform", "sensor", "expected_datetime"),
+        [
+            ("T31TCJ_20200102T030405.tif", "Sentinel-2", "MSI", dt.datetime(2020, 1, 2, 3, 4, 5)),
+            ("SPOT_scene_20240131_dem.tif", "HFS", "SPOT5", dt.datetime(2024, 1, 31)),
+            ("IODEM3_20240201_235959_dem.tif", "IceBridge", "DMS", dt.datetime(2024, 2, 1, 23, 59, 59)),
+        ],
+    )
+    def test_parse_metadata_from_fn__sensor_names(
+        self, filename: str, platform: str, sensor: str, expected_datetime: dt.datetime
+    ) -> None:
+        """Checks that supported sensor filenames provide their platform, sensor and acquisition time."""
+
+        metadata = gu.raster.satimg.parse_metadata_from_fn(filename)
+
+        # Check attributes are as expected
+        assert metadata["platform"] == platform
+        assert metadata["sensor"] == sensor
+        assert metadata["datetime"] == expected_datetime
+
+    def test_parse_and_convert_metadata_from_filename__tile_bounds(self) -> None:
+        """Checks that an ASTER tile name gives the right SW corner of 1x1° tiles."""
+
+        metadata = gu.raster.satimg.parse_and_convert_metadata_from_filename("ASTGTM2_N00E108_dem.tif", silent=True)
+
+        # Check tile coords and size
+        assert metadata["tile_xmin"] == 108
+        assert metadata["tile_ymin"] == 0
+        assert metadata["tile_xsize"] == 1
+        assert metadata["tile_ysize"] == 1
+
+    @pytest.mark.parametrize("silent", [False, True])
+    def test_parse_and_convert_metadata_from_filename__unknown_name(
+        self, silent: bool, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Checks that an unknown filename returns no metadata."""
+
+        metadata = gu.raster.satimg.parse_and_convert_metadata_from_filename("unknown.tif", silent=silent)
+        output = capsys.readouterr().out
+
+        # Check output and message if not silent
+        assert metadata == {}
+        assert output == ("" if silent else "No metadata could be read from filename.\n")
+
+
+class TestSatImgErrors:
+    """Test module for errors in running satellite image."""
+
+    def test_parse_tile_attr_from_name__error(self) -> None:
+        """Checks an error is raised for unsupported product name."""
+
+        with pytest.raises(ValueError, match="not recognized for product UNKNOWN"):
+            gu.raster.satimg.parse_tile_attr_from_name("N01W179", product="UNKNOWN")
+
+    @pytest.mark.parametrize(
+        ("tile_name", "message"),
+        [
+            ("N12Q034", "No west .* or east"),
+            ("W034Q12", "No south .* or north"),
+            ("Q12E034", "Tile not recognized"),
+        ],
+    )
+    def test_sw_naming_to_latlon__error(self, tile_name: str, message: str) -> None:
+        """Checks an error is raised for a wrong SW naming."""
+
+        with pytest.raises(ValueError, match=message):
+            gu.raster.satimg.sw_naming_to_latlon(tile_name)
+
+    def test_latlon_to_sw_naming__error(self) -> None:
+        """Checks an error is raised for a wrong lat/lon conversion to SW."""
+
+        with pytest.raises(ValueError, match="Latitude intervals provided do not contain"):
+            gu.raster.satimg.latlon_to_sw_naming((10, 20), latlon_sizes=((1, 2),), lat_lims=((60, 90),))

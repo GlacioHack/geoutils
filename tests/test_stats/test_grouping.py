@@ -5,17 +5,26 @@ from __future__ import annotations
 from collections.abc import Mapping
 from importlib.util import find_spec
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
 from affine import Affine
-from shapely.geometry import box
+from shapely.geometry import Polygon, box
 
 import geoutils as gu
 from geoutils.multiproc import MultiprocConfig
+from geoutils.operators import LocalData, Reducer
+from geoutils.operators.reducer import Mean
+
+
+class NoFractionalSupportReducer(Reducer):
+    """Reducer that does not accept area weights for tests."""
+
+    def reduce(self, data: LocalData) -> float:
+        return float(np.mean(data.values))
 
 
 class TestGroupedStats:
@@ -237,7 +246,7 @@ class TestGroupedStats:
         assert np.isnan(table.xs("mean", level="statistic", axis=1).iloc[2, 0])
 
     @pytest.mark.parametrize("subsampling_strategy", ["topk", "sequential"])
-    def test_stats__separate_sampling_and_reduction(self, subsampling_strategy: str) -> None:
+    def test_stats__separate_sampling_and_reduction(self, subsampling_strategy: Literal["topk", "sequential"]) -> None:
         """Checks that the sampling option stays separate from the grouped calculation strategy."""
 
         # Sample ten values while requesting masks for both complete groups
@@ -275,6 +284,242 @@ class TestGroupedStats:
         assert union[("band_1", "count")].tolist() == [6, 2]
         assert features[("band_1", "count")].tolist() == [1, 1]
         assert features[("band_1", "mean")].tolist() == [1, 8]
+
+    def test_stats__fractional_vector_accuracy(self) -> None:
+        """Checks that vector groups use fractional coverage properly with weighted reducers."""
+
+        # We define:
+        # A polygon across four cells (covers 0.25 of each)
+        # Another polygon over the right column
+        raster = gu.Raster.from_array(
+            np.array([[1.0, 2.0], [3.0, 4.0]]),
+            transform=Affine(1, 0, 0, 0, -1, 2),
+            crs=32631,
+        )
+        zones = gu.Vector(
+            gpd.GeoDataFrame(
+                {"zone": ["center", "right"]},
+                geometry=[box(0.5, 0.5, 1.5, 1.5), box(1, 0, 2, 2)],
+                crs=32631,
+            )
+        )
+
+        # Calculate means, sums, extrema, and distribution statistics using the same covered cell fractions
+        statistics = [
+            "mean",
+            "sum",
+            "sumofsquares",
+            "min",
+            "max",
+            "std",
+            "rmse",
+            "median",
+            "90thpercentile",
+            "iqr",
+            "le90",
+            "nmad",
+            "validcount",
+            "totalcount",
+            "percentagevalidpoints",
+        ]
+        result = raster.stats(
+            statistics,
+            by={"zone": (zones, "zone")},
+            fractional=True,
+            overlap_backend="shapely",
+        )
+
+        # The centered zones with 0.25 cells weights a total of 1
+        # The right zone contains 2 cells
+        raster_values = np.asarray(raster.data)
+        zone_values = (raster_values.ravel(), raster_values[:, 1])
+        zone_weights = (np.full(raster_values.size, 0.25), np.ones(raster_values.shape[0]))
+        expected = {name: [] for name in ("count", *statistics)}
+
+        # We weight manually to compare:
+        for values, weights in zip(zone_values, zone_weights):
+            valid = np.isfinite(values)
+            valid_values = values[valid]
+            valid_weights = weights[valid]
+
+            # We can micmic the effect of weighted statistics by repeating values
+            # Center values [1, 2, 3, 4] appear once, and right values [2, 4] appear 4 times
+            # So we multiply all weights by 4 to repeat values with an integer weight
+            repeated_values = np.repeat(valid_values, (4 * valid_weights).astype(int))
+
+            # Counts
+            count = np.sum(valid_weights)
+            total_count = np.sum(weights)
+
+            # Quantiles
+            low, lower_quartile, median, upper_quartile, percentile_90, high = np.quantile(
+                repeated_values, [0.05, 0.25, 0.5, 0.75, 0.9, 0.95], method="inverted_cdf"
+            )
+            median_deviation = np.quantile(np.abs(repeated_values - median), 0.5, method="inverted_cdf")
+
+            # (We use original fractions for sums as repeated values would multiply them by 4)
+            zone_expected = {
+                "count": count,
+                "mean": np.mean(repeated_values),
+                "sum": np.sum(valid_values * valid_weights),
+                "sumofsquares": np.sum(np.square(valid_values) * valid_weights),
+                "min": np.min(repeated_values),
+                "max": np.max(repeated_values),
+                "std": np.std(repeated_values),
+                "rmse": np.sqrt(np.mean(np.square(repeated_values))),
+                "median": median,
+                "90thpercentile": percentile_90,
+                "iqr": upper_quartile - lower_quartile,
+                "le90": high - low,
+                "nmad": 1.4826 * median_deviation,
+                "validcount": count,
+                "totalcount": total_count,
+                "percentagevalidpoints": 100 * count / total_count,
+            }
+            for statistic, value in zone_expected.items():
+                expected[statistic].append(value)
+
+        # Check exact equality with NumPy
+        for statistic, expected_values in expected.items():
+            np.testing.assert_allclose(result[("band_1", statistic)], expected_values, err_msg=statistic)
+
+        # Check "all" return the same as asking all by name one by one
+        all_result = raster.stats(
+            "all",
+            by={"zone": (zones, "zone")},
+            fractional=True,
+            overlap_backend="shapely",
+        )
+        for statistic in all_result.columns.get_level_values("statistic"):
+            np.testing.assert_allclose(all_result[("band_1", statistic)], result[("band_1", statistic)])
+
+    def test_stats__fractional_vector_union(self) -> None:
+        """Checks union of group labels, and that overlapping groups (fractional on same pixels) stay independent."""
+
+        # Repeat one geometry twice, overlap another one
+        raster = gu.Raster.from_array(
+            np.array([[1.0, 2.0], [3.0, 4.0]]),
+            transform=Affine(1, 0, 0, 0, -1, 2),
+            crs=32631,
+        )
+        centered = box(0.5, 0.5, 1.5, 1.5)
+        zones = gu.Vector(
+            gpd.GeoDataFrame(
+                {"zone": ["center", "center", "right"]},
+                geometry=[centered, centered, box(1, 0, 2, 2)],
+                crs=32631,
+            )
+        )
+
+        # Repeated center geometry should be counted only once
+        # Each group should be able to use their relative pixel weights
+        grouped = raster.stats(
+            ["mean", "sum"],
+            by={"zone": (zones, "zone")},
+            fractional=True,
+            overlap_backend="shapely",
+        )
+        # Count calculation
+        # Center: four quarter-cell sum to 1; Right: two full cells sum to 2
+        np.testing.assert_allclose(grouped[("band_1", "count")], [1, 2])
+        # Mean calculation
+        # Center: (1 + 2 + 3 + 4) * 0.25 / 1 = 2.5; Right: (2 + 4) / 2 = 3
+        np.testing.assert_allclose(grouped[("band_1", "mean")], [2.5, 3])
+
+        # Not passing a vector feature name should use inside/outside boolean zones, still fractional
+        # Union covers 0.25 of each left cell and both right cells completely
+        # Outside gets the remaining 0.75 of each left cell
+        binary = raster.stats(
+            "mean",
+            by={"inside": zones},
+            fractional=True,
+            overlap_backend="shapely",
+        )
+        # Count calculation
+        # Outside: 0.75 + 0.75 = 1.5; Inside: 0.25 + 1 + 0.25 + 1 = 2.5
+        np.testing.assert_allclose(binary[("band_1", "count")], [1.5, 2.5])
+        # Mean calculation
+        # Outside: (1 * 0.75 + 3 * 0.75) / 1.5 = 2; Inside: (1 * 0.25 + 2 + 3 * 0.25 + 4) / 2.5 = 2.8
+        np.testing.assert_allclose(binary[("band_1", "mean")], [2, 2.8])
+
+    def test_stats__fractional_reducer_error(self) -> None:
+        """Checks that fractional stats only work with a custom reducer that accepts support weights."""
+
+        raster = gu.Raster.from_array(
+            np.arange(4, dtype=float).reshape(2, 2),
+            transform=Affine(1, 0, 0, 0, -1, 2),
+            crs=32631,
+        )
+        zone = gu.Vector(gpd.GeoDataFrame({"zone": ["center"]}, geometry=[box(0.5, 0.5, 1.5, 1.5)], crs=32631))
+
+        # The reducer must raise an error because it cannot use the supplied area weights
+        with pytest.raises(ValueError, match="does not accept support_weights"):
+            raster.stats(
+                NoFractionalSupportReducer(),
+                by={"zone": (zone, "zone")},
+                fractional=True,
+                overlap_backend="shapely",
+            )
+
+    def test_stats__fractional_error(self) -> None:
+        """Checks that overlapping fractional groups each get the correct mean uncertainty."""
+
+        # Two overlapping geometries, one containing 4 quarter cells, one the right column
+        raster = gu.Raster.from_array(
+            np.array([[1.0, 2.0], [3.0, 4.0]]),
+            transform=Affine(1, 0, 0, 0, -1, 2),
+            crs=32631,
+        )
+        zones = gu.Vector(
+            gpd.GeoDataFrame(
+                {"zone": ["center", "right"]},
+                geometry=[box(0.5, 0.5, 1.5, 1.5), box(1, 0, 2, 2)],
+                crs=32631,
+            )
+        )
+        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+
+        # We pass an error to stats()
+        nominal, summary = raster.stats(
+            Mean(),
+            by={"zone": (zones, "zone")},
+            fractional=True,
+            overlap_backend="shapely",
+            error_structure=errors,
+        )
+        # Center mean: (1 + 2 + 3 + 4) / 4 = 2.5; right mean: (2 + 4) / 2 = 3
+        np.testing.assert_allclose(nominal[("band_1", "Mean")], [2.5, 3])
+
+        # Four equal weights give variance 1/4; two equal weights give variance 1/2
+        np.testing.assert_allclose(summary.variance, [0.25, 0.5])
+
+    def test_stats__fractional_exactextract_matches_shapely(self) -> None:
+        """Checks that optional ExactExtract and Shapely produce the same fractional grouped statistics."""
+
+        pytest.importorskip("exactextract")
+
+        # Synthetic polygons not vertical/horizontal (not aligned with grid) so coverage weights are nontrivial
+        raster = gu.Raster.from_array(
+            np.arange(1, 10, dtype=float).reshape(3, 3),
+            transform=Affine(1, 0, 0, 0, -1, 3),
+            crs=32631,
+        )
+        polygon = Polygon([(0.2, 0.3), (2.7, 0.6), (2.4, 2.6), (0.4, 2.4)])
+        zone = gu.Vector(gpd.GeoDataFrame({"zone": ["present"]}, geometry=[polygon], crs=32631))
+        options = {
+            "statistics": ["mean", "sum", "std"],
+            "by": {"zone": (zone, "zone")},
+            "categories": {"zone": ["present", "missing"]},
+            "observed": False,
+            "fractional": True,
+        }
+
+        # Check results are indeed equal (within numerical tolerance)!
+        shapely_result = raster.stats(**options, overlap_backend="shapely")
+        exactextract_result = raster.stats(**options, overlap_backend="exactextract")
+        pd.testing.assert_frame_equal(exactextract_result, shapely_result, rtol=5e-7, atol=5e-7)
+        assert exactextract_result.loc["missing", ("band_1", "count")] == 0
+        assert np.isnan(exactextract_result.loc["missing", ("band_1", "mean")])
 
     @pytest.mark.parametrize("source_type", ["pointcloud", "dataframe"])
     def test_stats__geometry_z_is_unchanged_by_masks(self, source_type: str) -> None:
@@ -326,6 +571,33 @@ class TestGroupedStats:
         axes_2d = gu.stats.plot_grouped_stats(two_dimensional, statistic="mean")
         assert set(axes_2d) == {"count_x", "count_y", "statistic", "colorbar"}
         plt.close("all")
+
+    def test_plot_grouped_stats__axes_min_count(self, tmp_path: Path) -> None:
+        """Checks that a figure relies on user axis and removes min_count."""
+
+        # Load plotting only for this test
+        pytest.importorskip("matplotlib")
+        import matplotlib.pyplot as plt
+
+        # We synthesize a group A/B to plot
+        table = gu.stats.stats(
+            np.array([2.0, 4.0, 10.0]),
+            by={"group": np.array(["A", "A", "B"])},
+            categories={"group": ["A", "B"]},
+            statistics="mean",
+        )
+        figure, frame = plt.subplots()
+        output = tmp_path / "grouped-means.png"
+
+        # Check min_count value was utilized in the plot
+        axes = gu.stats.plot_grouped_stats(table, statistic="mean", min_count=2, ax=frame, savefig_fname=str(output))
+        assert axes["statistic"].figure is figure
+        np.testing.assert_array_equal([bar.get_height() for bar in axes["count"].patches], [2, 1])
+        means = np.asarray(axes["statistic"].lines[0].get_ydata(), dtype=float)
+        assert means[0] == 3
+        assert np.isnan(means[1])
+        assert output.is_file()
+        plt.close(figure)
 
     @pytest.mark.parametrize("kind", ["integer", "boolean", "string"])
     def test_stats__masked_values_and_categories(self, kind: str) -> None:
@@ -388,16 +660,17 @@ class TestGroupedStats:
         pytest.importorskip("flox")
         values = np.array([1.0, 2.0, np.nan, 4.0, 5.0, 6.0])
         groups = np.array([2, 2, 0, 0, 1, 1])
-        options = {
-            "statistics": ["mean", "std"],
-            "by": {"zone": groups},
-            "categories": {"zone": [2, 0, 1, 3]},
-            "observed": False,
-        }
+        statistics = ["mean", "std"]
+        by = {"zone": groups}
+        categories = {"zone": [2, 0, 1, 3]}
 
         # Calculate the same complete table with the built-in and Flox reducers
-        expected = gu.stats.stats(values, backend="geoutils", **options)
-        result = gu.stats.stats(values, backend="flox", **options)
+        expected = gu.stats.stats(
+            values, statistics=statistics, by=by, categories=categories, observed=False, backend="geoutils"
+        )
+        result = gu.stats.stats(
+            values, statistics=statistics, by=by, categories=categories, observed=False, backend="flox"
+        )
 
         # Check the declared row order, empty category and every reduced value
         pd.testing.assert_frame_equal(result, expected)
@@ -415,21 +688,71 @@ class TestGroupedStats:
         values["first"][5] = np.nan
         distance = np.arange(24, dtype=float) % 6
         surface = np.array(["ice", "rock"] * 12)
-        options = {
-            "statistics": ["mean", "sum", "totalcount", "percentagevalidpoints"],
-            "by": {"distance": distance, "surface": surface},
-            "bins": {"distance": [0, 2, 4, 6]},
-            "categories": {"surface": ["rock", "ice", "water"]},
-            "mask": np.arange(24) % 5 != 0,
-            "subsample": 9,
-            "random_state": 42,
-            "observed": False,
-        }
+        statistics = ["mean", "sum", "totalcount", "percentagevalidpoints"]
+        by = {"distance": distance, "surface": surface}
+        bins = {"distance": [0, 2, 4, 6]}
+        categories = {"surface": ["rock", "ice", "water"]}
+        mask = np.arange(24) % 5 != 0
 
         # Compare every sampled value and empty declared group with the built-in reducer
-        expected = gu.stats.stats(values, backend="geoutils", **options)
-        result = gu.stats.stats(values, backend="flox", **options)
+        expected = gu.stats.stats(
+            values,
+            statistics=statistics,
+            by=by,
+            bins=bins,
+            categories=categories,
+            mask=mask,
+            subsample=9,
+            random_state=42,
+            observed=False,
+            backend="geoutils",
+        )
+        result = gu.stats.stats(
+            values,
+            statistics=statistics,
+            by=by,
+            bins=bins,
+            categories=categories,
+            mask=mask,
+            subsample=9,
+            random_state=42,
+            observed=False,
+            backend="flox",
+        )
         pd.testing.assert_frame_equal(result, expected)
+
+    def test_stats__flox_percentiles_spread(self) -> None:
+        """Checks that Flox computes exact percentiles and spreads from each each group."""
+
+        # We create synthetic values from two groups A/B, with one NaN and one masked value
+        pytest.importorskip("flox")
+        values = np.array([1.0, 2.0, 3.0, 10.0, 4.0, 5.0, 6.0, np.nan])
+        groups = np.array(["A"] * 4 + ["B"] * 4)
+        mask = np.array([True, True, False, True, True, True, True, True])
+        statistics = ["median", "90thpercentile", "iqr", "le90"]
+
+        # Compte stats with with Flox
+        result = gu.stats.stats(
+            values,
+            statistics=statistics,
+            by={"group": groups},
+            categories={"group": ["A", "B"]},
+            mask=mask,
+            backend="flox",
+        )
+        # We check exact equivalence with NumPy
+        selected = [values[mask & np.isfinite(values) & (groups == group)] for group in ("A", "B")]
+        np.testing.assert_array_equal(result[("value", "count")], [len(group) for group in selected])
+        np.testing.assert_allclose(result[("value", "median")], [np.median(group) for group in selected])
+        np.testing.assert_allclose(
+            result[("value", "90thpercentile")], [np.percentile(group, 90) for group in selected]
+        )
+        np.testing.assert_allclose(
+            result[("value", "iqr")], [np.percentile(group, 75) - np.percentile(group, 25) for group in selected]
+        )
+        np.testing.assert_allclose(
+            result[("value", "le90")], [np.percentile(group, 95) - np.percentile(group, 5) for group in selected]
+        )
 
 
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
@@ -444,7 +767,7 @@ class TestGroupedStatsChunked:
     """
 
     @pytest.mark.parametrize("strategy", ["dense", "sparse", "groupwise"])
-    def test_stats__empty_selection(self, strategy: str) -> None:
+    def test_stats__empty_selection(self, strategy: Literal["dense", "sparse", "groupwise"]) -> None:
         """Checks that fully masked chunks return an empty table and mask mapping."""
 
         # Mask every location while requesting both boolean groups in the result
@@ -897,7 +1220,9 @@ class TestGroupedStatsChunked:
     @pytest.mark.parametrize("backend", ["dask", "multiproc"])
     @pytest.mark.parametrize("sampling_strategy", ["topk", "sequential"])
     @pytest.mark.parametrize("subsample", [0.25, 3, 1])
-    def test_stats__subsample_per_group(self, backend: str, sampling_strategy: str, subsample: int | float) -> None:
+    def test_stats__subsample_per_group(
+        self, backend: str, sampling_strategy: Literal["topk", "sequential"], subsample: int | float
+    ) -> None:
         """Checks that each combined group receives its own sample size while masks include every eligible location."""
 
         # 1/ Prepare unequal groups, one absent category/bin combination, and values with different finite counts
@@ -1236,6 +1561,37 @@ class TestGroupedStatsChunked:
 class TestGroupedStatsErrors:
     """Test module for errors and warnings raised by grouped statistics."""
 
+    @pytest.mark.parametrize(
+        ("selector", "error_type", "message"),
+        [
+            (1, TypeError, "must be a column name"),
+            ("missing", ValueError, "does not exist"),
+        ],
+    )
+    def test_stats__error_fractional_vector_column(
+        self, selector: int | str, error_type: type[Exception], message: str
+    ) -> None:
+        """Checks an error is raised for a fractional group column that is invalid or absent."""
+
+        # Create a synthetic raster/vector, both valid
+        raster = gu.Raster.from_array(np.ones((1, 1)), Affine(1, 0, 0, 0, -1, 1), 32631)
+        zones = gu.Vector(gpd.GeoDataFrame({"zone": ["inside"]}, geometry=[box(0, 0, 1, 1)], crs=32631))
+
+        # Raise error on wrong column selector
+        with pytest.raises(error_type, match=message):
+            raster.stats("mean", by={"zone": (zones, selector)}, fractional=True)
+
+    def test_stats__error_fractional_missing_label(self) -> None:
+        """Checks an error is raised when a fractional polygon group has a missing label."""
+
+        # We define a polygon that covers the raster cell but has no group label
+        raster = gu.Raster.from_array(np.ones((1, 1)), Affine(1, 0, 0, 0, -1, 1), 32631)
+        zones = gu.Vector(gpd.GeoDataFrame({"zone": [None]}, geometry=[box(0, 0, 1, 1)], crs=32631))
+
+        # Raise appropriate error
+        with pytest.raises(ValueError, match="group labels cannot be missing"):
+            raster.stats("mean", by={"zone": (zones, "zone")}, fractional=True)
+
     @pytest.mark.skipif(find_spec("flox") is not None, reason="Only runs if flox is missing.")
     def test_stats__error_missing_flox(self) -> None:
         """Checks that stats() reports a missing Flox installation when the Flox backend is requested."""
@@ -1286,7 +1642,8 @@ class TestGroupedStatsErrors:
         # Use one ordinary category input so each call reaches Flox-specific validation
         pytest.importorskip("flox")
         values = np.arange(6, dtype=float)
-        grouping = {"by": {"zone": np.arange(6) % 2}, "categories": {"zone": [0, 1]}}
+        by = {"zone": np.arange(6) % 2}
+        categories = {"zone": [0, 1]}
 
         # Raise errors for global statistics, group masks, sampling within groups,
         # multiprocessing and GeoUtils strategies
@@ -1299,9 +1656,9 @@ class TestGroupedStatsErrors:
             {"strategy": "dense"},
         ):
             with pytest.raises(ValueError, match="Flox backend requires"):
-                gu.stats.stats(values, "mean", backend="flox", **grouping, **options)
+                gu.stats.stats(values, "mean", backend="flox", by=by, categories=categories, **options)  # type: ignore[arg-type]
         with pytest.raises(ValueError, match="does not support"):
-            gu.stats.stats(values, "nmad", backend="flox", **grouping)
+            gu.stats.stats(values, "nmad", backend="flox", by=by, categories=categories)
 
     def test_raster_stats__flox_loading_warning(self) -> None:
         """Checks that a Raster input warns that the Flox backend loads its values."""

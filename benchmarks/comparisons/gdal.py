@@ -208,7 +208,10 @@ def build_gdal_command(
         return GdalCommand(command, output_file)
 
     if operation == "reproject":
-        # Match the GeoUtils WGS84 to UTM zone 32N nearest-neighbor workflow
+        # Match the GeoUtils WGS84 to UTM zone 32N grid and selected resampling method
+        if case.method is None:
+            raise ValueError("A GDAL reprojection comparison requires a resampling method")
+        resampling = {"nearest": "near", "cubic_spline": "cubicspline"}.get(case.method, case.method)
         output_file = os.path.join(config.directory, "output-gdal-reproject.tif")
         command = [
             _require_command("gdalwarp"),
@@ -220,7 +223,7 @@ def build_gdal_command(
             str(width),
             str(height),
             "-r",
-            "near",
+            resampling,
             "-ot",
             "Float32",
             "-dstnodata",
@@ -359,6 +362,10 @@ def execute_gdal(runner: Any, case: Case) -> float:
     else:
         value = read_raster_center(command.output_file)
         expected = runner.config.raster_value
-    if value != expected:
+    if operation == "reproject" and case.method == "sum":
+        valid_value = math.isfinite(value)
+    else:
+        valid_value = value == expected
+    if not valid_value:
         raise RuntimeError(f"Unexpected GDAL {operation} validation value: {value}")
     return value

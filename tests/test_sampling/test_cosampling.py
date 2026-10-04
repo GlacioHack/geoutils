@@ -184,8 +184,8 @@ class TestCosample:
         points = gu.PointCloud.from_xyz(x, y, np.array([10.0, 20.0]), crs=raster.crs)
 
         # Read the same points with strict and lenient missing data settings
-        ignored = raster.cosample(points, resample_kwargs={"nodata_propagation": "ignore"})
-        propagated = raster.cosample(points, resample_kwargs={"nodata_propagation": "propagate"})
+        ignored = raster.cosample(points, resample_kwargs={"nodata_handling": "ignore"})
+        propagated = raster.cosample(points, resample_kwargs={"nodata_handling": "propagate"})
 
         # Check that only the strict setting drops the point beside the missing pixel
         assert list(ignored.ds.index) == [0, 1]
@@ -538,11 +538,11 @@ class TestPointCosampleSupport:
         x, y = raster.ij2xy(1 + positions % 7, 1 + positions % 9)
         points = gu.PointCloud.from_xyz(x, y, positions.astype(float), crs=raster.crs)
 
-        # Use Raster.interp_points() to identify which points remain valid around the nodata auxiliary pixel
+        # Use Raster.interp_at_points() to identify which points remain valid around the nodata auxiliary pixel
         auxiliary_raster = gu.Raster.from_array(
             np.ma.masked_invalid(auxiliary), raster.transform, raster.crs, nodata=None
         )
-        expected = auxiliary_raster.interp_points((x, y), method="nearest", as_array=True, dist_nodata_spread=2)
+        expected = auxiliary_raster.interp_at_points((x, y), method="nearest", as_array=True, nodata_handling=2)
         kept = np.flatnonzero(np.isfinite(expected))
         raw_auxiliary = auxiliary[np.newaxis, ...] if singleton_band else auxiliary
         result = points.cosample(
@@ -550,7 +550,7 @@ class TestPointCosampleSupport:
             auxiliary={"offset": raw_auxiliary},
             auxiliary_at="other",
             resample_method="nearest",
-            resample_kwargs={"dist_nodata_spread": 2},
+            resample_kwargs={"nodata_handling": 2},
         )
 
         # Check the exact finite positions returned by interpolation for two-dimensional and one-band inputs
@@ -1008,7 +1008,7 @@ class TestCosampleChunked:
     def test_cosample__no_replacement_after_interpolation(self, lazy: bool) -> None:
         """Checks that points rejected during interpolation are not replaced in the sample."""
 
-        # Place points around one raster nodata pixel, including neighbors rejected by slinear's default nodata spread
+        # Place points around one raster nodata pixel, including neighbors rejected by a one-cell nodata spread
         raster = _raster(np.ones((11, 11), dtype=float))
         raster.data[5, 5] = np.ma.masked
         rows, columns = np.meshgrid(np.arange(3, 8), np.arange(3, 8), indexing="ij")
@@ -1017,33 +1017,38 @@ class TestCosampleChunked:
         options = {"subsample": 23, "random_state": 42}
 
         # Select almost every initially valid point so final interpolation removes some selected nodata neighbors
-        coverage_values = raster.interp_points((x, y), method="slinear", dist_nodata_spread=0, as_array=True)
+        coverage_values = raster.interp_at_points((x, y), method="slinear", nodata_handling=0, as_array=True)
         candidate_validity = np.isfinite(coverage_values)
         selected = points.pc.cosample(points, mask=candidate_validity, **options)
-        interpolated_values = raster.interp_points((x, y), method="slinear", as_array=True)
+        interpolated_values = raster.interp_at_points((x, y), method="slinear", nodata_handling=1, as_array=True)
         selected_indices = selected.index.to_numpy()
         expected_indices = selected_indices[np.isfinite(interpolated_values[selected_indices])]
-        expected = points.pc.cosample(raster.to_xarray(), resample_method="slinear", **options)
         assert candidate_validity.sum() == 24
         assert 0 < len(expected_indices) < options["subsample"]
 
-        # Apply the same seeded selection with raster values read eagerly or through Dask
-        source: Any = points
-        other: Any = raster.to_xarray()
-        if lazy:
-            import dask_geopandas as dgpd
+        # Apply the same seeded selection with an explicit configured spread and restore the process-wide setting
+        default_handling = gu.config["interpolation_nodata_handling"]
+        try:
+            gu.config["interpolation_nodata_handling"] = 1
+            expected = points.pc.cosample(raster.to_xarray(), resample_method="slinear", **options)
+            source: Any = points
+            other: Any = raster.to_xarray()
+            if lazy:
+                import dask_geopandas as dgpd
 
-            from geoutils.pointcloud.pd_accessor import (
-                _register_dask_pointcloud_accessor,
-            )
+                from geoutils.pointcloud.pd_accessor import (
+                    _register_dask_pointcloud_accessor,
+                )
 
-            _register_dask_pointcloud_accessor()
-            source = dgpd.from_geopandas(points, npartitions=3, sort=False)
-            other = raster.to_xarray().chunk({"y": 6, "x": 6})
-        result = source.pc.cosample(other, resample_method="slinear", **options)
-        if lazy:
-            assert not source.pc.is_loaded
-        output = result.compute() if lazy else result
+                _register_dask_pointcloud_accessor()
+                source = dgpd.from_geopandas(points, npartitions=3, sort=False)
+                other = raster.to_xarray().chunk({"y": 6, "x": 6})
+            result = source.pc.cosample(other, resample_method="slinear", **options)
+            if lazy:
+                assert not source.pc.is_loaded
+            output = result.compute() if lazy else result
+        finally:
+            gu.config["interpolation_nodata_handling"] = default_handling
 
         # Return the originally selected finite rows in their original order, with no replacement points
         assert_geodataframe_equal(output, expected)
@@ -1189,7 +1194,7 @@ class TestCosampleChunked:
 
         import dask_geopandas as dgpd
 
-        import geoutils.interface.interpolation as interpolation
+        import geoutils.interface.resampling as resampling
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
         # 1/ Prepare duplicate point labels and one raster nodata pixel to check validity and row order
@@ -1207,7 +1212,7 @@ class TestCosampleChunked:
 
         # 2/ Check that building the Dask result reads raster validity without interpolating raster values
         calls: list[bool] = []
-        original_interpolation = interpolation._interp_points_base
+        original_interpolation = resampling._interp_points_base
 
         def track_interpolation(*args: Any, **kwargs: Any) -> Any:
             """
@@ -1217,7 +1222,7 @@ class TestCosampleChunked:
             calls.append(validity_only)
             return original_interpolation(*args, **kwargs)
 
-        monkeypatch.setattr(interpolation, "_interp_points_base", track_interpolation)
+        monkeypatch.setattr(resampling, "_interp_points_base", track_interpolation)
         result = lazy_points.pc.cosample(lazy_raster, **options)
         assert isinstance(result, dgpd.GeoDataFrame)
         assert not result.pc.is_loaded
@@ -1463,7 +1468,7 @@ class TestCosampleErrors:
             pytest.fail("Point coordinates must be checked before raster preparation.")
 
         monkeypatch.setattr(gu.Raster, "reproject", unexpected_raster_operation)
-        monkeypatch.setattr(gu.Raster, "interp_points", unexpected_raster_operation)
+        monkeypatch.setattr(gu.Raster, "interp_at_points", unexpected_raster_operation)
         with pytest.raises(ValueError, match="ordered support coordinates"):
             raster.cosample(points, auxiliary={"extra": auxiliary}, align="reproject")
 

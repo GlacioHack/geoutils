@@ -17,7 +17,7 @@ Other operations are more complex and require {ref}`specific logic described fur
 - The {meth}`~geoutils.Raster.reproject` function **maps the intersection of projected source grid chunks for each destination chunk** (with potentially different CRS, resolution and bounds), and defines default output chunksizes based on resolution change to avoid unexpected memory blowup,
 - The {meth}`~geoutils.Raster.polygonize` function polygonizes implements **three chunk-boundary reconciliation strategies** with different considerations for connected-component labeling and stitching of geometries,
 - The {meth}`~geoutils.Vector.rasterize` function performs a geometry subsetting then directly **maps rasterized output blocks** only utilizing these subset geometries.
-- The {meth}`~geoutils.Raster.interp_points` function performs a **fast regular-grid mapping of point locations in raster chunks**, expanding raster chunks by a few pixels depending on the resampling method, then performing ordered concatenation of outputs,
+- The {meth}`~geoutils.Raster.interp_at_points` function performs a **fast regular-grid mapping at point locations in raster chunks**, expanding raster chunks by a few pixels depending on the resampling method, then performing ordered concatenation of outputs,
 - The {meth}`~geoutils.Raster.subsample` function performs an initial chunk-by-chunk sum of valid values to define the requested sample size, then samples values per chunk through **reproducible chunk-invariant seeding** (default) or **faster chunk-dependent seeding**.
 
 (specific-logic)=

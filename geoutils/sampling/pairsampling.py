@@ -436,9 +436,11 @@ def _prepare_point_pair_data(
             if mask_pointcloud is not None and mask_pointcloud._is_dask:
                 prepared_mask = _stage_dask_point_pair_mask(mask_pointcloud, directory, storage)
 
+        # We finish the writing before mask validation below can remove their temporary directory
+        source_parts = list(_point_pair_partitions(pointcloud, reader, mp_config, directory))
         parts: list[tuple[Path, int]] = []
         source_size = 0
-        for part_index, rows, filename in _point_pair_partitions(pointcloud, reader, mp_config, directory):
+        for part_index, rows, filename in source_parts:
             if rows.start != source_size:
                 raise RuntimeError("Point partitions must cover consecutive source rows.")
             dataframe = pd.read_pickle(filename)

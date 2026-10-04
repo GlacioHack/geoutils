@@ -55,7 +55,7 @@ def _custom_func(raster: Raster, addition: float, factor: float) -> Raster:
 def _custom_func_stats(raster: RasterType) -> dict[str, floating[Any]]:
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning, message="Empty raster")
-        return raster.get_stats(band=1, stats_name=["mean", "valid_count"])  # type: ignore
+        return raster.stats(["mean", "valid_count"], values=1)  # type: ignore
 
 
 # Define a simple function which return a Mask
@@ -203,7 +203,8 @@ class TestMultiproc:
     landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
 
     @pytest.fixture(scope="class", params=[None, "test"])
-    def cluster(self, request: pytest.FixtureRequest) -> Iterator[AbstractCluster | None]:
+    @classmethod
+    def cluster(cls, request: pytest.FixtureRequest) -> Iterator[AbstractCluster | None]:
         # This is for tests to work with spawn (Windows, requires this fixture) or Fork (ubuntu, macos)
         if request.param is None:
             yield None

@@ -192,15 +192,16 @@ class TestSelection:
         values = xr.DataArray([[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]], dims=("y", "x"))
         keep = xr.DataArray([[True, False, True], [False, True, True]], dims=("y", "x"))
         groups = xr.DataArray([[0, 0, 0], [1, 1, 1]], dims=("y", "x"))
-        options = {"by": {"zone": groups}, "categories": {"zone": [0, 1]}} if grouped else {}
+        by = {"zone": groups} if grouped else None
+        categories = {"zone": [0, 1]} if grouped else None
 
         # Use these arrays directly or select them as values on an existing raster grid
         if source_type == "array":
-            result = gu.stats.stats(values, "mean", mask=keep, **options)
+            result = gu.stats.stats(values, "mean", mask=keep, by=by, categories=categories)
             value_name = "value"
         else:
             raster = gu.Raster.from_array(np.zeros((2, 3)), rio.transform.from_origin(0, 2, 1, 1), crs=4326)
-            result = raster.stats("mean", values={"temperature": values}, mask=keep, **options)
+            result = raster.stats("mean", values={"temperature": values}, mask=keep, by=by, categories=categories)
             value_name = "temperature"
 
         # The mask leaves two values in each row, giving row means of 20 and 55 and a whole mean of 37.5
@@ -628,7 +629,59 @@ class TestSelectionChunked:
 
 
 class TestSelectionErrors:
-    """Test module for validation errors raised while selecting values, masks, and support."""
+    """Test module for errors/warnings raised in selection subfunctions."""
+
+    @pytest.mark.parametrize(
+        ("option", "message"),
+        [
+            ({"mask_mode": "neither"}, "Argument ``mask_mode``"),
+            ({"align": "ignore"}, "Argument ``align``"),
+            ({"at": "other"}, "Argument ``at``"),
+            ({"values": 1}, "Arguments ``values`` and ``at`` require"),
+        ],
+    )
+    def test_stats__error_invalid_selection_array(self, option: dict[str, Any], message: str) -> None:
+        """Checks errors raised for selection options with a plain array input."""
+
+        # Plain array
+        values = np.arange(4, dtype=float)
+
+        # Check proper errors are raised
+        with pytest.raises(ValueError, match=message):
+            gu.stats.stats(values, "mean", **option)
+
+    @pytest.mark.parametrize("selection", [0, 2, "one", [1, 2]])
+    def test_stats__error_invalid_raster_bands(self, selection: Any) -> None:
+        """Checks errors raised for selection of raster bands."""
+
+        # We define a single band raster
+        raster = gu.Raster.from_array(np.arange(4).reshape(2, 2), from_origin(0, 2, 1, 1), 4326)
+
+        # Check errors are raised on wrong input
+        with pytest.raises((TypeError, ValueError), match="Raster bands|Raster ``values``"):
+            raster.stats("mean", values=selection)
+
+    @pytest.mark.parametrize("selection", [[], {"": 1}, {1: 1}])
+    def test_stats__error_invalid_value_names(self, selection: Any) -> None:
+        """Checks errors raised for defining raster value names in the input mapping."""
+
+        # We define a single band raster
+        raster = gu.Raster.from_array(np.arange(4).reshape(2, 2), from_origin(0, 2, 1, 1), 4326)
+
+        # Check error raised for empty/non-string
+        with pytest.raises(ValueError, match="Selected value names must be non-empty strings"):
+            raster.stats("mean", values=selection)
+
+    @pytest.mark.parametrize("selection", [1, [1]])
+    def test_stats__error_invalid_point_columns(self, selection: Any) -> None:
+        """Checks errors raised for point cloud column inputs."""
+
+        # Point cloud with Z column
+        points = gu.PointCloud.from_xyz(np.arange(4), np.zeros(4), np.arange(4), crs=4326)
+
+        # Check error raised for incorrect column
+        with pytest.raises(TypeError, match="Point cloud ``values`` must select"):
+            points.stats("mean", values=selection)
 
     @pytest.mark.parametrize("grouped", [False, True])
     def test_stats__error_tabular_inputs(self, grouped: bool) -> None:

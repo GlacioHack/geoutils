@@ -13,7 +13,7 @@ kernelspec:
 (filters)=
 
 # Filters
-GeoUtils provides several filters to process raster data. They can be applied to {class}`~geoutils.Raster` objects.
+GeoUtils provides filters for {class}`~geoutils.Raster` and {class}`~geoutils.PointCloud` data.
 
 ## Available filters
 The following filters are currently available in GeoUtils:
@@ -89,3 +89,73 @@ def double_filter(arr: np.ndarray) -> np.ndarray:
     return arr * 2
 rast_double = rast.filter(double_filter)
 ```
+
+## Reducer windows
+
+Pass a {class}`~geoutils.operators.Reducer` to choose the calculation and a
+{class}`~geoutils.operators.GridNeighbours` to choose the raster cells:
+
+```{code-block} python
+from geoutils.operators import GridNeighbours
+from geoutils.operators.reducer import Mean
+
+window = GridNeighbours(size=5, shape="circular")
+smoothed = rast.filter(Mean(neighborhood=window), coverage="fractional")
+```
+
+`coverage="center"` selects cells by their centers, `"all_touched"` includes cells with positive overlap, and
+`"fractional"` weights cells by covered area. Area coverage supports square and circular windows in pixel units.
+Other neighborhoods can supply arbitrary row/column offsets. `size`, `kernel_shape`, and `coverage` override a
+reducer's window for that call. Without a configured window, filtering uses a 3 × 3 square.
+
+Reducer filters preserve missing centers by default; `preserve_nodata=False` lets valid neighbors fill them.
+`nodata_handling="propagate"` makes any missing neighbor invalidate the result, and `boundless=False` requires a
+complete window. Bands are filtered independently, including with Dask and multiprocessing.
+
+Built-in reductions share sliding sums and convolution with raster filters. Dense calls to
+{meth}`~geoutils.Raster.resample_at_points` reuse these calculations when their windows have the same alignment;
+sparse targets and custom reducers evaluate their neighborhoods directly. A custom reducer receives the same
+values, coordinates, source IDs and optional area weights through either API.
+
+Legacy named circular mean filters select cells strictly inside their kernel radius.
+`GridNeighbours(size=5, shape="circular")` draws a circle of radius 2.5 pixels from the window center for all three
+coverage rules.
+
+## Point cloud neighborhood filters
+
+{meth}`~geoutils.PointCloud.filter` replaces each active point value with a reduction of neighboring values selected
+by horizontal X/Y distance. Built-in names include `"mean"`, `"median"`, `"min"`, `"max"`, `"range"`, `"count"`,
+`"sum"`, `"std"` and `"rms"`; any {class}`~geoutils.operators.Reducer` can provide another calculation. A radius uses
+CRS units, `k` selects the nearest points, and passing both first applies the radius and then the count limit. The
+default includes the point being filtered. Set `include_self=False` for a leave-one-out calculation such as the
+equivalent PDAL `filters.zsmooth` median.
+
+Point rows, horizontal locations and other dataframe columns are preserved. Missing values are ignored by default;
+use `nodata_propagation="propagate"` when any missing neighbor should make the output missing. `min_points` requires a
+minimum number of finite neighbors. A point that does not meet that requirement receives a missing value.
+
+```{code-block} python
+from geoutils.operators.reducer import Median
+
+filtered = points.filter(
+    method=Median(),
+    radius=2,
+    include_self=False,
+    min_points=3,
+)
+```
+
+A reducer's {class}`~geoutils.operators.PointNeighbours` supplies its radius and nearest-neighbor limit when those
+arguments are omitted. Explicit arguments override the configured limit without changing the reducer. An explicit
+`radius=None` removes the distance limit; `k=None` removes the count limit. With no configured neighborhood or supplied
+limits, the radius is one CRS unit.
+
+Dask dataframes return a lazy point dataframe and require active values in a named column. Known spatial partition
+bounds let Dask skip distant source partitions, so call `calculate_spatial_partitions()` before filtering a large
+file-backed point cloud. Multiprocessing reads the radius-expanded bounds of each row partition and writes the result
+to the file selected by {class}`~geoutils.multiproc.MultiprocConfig`. Storing nearby input points in the same
+partitions reduces the size of those reads. Both Dask and multiprocessing require a finite radius.
+
+For dense point clouds, `batch_size` limits how many target points build neighbor pairs at once. Smaller batches lower
+temporary memory use at the cost of more query calls. For multiprocessing, `mp_config.chunks` separately controls how
+many target rows each worker reads and writes as one partition.

@@ -121,6 +121,7 @@ OPERATION_GROUPS: dict[str, str] = {
     "copy": "Raster ⟶ Raster",
     "filter": "Raster ⟶ Raster",
     "reproject": "Raster ⟶ Raster",
+    "random_field": "Raster ⟶ Raster",
     "subsample": "Raster ⟶ Point",
     "to_pointcloud": "Raster ⟶ Point",
     "interp_points": "Raster ⟶ Point",
@@ -159,7 +160,7 @@ class _PreviewResult:
     """Provide complete deterministic ASV-like measurements for renderer development."""
 
     def __init__(self, commit_hash: str = "preview-current", geoutils_scale: float = 1.0) -> None:
-        """Create three sample values for every comparison series and measurement."""
+        """Create sample values matching each comparison's parameter count."""
 
         self.commit_hash = commit_hash
         self.date = 1_700_000_000_000
@@ -172,6 +173,7 @@ class _PreviewResult:
         # Create all keys normally read from saved ASV results so every report section can render
         for comparison in COMPARISONS:
             parameter_values = comparison.benchmark.values
+            parameter_count = len(parameter_values)
 
             for series_index, (_, class_name) in enumerate(comparison.series, start=1):
                 prefix = f"{COMPARISON_BENCHMARK_MODULE}.{class_name}"
@@ -185,12 +187,15 @@ class _PreviewResult:
                 self.parameters[f"{prefix}.time_operation"] = parameters
                 self.parameters[f"{prefix}.track_end_to_end_time_s"] = parameters
                 self.parameters[f"{prefix}.track_process_tree_mem_increase_mb"] = parameters
-                self.values[f"{prefix}.time_operation"] = [scale * series_index * value for value in (0.05, 0.10, 0.20)]
+                self.values[f"{prefix}.time_operation"] = [
+                    scale * series_index * 0.05 * 2**index for index in range(parameter_count)
+                ]
                 self.values[f"{prefix}.track_end_to_end_time_s"] = [
-                    scale * series_index * value for value in (0.10, 0.20, 0.40)
+                    scale * series_index * 0.10 * 2**index for index in range(parameter_count)
                 ]
                 self.values[f"{prefix}.track_process_tree_mem_increase_mb"] = [
-                    scale * series_index * value for value in (100.0, 140.0, 200.0)
+                    scale * series_index * (100.0 + 40.0 * index + 20.0 * max(0, index - 1))
+                    for index in range(parameter_count)
                 ]
 
     def get_all_result_keys(self) -> Any:

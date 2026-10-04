@@ -46,6 +46,7 @@ from geoutils.multiproc.readers import (
     _reader_from_vector,
     _ValueReader,
 )
+from geoutils.operators.base import LocalData
 from geoutils.raster.array import get_mask_from_array
 from geoutils.sampling.stratified import _stratified_subsample_indices
 from geoutils.sampling.support import (
@@ -58,11 +59,11 @@ from geoutils.sampling.support import (
     _values_at_support,
 )
 from geoutils.stats.reduction import _reduce_values
-from geoutils.stats.selection import _sample_eligible_indices
+from geoutils.stats.selection import _coordinates_at_support, _sample_eligible_indices
 from geoutils.vector.base import _as_geodataframe
 
 if TYPE_CHECKING:
-    from geoutils.interface.interpolation import InterpolationMethod
+    from geoutils.interface.resampling import InterpolationMethod
     from geoutils.multiproc import MultiprocConfig
     from geoutils.pointcloud.base import PointCloudBase
     from geoutils.pointcloud.pointcloud import PointCloudLike
@@ -1273,6 +1274,7 @@ def _calculate_grouped_stats(
     return_masks: bool,
     support: RasterBase | PointCloudBase | None,
     mp_config: MultiprocConfig | None,
+    _return_local_data: bool = False,
 ) -> pd.DataFrame | tuple[pd.DataFrame, Mapping[Hashable, RasterLike | PointCloudLike | ArrayLike]]:
     """
     Calculate statistics for values with prepared group definitions and aligned grouping values.
@@ -1297,6 +1299,8 @@ def _calculate_grouped_stats(
             named_values, by, mask, mp_config
         )
         tiles = None
+    if _return_local_data and (use_reader_mp or use_dask or mp_config is not None or subsample != 1):
+        raise ValueError("Statistics uncertainty propagation currently requires eager inputs without subsampling.")
 
     # 2/ Derive bin edges from each grouper min/max when only a bin count was passed (e.g., 20) for a grouper
     if use_reader_mp:
@@ -1312,6 +1316,8 @@ def _calculate_grouped_stats(
 
     # Let Flox match the grouping values directly; combined group IDs are only needed for global subsampling
     if backend == "flox":
+        if _return_local_data:
+            raise ValueError("Statistics uncertainty propagation requires backend='geoutils'.")
         full_group_ids = None
         if subsample != 1:
             full_group_ids, _, _ = _assign_group_ids_dask_eager(
@@ -1407,6 +1413,7 @@ def _calculate_grouped_stats(
             strategy=strategy,
             mp_config=mp_config if subsample == 1 else None,
         )
+        reduced_group_numbers = table.index.to_numpy(copy=True)
         result = _format_grouped_stats(
             table,
             statistics,
@@ -1434,7 +1441,37 @@ def _calculate_grouped_stats(
         if return_masks and assignment_mp is not None:
             weakref.finalize(result[1], assignment_mp.storage.close)
             keep_mp_storage = True
-        return result
+        if not _return_local_data:
+            return result
+
+        # Build one LocalData object for each value and output group, following the row order of the result table
+        result_table = result[0] if return_masks else result
+        assert isinstance(result_table, pd.DataFrame)
+        selected_group_numbers = np.arange(total_groups) if not observed else reduced_group_numbers
+        flat_group_ids = np.asarray(group_ids).reshape(-1)
+        coordinates = _coordinates_at_support(support)
+        local_inputs: list[LocalData] = []
+        output_labels: list[Hashable] = []
+        nominal_values: list[float] = []
+        statistic_name = statistics.names[0]
+        for name, array in arrays.items():
+            flat_values = np.asanyarray(np.ma.getdata(array)).reshape(-1)
+            valid = ~get_mask_from_array(array).reshape(-1)
+            for group_number, group_label in zip(selected_group_numbers, result_table.index):
+                positions = np.flatnonzero(flat_group_ids == group_number)
+                source_ids = np.empty(len(positions), dtype=object)
+                source_ids[:] = [(name, int(position)) for position in positions]
+                local_inputs.append(
+                    LocalData(
+                        values=flat_values[positions],
+                        valid=valid[positions],
+                        source_ids=source_ids,
+                        coordinates=None if coordinates is None else coordinates[positions],
+                    )
+                )
+                output_labels.append((name, group_label))
+                nominal_values.append(float(result_table.loc[group_label, (name, statistic_name)]))
+        return result, local_inputs, output_labels, np.asarray(nominal_values)
     finally:
         if assignment_mp is not None and not keep_mp_storage:
             assignment_mp.storage.close()
@@ -1680,6 +1717,7 @@ def _grouped_stats(
     mp_config: MultiprocConfig | None,
     definitions: Mapping[str, _GroupDefinition],
     stack: ExitStack | None = None,
+    _return_local_data: bool = False,
 ) -> pd.DataFrame | tuple[pd.DataFrame, Mapping[Hashable, RasterLike | PointCloudLike | ArrayLike]]:
     """
     Calculate grouped statistics after selecting values (source input) and groupers (grouping variables from ``by``) on
@@ -1724,6 +1762,7 @@ def _grouped_stats(
         return_masks=return_masks,
         support=support,
         mp_config=mp_config,
+        _return_local_data=_return_local_data,
     )
 
 
