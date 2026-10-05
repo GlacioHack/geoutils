@@ -45,6 +45,7 @@ from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.rasterization import _create_mask, _rasterize
 from geoutils.multiproc import MultiprocConfig
+from geoutils.operators.overlap import OverlapBackend
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
@@ -764,6 +765,9 @@ class VectorBase(ABC):
         chunksizes: tuple[int, int] | None = None,
         mp_config: MultiprocConfig | None = None,
         dask: bool = False,
+        fractional: bool | Literal["union"] = False,
+        fractional_by: str | None = None,
+        overlap_backend: OverlapBackend = "auto",
         **kwargs: Any,
     ) -> RasterType:
         """
@@ -792,6 +796,11 @@ class VectorBase(ABC):
             reference chunks or 1024 by 1024.
         :param mp_config: Multiprocessing configuration. Cannot be combined with Dask execution.
         :param dask: Whether to return a lazy Dask-backed DataArray. A Dask-backed reference also selects this backend.
+        :param fractional: Return exact cell coverage instead of burn values. True returns one layer per feature or
+            fractional_by group; ``"union"`` returns one layer for the union of every feature.
+        :param fractional_by: Feature column used to combine equal labels into separate fractional output layers.
+        :param overlap_backend: Library used to calculate fractional coverage. Auto uses ExactExtract when it is
+            installed and the grid is compatible, and otherwise uses Shapely.
         :param kwargs: Deprecated raster, xres and yres aliases.
 
         :returns: Raster or DataArray containing the burned geometries.
@@ -831,6 +840,9 @@ class VectorBase(ABC):
             chunksizes=chunksizes,
             mp_config=mp_config,
             dask=dask,
+            fractional=fractional,
+            fractional_by=fractional_by,
+            overlap_backend=overlap_backend,
         )
         return self._cast_raster_output(raster)
 

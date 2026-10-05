@@ -38,6 +38,7 @@ from geoutils._misc import deprecate, import_optional
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc.chunked import ChunkSpec, normalize_chunks
 from geoutils.multiproc.cluster import AbstractCluster, ClusterGenerator
+from geoutils.projtools import _affine_matmul
 
 if TYPE_CHECKING:
     from geoutils.raster.base import RasterBase
@@ -277,8 +278,8 @@ def plot_tiling(raster: Raster, tiling_grid: NDArrayNum) -> None:
     ax, caxes = raster.plot(return_axes=True)
     for tile in tiling_grid.reshape(-1, 4):
         row_min, row_max, col_min, col_max = tile
-        x_min, y_min = raster.transform * (col_min, row_min)  # Bottom-left corner
-        x_max, y_max = raster.transform * (col_max, row_max)  # Top-right corne
+        x_min, y_min = _affine_matmul(raster.transform, (col_min, row_min))  # Bottom-left corner
+        x_max, y_max = _affine_matmul(raster.transform, (col_max, row_max))  # Top-right corne
         rect = mpl.patches.Rectangle(
             (x_min, y_min), x_max - x_min, y_max - y_min, edgecolor="red", facecolor="none", linewidth=1.5
         )
@@ -334,7 +335,15 @@ def _remove_tile_padding(raster_shape: tuple[int, int], raster_tile: Raster, til
     colmax = colmin + int(tile[3] - tile[2])
 
     # Crop back to the destination block without changing its output bounds
-    raster_tile.icrop(bbox=(colmin, rowmin, colmax, rowmax), inplace=True)
+    cropped = raster_tile.icrop(bbox=(colmin, rowmin, colmax, rowmax))
+    assert cropped is not None
+
+    # Update only pixel data and grid for loaded tiles so custom metadata survives the crop
+    if raster_tile.is_loaded:
+        raster_tile._data = cropped.data
+        raster_tile.transform = cropped.transform
+    else:
+        raster_tile.__dict__.update(cropped.__dict__)
 
 
 def _apply_func_block(

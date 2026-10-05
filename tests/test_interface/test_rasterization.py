@@ -129,6 +129,115 @@ class TestRasterVectorInterface:
         with pytest.raises(InvalidGridError, match="Either 'ref' or 'crs' must be provided"):
             vct.rasterize(rst, crs=3857)
 
+    def test_rasterize__fractional_feature_and_union_layers(self) -> None:
+        """Checks that overlapping polygons produce separate coverage layers or one layer for their union."""
+
+        # Cross four cells with one centered square and cover the complete right column with another polygon
+        centered = Polygon([(0.5, 0.5), (1.5, 0.5), (1.5, 1.5), (0.5, 1.5)])
+        right = Polygon([(1, 0), (2, 0), (2, 2), (1, 2)])
+        vector = gu.Vector(gpd.GeoDataFrame({"name": ["centered", "right"]}, geometry=[centered, right], crs=32631))
+        options = {"res": 1, "bounds": (0, 0, 2, 2), "crs": 32631, "out_dtype": np.float64}
+
+        # Preserve both feature contributions even where they overlap the same right-column cells
+        layered = vector.rasterize(**options, fractional=True, overlap_backend="shapely")
+        expected_layers = np.array([np.full((2, 2), 0.25), [[0, 1], [0, 1]]])
+        np.testing.assert_allclose(layered.data, expected_layers)
+        assert layered.tags["long_name"] == ("0", "1")
+
+        # Union coverage counts shared polygon area once and cannot exceed complete cell coverage
+        union = vector.rasterize(**options, fractional="union", overlap_backend="shapely")
+        np.testing.assert_allclose(union.data, [[0.25, 1], [0.25, 1]])
+        assert union.tags["long_name"] == ("union",)
+
+    def test_rasterize__fractional_group_layers_union_repeated_features(self) -> None:
+        """Checks that fractional_by unions overlapping features within each named output layer."""
+
+        # Repeat the centered polygon in one group and place a full-height polygon in another group
+        centered = Polygon([(0.5, 0.5), (1.5, 0.5), (1.5, 1.5), (0.5, 1.5)])
+        right = Polygon([(1, 0), (2, 0), (2, 2), (1, 2)])
+        dataframe = gpd.GeoDataFrame(
+            {"zone": ["shared", "shared", "right"]},
+            geometry=[centered, centered, right],
+            crs=32631,
+        )
+
+        # Equal labels form one union geometry, so the repeated centered polygon still covers one quarter per cell
+        result = gu.Vector(dataframe).rasterize(
+            res=1,
+            bounds=(0, 0, 2, 2),
+            crs=32631,
+            fractional=True,
+            fractional_by="zone",
+            overlap_backend="shapely",
+        )
+        expected = np.array([np.full((2, 2), 0.25), [[0, 1], [0, 1]]], dtype=np.float32)
+        np.testing.assert_allclose(result.data, expected)
+        assert result.tags["long_name"] == ("shared", "right")
+
+    def test_rasterize__fractional_chunked_backends_match_eager(self, tmp_path: Any) -> None:
+        """Checks that fractional layers stay lazy with Dask and match eager and multiprocessing chunks."""
+
+        pytest.importorskip("dask")
+        import dask.array as da
+
+        # Use two polygons crossing each 1 x 1 chunk so every backend must preserve global layer positions
+        polygons = [
+            Polygon([(0.25, 0.25), (2.25, 0.25), (2.25, 2.25), (0.25, 2.25)]),
+            Polygon([(1.25, 1.25), (2.75, 1.25), (2.75, 2.75), (1.25, 2.75)]),
+        ]
+        vector = gu.Vector(gpd.GeoDataFrame(geometry=polygons, crs=32631))
+        options = {"res": 1, "bounds": (0, 0, 3, 3), "crs": 32631, "fractional": True}
+
+        # Calculate the eager reference and construct the same coverage as a lazy block graph
+        expected = vector.rasterize(**options, overlap_backend="shapely")
+        lazy = vector.rasterize(**options, dask=True, chunksizes=(1, 1), overlap_backend="shapely")
+        assert isinstance(lazy, xr.DataArray)
+        assert isinstance(lazy.data, da.Array)
+        assert not lazy._in_memory
+        np.testing.assert_array_equal(lazy.data.compute(), expected.data)
+        assert not lazy._in_memory
+
+        # Write the same 1 x 1 blocks in workers and compare the initially file-backed output
+        output_path = tmp_path / "fractional.tif"
+        config = MultiprocConfig(chunks=(1, 1), outfile=str(output_path))
+        multiproc = vector.rasterize(**options, mp_config=config, overlap_backend="shapely")
+        assert not multiproc.is_loaded
+        np.testing.assert_array_equal(multiproc.data, expected.data)
+        assert multiproc.tags["long_name"] == ("0", "1")
+
+    def test_rasterize__fractional_exactextract_matches_shapely(self) -> None:
+        """Checks that optional ExactExtract coverage agrees with Shapely for partial and complete cells."""
+
+        pytest.importorskip("exactextract")
+
+        # Cut several cells with a non-axis-aligned polygon to compare the two independent geometry engines
+        polygon = Polygon([(0.1, 0.2), (2.8, 0.6), (2.2, 2.9), (0.4, 2.4)])
+        vector = gu.Vector(gpd.GeoDataFrame(geometry=[polygon], crs=32631))
+        options = {"res": 1, "bounds": (0, 0, 3, 3), "crs": 32631, "fractional": True}
+
+        # ExactExtract stores coverage as float32, so compare within its approximately seven significant digits
+        shapely_result = vector.rasterize(**options, overlap_backend="shapely")
+        exactextract_result = vector.rasterize(**options, overlap_backend="exactextract")
+        np.testing.assert_allclose(exactextract_result.data, shapely_result.data, rtol=5e-7, atol=5e-7)
+
+    def test_rasterize__error_fractional_options(self) -> None:
+        """Checks that fractional rasterization rejects burn semantics and an empty set of feature layers."""
+
+        # A grouping column only has meaning when rasterization creates fractional layers
+        with pytest.raises(ValueError, match="fractional_by requires fractional=True"):
+            self.vector.rasterize(res=1, fractional_by="value")
+
+        # Fractional coverage cannot also define overwrite values because each feature owns its own layer
+        with pytest.raises(ValueError, match="in_value cannot be combined"):
+            self.vector.rasterize(res=1, fractional=True, in_value=2)
+
+        # An empty vector has no feature layers, while its union remains one valid zero-coverage layer
+        empty = gu.Vector(gpd.GeoDataFrame(geometry=[], crs=4326))
+        with pytest.raises(ValueError, match="at least one input feature"):
+            empty.rasterize(res=1, bounds=(0, 0, 2, 2), fractional=True)
+        union = empty.rasterize(res=1, bounds=(0, 0, 2, 2), fractional="union")
+        np.testing.assert_array_equal(union.data, np.zeros((2, 2), dtype=np.float32))
+
     def test_rasterize__nodata_background(self) -> None:
         """Checks that rasterize() works properly with a NaN background."""
 

@@ -1063,7 +1063,9 @@ class Variogram:
         """
 
         # Import Matplotlib only when the caller requests a plot
-        pyplot = import_optional("matplotlib.pyplot", package_name="matplotlib")
+        import_optional("matplotlib", package_name="matplotlib")
+        import matplotlib.pyplot as pyplot
+
         if ax is None:
             _, ax = pyplot.subplots()
 
@@ -1397,18 +1399,20 @@ def _model_to_gpytorch(
         raise AssertionError("A base variogram model must define its partial sill.")
 
     if model.model_name == "gaussian":
-        base_kernel = gpytorch.kernels.RBFKernel(active_dims=resolved_active_dims)
+        base_kernel = gpytorch.kernels.RBFKernel(active_dims=resolved_active_dims).double()
     elif model.model_name == "exponential":
-        base_kernel = gpytorch.kernels.MaternKernel(nu=0.5, active_dims=resolved_active_dims)
+        base_kernel = gpytorch.kernels.MaternKernel(nu=0.5, active_dims=resolved_active_dims).double()
     elif model.model_name == "matern":
-        base_kernel = gpytorch.kernels.MaternKernel(nu=model.smoothness, active_dims=resolved_active_dims)
+        base_kernel = gpytorch.kernels.MaternKernel(nu=model.smoothness, active_dims=resolved_active_dims).double()
     else:
         raise NotImplementedError(f"Variogram model {model.model_name!r} has no exact GPyTorch adapter.")
 
     # Apply the model variance around GPyTorch's base correlation kernel
-    kernel = gpytorch.kernels.ScaleKernel(base_kernel)
-    kernel.base_kernel.lengthscale = parameters["lengthscale"]
-    kernel.outputscale = float(model.partial_sill)
+    kernel = gpytorch.kernels.ScaleKernel(base_kernel).double()
+    lengthscale = kernel.base_kernel.raw_lengthscale.new_tensor(parameters["lengthscale"])
+    outputscale = kernel.raw_outputscale.new_tensor(float(model.partial_sill))
+    kernel.base_kernel.lengthscale = lengthscale
+    kernel.outputscale = outputscale
     return kernel, model.nugget
 
 

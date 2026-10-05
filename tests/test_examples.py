@@ -3,7 +3,11 @@ Test the example files used for testing and documentation
 """
 
 import hashlib
+import io
+import tarfile
 import warnings
+from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -24,6 +28,55 @@ def test_read_paths_vector(example: str) -> None:
     warnings.simplefilter("error")
     assert isinstance(gu.Vector(examples.get_path(example)), gu.Vector)
     assert isinstance(gu.Vector(examples.get_path_test(example)), gu.Vector)
+
+
+class TestDownloadExamples:
+    """Test module for downloading the example archive and reporting download failures."""
+
+    def test_download_examples(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Checks downloading (without network access, using some monkeypatching)."""
+
+        # We build an archive with the same example directories
+        directory_names = ("Everest_Landsat", "Exploradores_ASTER", "Coromandel_Lidar")
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode="w:gz") as tar:
+            for name in directory_names:
+                content = name.encode()
+                member = tarfile.TarInfo(f"geoutils-data-test/data/{name}/example.txt")
+                member.size = len(content)
+                tar.addfile(member, io.BytesIO(content))
+
+        # The, we mock the download and installation
+        response = Mock()
+        response.getcode.return_value = 200
+        response.read.return_value = archive.getvalue()
+        urlopen = Mock(return_value=response)
+        destination = tmp_path / "examples"
+        destination.mkdir()
+        monkeypatch.setattr(examples.urllib.request, "urlopen", urlopen)
+        monkeypatch.setattr(examples, "_EXAMPLES_DIRECTORY", destination)
+
+        # Check the download of every directory
+        examples.download_examples(overwrite=True)
+        for name in directory_names:
+            assert (destination / name / "example.txt").read_bytes() == name.encode()
+        urlopen.assert_called_once()
+
+    def test_download_examples__error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Checks an error is raised when the download of the examples fail."""
+
+        # We mock a failed HTTP response
+        response = Mock(status_code=503)
+        response.getcode.return_value = 503
+        monkeypatch.setattr(examples.urllib.request, "urlopen", Mock(return_value=response))
+        destination = tmp_path / "examples"
+        destination.mkdir()
+        monkeypatch.setattr(examples, "_EXAMPLES_DIRECTORY", destination)
+
+        # We check the error is properly raised
+        with pytest.raises(ValueError, match="non-200 response: 503"):
+            examples.download_examples(overwrite=True)
+        assert list(destination.iterdir()) == []
 
 
 # Original sha256 obtained with `sha256sum filename`

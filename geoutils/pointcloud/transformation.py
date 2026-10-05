@@ -38,10 +38,10 @@ from geoutils.pointcloud.las import (
     _as_geodataframe,
     _build_laspy_header,
     _is_laspy_supported,
-    _load_laspy_data_slice,
     _load_laspy_metadata,
     _point_partition_size,
 )
+from geoutils.pointcloud.loading import _read_point_file_rows
 from geoutils.pointcloud.writing import (
     _check_gpkg_attributes,
     _resolve_pointcloud_output,
@@ -156,10 +156,7 @@ def _reproject_pointcloud_partition(
 
     # Read independent row ranges so unloaded sources stay outside the parent process
     if isinstance(source, pathlib.Path):
-        if _is_laspy_supported(source):
-            dataframe = _load_laspy_data_slice(source, columns=columns, start=start, count=count)
-        else:
-            dataframe = pyogrio.read_dataframe(source, skip_features=start, max_features=count)
+        dataframe = _read_point_file_rows(source, columns, start, count)
     else:
         dataframe = source
     projected = dataframe.to_crs(crs)
@@ -395,10 +392,7 @@ def _clip_pointcloud_partition(
 
     # Read independent row ranges so unloaded LAS, LAZ and GeoPackage sources stay outside the parent process
     if isinstance(source, pathlib.Path):
-        if _is_laspy_supported(source):
-            dataframe = _load_laspy_data_slice(source, columns=columns, start=start, count=count)
-        else:
-            dataframe = pyogrio.read_dataframe(source, skip_features=start, max_features=count)
+        dataframe = _read_point_file_rows(source, columns, start, count)
         dataframe = _apply_crop_filters(dataframe, crop_filters)
     else:
         dataframe = source

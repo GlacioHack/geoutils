@@ -3,6 +3,7 @@
 from typing import Any
 
 import pytest
+from affine import Affine
 from rasterio.crs import CRS
 from rasterio.transform import from_origin
 
@@ -84,6 +85,23 @@ class TestChunkedGeoGrid:
         assert actual == expected
         assert all(block.res == grid.res and block.crs == grid.crs for block in blocks)
         assert chunked.flat_block_index((1, 2)) == 5
+
+    def test_chunked_geogrid__rotated_block_transforms(self) -> None:
+        """Checks that each block origin follows both axes of a rotated raster grid."""
+
+        # Uneven final chunks expose the pixel offsets of the right and bottom blocks
+        transform = Affine.translation(500_000, 5_100_000) * Affine.rotation(17) * Affine.scale(100, -150)
+        grid = GeoGrid(transform=transform, shape=(5, 7), crs=CRS.from_epsg(32633))
+        chunked = ChunkedGeoGrid(grid, chunks=((2, 3), (3, 3, 1)))
+        blocks = chunked.get_blocks_as_geogrids()
+
+        # Translate in pixel coordinates so rotation changes both X and Y at each block origin
+        locations = chunked.get_block_locations()
+        for block, location in zip(blocks, locations):
+            expected_transform = transform * Affine.translation(location["xs"], location["ys"])
+            expected_shape = (location["ye"] - location["ys"], location["xe"] - location["xs"])
+            assert block.transform == expected_transform
+            assert block.shape == expected_shape
 
 
 class TestChunkedErrors:

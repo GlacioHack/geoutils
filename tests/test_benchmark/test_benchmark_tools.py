@@ -89,17 +89,18 @@ class TestComparisonReport:
     def test_benchmark_registry__generated_class_names_stable(self) -> None:
         """Checks that generated ASV identifiers keep function fields separate from their varying input."""
 
-        # Hash the sorted names to keep the exact 118-class identifier check compact and order independent
+        # Hash the sorted names to keep the identifier check compact and order independent
         class_names = sorted(
             benchmark.benchmark_class(case)
             for benchmark in BENCHMARKS
             if benchmark.parameter_name is not None
+            if benchmark.id != "reproject-operator-raster-size"
             for case in benchmark.cases
         )
         digest = hashlib.sha256("\n".join(class_names).encode()).hexdigest()
 
         # A changed name would split ASV history even when the underlying operation remained the same
-        assert digest == "608dbbf7be17dbd67d5b42e9953d1568e12281d06bd9bd3cf64959ba7517ba38"
+        assert digest == "59a8c569f0e73984bb091916084cd31adad590aa3b77ffce3801ad154239e320"
 
     def test_operation_discovery__deterministic_modules(self) -> None:
         """Checks that operation discovery returns the same modules in their stable report order."""
@@ -312,6 +313,70 @@ def test_grouped_reference__matches_geoutils() -> None:
 
 class TestGdalCommands:
     """Test module for building GDAL commands used by external benchmark comparisons."""
+
+    @pytest.mark.parametrize(
+        "method",
+        [
+            "nearest",
+            "bilinear",
+            "cubic",
+            "cubic_spline",
+            "lanczos",
+            "average",
+            "sum",
+            "min",
+            "max",
+            "rms",
+            "mode",
+            "med",
+            "q1",
+            "q3",
+        ],
+    )
+    def test_reproject__operator_reference_uses_matching_gdal_method(
+        self, method: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Checks that every operator benchmark selects the corresponding GDAL warp method."""
+
+        # Resolve the registered operator and its GDAL reference on the same benchmark grid
+        monkeypatch.setattr("benchmarks.comparisons.gdal._require_command", lambda name: name)
+        benchmark = BENCHMARK_BY_ID["reproject-operator-raster-size"]
+        operator_case = next(case for case in benchmark.cases if case.method == method and case.engine == "operator")
+        reference_case = next(
+            case for case in benchmark.cases if case.method == method and case.implementation == "gdal"
+        )
+        config = benchmark.make_config(128, operator_case)
+        config.directory = str(tmp_path)
+
+        # The source size, target size, and GDAL -r choice must describe one comparable calculation
+        options = benchmark.operation.option_builder(operator_case, config)
+        command = build_gdal_command(
+            "reproject",
+            reference_case,
+            config,
+            raster_file="source-raster.tif",
+            vector_file="source-vector.gpkg",
+            point_file="source-points.gpkg",
+        ).command
+        assert type(options["resampling"]).__name__ in {
+            "Nearest",
+            "Linear",
+            "RasterConvolution",
+            "Mean",
+            "Sum",
+            "Minimum",
+            "Maximum",
+            "RootMeanSquare",
+            "Mode",
+            "Median",
+            "Quantile",
+        }
+        expected_method = {"nearest": "near", "cubic_spline": "cubicspline"}.get(method, method)
+        assert command[command.index("-r") + 1] == expected_method
+        assert options["grid_size"] == (128, 128)
+        assert format_api_label(benchmark.operation, operator_case).endswith(
+            f"resampling={operator_case.labels['api_resampling']})"
+        )
 
     @pytest.mark.parametrize("operation", COMPARISON_OPERATIONS)
     def test_comparison_command__essential_arguments(

@@ -469,7 +469,6 @@ class TestMultiRaster:
             if k != 0:
                 assert np.count_nonzero(~rst.data.mask) == 0
 
-    @pytest.mark.skip(reason="to check when merge will be change")
     @pytest.mark.parametrize(
         "rasters",
         [
@@ -477,13 +476,18 @@ class TestMultiRaster:
             lazy_fixtures("images_3d"),
             lazy_fixtures("images_different_crs"),
         ],
-    )  # type: ignore
-    def test_merge_rasters_with_function_not_working(self, rasters: Any) -> None:  # type: ignore
-        # For merge algo: function not supporting the axis keyword argument but raising the right "axis" type error
-        def custom_func(x: NDArrayNum) -> NDArrayNum:
-            return np.logical_and(*x)
+    )
+    def test_merge_rasters__function_without_axis(self, rasters: Any) -> None:  # type: ignore
+        """Checks that a reducer without an axis argument merges every input band."""
 
-        gu.raster.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=custom_func)
+        # Reduce all bands without accepting an axis argument
+        def custom_func(x: NDArrayNum) -> NDArrayNum:
+            return np.logical_and.reduce(x)
+
+        # Compare the fallback with the same reduction through NumPy's axis argument
+        merged = gu.raster.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=custom_func)
+        expected = gu.raster.merge_rasters([rasters.img1, rasters.img2], merge_algorithm=np.logical_and.reduce)
+        assert merged.raster_equal(expected)
 
     @pytest.mark.parametrize(
         "rasters",

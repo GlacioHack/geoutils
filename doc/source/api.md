@@ -120,8 +120,11 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
     ~raster.base.RasterBase.reproject
     ~raster.base.RasterBase.polygonize
     ~raster.base.RasterBase.proximity
-    ~raster.base.RasterBase.interp_points
-    ~raster.base.RasterBase.reduce_points
+    ~raster.base.RasterBase.interp_at_points
+    ~raster.base.RasterBase.resample_at_points
+    ~raster.base.RasterBase.reduce_at_points
+    ~raster.base.RasterBase.krige
+    ~raster.base.RasterBase.random_field
     ~raster.base.RasterBase.filter
 ```
 
@@ -578,6 +581,15 @@ documentation](https://shapely.readthedocs.io/en/stable/properties.html).
     PointCloud.translate
 ```
 
+### Filtering
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloud.filter
+```
+
 ### Interface with raster
 
 ```{eval-rst}
@@ -585,6 +597,8 @@ documentation](https://shapely.readthedocs.io/en/stable/properties.html).
     :toctree: gen_modules/
 
     PointCloud.grid
+    PointCloud.krige
+    PointCloud.random_field
 ```
 
 ### Statistics
@@ -605,6 +619,26 @@ documentation](https://shapely.readthedocs.io/en/stable/properties.html).
 
     PointCloud.pointcloud_equal
     PointCloud.georeferenced_coords_equal
+```
+
+## Numerical operators and uncertainty
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    operators.Interpolator
+    operators.Reducer
+    operators.LocalData
+    operators.LinearCoefficients
+    operators.PointNeighbours
+    operators.GridNeighbours
+    operators.interpolator.Kriging
+    ErrorMagnitude
+    ErrorComponent
+    ErrorStructure
+    PropagationSummary
+    uncertainty.random_field
 ```
 
 ## Multiprocessing configuration

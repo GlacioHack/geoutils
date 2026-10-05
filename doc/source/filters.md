@@ -13,7 +13,7 @@ kernelspec:
 (filters)=
 
 # Filters
-GeoUtils provides several filters to process raster data. They can be applied to {class}`~geoutils.Raster` objects.
+GeoUtils provides filters for {class}`~geoutils.Raster` and {class}`~geoutils.PointCloud` data.
 
 ## Available filters
 The following filters are currently available in GeoUtils:

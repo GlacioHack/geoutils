@@ -27,6 +27,7 @@ from geoutils._dispatch import (
     _is_pointcloud,
     _is_raster,
     is_dask_array,
+    is_dask_dataframe,
 )
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike
@@ -54,7 +55,7 @@ from geoutils.sampling.support import (
 )
 
 if TYPE_CHECKING:
-    from geoutils.interface.interpolation import InterpolationMethod
+    from geoutils.interface.resampling import InterpolationMethod
     from geoutils.multiproc.mparray import MultiprocConfig
     from geoutils.pointcloud.base import PointCloudBase
     from geoutils.pointcloud.pointcloud import PointCloudLike
@@ -68,6 +69,25 @@ class _SelectionCounts:
 
     valid_before_mask: Any
     selected_locations: Any
+
+
+def _coordinates_at_support(
+    support: RasterBase | PointCloudBase | None,
+) -> NDArray[Any] | None:
+    """Return one coordinate per value in an eager raster or point cloud."""
+
+    if support is None:
+        return None
+    if _is_raster(support):
+        raster = cast("RasterBase", support)
+        x, y = raster.coords(grid=True, force_offset="center")
+        return np.column_stack((np.asarray(x).reshape(-1), np.asarray(y).reshape(-1)))
+
+    pointcloud = cast("PointCloudBase", support)
+    dataframe = pointcloud.ds
+    if is_dask_dataframe(dataframe):
+        raise ValueError("Statistics uncertainty propagation currently requires eager point coordinates.")
+    return np.column_stack((dataframe.geometry.x.to_numpy(), dataframe.geometry.y.to_numpy()))
 
 
 ########################################

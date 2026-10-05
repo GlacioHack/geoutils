@@ -773,3 +773,115 @@ class TestPairSampleErrors:
         # Report the mask problem before choosing any pair endpoints
         with pytest.raises(ValueError, match=error):
             points.pairsample(n_pairs=10, mask=mask, random_state=9)
+
+    @pytest.mark.parametrize(
+        "options, error_type, message",
+        [
+            ({"index_dtype": float}, TypeError, "index_dtype.*distance_dtype"),
+            ({"distance_dtype": int}, TypeError, "index_dtype.*distance_dtype"),
+            ({"index_dtype": np.int8}, ValueError, "cannot represent every cell"),
+            ({"min_distance": 0}, ValueError, "Require 0 <"),
+            ({"sampling": "unknown"}, ValueError, "sampling.*loglag.*random_xy"),
+        ],
+    )
+    def test_pairsample__error_raster_invalid_sampling_options(
+        self, raster: gu.Raster, options: dict[str, Any], error_type: type[Exception], message: str
+    ) -> None:
+        """Checks errors are raised for unsupported raster pair types, distances, or sampling method."""
+
+        # We use a raster with 900 cells, so uint8 indexes cannot identify every cell and raise an error
+        with pytest.raises(error_type, match=message):
+            raster.pairsample(n_pairs=10, **options)
+
+    @pytest.mark.parametrize(
+        "options, error_type, message",
+        [
+            ({"index_dtype": float}, TypeError, "index_dtype.*distance_dtype"),
+            ({"distance_dtype": int}, TypeError, "index_dtype.*distance_dtype"),
+            ({"index_dtype": np.int8}, ValueError, "cannot represent every point"),
+            ({"min_distance": 0}, ValueError, "Require 0 <"),
+            ({"n_pairs": 0}, ValueError, "n_pairs.*max_rounds"),
+            ({"max_rounds": 0}, ValueError, "n_pairs.*max_rounds"),
+            ({"sampling": "unknown"}, ValueError, "sampling.*loglag.*random_xy"),
+        ],
+    )
+    def test_pairsample__error_point_invalid_sampling_options(
+        self, options: dict[str, Any], error_type: type[Exception], message: str
+    ) -> None:
+        """Checks an error is raised for unsupported point pair types, distances, counts, or sampling method."""
+
+        # We use a point cloud with 144 rows, so uint8 indexes cannot identify every row and raise an error
+        x = np.arange(144, dtype=float)
+        points = gu.PointCloud.from_xyz(x, np.zeros_like(x), x, crs=32633)
+        arguments: dict[str, Any] = {"n_pairs": 10} | options
+        with pytest.raises(error_type, match=message):
+            points.pairsample(**arguments)
+
+    @pytest.mark.parametrize(
+        "mask_change, message",
+        [("crs", "does not share the support CRS"), ("order", "does not share the ordered support coordinates")],
+    )
+    def test_pairsample__error_dask_point_mask_support(self, mask_change: str, message: str) -> None:
+        """Checks an error is raised when a Dask point mask has a different CRS or row order."""
+
+        # We create lazy source and boolean mask with different partition sizes
+        dask = pytest.importorskip("dask")
+
+        dgpd = pytest.importorskip("dask_geopandas")
+        from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
+
+        _register_dask_pointcloud_accessor()
+        y, x = np.mgrid[:4, :4]
+        points = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), np.arange(16), crs=32633)
+        source = dgpd.from_geopandas(points.ds, npartitions=2, sort=False)
+
+        # We reverse the mask, or change the CRS
+        order = slice(None, None, -1) if mask_change == "order" else slice(None)
+        mask_crs = 4326 if mask_change == "crs" else points.crs
+        mask_points = gu.PointCloud.from_xyz(
+            x.ravel()[order], y.ravel()[order], np.ones(16, dtype=bool), crs=mask_crs, data_column="include"
+        )
+        mask = dgpd.from_geopandas(mask_points.ds, npartitions=3, sort=False)
+
+        # We check an error is raised
+        with dask.config.set(scheduler="synchronous"):
+            with pytest.raises(ValueError, match=message):
+                source.pc.pairsample(n_pairs=5, mask=mask, random_state=9)
+        assert not source.pc.is_loaded
+        assert not mask.pc.is_loaded
+
+    @pytest.mark.parametrize(
+        "mask_change, message",
+        [("crs", "does not share the support CRS"), ("order", "does not share the ordered support coordinates")],
+    )
+    def test_pairsample__error_multiproc_point_mask_support(
+        self, mask_change: str, message: str, tmp_path: Path
+    ) -> None:
+        """Checks an error is raised when a file-backed point mask has different coordinates or a different CRS."""
+
+        # We write point values and a boolean mask as separate files for partitioned reads
+        y, x = np.mgrid[:4, :4]
+        coordinates_x = x.ravel()
+        coordinates_y = y.ravel()
+        points = gu.PointCloud.from_xyz(coordinates_x, coordinates_y, np.arange(16), crs=32633, data_column="height")
+        source_path = tmp_path / "source.gpkg"
+        points.to_file(source_path)
+        source = gu.PointCloud(source_path, data_column="height")
+
+        # We change the mask CRS or reverse its row order
+        order = slice(None, None, -1) if mask_change == "order" else slice(None)
+        mask_crs = 4326 if mask_change == "crs" else points.crs
+        point_mask = gu.PointCloud.from_xyz(
+            coordinates_x[order], coordinates_y[order], np.ones(16, dtype=bool), crs=mask_crs, data_column="include"
+        )
+        mask_path = tmp_path / "mask.gpkg"
+        point_mask.to_file(mask_path)
+        file_mask = gu.PointCloud(mask_path, data_column="include")
+
+        # We check we raise an error
+        with ClusterGenerator("multi", nb_workers=2) as cluster:
+            config = MultiprocConfig(chunks=7, cluster=cluster)
+            with pytest.raises(ValueError, match=message):
+                source.pairsample(n_pairs=5, mask=file_mask, mp_config=config, random_state=9)
+        assert not source.is_loaded
+        assert not file_mask.is_loaded

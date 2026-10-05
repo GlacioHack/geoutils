@@ -12,7 +12,7 @@ import pytest
 import geoutils as gu
 
 # Add geoviewer path temporarily
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "bin/geoviewer.py")))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "bin")))
 import geoviewer  # noqa
 
 

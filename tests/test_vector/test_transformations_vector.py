@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 import geopandas as gpd
@@ -258,3 +259,32 @@ class TestTransformationChunked:
         assert_geodataframe_equal(computed_multiproc, expected, check_dtype=False)
         assert not multiproc.is_loaded
         assert not lazy.vct.is_loaded and not lazy_result.vct.is_loaded
+
+
+class TestTransformationErrors:
+    """Test module for errors/warnings raised during vector transformations."""
+
+    @pytest.mark.parametrize(
+        ("chunks", "driver", "suffix", "message"),
+        [
+            ((2, 2), None, ".gpkg", "integer chunk size"),
+            (2, "GTiff", ".gpkg", "only the 'GPKG' output driver"),
+            (2, None, ".geojson", "driver.*outfile"),
+        ],
+    )
+    def test_clip__error_multiproc_options(
+        self, chunks: int | tuple[int, int], driver: str | None, suffix: str, message: str, tmp_path: Path
+    ) -> None:
+        """Checks an error is raised before clipping for invalid options."""
+
+        # We create an in-memory polygon, with an invalid option
+        source = gpd.GeoDataFrame({"name": ["inside"]}, geometry=[box(0, 0, 2, 2)], crs=32610)
+        vector = gu.Vector(source)
+        outfile = tmp_path / f"clipped{suffix}"
+        config = MultiprocConfig(chunks=chunks, outfile=str(outfile), driver=driver)
+
+        # Check error is raised without changing source
+        with pytest.raises(ValueError, match=message):
+            vector.clip(box(0, 0, 1, 1), mp_config=config)
+        assert not outfile.exists()
+        assert_geodataframe_equal(vector.ds, source)

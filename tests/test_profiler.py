@@ -17,6 +17,7 @@ from geoutils import examples
 from geoutils.profiler import ProfileMetrics, Profiler, profile, profile_call
 
 
+@pytest.mark.filterwarnings("ignore:get_stats\\(\\) is deprecated:DeprecationWarning")
 class TestProfiling:
     """Check lightweight call metrics and the configurable GeoUtils profiling interface."""
 

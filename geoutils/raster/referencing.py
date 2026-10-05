@@ -134,6 +134,21 @@ def _coords(
 ) -> tuple[NDArrayNum, NDArrayNum]:
     """See description of Raster.coords."""
 
+    # Rotated pixels need both row and column to locate each coordinate
+    if transform.b != 0 or transform.d != 0:
+        if not grid:
+            raise ValueError("Rotated rasters require grid=True for pixel coordinates.")
+        rows, columns = np.indices(shape)
+        xx, yy = _ij2xy(
+            i=rows.ravel(),
+            j=columns.ravel(),
+            transform=transform,
+            area_or_point=area_or_point,
+            shift_area_or_point=shift_area_or_point,
+            force_offset=force_offset,
+        )
+        return np.asarray(xx).reshape(shape), np.asarray(yy).reshape(shape)
+
     # The coordinates are extracted from indexes 0 to shape
     _, yy = _ij2xy(
         i=np.arange(shape[0] - 1, -1, -1),

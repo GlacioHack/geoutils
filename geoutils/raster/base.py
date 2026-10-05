@@ -57,21 +57,26 @@ from geoutils._typing import (
     NDArrayNum,
     Number,
 )
-from geoutils.filters import _filter, _sieve
+from geoutils.filters.regular import _filter, _sieve
 from geoutils.gapfill import _fill_nodata
-from geoutils.interface._nodata import NodataPropagation
 from geoutils.interface.distance import _proximity_from_vector_or_raster
-from geoutils.interface.interpolation import (
-    InterpolationMethod,
-    _interp_points,
-    _reduce_points,
-)
 from geoutils.interface.raster_point import (
     _raster_to_pointcloud,
     _regular_pointcloud_to_raster,
 )
+from geoutils.interface.resampling import (
+    InterpolationMethod,
+    InterpolationMethodLike,
+    _resample_at_points,
+)
 from geoutils.interface.vectorization import _polygonize
 from geoutils.multiproc import MultiprocConfig
+from geoutils.operators.interpolator import Interpolator, Kriging, KrigingBackend
+from geoutils.operators.neighbours import GridCoverage, _build_kriging_grid_neighbours
+from geoutils.operators.nodata import NodataChoice, NodataPropagation
+from geoutils.operators.overlap import OverlapBackend, RasterOverlapBackend
+from geoutils.operators.reducer import Reducer
+from geoutils.operators.weighting import _with_error_structure
 from geoutils.projtools import (
     _get_bounds_projected,
     _get_footprint_projected,
@@ -88,7 +93,7 @@ from geoutils.raster.referencing import (
     _xy2ij,
 )
 from geoutils.raster.testing import _array_equal_or_close
-from geoutils.raster.transformation import _clip, _crop, _reproject, _translate
+from geoutils.raster.transformation import _clip, _crop, _reproject, _resolve_reprojection_operator, _translate
 from geoutils.sampling.subsampling import _subsample, _subsample_raster
 from geoutils.stats.stats import stats as _stats
 from geoutils.stats.stats import variogram as _variogram
@@ -105,7 +110,8 @@ if TYPE_CHECKING:
     from geoutils.interface.gridding import GriddingMethod
     from geoutils.pointcloud.pointcloud import PointCloud, PointCloudLike
     from geoutils.raster.raster import Raster
-    from geoutils.stats.variography import Variogram
+    from geoutils.stats.variography import Variogram, VariogramModel
+    from geoutils.uncertainty import ErrorStructure
     from geoutils.vector.base import VectorLike
     from geoutils.vector.vector import Vector, VectorType
 
@@ -374,7 +380,10 @@ class RasterBase(ABC):
             raise ValueError("Type of nodata not understood, must be float or int.")
 
         if new_nodata is not None:
-            if not rio.dtypes.can_cast_dtype(new_nodata, self.dtype):
+            # Rasterio may probe an invalid cast before rejecting incompatible nodata
+            with np.errstate(invalid="ignore", over="ignore"):
+                compatible = rio.dtypes.can_cast_dtype(new_nodata, self.dtype)
+            if not compatible:
                 raise ValueError(f"Nodata value {new_nodata} incompatible with self.dtype {self.dtype}.")
 
         if self._is_xr:
@@ -903,7 +912,7 @@ class RasterBase(ABC):
 
     def stats(
         self,
-        statistics: str | Callable[[Any], Any] | Iterable[str | Callable[[Any], Any]] | None = None,
+        statistics: str | Callable[[Any], Any] | Reducer | Iterable[str | Callable[[Any], Any] | Reducer] | None = None,
         *,
         by: Mapping[str, Any] | None = None,
         values: int | Iterable[int] | Mapping[str, Any] | None = None,
@@ -923,6 +932,10 @@ class RasterBase(ABC):
         observed: bool = True,
         return_masks: bool = False,
         mp_config: MultiprocConfig | None = None,
+        fractional: bool = False,
+        overlap_backend: OverlapBackend = "auto",
+        error_structure: ErrorStructure | None = None,
+        uncertainty_kwargs: Mapping[str, Any] | None = None,
     ) -> Any:
         """Calculate summary statistics or statistics grouped by categories, bins, or vector zones.
 
@@ -986,6 +999,12 @@ class RasterBase(ABC):
             Masks cover complete groups before subsampling. Requires by.
         :param mp_config: Worker and tile settings for multiprocessing, e.g. MultiprocConfig(chunks=512).
             Cannot be combined with Dask inputs.
+        :param fractional: Use the exact area covered by each polygon for one vector grouping. Overlapping groups are
+            calculated independently, and Reducers such as Mean() and Sum() receive the covered cell fractions.
+        :param overlap_backend: Library used to calculate polygon coverage of raster cells. Auto uses ExactExtract when
+            it is installed and the grid is compatible, and otherwise uses Shapely.
+        :param error_structure: Optional source error model for one supplied Reducer.
+        :param uncertainty_kwargs: Options passed to geoutils.uncertainty.propagate().
         :returns: A statistic, summary dictionary, grouped dataframe, or grouped dataframe and mask mapping.
         """
 
@@ -1010,6 +1029,10 @@ class RasterBase(ABC):
             observed=observed,
             return_masks=return_masks,
             mp_config=mp_config,
+            fractional=fractional,
+            overlap_backend=overlap_backend,
+            error_structure=error_structure,
+            uncertainty_kwargs=uncertainty_kwargs,
         )
 
     @profiler.profile("geoutils.raster.base.get_stats", memprof=True)
@@ -1532,13 +1555,20 @@ class RasterBase(ABC):
         bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
         nodata: int | float | None = None,
         dtype: DTypeLike | None = None,
-        resampling: Resampling | str = None,
+        resampling: Resampling | str | Interpolator | Reducer = None,
         force_source_nodata: int | float | None = None,
         silent: bool = False,
         inplace: bool = False,
         n_threads: int = 0,
         memory_limit: int = 64,
         mp_config: MultiprocConfig | None = None,
+        nodata_propagation: NodataPropagation | None = None,
+        overlap_backend: RasterOverlapBackend = "auto",
+        error_structure: ErrorStructure | None = None,
+        window: int | None = None,
+        window_shape: Literal["square", "circular"] | None = None,
+        coverage: GridCoverage | None = None,
+        area_weighting: Literal["diagonal_bounds", "intersection"] = "diagonal_bounds",
     ) -> RasterType | None:
         """
         Reproject raster to a different geotransform (resolution, bounds) and/or coordinate reference system (CRS).
@@ -1564,7 +1594,10 @@ class RasterBase(ABC):
         :param nodata: Destination nodata value. If set to ``None``, will use the same as source. If source does
             not exist, will use GDAL's default.
         :param dtype: Destination data type of array.
-        :param resampling: A Rasterio resampling method, can be passed as a string. Defaults to bilinear.
+        :param resampling: A Rasterio resampling method or a custom Interpolator or Reducer. Existing methods can be
+            passed as strings and continue to use Rasterio. By default, a Reducer weights source cells by their
+            covered area. With GridNeighbours, it uses a fixed window around the transformed destination center.
+            Defaults to bilinear.
             Can be configured with the global setting geoutils.config["reprojection_method"].
             See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
             for the full list.
@@ -1574,6 +1607,24 @@ class RasterBase(ABC):
         :param n_threads: Number of threads. Defaults to (os.cpu_count() - 1).
         :param memory_limit: Memory limit in MB for warp operations. Larger values may perform better.
         :param mp_config: Configuration object containing chunk size, output file path, and an optional cluster.
+        :param nodata_propagation: How invalid source values affect a custom Interpolator or Reducer. By default,
+            an Interpolator excludes invalid neighbors and masks a destination whose nearest source cell is invalid;
+            a Reducer excludes invalid source cells and returns nodata if none are valid. ``ignore`` excludes invalid
+            values without the nearest-cell mask; ``propagate`` returns nodata if any contributing value is invalid.
+            ``nearest`` explicitly requests the default Interpolator rule.
+        :param overlap_backend: Method used to calculate a Reducer's cell overlap. ``auto`` uses Numba for small
+            unaligned grids when installed, then ExactExtract when installed, or Shapely. ``numba``, ``exactextract``
+            and ``shapely`` select one explicitly. Aligned grids use direct overlap lengths.
+        :param error_structure: Optional observation error model used for weighting and fitting.
+            Use geoutils.uncertainty.propagate() to calculate output uncertainty.
+        :param window: Odd source window size for a Reducer, overriding its configured neighborhood.
+        :param window_shape: Square or circular source window for a Reducer.
+        :param coverage: Select cells by center, include all touched cells, or weight by covered area. Without a fixed
+            neighborhood, the default is ``fractional``.
+        :param area_weighting: For fractional reductions, ``diagonal_bounds`` weights the rectangle between two
+            transformed diagonal corners. At the source boundary, its outer row or column also receives weight for
+            the area extending beyond the raster. ``intersection`` weights only the overlap of each source cell with
+            the transformed four-corner destination polygon. Sums use the polygon in either mode.
 
         :returns: Reprojected raster.
         """
@@ -1581,9 +1632,11 @@ class RasterBase(ABC):
         # If resampling method undefined, default to the global system config
         if resampling is None:
             resampling = config["reprojection_method"]
+        if error_structure is not None:
+            resampling = _with_error_structure(_resolve_reprojection_operator(resampling), error_structure)
 
         # Reproject
-        return_copy, data, transformed, crs, nodata = _reproject(
+        reprojected = _reproject(
             source_raster=self,
             ref=ref,
             crs=crs,
@@ -1598,7 +1651,14 @@ class RasterBase(ABC):
             n_threads=n_threads,
             memory_limit=memory_limit,
             mp_config=mp_config,
+            nodata_propagation=nodata_propagation,
+            overlap_backend=overlap_backend,
+            window=window,
+            window_shape=window_shape,
+            coverage=coverage,
+            area_weighting=area_weighting,
         )
+        return_copy, data, transformed, crs, nodata = reprojected
 
         # If return copy is True (target georeferenced grid was the same as input)
         if return_copy:
@@ -1648,8 +1708,104 @@ class RasterBase(ABC):
         # Not in-place
         if data is None or transformed is None or crs is None:
             raise RuntimeError("Reprojection did not return the expected in-memory output.")
-        return self.from_array(
+        nominal_output = self.from_array(
             data=data, transform=transformed, crs=crs, nodata=nodata, area_or_point=self.area_or_point, tags=self.tags
+        )
+        return nominal_output
+
+    def krige(
+        self: RasterType,
+        variogram: Variogram | VariogramModel,
+        ref: RasterLike | None = None,
+        *,
+        backend: KrigingBackend = "gstools",
+        max_overlap: float | None = None,
+        exact: bool = True,
+        pseudo_inverse: bool = True,
+        mp_config: MultiprocConfig | None = None,
+        error_structure: ErrorStructure | None = None,
+    ) -> RasterType:
+        """Interpolate raster values by ordinary kriging on this grid or a reference grid.
+
+        The longest fitted variogram range defines how far GeoUtils searches for source cells. ``max_overlap`` can
+        limit that distance and the extra source data read around chunk edges. Repeated raster neighborhoods reuse
+        previously solved weights, while edges and missing-data patterns get weights for their exact source cells.
+
+        :param variogram: Fitted GeoUtils variogram used to calculate covariance.
+        :param ref: Optional destination raster grid. By default, interpolate on this raster's own grid.
+        :param backend: Library used to solve the kriging system, ``"gstools"`` or ``"gpytorch"``.
+        :param max_overlap: Optional physical-distance cap on the modeled decorrelation range.
+        :param exact: Return a source value exactly when a target has the same coordinates.
+        :param pseudo_inverse: Let GSTools use a pseudo inverse when source coordinates repeat or are redundant.
+        :param mp_config: Optional multiprocessing output configuration.
+        :param error_structure: Optional observation errors added to the covariance used for the kriging fit.
+        :returns: Kriged raster. Use geoutils.uncertainty.propagate() to calculate output uncertainty.
+        """
+
+        # Find the raster cell offsets within the covariance range before splitting the work into chunks
+        operator = Kriging(
+            variogram,
+            backend=backend,
+            max_overlap=max_overlap,
+            exact=exact,
+            pseudo_inverse=pseudo_inverse,
+        )
+        target = self if ref is None else ref
+        operator.default_neighborhood = _build_kriging_grid_neighbours(
+            operator,
+            self.transform,
+            aligned_targets=target.transform == self.transform,
+        )
+        result = self.reproject(
+            ref=target,
+            dtype=np.float64,
+            resampling=operator,
+            mp_config=mp_config,
+            nodata_propagation="ignore",
+            error_structure=error_structure,
+        )
+        if result is None:
+            raise AssertionError("Kriging reprojection must return a new raster.")
+        return result
+
+    def random_field(
+        self: RasterType,
+        error_structure: ErrorStructure,
+        *,
+        predictors: Mapping[str, Any] | None = None,
+        n_fields: int = 1,
+        random_state: int | np.random.Generator | None = None,
+        chunksizes: tuple[int, int] | None = None,
+        mp_config: MultiprocConfig | None = None,
+        backend: Literal["gstools", "gpytorch"] = "gpytorch",
+        gpytorch_inducing_points: int | Literal["auto"] | None = "auto",
+    ) -> RasterType | list[RasterType]:
+        """Generate one or more error fields across this raster.
+
+        :param error_structure: Error model defined by magnitude and correlation components.
+        :param predictors: Named magnitude predictors aligned with this raster.
+        :param n_fields: Number of independent fields.
+        :param random_state: Seed or generator used for reproducible fields.
+        :param chunksizes: Lazy output chunk size for an Xarray raster. Every chunk uses the same seed for a component.
+        :param mp_config: Worker, tile and output file settings for a Raster.
+        :param backend: Library used to draw correlated errors. Chunked GPyTorch fields use an inducing grid.
+        :param gpytorch_inducing_points: Target grid size for approximate GPyTorch fields. "auto" uses 256 points
+            for eager and chunked rasters; None requests an exact eager draw.
+        :returns: One result of the same raster type, or a list when n_fields is greater than one.
+        """
+
+        from geoutils.uncertainty import random_field
+
+        return random_field(
+            error_structure,
+            like=self,
+            predictors=predictors,
+            n_fields=n_fields,
+            random_state=random_state,
+            chunksizes=chunksizes,
+            mp_config=mp_config,
+            backend=backend,
+            gpytorch_inducing_points=gpytorch_inducing_points,
         )
 
     @overload
@@ -1798,7 +1954,8 @@ class RasterBase(ABC):
         """
         Get coordinates (x,y) of all pixels in the raster.
 
-        :param grid: Whether to return mesh grids of coordinates matrices.
+        :param grid: Whether to return coordinate matrix, otherwise only X/Y axis coordinates. Required for rotated
+            rasters where X/Y axis coordinates do not suffice to represent grid coordinates.
         :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
             coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
             Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
@@ -1840,67 +1997,67 @@ class RasterBase(ABC):
         )
 
     @overload
-    def interp_points(
+    def interp_at_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
-        method: InterpolationMethod = None,
-        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
+        method: InterpolationMethodLike = None,
+        nodata_handling: NodataChoice | None = None,
         band: int = 1,
         input_latlon: bool = False,
         *,
         as_array: Literal[False] = False,
         shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
-        nodata_propagation: NodataPropagation = "gdal",
+        error_structure: ErrorStructure | None = None,
         **kwargs: Any,
     ) -> PointCloud: ...
 
     @overload
-    def interp_points(
+    def interp_at_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
-        method: InterpolationMethod = None,
-        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
+        method: InterpolationMethodLike = None,
+        nodata_handling: NodataChoice | None = None,
         band: int = 1,
         input_latlon: bool = False,
         *,
         as_array: Literal[True],
         shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
-        nodata_propagation: NodataPropagation = "gdal",
+        error_structure: ErrorStructure | None = None,
         **kwargs: Any,
     ) -> NDArrayNum: ...
 
     @overload
-    def interp_points(
+    def interp_at_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
-        method: InterpolationMethod = None,
-        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
+        method: InterpolationMethodLike = None,
+        nodata_handling: NodataChoice | None = None,
         band: int = 1,
         input_latlon: bool = False,
         *,
         as_array: bool = False,
         shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
-        nodata_propagation: NodataPropagation = "gdal",
+        error_structure: ErrorStructure | None = None,
         **kwargs: Any,
     ) -> NDArrayNum | PointCloud: ...
 
-    @profiler.profile("geoutils.raster.base.interp_points", memprof=True)
-    def interp_points(
+    @profiler.profile("geoutils.raster.base.interp_at_points", memprof=True)
+    def interp_at_points(
         self,
         points: tuple[NDArrayNum, NDArrayNum] | tuple[Number, Number] | PointCloudLike,
-        method: InterpolationMethod = None,
-        dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
+        method: InterpolationMethodLike = None,
+        nodata_handling: NodataChoice | None = None,
         band: int = 1,
         input_latlon: bool = False,
         as_array: bool = False,
         shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
-        nodata_propagation: NodataPropagation = "gdal",
+        error_structure: ErrorStructure | None = None,
         **kwargs: Any,
-    ) -> NDArrayNum | PointCloud:
+    ) -> Any:
         """
          Interpolate raster values at a set of points.
 
@@ -1914,15 +2071,19 @@ class RasterBase(ABC):
          to ensure that the interpolation of points is done at the right location. See parameter description
          of shift_area_or_point for more details.
 
+         This method forwards its options to resample_at_points().
+
         :param points: Point(s) at which to interpolate raster value. Can be either a tuple of array-like of X/Y
             coordinates (same CRS as raster or latitude/longitude, see "input_latlon") or a pointcloud in any CRS.
             If points fall outside of image, value returned is nan.
-        :param method: Interpolation method, one of 'nearest', 'linear', 'cubic', 'quintic', 'slinear', 'pchip' or
-            'splinef2d'. For more information, see scipy.ndimage.map_coordinates and scipy.interpolate.interpn.
-            Default is linear. Can be configured with the global setting geoutils.config["interpolation_method"].
-        :param dist_nodata_spread: Optional extra distance of nodata spreading, either half-interpolation order rounded
-            up or down, or a fixed integer. Higher-order methods default to
-            geoutils.config["interpolation_dist_nodata_spread"].
+        :param method: Interpolator or one of 'nearest', 'linear', 'cubic', 'quintic', 'slinear', 'pchip' or
+            'splinef2d'. String methods use the existing SciPy array functions. A custom Interpolator defines the
+            calculation for source cells at fixed GridNeighbours offsets. Defaults to the configured interpolation
+            method.
+        :param nodata_handling: ``"nearest"`` masks values whose nearest source cell is missing; ``"ignore"`` uses
+            available finite cells; ``"propagate"`` masks values using a missing source cell. A non-negative integer
+            or half-order choice instead masks cells within that distance of missing source values. Defaults to
+            geoutils.config["interpolation_nodata_handling"], which is ``"nearest"`` unless changed.
         :param band: Band to use (from 1 to self.count).
         :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster
             CRS.
@@ -1931,108 +2092,295 @@ class RasterBase(ABC):
         :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
             coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
             Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
-        :param nodata_propagation: How invalid values affect nearest and linear interpolation. ``gdal`` uses finite
-            neighbors but keeps a cell invalid when its nearest source value is invalid, ``ignore`` uses every
-            available finite neighbor and ``propagate`` rejects values influenced by an invalid neighbor.
+        :param error_structure: Optional observation error model used for weighting and fitting.
+            Use geoutils.uncertainty.propagate() to calculate output uncertainty.
 
         :returns Point cloud of interpolated points, or 1D array of interpolated values.
         """
 
-        # If interpolation method undefined, default to the global system config
-        if method is None:
-            method = config["interpolation_method"]
-
-        output = _interp_points(
-            self,
-            points=points,
+        return self.resample_at_points(
+            points,
             method=method,
             band=band,
             input_latlon=input_latlon,
             as_array=as_array,
             shift_area_or_point=shift_area_or_point,
-            dist_nodata_spread=dist_nodata_spread,
+            nodata_handling=nodata_handling,
             mp_config=mp_config,
-            nodata_propagation=nodata_propagation,
+            error_structure=error_structure,
             **kwargs,
         )
-        if not as_array and not kwargs.get("return_interpolator", False):
-            return self._cast_pointcloud_output(output)
-        return output
 
-    def reduce_points(
+    @overload
+    def interp_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
-        reducer_function: Callable[[NDArrayNum], float] = np.ma.mean,
+        method: InterpolationMethodLike = None,
+        nodata_handling: NodataChoice | None = None,
+        band: int = 1,
+        input_latlon: bool = False,
+        *,
+        as_array: Literal[False] = False,
+        shift_area_or_point: bool | None = None,
+        mp_config: MultiprocConfig | None = None,
+        error_structure: ErrorStructure | None = None,
+        **kwargs: Any,
+    ) -> PointCloud: ...
+
+    @overload
+    def interp_points(
+        self,
+        points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
+        method: InterpolationMethodLike = None,
+        nodata_handling: NodataChoice | None = None,
+        band: int = 1,
+        input_latlon: bool = False,
+        *,
+        as_array: Literal[True],
+        shift_area_or_point: bool | None = None,
+        mp_config: MultiprocConfig | None = None,
+        error_structure: ErrorStructure | None = None,
+        **kwargs: Any,
+    ) -> NDArrayNum: ...
+
+    @overload
+    def interp_points(
+        self,
+        points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
+        method: InterpolationMethodLike = None,
+        nodata_handling: NodataChoice | None = None,
+        band: int = 1,
+        input_latlon: bool = False,
+        *,
+        as_array: bool = False,
+        shift_area_or_point: bool | None = None,
+        mp_config: MultiprocConfig | None = None,
+        error_structure: ErrorStructure | None = None,
+        **kwargs: Any,
+    ) -> NDArrayNum | PointCloud: ...
+
+    def interp_points(
+        self,
+        points: tuple[NDArrayNum, NDArrayNum] | tuple[Number, Number] | PointCloudLike,
+        method: InterpolationMethodLike = None,
+        nodata_handling: NodataChoice | None = None,
+        band: int = 1,
+        input_latlon: bool = False,
+        as_array: bool = False,
+        shift_area_or_point: bool | None = None,
+        mp_config: MultiprocConfig | None = None,
+        error_structure: ErrorStructure | None = None,
+        **kwargs: Any,
+    ) -> Any:
+        """Interpolate raster values at points using the deprecated name for interp_at_points().
+
+        .. deprecated:: 1.1
+            Use interp_at_points() instead.
+        """
+        warnings.warn(
+            "interp_points() is deprecated; use interp_at_points() instead.", DeprecationWarning, stacklevel=2
+        )
+        return self.interp_at_points(
+            points,
+            method=method,
+            nodata_handling=nodata_handling,
+            band=band,
+            input_latlon=input_latlon,
+            as_array=as_array,
+            shift_area_or_point=shift_area_or_point,
+            mp_config=mp_config,
+            error_structure=error_structure,
+            **kwargs,
+        )
+
+    @profiler.profile("geoutils.raster.base.resample_at_points", memprof=True)
+    def resample_at_points(
+        self,
+        points: tuple[NDArrayNum, NDArrayNum] | tuple[Number, Number] | PointCloudLike,
+        method: InterpolationMethodLike | Reducer | Callable[[NDArrayNum], float],
+        *,
+        coverage: GridCoverage | None = None,
+        band: int = 1,
+        input_latlon: bool = False,
+        as_array: bool = False,
+        nodata_handling: NodataChoice | None = None,
+        error_structure: ErrorStructure | None = None,
+        window: int | None = None,
+        window_shape: Literal["square", "circular"] | None = None,
+        masked: bool = False,
+        boundless: bool = True,
+        **kwargs: Any,
+    ) -> Any:
+        """Calculate raster values at points with an Interpolator or Reducer.
+
+        Interpolators use the same SciPy and chunked paths as interp_at_points(). Reducers combine raster cells
+        selected by GridNeighbours. By default, a reducer receives a 3 x 3 window around each point; pass
+        GridNeighbours(size=5) to the Reducer when constructing it to change those cells.
+
+        :param points: X/Y coordinates or a point cloud defining the requested positions.
+        :param method: Interpolator, Reducer, a reduction callable, or a built-in interpolation name.
+        :param coverage: Select cells by center, include all touched cells, or weight by covered area.
+        :param band: Source band number, starting at one.
+        :param input_latlon: Convert tuple coordinates from longitude/latitude to the raster CRS.
+        :param as_array: Return values rather than a point cloud at the requested coordinates.
+        :param nodata_handling: How missing source values affect the result. Reducers omit them by default. A distance
+            choice also masks results near missing source cells.
+        :param error_structure: Optional observation error model used for weighting and fitting.
+            Use geoutils.uncertainty.propagate() to calculate output uncertainty.
+        :param window: Optional odd window size for a reducer, overriding its configured neighborhood for this call.
+        :param window_shape: Use a square or circular window.
+        :param masked: Return a masked array when as_array=True.
+        :param boundless: Allow partial reduction windows at raster edges. If False, incomplete windows return NaN.
+        :param kwargs: Additional interp_at_points() options when method is an Interpolator or method name.
+        :returns: Resampled values.
+        """
+
+        return _resample_at_points(
+            self,
+            points=points,
+            method=method,
+            coverage=coverage,
+            band=band,
+            input_latlon=input_latlon,
+            as_array=as_array,
+            nodata_handling=nodata_handling,
+            error_structure=error_structure,
+            window=window,
+            window_shape=window_shape,
+            masked=masked,
+            boundless=boundless,
+            **kwargs,
+        )
+
+    def reduce_at_points(
+        self,
+        points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
+        reducer_function: Callable[[NDArrayNum], float] | Reducer = np.ma.mean,
         window: int | None = None,
         input_latlon: bool = False,
         band: int | None = None,
         masked: bool = False,
-        return_window: bool = False,
         as_array: bool = False,
         boundless: bool = True,
+        *,
+        coverage: GridCoverage | None = None,
+        window_shape: Literal["square", "circular"] | None = None,
+        error_structure: ErrorStructure | None = None,
+        mp_config: MultiprocConfig | None = None,
     ) -> Any:
         """
         Reduce raster values around point coordinates.
 
-        By default, samples pixel value of each band. Can be passed a band index to sample from.
-
-        Uses Rasterio's windowed reading to keep memory usage low (for a raster not loaded).
+        Samples the first band by default, or the requested band. Window reductions share the eager, Dask
+        and multiprocessing paths of resample_at_points(), with overlap covering the selected neighborhood.
 
         :param points: Point(s) at which to interpolate raster value. Can be either a tuple of array-like of X/Y
             coordinates (same CRS as raster or latitude/longitude, see "input_latlon") or a pointcloud in any CRS.
             If points fall outside of image, value returned is nan.
-        :param reducer_function: Reducer function to apply to the values in window (defaults to np.mean).
+        :param reducer_function: Reducer or function to apply to the values in each window (defaults to np.mean).
         :param window: Window size to read around coordinates. Must be odd.
         :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster
             CRS.
         :param band: Band number to extract from (from 1 to self.count).
         :param masked: Whether to return a masked array, or classic array.
-        :param return_window: Whether to return the windows (in addition to the reduced value).
         :param as_array: Whether to return an array of reduced values (defaults to a point cloud containing input
             coordinates).
-        :param boundless: Whether to allow windows that extend beyond the extent.
-
-        :returns: Point cloud of interpolated points, or 1D array of interpolated values.
-            In addition, if return_window=True, return tuple of (values, arrays).
+        :param boundless: Allow partial windows at raster edges. If False, incomplete windows return NaN.
+        :param coverage: Select cells by center, include all touched cells, or weight by covered area.
+        :param window_shape: Use a square or circular window.
+        :param error_structure: Optional observation error model used for weighting and fitting.
+            Use geoutils.uncertainty.propagate() to calculate output uncertainty.
+        :param mp_config: Multiprocessing settings for reading and reducing raster tiles.
+        :returns: Point cloud of reduced values, or a scalar/array when as_array=True.
         """
 
-        output = _reduce_points(
+        selected_window = window
+        if selected_window is None and (
+            not isinstance(reducer_function, Reducer) or reducer_function.default_neighborhood is None
+        ):
+            selected_window = 1
+
+        return _resample_at_points(
             self,
             points=points,
+            method=reducer_function,
+            window=selected_window,
+            input_latlon=input_latlon,
+            band=band,
+            masked=masked,
+            as_array=as_array,
+            boundless=boundless,
+            coverage=coverage,
+            window_shape=window_shape,
+            error_structure=error_structure,
+            mp_config=mp_config,
+        )
+
+    def reduce_points(
+        self,
+        points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
+        reducer_function: Callable[[NDArrayNum], float] | Reducer = np.ma.mean,
+        window: int | None = None,
+        input_latlon: bool = False,
+        band: int | None = None,
+        masked: bool = False,
+        as_array: bool = False,
+        boundless: bool = True,
+        *,
+        coverage: GridCoverage | None = None,
+        window_shape: Literal["square", "circular"] | None = None,
+        error_structure: ErrorStructure | None = None,
+        mp_config: MultiprocConfig | None = None,
+    ) -> Any:
+        """Reduce raster values around points using the deprecated name for reduce_at_points().
+
+        .. deprecated:: 1.1
+            Use reduce_at_points() instead.
+        """
+        warnings.warn(
+            "reduce_points() is deprecated; use reduce_at_points() instead.", DeprecationWarning, stacklevel=2
+        )
+        return self.reduce_at_points(
+            points,
             reducer_function=reducer_function,
             window=window,
             input_latlon=input_latlon,
             band=band,
             masked=masked,
-            return_window=return_window,
             as_array=as_array,
             boundless=boundless,
+            coverage=coverage,
+            window_shape=window_shape,
+            error_structure=error_structure,
+            mp_config=mp_config,
         )
-        if as_array:
-            return output
-        if return_window:
-            pointcloud, output_window = output
-            return self._cast_pointcloud_output(pointcloud), output_window
-        return self._cast_pointcloud_output(output)
 
     @profiler.profile("geoutils.raster.base.filter", memprof=True)
     def filter(
         self: RasterType,
-        method: str | Callable[..., NDArrayNum],
-        size: int = 3,
+        method: str | Reducer | Callable[..., NDArrayNum],
+        size: int | None = None,
         sigma: int = 1,
         engine: Literal["scipy", "numba"] = "scipy",
         outlier_threshold: float = 2.0,
         mp_config: MultiprocConfig | None = None,
+        coverage: GridCoverage | None = None,
+        kernel_shape: Literal["square", "circular"] | None = None,
         **kwargs: dict[str, Any],
     ) -> RasterType:
         """
-        Apply a filter to the array.
+        Apply a filter to the raster array.
+
+        A Reducer can select its cells with GridNeighbours, for example
+        ``filter(Mean(neighborhood=GridNeighbours(size=5, shape="circular", coverage="fractional")))``.
+        Its configured window is used unless size, kernel_shape or coverage is supplied.
 
         :param method: The filter to apply. Can be a string ("gaussian", "median", "mean", "max", "min", "distance")
-                       for built-in filters, or a custom callable that takes a 2D ndarray and returns one.
+            for built-in filters, or a custom callable that takes a 2D ndarray and returns one.
         :param size: Window size for filter
         :param mp_config: Multiprocessing configuration.
+        :param coverage: Select cells by center, include all touched cells, or weight by covered area.
+        :param kernel_shape: Use a square or circular window for a Reducer.
         :param sigma: Optional standard deviation for Gaussian filtering.
             Only used when `method="gaussian"`.
         :param engine: Optional engine to use for filtering, either "scipy" (default) or "numba".
@@ -2058,6 +2406,8 @@ class RasterBase(ABC):
             sigma=sigma,
             engine=engine,
             outlier_threshold=outlier_threshold,
+            coverage=coverage,
+            kernel_shape=kernel_shape,
             **kwargs,
         )
         return self._cast_raster_output(output)
@@ -2528,6 +2878,46 @@ class RasterBase(ABC):
         )
         return self._cast_pointcloud_output(output)
 
+    def estimate_error_structure(
+        self,
+        other: RasterLike | PointCloudLike | ArrayLike,
+        *,
+        other_precision: Literal["same", "negligible"] = "same",
+        predictors: Mapping[str, Any] | None = None,
+        components: Mapping[str, Mapping[str, Any]] | None = None,
+        mask: RasterLike | VectorLike | ArrayLike | None = None,
+        mp_config: MultiprocConfig | None = None,
+        **estimate_kwargs: Any,
+    ) -> ErrorStructure:
+        """Estimate this raster's error structure from its difference with another dataset.
+
+        The two inputs are aligned by cosample(). With ``other_precision="same"``, their errors must be independent
+        and have the same magnitude and correlation; the difference is divided by the square root of two. Use
+        ``"negligible"`` when the other dataset's error can be ignored.
+
+        :param other: Raster, point cloud, or array of comparable measurements.
+        :param other_precision: Whether the other input has the same precision or negligible error.
+        :param predictors: Named variables controlling a magnitude that varies with location.
+        :param components: Named magnitude and correlation models to fit.
+        :param mask: Locations used to estimate the error structure.
+        :param mp_config: Worker and tile settings for multiprocessing.
+        :param estimate_kwargs: Additional options accepted by ErrorStructure.estimate().
+        :returns: Fitted error structure for this raster.
+        """
+
+        from geoutils.uncertainty import ErrorStructure
+
+        return ErrorStructure.estimate(
+            self,
+            other=other,
+            other_precision=other_precision,
+            predictors=predictors,
+            components=components,
+            mask=mask,
+            mp_config=mp_config,
+            **estimate_kwargs,
+        )
+
     def cosample(
         self,
         other: RasterLike | PointCloudLike | ArrayLike,
@@ -2588,8 +2978,8 @@ class RasterBase(ABC):
             two-pixel radius and minimum of three finite points for circular methods. Other options include
             "distance_power" for IDW and "engine" ("scipy" or "numba").
             Set locations and method with at and grid_method.
-        :param resample_kwargs: Options for Raster.interp_points(), e.g. {"nodata_propagation": "ignore"}. The nodata
-            policies are "gdal", "ignore" and "propagate"; "dist_nodata_spread" controls extra spreading in pixels.
+        :param resample_kwargs: Options for Raster.interp_points(), e.g. {"nodata_handling": "ignore"}. The choices are
+            "nearest", "ignore", "propagate", a half-order rule, or a non-negative distance in pixels.
             Set locations, band and method with the corresponding cosample() arguments.
         :param align: Handling of mismatched grids or coordinate systems: "raise" an error, or "reproject" to match at.
             Point inputs must still share the same ordered coordinates when sampled at points.

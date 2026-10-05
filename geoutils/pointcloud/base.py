@@ -42,12 +42,18 @@ from geoutils import profiler
 from geoutils._dispatch import get_geo_attr, has_geo_attr, is_dask_dataframe
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
-from geoutils.interface._nodata import NodataPropagation
 from geoutils.interface.gridding import (
     GriddingEngine,
     GriddingMethod,
     _grid_pointcloud_to_raster,
+    _resolve_gridding_operator,
 )
+from geoutils.operators.interpolator import Kriging, KrigingBackend
+from geoutils.operators.neighbours import _DefaultNeighbour
+from geoutils.operators.nodata import NodataChoice
+from geoutils.operators.overlap import OverlapBackend
+from geoutils.operators.reducer import Reducer
+from geoutils.operators.weighting import _with_error_structure
 from geoutils.pointcloud.dataframe import (
     _build_pointcloud_output,
     _get_dataframe_attrs,
@@ -63,11 +69,13 @@ if TYPE_CHECKING:
     import matplotlib
     import xarray as xr
 
-    from geoutils.interface.interpolation import InterpolationMethod
+    from geoutils.filters.irregular import PointFilterMethod
+    from geoutils.interface.resampling import InterpolationMethod
     from geoutils.multiproc import MultiprocConfig
     from geoutils.pointcloud.pointcloud import PointCloudLike
     from geoutils.raster.base import RasterLike
-    from geoutils.stats.variography import Variogram
+    from geoutils.stats.variography import Variogram, VariogramModel
+    from geoutils.uncertainty import ErrorStructure
     from geoutils.vector.base import VectorLike
 
 
@@ -104,10 +112,10 @@ class PointCloudBase(VectorBase):
         """Whether all point geometries have a Z coordinate."""
 
         if self._is_dask:
-            return False
+            return _get_dataframe_attrs(self.ds).get("geometry_type") in ("Point Z", "3D Point")
         if not self.is_loaded:
             return getattr(self, "_geometry_type", None) in ("Point Z", "3D Point")
-        return all(p.has_z for p in self.ds.geometry) if len(self.ds.geometry) > 0 else False
+        return bool(self.ds.geometry.has_z.all()) if len(self.ds.geometry) > 0 else False
 
     @property
     def data(self) -> Any:
@@ -553,9 +561,64 @@ class PointCloudBase(VectorBase):
         ds = self.ds.compute() if self._is_dask else self.ds
         return PointCloud(ds, data_column=self.data_column)
 
+    def filter(
+        self,
+        method: PointFilterMethod = "median",
+        radius: float | None | _DefaultNeighbour = _DefaultNeighbour.VALUE,
+        *,
+        k: int | None | _DefaultNeighbour = _DefaultNeighbour.VALUE,
+        include_self: bool = True,
+        min_points: int = 0,
+        nodata_propagation: Literal["ignore", "propagate"] | None = None,
+        n_threads: int = 0,
+        batch_size: int = 65_536,
+        mp_config: MultiprocConfig | None = None,
+    ) -> PointCloudLike:
+        """Replace point values with a statistic calculated from neighboring points.
+
+        For each point, this method selects neighbors by horizontal X/Y distance and replaces the data column or
+        elevation with the requested statistic. ``radius`` uses coordinate-system units, ``k`` selects the nearest
+        points, and passing both first applies the radius and then the count limit. A point with too few finite
+        neighbors receives NaN.
+
+        Dask returns a lazy point dataframe and requires active values in a named column. Multiprocessing reads a
+        surrounding area needed by each row partition and writes the result selected by ``mp_config``. Both chunked
+        paths require a finite radius.
+
+        Omitted radius/k arguments use the Reducer's PointNeighbours, or a radius of one when none is configured.
+        Explicit None removes that limit; supplied limits apply only to this call.
+
+        :param method: Reducer or built-in name such as ``"median"``, ``"mean"``, ``"min"`` or ``"std"``.
+        :param radius: Maximum neighbor distance in CRS units. Required for Dask and multiprocessing execution.
+        :param k: Optional maximum number of nearest neighbors inside the radius.
+        :param include_self: Whether each point contributes its current value to its own neighborhood.
+        :param min_points: Minimum number of finite neighbors, combined with the Reducer's own minimum requirement.
+        :param nodata_propagation: Omit invalid neighbors (``"ignore"``), propagate them, or use the Reducer default.
+        :param n_threads: SciPy query threads for eager execution. Zero uses the CPU count minus one.
+        :param batch_size: Maximum number of target points queried together. Lower this value to reduce temporary
+            memory when each point has many neighbors.
+        :param mp_config: Worker count, row partition size and output file for multiprocessing execution.
+        :returns: Point cloud with the same rows, coordinates, and attributes and with filtered values.
+        """
+
+        from geoutils.filters.irregular import _filter_pointcloud
+
+        return _filter_pointcloud(
+            self,
+            method=method,
+            radius=radius,
+            k=k,
+            include_self=include_self,
+            min_points=min_points,
+            nodata_propagation=nodata_propagation,
+            n_threads=n_threads,
+            batch_size=batch_size,
+            mp_config=mp_config,
+        )
+
     def stats(
         self,
-        statistics: str | Callable[[Any], Any] | Iterable[str | Callable[[Any], Any]] | None = None,
+        statistics: str | Callable[[Any], Any] | Reducer | Iterable[str | Callable[[Any], Any] | Reducer] | None = None,
         *,
         by: Mapping[str, Any] | None = None,
         values: str | Iterable[str] | Mapping[str, Any] | None = None,
@@ -575,6 +638,10 @@ class PointCloudBase(VectorBase):
         observed: bool = True,
         return_masks: bool = False,
         mp_config: MultiprocConfig | None = None,
+        fractional: bool = False,
+        overlap_backend: OverlapBackend = "auto",
+        error_structure: ErrorStructure | None = None,
+        uncertainty_kwargs: Mapping[str, Any] | None = None,
     ) -> Any:
         """Calculate summary statistics or statistics grouped by categories, bins, or vector zones.
 
@@ -621,6 +688,10 @@ class PointCloudBase(VectorBase):
             Masks cover complete groups before subsampling. Requires by.
         :param mp_config: Worker and tile settings for multiprocessing, e.g. MultiprocConfig(chunks=512).
             Cannot be combined with Dask inputs.
+        :param fractional: Use the exact area covered by each polygon when grouping values from a raster grid.
+        :param overlap_backend: Library used to calculate polygon coverage of raster cells.
+        :param error_structure: Optional source error model for one supplied Reducer.
+        :param uncertainty_kwargs: Options passed to geoutils.uncertainty.propagate().
         :returns: A statistic, summary dictionary, grouped dataframe, or grouped dataframe and mask mapping.
         """
 
@@ -645,6 +716,10 @@ class PointCloudBase(VectorBase):
             observed=observed,
             return_masks=return_masks,
             mp_config=mp_config,
+            fractional=fractional,
+            overlap_backend=overlap_backend,
+            error_structure=error_structure,
+            uncertainty_kwargs=uncertainty_kwargs,
         )
 
     @profiler.profile("geoutils.pointcloud.base.get_stats", memprof=True)
@@ -764,6 +839,46 @@ class PointCloudBase(VectorBase):
             mask=mask,
         )
 
+    def estimate_error_structure(
+        self,
+        other: RasterLike | PointCloudLike | ArrayLike,
+        *,
+        other_precision: Literal["same", "negligible"] = "same",
+        predictors: Mapping[str, Any] | None = None,
+        components: Mapping[str, Mapping[str, Any]] | None = None,
+        mask: RasterLike | VectorLike | ArrayLike | None = None,
+        mp_config: MultiprocConfig | None = None,
+        **estimate_kwargs: Any,
+    ) -> ErrorStructure:
+        """Estimate this point cloud's error structure from its difference with another dataset.
+
+        The two inputs are aligned by cosample(). With ``other_precision="same"``, their errors must be independent
+        and have the same magnitude and correlation; the difference is divided by the square root of two. Use
+        ``"negligible"`` when the other dataset's error can be ignored.
+
+        :param other: Raster, point cloud, or array of comparable measurements.
+        :param other_precision: Whether the other input has the same precision or negligible error.
+        :param predictors: Named variables controlling a magnitude that varies with location.
+        :param components: Named magnitude and correlation models to fit.
+        :param mask: Locations used to estimate the error structure.
+        :param mp_config: Worker and point partition settings for multiprocessing.
+        :param estimate_kwargs: Additional options accepted by ErrorStructure.estimate().
+        :returns: Fitted error structure for this point cloud.
+        """
+
+        from geoutils.uncertainty import ErrorStructure
+
+        return ErrorStructure.estimate(
+            self,
+            other=other,
+            other_precision=other_precision,
+            predictors=predictors,
+            components=components,
+            mask=mask,
+            mp_config=mp_config,
+            **estimate_kwargs,
+        )
+
     def cosample(
         self,
         other: RasterLike | PointCloudLike | ArrayLike,
@@ -821,8 +936,8 @@ class PointCloudBase(VectorBase):
             two-pixel radius and minimum of three finite points for circular methods. Other options include
             "distance_power" for IDW and "engine" ("scipy" or "numba").
             Set locations and method with at and grid_method.
-        :param resample_kwargs: Options for Raster.interp_points(), e.g. {"nodata_propagation": "ignore"}. The nodata
-            policies are "gdal", "ignore" and "propagate"; "dist_nodata_spread" controls extra spreading in pixels.
+        :param resample_kwargs: Options for Raster.interp_points(), e.g. {"nodata_handling": "ignore"}. The choices are
+            "nearest", "ignore", "propagate", a half-order rule, or a non-negative distance in pixels.
             Set locations, band and method with the corresponding cosample() arguments.
         :param align: Handling of mismatched grids or coordinate systems: "raise" an error, or "reproject" to match at.
             Point inputs must still share the same ordered coordinates when sampled at points.
@@ -1143,13 +1258,14 @@ class PointCloudBase(VectorBase):
         nodata: int | float = -9999,
         *,
         data_column: str | None = None,
+        nodata_handling: NodataChoice | None = None,
         distance_power: float = 2.0,
         min_points: int = 1,
         engine: GriddingEngine = "scipy",
         chunksizes: tuple[int, int] | None = None,
         mp_config: MultiprocConfig | None = None,
         n_threads: int = 0,
-        nodata_propagation: NodataPropagation = "gdal",
+        error_structure: ErrorStructure | None = None,
     ) -> Any:
         """
         Grid the point cloud into a raster.
@@ -1165,37 +1281,159 @@ class PointCloudBase(VectorBase):
         :param resampling: Interpolation, circular statistic or distance method. ``average``, ``min`` and ``max`` are
             aliases for ``mean``, ``minimum`` and ``maximum``.
         :param dist_nodata_pixel: Maximum point distance or circular neighborhood radius in output pixels.
+            A Reducer configured with PointNeighbours uses its point count or radius in coordinate units instead.
         :param nodata: Nodata value of the output raster.
         :param data_column: Point value column to grid. None uses the active point values.
+        :param nodata_handling: ``"nearest"`` calculates from finite points, then masks an Interpolator's result when
+            the nearest source point is missing. ``"ignore"`` uses available finite values; ``"propagate"`` masks
+            cells using a missing source. Reducers default to ``"ignore"`` and cannot use ``"nearest"``. A
+            non-negative integer or half-order choice masks cells within that distance of missing source values.
+            Interpolators default to the configured choice.
         :param distance_power: Distance exponent used for inverse-distance weighting.
         :param min_points: Minimum number of finite points required inside a circular neighborhood.
         :param engine: Calculation engine, either ``scipy`` or ``numba``.
         :param chunksizes: Output chunk size as ``(rows, columns)`` for Dask or multiprocessing execution.
         :param mp_config: Multiprocessing configuration for computing output chunks in workers.
         :param n_threads: Number of SciPy threads for eager nearest gridding. ``0`` uses all but one available CPU.
-        :param nodata_propagation: Whether invalid point values follow GDAL behavior, are ignored, or propagate.
+        :param error_structure: Optional observation error model used for weighting and fitting.
+            Use geoutils.uncertainty.propagate() to calculate output uncertainty.
         :returns: A gridded raster matching the concrete PointCloud or dataframe accessor interface.
         """
 
-        return self._cast_raster_output(
-            _grid_pointcloud_to_raster(
-                source_pointcloud=self,
-                ref=ref,
-                grid_coords=grid_coords,
-                res=res,
-                shape=shape,
-                bounds=bounds,
-                resampling=resampling,
-                dist_nodata_pixel=dist_nodata_pixel,
-                nodata=nodata,
-                data_column=data_column,
-                distance_power=distance_power,
-                min_points=min_points,
-                engine=engine,
-                chunksizes=chunksizes,
-                mp_config=mp_config,
-                dask=self._is_dask,
-                n_threads=n_threads,
-                nodata_propagation=nodata_propagation,
+        if error_structure is not None:
+            resampling = _with_error_structure(
+                _resolve_gridding_operator(resampling, distance_power=distance_power), error_structure
             )
+
+        output = _grid_pointcloud_to_raster(
+            source_pointcloud=self,
+            ref=ref,
+            grid_coords=grid_coords,
+            res=res,
+            shape=shape,
+            bounds=bounds,
+            resampling=resampling,
+            dist_nodata_pixel=dist_nodata_pixel,
+            nodata=nodata,
+            data_column=data_column,
+            nodata_handling=nodata_handling,
+            distance_power=distance_power,
+            min_points=min_points,
+            engine=engine,
+            chunksizes=chunksizes,
+            mp_config=mp_config,
+            dask=self._is_dask,
+            n_threads=n_threads,
+        )
+        return self._cast_raster_output(output)
+
+    def krige(
+        self,
+        variogram: Variogram | VariogramModel,
+        ref: RasterLike | None = None,
+        grid_coords: tuple[NDArrayNum, NDArrayNum] | None = None,
+        res: float | tuple[float, float] | None = None,
+        shape: tuple[int, int] | None = None,
+        bounds: tuple[float, float, float, float] | None = None,
+        *,
+        backend: KrigingBackend = "gstools",
+        max_overlap: float | None = None,
+        exact: bool = True,
+        pseudo_inverse: bool = True,
+        nodata: int | float = -9999,
+        data_column: str | None = None,
+        min_points: int = 1,
+        chunksizes: tuple[int, int] | None = None,
+        mp_config: MultiprocConfig | None = None,
+        error_structure: ErrorStructure | None = None,
+    ) -> Any:
+        """Interpolate point values onto a raster grid by ordinary kriging.
+
+        The longest effective range in the fitted variogram defines how far GeoUtils searches for source points and
+        how much extra data it reads around each output chunk. max_overlap can limit that distance without changing
+        the selected points at a chunk boundary.
+
+        :param variogram: Fitted GeoUtils variogram used to calculate covariance.
+        :param ref: Optional raster whose output grid is matched.
+        :param grid_coords: Regular X and Y output coordinates.
+        :param res: Output resolution, mutually exclusive with shape.
+        :param shape: Output height and width, mutually exclusive with res.
+        :param bounds: Optional output bounds.
+        :param backend: Library used to solve the kriging system, ``"gstools"`` or ``"gpytorch"``.
+        :param max_overlap: Optional physical-distance cap on the modeled decorrelation range.
+        :param exact: Return a source value exactly when a target has the same coordinates.
+        :param pseudo_inverse: Let GSTools use a pseudo inverse when source coordinates repeat or are redundant.
+        :param nodata: Nodata value of the output raster.
+        :param data_column: Point value column to interpolate. None uses the active point values.
+        :param min_points: Minimum number of finite source points required for a target.
+        :param chunksizes: Spatial output chunks used by a Dask reference or explicit lazy output.
+        :param mp_config: Optional multiprocessing output configuration.
+        :param error_structure: Optional observation errors added to the covariance used for the kriging fit.
+        :returns: Kriged raster. Use geoutils.uncertainty.propagate() to calculate output uncertainty.
+        """
+
+        operator = Kriging(
+            variogram,
+            backend=backend,
+            max_overlap=max_overlap,
+            exact=exact,
+            pseudo_inverse=pseudo_inverse,
+        )
+        operator.validate_geospatial_support(2)
+        return self.grid(
+            ref=ref,
+            grid_coords=grid_coords,
+            res=res,
+            shape=shape,
+            bounds=bounds,
+            resampling=operator,
+            dist_nodata_pixel=0,
+            nodata=nodata,
+            data_column=data_column,
+            min_points=min_points,
+            engine="scipy",
+            chunksizes=chunksizes,
+            mp_config=mp_config,
+            nodata_handling="ignore",
+            error_structure=error_structure,
+        )
+
+    def random_field(
+        self,
+        error_structure: ErrorStructure,
+        *,
+        predictors: Mapping[str, Any] | None = None,
+        n_fields: int = 1,
+        random_state: int | np.random.Generator | None = None,
+        chunksizes: int | None = None,
+        mp_config: MultiprocConfig | None = None,
+        backend: Literal["gstools", "gpytorch"] = "gpytorch",
+        gpytorch_inducing_points: int | Literal["auto"] | None = "auto",
+    ) -> Any:
+        """Generate one or more error fields at every point in this point cloud.
+
+        :param error_structure: Error model defined by magnitude and correlation components.
+        :param predictors: Named magnitude predictors or point column names.
+        :param n_fields: Number of independent fields.
+        :param random_state: Seed or generator used for reproducible fields.
+        :param chunksizes: Target point rows per Dask partition for a Dask GeoDataFrame.
+        :param mp_config: Worker, row partition and output file settings for multiprocessing fields.
+        :param backend: Library used to draw correlated errors. Chunked GPyTorch fields use an inducing grid.
+        :param gpytorch_inducing_points: Target grid size for approximate GPyTorch fields. "auto" uses 256 points
+            for eager and chunked point clouds; None requests an exact eager draw.
+        :returns: One result of the same point cloud type, or a list when n_fields is greater than one.
+        """
+
+        from geoutils.uncertainty import random_field
+
+        return random_field(
+            error_structure,
+            like=self,
+            predictors=predictors,
+            n_fields=n_fields,
+            random_state=random_state,
+            chunksizes=chunksizes,
+            mp_config=mp_config,
+            backend=backend,
+            gpytorch_inducing_points=gpytorch_inducing_points,
         )

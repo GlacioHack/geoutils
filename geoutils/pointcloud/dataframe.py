@@ -124,9 +124,10 @@ def _build_pointcloud_output(
     if not is_dask_dataframe(dataframe):
         point_count = len(dataframe)
     bounds = metadata.get("bounds") if preserve_locations else None
+    geometry_type = metadata.get("geometry_type", "Point") if preserve_locations else "Point"
     metadata.update(
         data_column=data_column,
-        geometry_type="Point",
+        geometry_type=geometry_type,
         crs=dataframe.crs,
         point_count=point_count,
         bounds=bounds,
@@ -203,9 +204,9 @@ def _point_array_partitions(
             columns.append(dataframe.index.to_series().astype(array.dtype))
             continue
 
-        # Give each value partition the exact index of its corresponding point partition
+        # Split values by point partition length; assignment uses row positions
         aligned = array.rechunk((lengths,))
-        columns.append(dd.from_dask_array(aligned, index=dataframe.index))
+        columns.append(dd.from_dask_array(aligned))
     return columns
 
 

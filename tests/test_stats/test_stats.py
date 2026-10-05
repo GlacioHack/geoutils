@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import warnings
 from cmath import isnan
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -13,6 +13,7 @@ import geoutils as gu
 from geoutils import examples
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
+from geoutils.operators.reducer import Mean, Mode, Quantile, Range, Sum
 from geoutils.stats.reduction import (
     _STATS_ALIAS_ALL,
     _STATS_ALIAS_CALLABLE,
@@ -38,6 +39,36 @@ class TestStats:
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
     landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
+
+    def test_stats__reducer_objects(self) -> None:
+        """Checks that stats() reuses Reducers globally and within declared groups."""
+
+        # Split four finite values into two categories with a known mean and range in each group
+        values = np.array([[1.0, 3.0], [6.0, 10.0]])
+        groups = np.array([[0, 0], [1, 1]])
+
+        # A built-in linear Reducer follows the established optimized statistic result
+        mean = gu.stats.stats(values, Mean())
+        assert mean == gu.stats.stats(values, "mean")
+        total = gu.stats.stats(values, Sum())
+        assert total == gu.stats.stats(values, "sum")
+
+        # A nonlinear Reducer without a legacy statistic name receives each complete group through LocalData
+        grouped = gu.stats.stats(
+            values,
+            [
+                Mean(),
+                Range(),
+                Mode(weighted=False, tie_break="first"),
+                Quantile(0.25),
+            ],
+            by={"group": groups},
+            categories={"group": [0, 1]},
+        )
+        np.testing.assert_array_equal(grouped["value", "Mean"], [2.0, 8.0])
+        np.testing.assert_array_equal(grouped["value", "Range"], [2.0, 4.0])
+        np.testing.assert_array_equal(grouped["value", "Mode"], [1.0, 6.0])
+        np.testing.assert_array_equal(grouped["value", "Quantile"], [1.5, 7.0])
 
     def test_stats__summary_and_grouped_routes(self) -> None:
         """Checks that by chooses between a summary and a grouped table."""
@@ -85,17 +116,31 @@ class TestStats:
         assert default_grouped.columns.get_level_values("statistic").tolist() == expected_grouped_statistics
 
     @pytest.mark.parametrize("subsampling_strategy", ["topk", "sequential"])
-    def test_stats__subsample_per_group_without_by(self, subsampling_strategy: str) -> None:
+    def test_stats__subsample_per_group_without_by(self, subsampling_strategy: Literal["topk", "sequential"]) -> None:
         """Checks that per-group sampling without groups behaves like ordinary summary sampling."""
 
         # Use a shared mask so the sample must exclude locations before selecting any values
         values = pd.Series(np.arange(30, dtype=float))
         mask = values.to_numpy() % 3 != 0
-        options = {"mask": mask, "subsample": 7, "random_state": 42, "subsampling_strategy": subsampling_strategy}
 
         # Compare the option against the established summary path with the same seed
-        expected = gu.stats.stats(values, ["mean", "std", "totalcount"], **options)
-        result = gu.stats.stats(values, ["mean", "std", "totalcount"], subsample_per_group=True, **options)
+        expected = gu.stats.stats(
+            values,
+            ["mean", "std", "totalcount"],
+            mask=mask,
+            subsample=7,
+            random_state=42,
+            subsampling_strategy=subsampling_strategy,
+        )
+        result = gu.stats.stats(
+            values,
+            ["mean", "std", "totalcount"],
+            mask=mask,
+            subsample=7,
+            random_state=42,
+            subsampling_strategy=subsampling_strategy,
+            subsample_per_group=True,
+        )
         assert result == expected
         assert result["totalcount"] == 7
 
@@ -108,7 +153,26 @@ class TestStats:
         values = pd.Series(np.arange(4, dtype=float))
         by = {"group": values > 1} if grouped else None
         with pytest.raises(TypeError, match="Argument ``subsample_per_group`` must be a boolean"):
-            gu.stats.stats(values, "mean", by=by, subsample_per_group=invalid)
+            gu.stats.stats(values, "mean", by=by, subsample_per_group=invalid)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        ("option", "message", "error"),
+        [
+            ({"strategy": "invalid"}, "Argument ``strategy``", ValueError),
+            ({"backend": "invalid"}, "Argument ``backend``", ValueError),
+            ({"subsampling_strategy": "invalid"}, "Argument ``subsampling_strategy``", ValueError),
+            ({"subsample": 0}, "Argument ``subsample``", ValueError),
+            ({"fractional": "yes"}, "Argument ``fractional``", TypeError),
+            ({"fractional": True}, "Fractional statistics require one vector grouper", ValueError),
+            ({"return_masks": True}, "Argument ``by`` is required", ValueError),
+        ],
+    )
+    def test_stats__error_invalid_options(self, option: dict[str, Any], message: str, error: type[Exception]) -> None:
+        """Checks errors raised for various options."""
+
+        values = np.arange(4, dtype=float)
+        with pytest.raises(error, match=message):
+            gu.stats.stats(values, "mean", **option)
 
     @pytest.mark.parametrize("as_list", [False, True])
     def test_stats__empty_mask_callable_result(self, as_list: bool) -> None:
@@ -132,13 +196,12 @@ class TestStats:
         # Give the second named array a distinct mean and the exact same spread
         first = np.arange(6, dtype=float)
         values = {"first": first, "second": first + 100}
-        options = {}
-        if grouped:
-            options = {"by": {"zone": np.array([0, 0, 0, 1, 1, 1])}, "categories": {"zone": [0, 1]}}
+        by = {"zone": np.array([0, 0, 0, 1, 1, 1])} if grouped else None
+        categories = {"zone": [0, 1]} if grouped else None
 
         # Pass a generator that can only be consumed once while selecting both arrays
         statistics = (name for name in ["mean", "std"])
-        result = gu.stats.stats(values, statistics, **options)
+        result = gu.stats.stats(values, statistics, by=by, categories=categories)
 
         # Check each array independently so an exhausted request cannot silently omit its statistics
         for name, array in values.items():
@@ -639,6 +702,98 @@ class TestStats:
             "Percentage valid points": np.float64(100.0),
         }
         compare_dict(rast_stats_crop_proj_pc, rast_crop_proj_pc.stats("all"))
+
+
+class TestStatsUncertainty:
+    """Test module for global and grouped statistics uncertainty and unsupported options."""
+
+    def test_stats__propagates_mean(self) -> None:
+        """Checks that a global mean propagates errors properly."""
+
+        # Create 4 values with fixed error magnitude
+        values = np.array([[1.0, 3.0], [6.0, 10.0]])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+
+        # Derive stats, check mean value is equal
+        nominal, summary = gu.stats.stats(
+            values,
+            Mean(),
+            error_structure=source_error,
+        )
+        assert nominal == np.mean(values)
+        np.testing.assert_array_equal(summary.estimate, [np.mean(values)])
+
+        # Check the uncertainty (variance) on the mean value is as expected
+        weights = np.full(values.size, 1 / values.size)
+        expected_variance = np.sum((2 * weights) ** 2)
+        np.testing.assert_allclose(summary.variance, [expected_variance])
+
+    def test_stats__propagates_independently(self) -> None:
+        """Checks that two value arrays have separate error propagation."""
+
+        # We create two array with different values
+        first = np.array([1.0, 3.0])
+        second = np.array([10.0, 14.0])
+        values = {"first": first, "second": second}
+        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+
+        # We propagate the mean for both, and check mean values
+        nominal, summary = gu.stats.stats(
+            values,
+            Mean(),
+            error_structure=source_error,
+        )
+        assert nominal == {name: np.mean(array) for name, array in values.items()}
+        np.testing.assert_array_equal(summary.estimate, [np.mean(first), np.mean(second)])
+
+        # We check output uncertainty
+        np.testing.assert_allclose(summary.variance, [2, 2])
+
+    def test_stats__propagates_grouped_mean(self) -> None:
+        """Checks that grouped stats() propagates uncertainty properly."""
+
+        # We create 2 groups of 2 values each, with and STD of 2
+        values = np.array([[1.0, 3.0], [6.0, 10.0]])
+        groups = np.array([[0, 0], [1, 1]])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        by = {"group": groups}
+        categories = {"group": [0, 1]}
+
+        # We estimate the grouped mean with/without uncertainty propagation
+        expected = gu.stats.stats(values, Mean(), by=by, categories=categories)
+        nominal, summary = gu.stats.stats(
+            values,
+            Mean(),
+            error_structure=source_error,
+            by=by,
+            categories=categories,
+        )
+        pd.testing.assert_frame_equal(nominal, expected)
+        np.testing.assert_array_equal(summary.estimate, [2.0, 8.0])
+
+        # Each group mean has variance 4 / 2 from its two independent values
+        np.testing.assert_allclose(summary.variance, [2.0, 2.0])
+
+    @pytest.mark.parametrize(
+        ("statistics", "option", "message", "error"),
+        [
+            ("mean", {}, "requires one Reducer", TypeError),
+            (Mean(), {"subsample": 2}, "does not yet support subsampling", ValueError),
+            (Mean(), {"backend": "flox"}, "requires backend='geoutils'", ValueError),
+        ],
+    )
+    def test_stats__error_uncertainty(
+        self, statistics: str | Mean, option: dict[str, Any], message: str, error: type[Exception]
+    ) -> None:
+        """Checks that uncertainty works only with proper reducer/backend/sampling scheme."""
+
+        # We create an array with fixed error
+        values = np.array([1.0, 3.0])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+
+        # We raise error on options not working with uncertainty
+        with pytest.raises(error, match=message):
+            gu.stats.stats(values, statistics, error_structure=source_error, **option)
 
 
 class TestStatsChunked:

@@ -386,24 +386,24 @@ prox_lt_100_from_vect = rast.proximity(vector=vect_lt_100)
 prox_lt_100_from_vect
 ```
 
-## Interpolate or reduce to point
+## Interpolate or reduce at points
 
 Interpolating or extracting **raster** values at specific points can be done through:
-- the {func}`~geoutils.Raster.reduce_points` function, that applies a reductor function ({func}`numpy.ma.mean` by default) to a surrounding window for each coordinate, or
-- the {func}`~geoutils.Raster.interp_points` function, that interpolates the **raster**'s regular grid to each coordinate using a resampling algorithm.
+- the {func}`~geoutils.Raster.reduce_at_points` function, that applies a reductor function ({func}`numpy.ma.mean` by default) to a surrounding window for each coordinate, or
+- the {func}`~geoutils.Raster.interp_at_points` function, that interpolates the **raster**'s regular grid to each coordinate using a resampling algorithm.
 
 ```{code-cell} ipython3
 # Extract median value in a 3 x 3 pixel window
-rast_reproj.reduce_points((0.5, 0.5), window=3, reducer_function=np.ma.median)
+rast_reproj.reduce_at_points((0.5, 0.5), window=3, reducer_function=np.ma.median)
 ```
 
 ```{code-cell} ipython3
 # Interpolate coordinate value with quintic algorithm
-rast_reproj.interp_points((0.5, 0.5), method="quintic")
+rast_reproj.interp_at_points((0.5, 0.5), method="quintic")
 ```
 
 ```{note}
-Both {func}`~geoutils.Raster.reduce_points` and {func}`~geoutils.Raster.interp_points` can be passed a single coordinate as {class}`floats<float>`, or a
+Both {func}`~geoutils.Raster.reduce_at_points` and {func}`~geoutils.Raster.interp_at_points` can be passed a single coordinate as {class}`floats<float>`, or a
 {class}`list` of coordinates.
 ```
 

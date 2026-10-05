@@ -88,11 +88,11 @@ def _prepare_benchmark_process(cachemax_mb: int) -> None:
     import rasterio as rio
 
     from geoutils import filters
-    from geoutils.interface import gridding, interpolation, rasterization, vectorization
+    from geoutils.interface import gridding, rasterization, resampling, vectorization
     from geoutils.raster import xr_accessor
 
     # Keep references explicit so static checks recognize the intentional warm-up imports
-    _ = filters, gridding, interpolation, rasterization, vectorization, xr_accessor
+    _ = filters, gridding, rasterization, resampling, vectorization, xr_accessor
 
     # Rasterio's integer setter expects bytes, unlike the GDAL configuration string used by CLI commands
     rio.env.set_gdal_config("GDAL_CACHEMAX", cachemax_mb * 1024**2)
