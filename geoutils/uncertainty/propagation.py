@@ -48,6 +48,7 @@ from geoutils.uncertainty.error_structure import (
 # 1/ PROPAGATION RESULTS
 ############################################
 
+
 @dataclass(frozen=True, kw_only=True)
 class PropagationSummary:
     """

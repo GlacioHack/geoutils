@@ -109,7 +109,7 @@ class TestPointCloudFilter:
         neighborhood = PointNeighbours(k=2, radius=None)
         operator = Mean(neighborhood=neighborhood)
 
-        # Diffent inputs to verify we can override the neighborhood with radius/k
+        # Different inputs to verify we can override the neighborhood with radius/k
         configured = points.filter(operator)
         limited = points.filter(operator, radius=0.5)
         unlimited = points.filter(operator, k=None, radius=5)

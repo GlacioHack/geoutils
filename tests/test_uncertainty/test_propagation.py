@@ -614,7 +614,7 @@ class TestSpatialPropagation:
             return_samples=return_samples,
         )
 
-        # We independently draw the samples with the same random state, and estimate the covriance
+        # We independently draw the samples with the same random state, and estimate the covariance
         source_samples = errors.iter_samples(
             np.arange(values.size), nominal=values.ravel(), kind="value", n_samples=8, random_state=6
         )
