@@ -1502,8 +1502,8 @@ class TestReductionChunked:
         computed = lazy_result.compute()
         if fractional:
             # Fractional area sums can differ slightly when chunks change the addition order
-            np.testing.assert_allclose(computed, expected, rtol=0, atol=1e-12)
-            np.testing.assert_allclose(mp_result, expected, rtol=0, atol=1e-12)
+            np.testing.assert_allclose(computed, expected, rtol=1e-15, atol=1e-12)
+            np.testing.assert_allclose(mp_result, expected, rtol=1e-15, atol=1e-12)
         else:
             np.testing.assert_array_equal(computed, expected)
             np.testing.assert_array_equal(mp_result, expected)
