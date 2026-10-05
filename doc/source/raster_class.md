@@ -392,9 +392,6 @@ Interpolating or extracting **raster** values at specific points can be done thr
 - the {func}`~geoutils.Raster.reduce_at_points` function, that applies a reductor function ({func}`numpy.ma.mean` by default) to a surrounding window for each coordinate, or
 - the {func}`~geoutils.Raster.interp_at_points` function, that interpolates the **raster**'s regular grid to each coordinate using a resampling algorithm.
 
-{func}`~geoutils.Raster.resample_at_points` accepts either an Interpolator or a Reducer through one method. The two
-functions above use the same Dask/MP point sampling, with chunk overlap covering the selected neighborhood.
-
 ```{code-cell} ipython3
 # Extract median value in a 3 x 3 pixel window
 rast_reproj.reduce_at_points((0.5, 0.5), window=3, reducer_function=np.ma.median)

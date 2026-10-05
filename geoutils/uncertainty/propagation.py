@@ -40,7 +40,6 @@ from geoutils.uncertainty.error_structure import (
     ErrorComponent,
     ErrorStructure,
     _draw_source_errors,
-    _normalize_source_ids,
     _prepare_source_errors,
     _source_covariance_matrix,
 )
@@ -48,9 +47,6 @@ from geoutils.uncertainty.error_structure import (
 ############################################
 # 1/ PROPAGATION RESULTS
 ############################################
-
-# Results from carrying source uncertainty through a calculation.
-
 
 @dataclass(frozen=True, kw_only=True)
 class PropagationSummary:
@@ -222,7 +218,7 @@ class PropagationSummary:
 
 
 def _numeric_values(value: Any) -> NDArray[np.float64]:
-    """Read numeric values from an output without changing its labels or spatial support."""
+    """Read numeric values from an output."""
 
     if isinstance(value, (RasterBase, PointCloudBase)):
         value = value.data
@@ -232,7 +228,7 @@ def _numeric_values(value: Any) -> NDArray[np.float64]:
 
 
 def _wrap_like(template: Any, values: NDArray[Any]) -> Any:
-    """Give calculated values the same spatial or labelled layout as the original output."""
+    """Wrap calculated values into the same data structure as the template."""
 
     if isinstance(template, (RasterBase, PointCloudBase)):
         return template.copy(new_array=np.ma.masked_invalid(values))
@@ -456,7 +452,7 @@ def _propagate_local_operator_analytically(
     error_structure: ErrorStructure,
     scalar: bool,
 ) -> PropagationSummary:
-    """Calculate each output's error from its source weights and observation covariance."""
+    """Calculate each output error from its source weights and observation covariance."""
 
     output_count = len(rows)
     mean = estimate.copy()
@@ -470,7 +466,7 @@ def _propagate_local_operator_analytically(
         covariance = _source_covariance_matrix(source_ids, coordinates, component_data, indexes)
         variance[position] = max(float(weights @ covariance @ weights), 0.0)
 
-    # Standard deviation has the output values' units
+    # Standard deviation has the output values units
     standard_deviation = np.sqrt(variance)
     return PropagationSummary(
         estimate=float(estimate[0]) if scalar else estimate,
@@ -581,160 +577,7 @@ def _propagate_local_operator_numerically(
 
 
 ############################################
-# 5/ COMPLETE USER CALCULATIONS
-############################################
-
-
-def _callable_output_selection(
-    estimate: Any,
-    at: Literal["all"] | Sequence[Hashable] | None,
-    *,
-    default_limit: int,
-) -> pd.DataFrame:
-    """Select a small set of final outputs without constructing labels for an entire large raster."""
-
-    values = _numeric_values(estimate)
-    shape = values.shape
-
-    # Only a request for every output needs a key for every cell
-    if at is None and values.size > default_limit:
-        chosen: list[Hashable] = []
-    elif at is None or (isinstance(at, str) and at == "all"):
-        if isinstance(estimate, pd.Series):
-            chosen = estimate.index.tolist()
-        elif isinstance(estimate, pd.DataFrame):
-            chosen = [(row, column) for row in estimate.index for column in estimate.columns]
-        elif values.ndim == 0:
-            chosen = ["value"]
-        else:
-            chosen = list(np.ndindex(shape)) if values.ndim > 1 else list(range(values.size))
-    elif isinstance(at, str):
-        raise ValueError("at must be 'all' or a sequence of output labels.")
-    else:
-        chosen = list(at)
-
-    # Resolve each requested key directly so a few raster cells do not build a full-grid index
-    positions: list[int] = []
-    try:
-        if len(set(chosen)) != len(chosen):
-            raise KeyError("duplicate key")
-        for key in chosen:
-            if isinstance(estimate, pd.Series):
-                position = estimate.index.get_loc(key)
-            elif isinstance(estimate, pd.DataFrame):
-                if not isinstance(key, tuple) or len(key) != 2:
-                    raise KeyError(key)
-                row, column = key
-                position = np.ravel_multi_index((estimate.index.get_loc(row), estimate.columns.get_loc(column)), shape)
-            elif values.ndim == 0:
-                if key != "value":
-                    raise KeyError(key)
-                position = 0
-            else:
-                coordinates: tuple[int, ...]
-                if values.ndim == 1:
-                    if not isinstance(key, (int, np.integer)):
-                        raise KeyError(key)
-                    coordinates = (int(key),)
-                else:
-                    if not isinstance(key, tuple) or len(key) != values.ndim:
-                        raise KeyError(key)
-                    if any(not isinstance(number, (int, np.integer)) for number in key):
-                        raise KeyError(key)
-                    coordinates = tuple(int(number) for number in key)
-                if any(number < 0 or number >= size for number, size in zip(coordinates, shape)):
-                    raise KeyError(key)
-                position = np.ravel_multi_index(coordinates, shape)
-            if not isinstance(position, (int, np.integer)):
-                raise KeyError(key)
-            positions.append(int(position))
-    except (KeyError, TypeError, ValueError) as exception:
-        raise ValueError("at must name distinct existing output labels.") from exception
-    index = pd.Index(chosen, tupleize_cols=False, name="output")
-    return pd.DataFrame({"flat_index": positions, "estimate": values.reshape(-1)[positions]}, index=index)
-
-
-def _propagate_callable_calculation(
-    operation: Callable[[Any], Any],
-    data: Any,
-    error_structure: ErrorStructure,
-    *,
-    predictors: Mapping[str, Any] | None,
-    method: Literal["auto", "analytical", "numerical"],
-    at: Literal["all"] | Sequence[Hashable] | None,
-    n_samples: int,
-    random_state: int | np.random.Generator | None,
-    return_samples: bool,
-    max_sample_bytes: int,
-    circular_period: float | None,
-    on_error: Literal["raise", "warn"],
-    quantiles: Sequence[float],
-) -> PropagationSummary:
-    """Run an entire callable calculation for every draw of the initial error model."""
-
-    if method == "analytical":
-        raise NotImplementedError("An arbitrary callable needs explicit derivatives for analytical propagation.")
-    estimate = operation(data)
-    selection = _callable_output_selection(estimate, at, default_limit=256)
-    if (return_samples or quantiles) and selection.empty:
-        raise ValueError("Select outputs with at when requesting samples or quantiles.")
-
-    # Draw one complete field for spatial data, or an aligned vector for arrays and series
-    if isinstance(data, (RasterBase, PointCloudBase)):
-
-        def draw_error(generator: np.random.Generator) -> Any:
-            """Draw one field on the original spatial support."""
-
-            return error_structure.generate_random_field(like=data, predictors=predictors, random_state=generator)
-
-        def calculate(error: Any) -> Any:
-            """Run the full user calculation on one perturbed spatial input."""
-
-            values = np.ma.asarray(data.data, dtype=float) + np.ma.asarray(error.data, dtype=float)
-            return operation(data.copy(new_array=values))
-
-        draw_error_callback = draw_error
-        calculate_callback = calculate
-    else:
-        if predictors:
-            raise ValueError("Predictors require a spatial component input.")
-        nominal = _numeric_values(data)
-        source_ids = data.index if isinstance(data, pd.Series) else np.arange(nominal.size)
-        ids = _normalize_source_ids(source_ids)
-        coordinates, component_data = _prepare_source_errors(error_structure, len(ids))
-
-        def draw_vector_error(generator: np.random.Generator) -> NDArray[np.float64]:
-            """Draw one aligned finite error vector."""
-
-            return _draw_source_errors(len(ids), coordinates, component_data, generator).reshape(nominal.shape)
-
-        def calculate_vector(error: NDArray[np.float64]) -> Any:
-            """Run the full user calculation on one perturbed array or series."""
-
-            return operation(_wrap_like(data, nominal + error))
-
-        draw_error_callback = draw_vector_error
-        calculate_callback = calculate_vector
-
-    return simulate(
-        estimate=estimate,
-        draw_error=draw_error_callback,
-        calculate=calculate_callback,
-        error_structure=error_structure,
-        selection=selection,
-        n_samples=n_samples,
-        random_state=random_state,
-        output={"circular_period": circular_period},
-        return_samples=return_samples,
-        max_sample_bytes=max_sample_bytes,
-        quantiles=quantiles,
-        on_error=on_error,
-        metadata={"operation": "callable", "output_distribution": "unknown"},
-    )
-
-
-############################################
-# 6/ SPATIAL METHOD PROPAGATION
+# 5/ SPATIAL METHOD PROPAGATION
 ############################################
 
 
@@ -835,7 +678,7 @@ def _propagate_spatial_method(
     from geoutils.operators.weighting import _with_error_structure
     from geoutils.raster.transformation import _resolve_reprojection_operator
 
-    # Resolve aliases before replacing the estimator; the public method still owns validation and output layout
+    # 1/ Resolve aliases before replacing the estimator; the public method still owns validation and output layout
     source = operation.__self__
     name = operation.__name__
     kwargs = dict(operation_kwargs)
@@ -887,13 +730,13 @@ def _propagate_spatial_method(
     else:
         raise TypeError("Spatial propagation supports grid(), reproject(), and the point resampling methods.")
 
-    # Give all three calculations the same model, including any covariance used by fitting
+    # 2/ Give all three calculations the same model, including any covariance used by fitting
     operator = _with_error_structure(operator, error_structure)
     operator._error_predictors = options.get("predictors")
     kwargs.pop("error_structure", None)
     kwargs[parameter] = operator
 
-    # Saved draws collect source groups; ordinary marginal propagation stays local to each chunk
+    # 3/ Saved draws collect source groups; ordinary marginal propagation stays local to each chunk
     collect_inputs = options.get("return_samples") or options.get("quantiles") or options.get("at") is not None
     if collect_inputs:
         if getattr(source, "_chunks", None) is not None or getattr(source, "_is_dask", False):
@@ -919,6 +762,7 @@ def _propagate_spatial_method(
         }
         return replace(summary, **moments)
 
+    # 4/ Calculate the estimate and marginal moments on the same spatial layout
     estimate = operation(**kwargs)
     # Error magnitudes and means need floating-point output even when the original raster stores integers
     if name in {"grid", "reproject"}:
@@ -931,7 +775,7 @@ def _propagate_spatial_method(
     kwargs[parameter] = moment_type(operator, "std", options)
     std = operation(**kwargs)
 
-    # Marginal results have the same spatial layout and laziness as the ordinary public call
+    # 5/ Record the propagation method and valid draw counts
     analytical = type(operator).coefficients not in (Interpolator.coefficients, Reducer.coefficients)
     if isinstance(source, RasterBase) and isinstance(operator, Interpolator):
         analytical |= _regular_interpolation_method(operator) in {"nearest", "linear"}
@@ -943,7 +787,7 @@ def _propagate_spatial_method(
         kwargs[parameter] = moment_type(operator, "n_valid", options)
         n_valid = operation(**kwargs)
 
-    # Small eager outputs can expose labelled intervals without forcing any lazy result to compute
+    # 6/ Small eager outputs can expose labelled intervals without forcing any lazy result to compute
     selection = pd.DataFrame(columns=["flat_index", "estimate"])
     raw_estimate = getattr(estimate, "data", estimate)
     if not hasattr(raw_estimate, "compute"):
@@ -967,9 +811,9 @@ def _propagate_spatial_method(
     )
 
 
-############################################
-# 7/ PUBLIC PROPAGATION ENTRY POINTS
-############################################
+#######################
+# 6/ PARENT FUNCTIONS
+#######################
 
 
 def simulate(
@@ -988,11 +832,11 @@ def simulate(
     on_error: Literal["raise", "warn"] = "raise",
     metadata: Mapping[str, object] | None = None,
 ) -> PropagationSummary:
-    """Draw initial errors and stream the final calculation's marginal statistics.
+    """
+    Simulate errors numerically for uncertainty propagation into marginal statistics.
 
-    calculate() receives one draw from draw_error(). It must execute the whole calculation on that draw, so
-    repeated uses of the same observation share one error realization. Selected samples are stored only when
-    requested for output or exact empirical quantiles.
+    This function estimates mean/variance by accumulating statistics per batch of simulations, without storing
+    individual results at once, except if quantiles are requested.
 
     :param estimate: Calculation performed on the original data.
     :param draw_error: Return one complete draw of errors from the initial source.
@@ -1010,6 +854,7 @@ def simulate(
     :returns: Nominal and propagated results with requested selected information.
     """
 
+    # 1/ Check user input
     if isinstance(n_samples, (bool, np.bool_)) or not isinstance(n_samples, (int, np.integer)) or n_samples < 2:
         raise ValueError("n_samples must be an integer of at least two.")
     if on_error not in {"raise", "warn"}:
@@ -1021,7 +866,7 @@ def simulate(
     if not selection.index.is_unique:
         raise ValueError("selection keys must be unique.")
 
-    # Validate the selected positions and storage budget before drawing a source field
+    # 2/ Validate selected positions and RAM budget before drawing a random field
     nominal = np.asarray(_numeric_values(estimate), dtype=float)
     shape = nominal.shape
     positions = selection["flat_index"].to_numpy(dtype=np.int64, copy=True)
@@ -1042,7 +887,7 @@ def simulate(
     if period is not None and (not np.isfinite(period) or period <= 0):
         raise ValueError("A circular output requires a finite positive period.")
 
-    # Update each output's moments without retaining complete raster or point-cloud realizations
+    # 3/ We allocate running moments without storing complete draws
     count = np.zeros(shape, dtype=np.int64)
     mean = np.zeros(shape, dtype=float) if period is None else None
     moment = np.zeros(shape, dtype=float) if period is None else None
@@ -1052,6 +897,7 @@ def simulate(
     n_success = 0
     generator = np.random.default_rng(random_state)
 
+    # 4/ We draw random source errors and update each output by accumulation
     for number in range(1, int(n_samples) + 1):
         try:
             values = np.asarray(_numeric_values(calculate(draw_error(generator))), dtype=float)
@@ -1066,16 +912,19 @@ def simulate(
             warnings.warn(f"Simulation {number} of {n_samples} failed and was skipped: {exception}", stacklevel=2)
             continue
 
-        # Partial results contribute to each finite output's own statistics
         valid = np.isfinite(values)
         count[valid] += 1
         if period is None:
             assert mean is not None and moment is not None
+
+            # Update the mean and sum of squared deviations without storing full draws
             difference = values[valid] - mean[valid]
             mean[valid] += difference / count[valid]
             moment[valid] += difference * (values[valid] - mean[valid])
         else:
             assert sine is not None and cosine is not None
+
+            # Sum unit-circle components so values near zero and one period average together
             angles = values[valid] * (2 * np.pi / period)
             sine[valid] += np.sin(angles)
             cosine[valid] += np.cos(angles)
@@ -1087,7 +936,7 @@ def simulate(
     if n_success < 2:
         raise RuntimeError(f"Only {n_success} of {n_samples} simulations succeeded; at least two are required.")
 
-    # Angular means and spreads use the circular resultant; ordinary outputs use sample variance
+    # 5/ Angular means and spreads use the circular resultant; ordinary outputs use sample variance
     std = np.full(shape, np.nan, dtype=float)
     resultant: Any = None
     if period is None:
@@ -1106,7 +955,7 @@ def simulate(
         std[(count > 1) & undefined] = np.inf
         resultant = _wrap_like(estimate, length)
 
-    # Use one selected buffer for requested draws and empirical quantiles, then release it
+    # 6/ We use one selected buffer for requested draws and empirical quantiles, then release it
     samples: pd.DataFrame | None = None
     quantile_table: pd.DataFrame | None = None
     if samples_buffer is not None:
@@ -1117,6 +966,7 @@ def simulate(
         if probabilities:
             values = samples_buffer
             if period is not None:
+                # Measure angular quantiles around the original estimate to avoid a wraparound jump
                 nominal_selected = selection["estimate"].to_numpy(dtype=float, copy=True)
                 values = nominal_selected + _wrap_difference(values - nominal_selected, period)
             with warnings.catch_warnings():
@@ -1126,6 +976,7 @@ def simulate(
                 calculated, index=pd.Index(probabilities, name="probability"), columns=selection.index
             )
 
+    # 7/ Return moments in the original output layout with draw counts and selected results
     details = dict(metadata or {})
     details.setdefault("approximation", "monte_carlo")
     n_valid = int(count.reshape(-1)[0]) if nominal.ndim == 0 else _wrap_like(estimate, count)
@@ -1149,8 +1000,8 @@ def simulate(
 
 
 def propagate(
-    operator: Interpolator | Reducer | Callable[[Any], Any],
-    data: Any = None,
+    operator: Interpolator | Reducer | Callable[..., Any],
+    data: LocalData | Sequence[LocalData] | None = None,
     error_structure: ErrorStructure | None = None,
     *,
     operation_kwargs: Mapping[str, Any] | None = None,
@@ -1164,11 +1015,11 @@ def propagate(
     random_state: int | np.random.Generator | None = None,
     return_samples: bool = False,
     max_sample_bytes: int = 268_435_456,
-    circular_period: float | None = None,
     on_error: Literal["raise", "warn"] = "raise",
     quantiles: Sequence[float] = (),
 ) -> PropagationSummary:
-    """Use observation errors for fitting and propagate them through an operator or spatial operation.
+    """
+    Use observation errors for fitting and propagate them through an operator or spatial operation.
 
     For a weighted sum, _affine_rows() collects the weights and _propagate_local_operator_analytically() calculates
     the resulting mean/variance directly. Other methods use _propagate_local_operator_numerically(): we draw source
@@ -1183,7 +1034,7 @@ def propagate(
     lazy with Dask; selected samples currently require eager inputs. Calling the spatial method directly
     with error_structure uses errors only for fitting and returns its ordinary result.
 
-    :param operator: Interpolator, Reducer, bound spatial method, or complete callable calculation.
+    :param operator: Interpolator, Reducer, or supported bound spatial method.
     :param data: Source data for one output or an ordered sequence of outputs. Omit for a bound spatial method.
     :param error_structure: Source uncertainty model, before it is matched to these observations.
     :param operation_kwargs: Arguments to a bound grid(), reproject(), krige(), or point resampling method.
@@ -1205,7 +1056,7 @@ def propagate(
         arrays.
     """
 
-    # Check the operator and error model, then use a scalar result for one target or an array for several
+    # 1/ Check user inputs
     if not isinstance(error_structure, ErrorStructure):
         raise TypeError("error_structure must be an ErrorStructure.")
     if method not in {"auto", "analytical", "numerical"}:
@@ -1218,11 +1069,13 @@ def propagate(
         raise ValueError("max_sample_bytes must be a positive integer.")
     if method == "analytical" and return_samples:
         raise ValueError("return_samples cannot be used with analytical propagation.")
+
+    # Run bound spatial methods with their own source and output layouts
     if operation_kwargs is not None:
         if data is not None or not callable(operator) or getattr(operator, "__self__", None) is None:
             raise TypeError("operation_kwargs requires a bound spatial method and no separate data argument.")
-        if nominal_estimate is not None or output_labels is not None or circular_period is not None:
-            raise ValueError("These output options apply to LocalData groups or complete callable calculations.")
+        if nominal_estimate is not None or output_labels is not None:
+            raise ValueError("nominal_estimate and output_labels apply only to local operators.")
         return _propagate_spatial_method(
             operator,
             error_structure,
@@ -1239,28 +1092,10 @@ def propagate(
                 "quantiles": quantiles,
             },
         )
-    if callable(operator) and not isinstance(operator, (Interpolator, Reducer)):
-        if nodata_propagation is not None or nominal_estimate is not None or output_labels is not None:
-            raise ValueError("nodata_propagation, nominal_estimate and output_labels apply only to local operators.")
-        return _propagate_callable_calculation(
-            operator,
-            data,
-            error_structure,
-            predictors=predictors,
-            method=method,
-            at=at,
-            n_samples=n_samples,
-            random_state=random_state,
-            return_samples=return_samples,
-            max_sample_bytes=max_sample_bytes,
-            circular_period=circular_period,
-            on_error=on_error,
-            quantiles=quantiles,
-        )
+
+    # Prepare LocalData targets for an interpolator or reducer
     if not isinstance(operator, (Interpolator, Reducer)):
-        raise TypeError("operator must be an Interpolator, Reducer or callable.")
-    if circular_period is not None:
-        raise ValueError("Circular outputs require a complete callable calculation.")
+        raise TypeError("operator must be an Interpolator, Reducer or supported bound spatial method.")
     scalar = isinstance(data, LocalData)
     targets: list[LocalData]
     if scalar:
@@ -1270,7 +1105,7 @@ def propagate(
     if not targets or any(not isinstance(local, LocalData) for local in targets):
         raise ValueError("data must contain at least one LocalData target.")
 
-    # Use each distinct source observation once when calculating errors for the selected neighborhoods
+    # 2/ We use each distinct source observation once when calculating errors for the selected neighborhoods
     source_ids, coordinates, source_positions = _collect_source_support(targets)
     component_data = None
     if len(source_ids):
@@ -1292,7 +1127,7 @@ def propagate(
                 weighted_targets.append(replace(local, error_covariance=covariance))
             targets = weighted_targets
 
-    # Calculate the original result, or use the supplied estimate after checking its shape
+    # 3/ Calculate or validate the result from the original values
     handling = operator.default_nodata_propagation if nodata_propagation is None else nodata_propagation
     if nominal_estimate is None:
         estimate = _evaluate_batch(operator, targets, handling)
@@ -1302,7 +1137,7 @@ def propagate(
             raise ValueError("nominal_estimate must contain one value per LocalData target.")
     labels = _normalize_output_labels(output_labels, len(targets), scalar=scalar)
 
-    # Select output labels for optional samples and quantiles
+    # 4/ Select outputs for optional samples and quantiles
     all_outputs = _output_selection(labels, estimate)
     if at is None:
         selection = all_outputs if len(targets) <= 256 else all_outputs.iloc[:0]
@@ -1318,7 +1153,7 @@ def propagate(
     if (return_samples or quantiles) and selection.empty:
         raise ValueError("Select outputs with at when requesting samples or quantiles.")
 
-    # Check whether any output has a finite source observation
+    # 5/ Return an empty summary when no output can be calculated
     if len(source_ids) == 0 or not np.any(np.isfinite(estimate)):
         if return_samples:
             raise ValueError("return_samples requires at least one valid source observation.")
@@ -1330,7 +1165,7 @@ def propagate(
         )
     assert component_data is not None
 
-    # Use exact propagation for weighted sums, unless the caller requested draws or numerical propagation
+    # 6/ Calculate exact uncertainty for weighted sums when possible
     if method != "numerical" and not return_samples:
         rows = _affine_rows(
             operator,
@@ -1361,6 +1196,8 @@ def propagate(
                 )
                 return replace(summary, quantiles=table)
             return summary
+
+    # 7/ Estimate uncertainty by drawing source errors
     return _propagate_local_operator_numerically(
         operator,
         targets,

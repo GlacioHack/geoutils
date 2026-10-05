@@ -123,8 +123,6 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
     ~raster.base.RasterBase.interp_at_points
     ~raster.base.RasterBase.resample_at_points
     ~raster.base.RasterBase.reduce_at_points
-    ~raster.base.RasterBase.interp_points
-    ~raster.base.RasterBase.reduce_points
     ~raster.base.RasterBase.krige
     ~raster.base.RasterBase.random_field
     ~raster.base.RasterBase.filter

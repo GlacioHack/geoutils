@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Filter point values using neighboring points."""
+"""Filter point values."""
 
 from __future__ import annotations
 
@@ -188,7 +188,7 @@ def _reduce_point_pairs_generic(
     nodata_handling: NodataHandling,
     min_points: int,
 ) -> NDArrayNum:
-    """Pass each target's neighbours to a custom Reducer as a LocalData object."""
+    """Pass each target neighbours to a custom Reducer as a LocalData object."""
 
     # Group neighbours by target, nearest first (source IDs resolve equal distances consistently)
     order = np.lexsort((source_ids[source_indexes], distances, target_indexes))
@@ -284,7 +284,7 @@ def _filter_point_values(
 
     from scipy.spatial import cKDTree
 
-    # Exclude invalid X/Y coordinates before building the source search tree
+    # We exclude invalid X/Y coordinates before building the source search tree
     output = np.full(len(target_coordinates), np.nan, dtype=np.float64)
     finite_source_coordinates = np.isfinite(source_coordinates).all(axis=1)
     finite_target_coordinates = np.isfinite(target_coordinates).all(axis=1)
@@ -298,6 +298,7 @@ def _filter_point_values(
 
     # Build the source search tree once, then query a limited number of targets at a time
     source_tree = cKDTree(source_coordinates)
+
     # Custom Reducers need a unique ID for each source point, even without Dask partitions
     stable_source_ids = np.arange(len(source_coordinates)) if source_ids is None else source_ids
     target_positions = np.flatnonzero(finite_target_coordinates)
@@ -421,7 +422,7 @@ def _point_filter_source_subset(
 def _filter_dask_point_partition(
     targets: gpd.GeoDataFrame,
     source_parts: list[gpd.GeoDataFrame],
-    data_column: str,
+    data_column: str | None,
     id_column: str,
     reducer: Reducer,
     neighborhood: PointNeighbours,
@@ -475,8 +476,6 @@ def _dask_filter_pointcloud(
     assert neighborhood.radius is not None
     dataframe = source_pointcloud.ds
     data_column = source_pointcloud.data_column
-    if data_column is None:
-        raise ValueError("Dask-backed point clouds require an explicit data column for point filtering.")
 
     # Assign IDs without loading the points, so include_self=False can distinguish otherwise identical rows
     id_column = _point_filter_id_column(dataframe._meta)
@@ -519,7 +518,8 @@ def _dask_filter_pointcloud(
 
     # Record the output column and spatial bounds without reading any point rows
     output_meta = dataframe._meta.copy()
-    output_meta[data_column] = np.asarray([], dtype=np.float64)
+    if data_column is not None:
+        output_meta[data_column] = np.asarray([], dtype=np.float64)
     with dask.config.set({"dataframe.convert-string": False}):
         output = dd.from_delayed(output_parts, meta=output_meta)
     filtered = dask_geopandas.from_dask_dataframe(output, geometry=dataframe.geometry.name)
@@ -683,12 +683,8 @@ def _filter_pointcloud(
     batch_size: int = _POINT_FILTER_QUERY_BATCH_SIZE,
     mp_config: MultiprocConfig | None = None,
 ) -> PointCloudLike:
-    """Filter point values using nearby points, in memory or with Dask/multiprocessing.
-
-    _filter_point_dataframe() finds neighbours and calculates the filtered values for points already in memory.
-    _dask_filter_pointcloud() arranges the same calculation as lazy tasks using each partition's bounds.
-    _multiproc_filter_pointcloud() reads nearby points for each group of rows, filters them in worker processes,
-    then combines their temporary files into the final point cloud.
+    """
+    Filter point values using nearby points, in memory or with Dask/multiprocessing.
 
     :param source_pointcloud: Point cloud or dataframe accessor to filter (its active data column or elevations).
     :param method: Built-in reducer name or a Reducer instance.
@@ -718,7 +714,7 @@ def _filter_pointcloud(
     )
     nodata_handling = _point_filter_nodata_handling(reducer, nodata_propagation)
 
-    # Check options before choosing in-memory, Dask or multiprocessing filtering
+    # Check options before choosing in-memory, Dask or MP filtering
     if not isinstance(include_self, (bool, np.bool_)):
         raise TypeError("Argument ``include_self`` must be a boolean.")
     if isinstance(min_points, bool) or not isinstance(min_points, (int, np.integer)) or min_points < 0:
@@ -728,13 +724,15 @@ def _filter_pointcloud(
     if isinstance(batch_size, bool) or not isinstance(batch_size, (int, np.integer)) or batch_size < 1:
         raise ValueError("Argument ``batch_size`` must be a positive integer.")
 
-    # A finite radius lets Dask and multiprocessing read only nearby source points
+    # To use Dask and MP, a radius needs to be set!
     if (source_pointcloud._is_dask or mp_config is not None) and neighborhood.radius is None:
         raise ValueError("Dask and multiprocessing point filtering require a finite ``radius``.")
     if source_pointcloud._is_dask and mp_config is not None:
         raise ValueError("Cannot use Multiprocessing and Dask simultaneously. Remove ``mp_config`` or use eager data.")
 
-    # 2/ For Dask/multiprocessing, filter each group of rows using the same in-memory function
+    # 2/ Dispatch to Dask/MP/in-memory
+
+    # For Dask
     if source_pointcloud._is_dask:
         filtered = _dask_filter_pointcloud(
             source_pointcloud,
@@ -747,15 +745,20 @@ def _filter_pointcloud(
         )
         output = source_pointcloud._cast_pointcloud_output(filtered)
 
-        # Filtering does not move or remove points, so the saved point count and bounds are still valid
+        # As filtering keeps the same point coords as input, the saved point count and bounds are still valid
         from geoutils.pointcloud.dataframe import _get_dataframe_attrs, _set_dataframe_attrs
 
         source_attrs = _get_dataframe_attrs(source_pointcloud.ds)
         output_attrs = _get_dataframe_attrs(output).copy()
-        output_attrs.update(point_count=source_attrs.get("point_count"), bounds=source_attrs.get("bounds"))
+        output_attrs.update(
+            point_count=source_attrs.get("point_count"),
+            bounds=source_attrs.get("bounds"),
+            geometry_type=source_attrs.get("geometry_type", "Point"),
+        )
         _set_dataframe_attrs(output, output_attrs)
         return output
 
+    # For MP
     if mp_config is not None:
         return _multiproc_filter_pointcloud(
             source_pointcloud,
@@ -768,8 +771,8 @@ def _filter_pointcloud(
             batch_size=int(batch_size),
         )
 
-    # 3/ Otherwise, filter the full dataframe in memory
-    # IDs let include_self=False distinguish points at the same coordinates
+    # Otherwise, in memory
+    # IDs are for include_self=False to distinguish points at the same coordinates
     dataframe = source_pointcloud.ds
     id_column = None
     identified = dataframe
@@ -778,7 +781,7 @@ def _filter_pointcloud(
         identified = dataframe.copy()
         identified[id_column] = np.arange(len(identified), dtype=np.uint64)
 
-    # SciPy can use several threads for the neighbour search; the filtered values are written to a dataframe copy
+    # SciPy can use several threads for the neighbor search
     resolved_threads = max(1, (os.cpu_count() or 2) - 1) if n_threads == 0 else int(n_threads)
     filtered = _filter_point_dataframe(
         identified,

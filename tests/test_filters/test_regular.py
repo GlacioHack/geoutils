@@ -23,15 +23,12 @@ from geoutils.raster import get_array_and_mask
 from tests.operator_helpers import SourceIndexSum
 
 
-class TestRasterFilters:  # type: ignore
-    """Test module for Raster.filter() with a callable or an invalid method.
-
-    Numerical kernels, engine comparisons and reference values are covered in test_operators/test_reducer.py.
-    """
+class TestRasterFilters:
+    """Test module for Raster.filter() with a callable or an invalid method."""
 
     aster_dem_path = gu.examples.get_path("exploradores_aster_dem")
 
-    def test_raster_filter_callable(self) -> None:
+    def test_raster_filter__callable(self) -> None:
         """Checks that Raster.filter() applies a custom callable to each raster value."""
 
         def double_filter(arr: NDArrayNum) -> NDArrayNum:
@@ -60,7 +57,7 @@ class TestRasterFilters:  # type: ignore
         np.testing.assert_allclose(circular.data[2, 2], np.mean(cross))
         np.testing.assert_allclose(square.data[2, 2], np.mean(values[1:4, 1:4]))
 
-    def test_raster_filter_invalid(self) -> None:
+    def test_raster_filter__invalid(self) -> None:
         """Checks that Raster.filter() rejects an unknown name and a value that is not callable."""
         raster = gu.Raster(self.aster_dem_path)
         with pytest.raises(ValueError, match="Unsupported filter method"):
@@ -353,7 +350,8 @@ class TestPatchFilters:
 
 
 class TestReducerFilters:
-    """Test module for reducer neighborhoods, filter options and custom raster filters.
+    """
+    Test module for filtering with custom reducers.
 
     Reducer accuracy and fractional area calculations are covered in test_operators/test_reducer.py.
     """
