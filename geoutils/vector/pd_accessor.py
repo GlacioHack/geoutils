@@ -121,6 +121,14 @@ class VectorAccessor(VectorBase):
 
     _ACCESSOR_OUTPUT = True
 
+    @property
+    def _dataset(self) -> Any:
+        return self.ds
+
+    @_dataset.setter
+    def _dataset(self, new_ds: Any) -> None:
+        self.ds = new_ds
+
     def __init__(self, pandas_obj: Any) -> None:
         """Validate and retain an eager or lazy geospatial dataframe."""
 

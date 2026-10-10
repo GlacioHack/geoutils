@@ -80,17 +80,28 @@ def run_sampling(runner: Any, case: Case) -> float:
     else:
         expected_count = int(runner.config.value("pointcloud_subsample_size"))
 
-    if runner.backend == "dask":
+    if case.variant == "xarray":
+        points = getattr(raster.rst, operation)(**options, backend="xarray")
+        if points.pc.is_loaded:
+            raise AssertionError("Dask Xarray point output must stay lazy before writing.")
+        filename = runner.path(f"output-xarray.{case.output_driver.lower()}")
+        points.pc.to_file(filename)
+        runner._last_output_file = filename
+        output_count, value = read_point_file_sample(filename, "b1")
+        if points.pc.is_loaded or raster.rst.is_loaded:
+            raise AssertionError("Writing Xarray points must leave the source and output arrays lazy.")
+    elif runner.backend == "dask":
         points = getattr(raster.rst, operation)(**options)
         if not is_dask_dataframe(points) or points.pc.is_loaded:
             raise AssertionError(f"Dask {operation}() output must remain lazy before computation.")
-        dataframe = points.compute()
+        filename = runner._output_path(suffix=f".{case.output_driver.lower()}")
+        points.pc.to_file(filename, driver=case.output_driver)
+        runner._last_output_file = filename
+        output_count, value = read_point_file_sample(filename, "b1")
         if points.pc.is_loaded:
-            raise AssertionError("Computing a Dask result must not load its original point cloud wrapper.")
+            raise AssertionError("Writing a Dask result must not load its original point cloud wrapper.")
         if raster._in_memory:
-            raise AssertionError("Computing Dask points must not load the source raster.")
-        output_count = len(dataframe)
-        value = float(dataframe["b1"].iloc[0])
+            raise AssertionError("Writing Dask points must not load the source raster.")
     else:
         suffix = f".{case.output_driver.lower()}"
         points = getattr(raster, operation)(
@@ -185,6 +196,26 @@ LAS_POINTCLOUD_CASES = tuple(
     )
     for driver in POINT_OUTPUT_DRIVERS
 )
+XARRAY_SUBSAMPLE_CASES = tuple(
+    Case(
+        execution="dask",
+        output_driver=driver,
+        variant="xarray",
+        options={"operation": "subsample"},
+        labels={"output_driver": f"GeoUtils Xarray {driver}"},
+    )
+    for driver in POINT_OUTPUT_DRIVERS
+)
+XARRAY_POINTCLOUD_CASES = tuple(
+    Case(
+        execution="dask",
+        output_driver=driver,
+        variant="xarray",
+        options={"operation": "to_pointcloud"},
+        labels={"output_driver": f"GeoUtils Xarray {driver}"},
+    )
+    for driver in POINT_OUTPUT_DRIVERS
+)
 SUBSAMPLE_REFERENCE = reference_case(SUBSAMPLE_CASES, implementation="pdal")
 POINTCLOUD_REFERENCE = reference_case(POINTCLOUD_CASES, implementation="pdal")
 LAS_SUBSAMPLE_REFERENCES = tuple(reference_case(case, implementation="pdal") for case in LAS_SUBSAMPLE_CASES)
@@ -217,7 +248,7 @@ BENCHMARKS = (
         "subsample_size",
         SUBSAMPLE_SIZES,
         SUBSAMPLE,
-        (*LAS_SUBSAMPLE_CASES, *LAS_SUBSAMPLE_REFERENCES),
+        (*LAS_SUBSAMPLE_CASES, *XARRAY_SUBSAMPLE_CASES, *LAS_SUBSAMPLE_REFERENCES),
         subsample_config,
         name="subsample-las-laz",
         parameter_label="Number of output points",
@@ -237,7 +268,7 @@ BENCHMARKS = (
         "raster_size",
         RASTER_SIZES,
         TO_POINTCLOUD,
-        (*LAS_POINTCLOUD_CASES, *LAS_POINTCLOUD_REFERENCES),
+        (*LAS_POINTCLOUD_CASES, *XARRAY_POINTCLOUD_CASES, *LAS_POINTCLOUD_REFERENCES),
         raster_size_config,
         name="to-pointcloud-las-laz",
         parameter_label="Size of raster (pixels per side)",
@@ -256,6 +287,7 @@ COMPARISONS = (
     comparison(
         BENCHMARKS[1],
         by="output_driver",
+        cases=(*LAS_SUBSAMPLE_CASES, *LAS_SUBSAMPLE_REFERENCES),
         logarithmic_x=True,
         documentation=False,
         summary=False,
@@ -263,6 +295,22 @@ COMPARISONS = (
     comparison(
         BENCHMARKS[3],
         by="output_driver",
+        cases=(*LAS_POINTCLOUD_CASES, *LAS_POINTCLOUD_REFERENCES),
+        documentation=False,
+        summary=False,
+    ),
+    comparison(
+        BENCHMARKS[1],
+        by="output_driver",
+        slug="subsample-xarray-las-laz-size",
+        logarithmic_x=True,
+        documentation=False,
+        summary=False,
+    ),
+    comparison(
+        BENCHMARKS[3],
+        by="output_driver",
+        slug="to-pointcloud-xarray-las-laz-raster-size",
         documentation=False,
         summary=False,
     ),
@@ -300,7 +348,7 @@ class DaskTopkComparison:
         columns = da.arange(shape[1], chunks=500)[None, :]
         positions = rows * shape[1] + columns
         values = da.where(positions % 19 == 0, np.nan, 1.0).astype(np.float32)
-        self.raster = gu.RasterAccessor.from_array(values, from_origin(0, shape[0], 1, 1), 32633)
+        self.raster = gu.DataArrayRasterAccessor.from_array(values, from_origin(0, shape[0], 1, 1), 32633)
 
     def _run(self, implementation: Literal["geoutils", "dask_argtopk"], subsample_size: int) -> None:
         """Compute selected cell numbers through one top-k implementation."""

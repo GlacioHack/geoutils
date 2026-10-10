@@ -115,7 +115,7 @@ def _polygonize_base(
     *,
     transform: rio.Affine,
     crs: Any,
-    data_column_name: str,
+    data_name: str,
     connectivity: Literal[4, 8] = 4,
     value_column: str = "raster_value",
     float_tol: float = 0.001,
@@ -130,7 +130,7 @@ def _polygonize_base(
     :param mask: 2D boolean-like array selecting pixels to polygonize.
     :param transform: Affine transform of the array.
     :param crs: CRS of the output.
-    :param data_column_name: Name of the feature id column.
+    :param data_name: Name identifying the feature IDs.
     :param value_column: Name of the value attribute column.
     :param float_tol: Tolerance threshold for float32 value inputs (overrides GDAL internal logic, to keep chunk
         consistent).
@@ -146,7 +146,7 @@ def _polygonize_base(
     # If mask is empty, return empty but well-formed GeoDataFrame (important for chunked behaviour)
     m = np.asarray(mask, dtype=bool)
     if not m.any():
-        return gpd.GeoDataFrame({data_column_name: [], value_column: []}, geometry=[], crs=crs)
+        return gpd.GeoDataFrame({data_name: [], value_column: []}, geometry=[], crs=crs)
 
     # Now, we let rasterio.features.shapes yield (geometry, value) pairs
     warnings.filterwarnings("ignore", category=rio.errors.NotGeoreferencedWarning)
@@ -162,10 +162,10 @@ def _polygonize_base(
         gdf = gpd.GeoDataFrame.from_features(list(results))
 
     if len(gdf) == 0:
-        return gpd.GeoDataFrame({data_column_name: [], value_column: []}, geometry=[], crs=crs)
+        return gpd.GeoDataFrame({data_name: [], value_column: []}, geometry=[], crs=crs)
 
     # Insert under the data column name
-    gdf.insert(0, data_column_name, range(0, len(gdf)))
+    gdf.insert(0, data_name, range(0, len(gdf)))
     gdf = gdf.set_geometry(col="geometry")
     gdf = gdf.set_crs(crs)
 
@@ -223,7 +223,7 @@ class _PolygonizePrepared:
     # Column names (kept here to avoid drifting defaults across backends)
     value_column: str
     id_column: str
-    data_column_name: str
+    data_name: str
 
     # Halo (i.e. required overlap) derived from strategy/connectivity (computed once)
     halo: int
@@ -235,7 +235,7 @@ class _PolygonizePrepared:
 def _polygonize_prepare(
     source_raster: RasterBase,
     target_values: Any,
-    data_column_name: str,
+    data_name: str,
     *,
     connectivity: Literal[4, 8],
     strategy: Literal["label_union", "label_stitch", "geometry_stitch"],
@@ -255,7 +255,7 @@ def _polygonize_prepare(
          - per-value labeling (exact) when selection is a set of discrete values.
       3. Choose `final_dtype` that `GeoPandas.from_features` can represent efficiently.
       4. Compute `halo` once from (strategy, connectivity) so backends are consistent.
-      5. Store column naming (id/value/data_column_name) to avoid drift across backends.
+      5. Store column naming (id/value/data_name) to avoid drift across backends.
       6. Store floating tolerance.
     """
 
@@ -310,7 +310,7 @@ def _polygonize_prepare(
         strategy=strategy,
         value_column=value_column,
         id_column=id_column,
-        data_column_name=data_column_name,
+        data_name=data_name,
         halo=halo,
         float_tol=float_tol,
     )
@@ -1532,7 +1532,7 @@ def _polygonize_block_geometry_halo(
     b: dict[str, int],
     tiling_transform: rio.Affine,
     crs: Any,
-    data_column_name: str,
+    data_name: str,
     value_column: str,
     halo: int,
     connectivity: Literal[4, 8],
@@ -1564,7 +1564,7 @@ def _polygonize_block_geometry_halo(
         m_np,
         transform=t_halo,
         crs=crs,
-        data_column_name=data_column_name,
+        data_name=data_name,
         value_column=value_column,
         connectivity=connectivity,
         float_tol=float_tol,
@@ -1590,7 +1590,7 @@ def _polygonize_block_geometry_halo(
     )
 
     # Drop per-call id; re-index later
-    return g.drop(columns=[data_column_name], errors="ignore")
+    return g.drop(columns=[data_name], errors="ignore")
 
 
 def _concat_nonempty(parts: list[gpd.GeoDataFrame]) -> gpd.GeoDataFrame:
@@ -1888,7 +1888,7 @@ def _chunked_polygonize_geometry_task(
         b=block_id,
         tiling_transform=tiling_transform,
         crs=crs,
-        data_column_name=prepared.data_column_name,
+        data_name=prepared.data_name,
         value_column=prepared.value_column,
         halo=prepared.halo,
         connectivity=prepared.connectivity,
@@ -2161,7 +2161,7 @@ def _multiproc_polygonize(
 def _polygonize(
     source_raster: RasterType,
     target_values: Any,
-    data_column_name: str,
+    data_name: str,
     *,
     band: int = 1,
     connectivity: Literal[4, 8] = 4,
@@ -2199,7 +2199,7 @@ def _polygonize(
     prepared = _polygonize_prepare(
         source_raster,
         target_values,
-        data_column_name,
+        data_name,
         connectivity=connectivity,
         strategy=strategy,
         value_column="raster_value",
@@ -2253,7 +2253,7 @@ def _polygonize(
                 mask,
                 transform=source_raster.transform,
                 crs=source_raster.crs,
-                data_column_name=data_column_name,
+                data_name=data_name,
                 value_column=prepared.value_column,
                 connectivity=prepared.connectivity,
                 float_tol=prepared.float_tol,
@@ -2310,10 +2310,10 @@ def _polygonize(
     # Finalize Vector output
     # For chunked methods, we only need to add the id column that is missing
     if len(gdf) == 0:
-        gdf = gpd.GeoDataFrame({data_column_name: [], "raster_value": []}, geometry=[], crs=source_raster.crs)
+        gdf = gpd.GeoDataFrame({data_name: [], "raster_value": []}, geometry=[], crs=source_raster.crs)
     else:
-        if data_column_name not in gdf.columns:
-            gdf.insert(0, data_column_name, range(0, len(gdf)))
+        if data_name not in gdf.columns:
+            gdf.insert(0, data_name, range(0, len(gdf)))
         gdf = gdf.set_geometry(col="geometry")
         gdf = gdf.set_crs(source_raster.crs)
 

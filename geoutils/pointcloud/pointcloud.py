@@ -34,15 +34,17 @@ from typing import (
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import xarray as xr
 from pyproj import CRS
 from rasterio.coords import BoundingBox
 from shapely.geometry.base import BaseGeometry
 
 from geoutils import profiler
 from geoutils._dispatch import is_dask_array, is_dask_dataframe
+from geoutils._misc import _deprecate_keyword, _validate_downsample
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.multiproc import MultiprocConfig
-from geoutils.pointcloud.base import PointCloudBase, _validate_downsample
+from geoutils.pointcloud.base import GeometryPointCloudBase, PointCloudBase
 from geoutils.pointcloud.las import (
     _is_laspy_supported,
     _load_laspy_data,
@@ -57,7 +59,7 @@ from geoutils.vector.vector import Vector
 
 # This is a generic Vector-type (if subclasses are made, this will change appropriately)
 PointCloudType = TypeVar("PointCloudType", bound="PointCloud")
-PointCloudLike = Union[PointCloudBase, gpd.GeoDataFrame]
+PointCloudLike = Union[PointCloudBase, gpd.GeoDataFrame, xr.DataArray]
 
 # List of NumPy "array" functions that are handled.
 # Note: all universal function are supported: https://numpy.org/doc/stable/reference/ufuncs.html
@@ -169,18 +171,18 @@ def _cast_numeric_array_pointcloud(
     )
 
 
-class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
+class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
     """
     The georeferenced point cloud.
 
-    A point cloud is a vector of 2D point geometries associated to numeric values from a main data column, and can
-    also contain auxiliary data columns.
+    A point cloud is a vector of 2D point geometries associated to numeric values from a main data attribute, and can
+    also contain auxiliary data attributes.
 
      Main attributes:
-        ds: :class:`geopandas.GeoDataFrame`
+        gdf: :class:`geopandas.GeoDataFrame`
             Geodataframe of the point cloud.
-        data_column: str
-            Name of point cloud data column.
+        data_name: str
+            Name of point cloud data attribute.
         crs: :class:`pyproj.crs.CRS`
             Coordinate reference system of the point cloud.
         bbox: :class:`rio.coords.BoundingBox`
@@ -191,19 +193,23 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
     See the API for more details.
     """
 
+    # Resolve the shared abstract storage through Vector's native GeoDataFrame
+    _dataset = Vector._dataset
+
+    @_deprecate_keyword("data_column", "data_name")
     @profiler.profile("geoutils.pointcloud.pointcloud.__init__", collect=False)
     def __init__(
         self,
         filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry,
-        data_column: str | None = None,
+        data_name: str | None = None,
         downsample: Number = 1,
     ):
         """
-        Instantiate a point cloud from either a data column name and a vector (filename, GeoPandas dataframe or series,
-        or a Shapely geometry), or only with a point cloud file type.
+        Instantiate a point cloud from either a data attribute name and a vector (filename, GeoPandas dataframe or
+        series, or a Shapely geometry), or only with a point cloud file type.
 
         :param filename_or_dataset: Path to vector file, or GeoPandas dataframe or series, or Shapely geometry.
-        :param data_column: Name of main data column defining the point cloud (not required for LAS/LAZ formats).
+        :param data_name: Name of main data attribute defining the point cloud (not required for LAS/LAZ formats).
         :param downsample: Factor by which to reduce the number of points when data are loaded. For example, 2 keeps
             up to ``ceil(N / 2)`` points selected by a deterministic random sample. The default 1 keeps all points.
         """
@@ -211,7 +217,7 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         self._ds: gpd.GeoDataFrame | None = None
         self._name: str | None = None
         self._crs: CRS | None = None
-        self._data_column: str | None = None
+        self._data_name: str | None = None
         self._bbox: BoundingBox
         self._columns: pd.Index | None = None
         self._feature_count: int | None = None
@@ -239,8 +245,8 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
             if isinstance(filename_or_dataset, (str, pathlib.Path)) and _is_laspy_supported(filename_or_dataset):
                 self._is_las = True
                 # No need to pass a data column for LAS/LAZ file, as Z is the logical default
-                if data_column is None:
-                    data_column = "Z"
+                if data_name is None:
+                    data_name = "Z"
                 # Load only metadata, and not the data
                 fn = os.fspath(filename_or_dataset)
                 metadata = _load_laspy_metadata(fn)
@@ -253,6 +259,31 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
                 self._feature_count = metadata.point_count
                 self._geometry_type = "Point"
                 self._ds = None
+            elif isinstance(filename_or_dataset, (str, pathlib.Path)) and (
+                pathlib.Path(filename_or_dataset).suffix.lower() == ".parquet"
+                or pathlib.Path(filename_or_dataset).is_dir()
+            ):
+                from geoutils.pointcloud.parquet import _point_parquet_metadata
+
+                parquet_metadata = _point_parquet_metadata(filename_or_dataset)
+                self._name = os.fspath(filename_or_dataset)
+                self._crs = parquet_metadata["crs"]
+                self._nb_points = parquet_metadata["point_count"]
+                self.__nongeo_columns = pd.Index(parquet_metadata["columns"])
+                self._columns = pd.Index(
+                    parquet_metadata["attrs"].get("dataframe_columns", [*parquet_metadata["columns"], "geometry"])
+                )
+                self._bbox = parquet_metadata["bounds"]
+                self._feature_count = parquet_metadata["point_count"]
+                self._geometry_type = parquet_metadata["geometry_type"]
+                if data_name is None and not parquet_metadata["attrs"].get("geometry_z"):
+                    data_name = parquet_metadata["attrs"].get("data_name")
+                if data_name is None and self._geometry_type != "Point Z":
+                    data_name = (
+                        "Z"
+                        if "Z" in parquet_metadata["columns"]
+                        else (parquet_metadata["columns"][0] if parquet_metadata["columns"] else None)
+                    )
             # Check on filename are done with Vector.__init__
             else:
                 super().__init__(filename_or_dataset)
@@ -263,13 +294,13 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
                         )
                     self.__nongeo_columns = pd.Index([c for c in Vector.columns.fget(self) if c != "geometry"])
                     self._nb_points = self._feature_count if self._feature_count is not None else -1
-                elif not all(p == "Point" for p in self.ds.geom_type):
+                elif not all(p == "Point" for p in self.gdf.geom_type):
                     raise ValueError(
                         "This vector file contains non-point geometries, cannot be instantiated as a point cloud."
                     )
 
         # Set data column name based on user input
-        self.set_data_column(new_data_column=data_column)
+        self.set_data_name(new_data_name=data_name)
         if self.is_loaded:
             self._apply_downsample()
 
@@ -278,15 +309,15 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
     ##############################################
 
     @property
-    def ds(self) -> gpd.GeoDataFrame:
+    def gdf(self) -> gpd.GeoDataFrame:
         """Geodataframe of the point cloud."""
         # We need to override the Vector method to introduce the is_loaded dynamic for LAS files
         if not self.is_loaded:
             self.load()
         return self._ds  # type: ignore
 
-    @ds.setter
-    def ds(self, new_ds: gpd.GeoDataFrame | gpd.GeoSeries) -> None:
+    @gdf.setter
+    def gdf(self, new_ds: gpd.GeoDataFrame | gpd.GeoSeries) -> None:
         """Set a new geodataframe for the point cloud."""
         # We need to override the setter Vector method because we have overridden the property method
         # (even if the code below is the same)
@@ -300,8 +331,6 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
 
     @property
     def crs(self) -> CRS:
-        """Coordinate reference system of the vector."""
-
         # Overriding method in Vector in case dataset is not loaded
         if self.is_loaded:
             return super().crs
@@ -318,9 +347,15 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
 
     @property
     def columns(self) -> pd.Index:
+        """Names of point attributes and geometry, read from file metadata before loading."""
+
         # Overriding method in Vector in case dataset is not loaded
         if self.is_loaded:
             return super().columns
+        if self.name is not None and (
+            pathlib.Path(self.name).suffix.lower() == ".parquet" or pathlib.Path(self.name).is_dir()
+        ):
+            return self._columns
         if self._is_las:
             # Return columns on disk (adding a placeholder geometry to replace X/Y)
             return pd.Index(list(self._nongeo_columns) + ["geometry"])
@@ -349,7 +384,7 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         """
         Load point cloud from disk (only supported for LAS files).
 
-        :param columns: Columns to load. Defaults to main data column only.
+        :param columns: Columns to load. Defaults to main data attribute only.
         :param mp_config: Optional multiprocessing configuration to load LAS/LAZ files by chunks.
         :param kwargs: Optional keyword arguments passed to :func:`geopandas.read_file` for non-LAS files.
         """
@@ -362,20 +397,30 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
                 "Cannot load as filename is not set anymore. Did you manually update the filename attribute?"
             )
 
+        if pathlib.Path(self.name).suffix.lower() == ".parquet" or pathlib.Path(self.name).is_dir():
+            from geoutils.pointcloud.parquet import _open_point_parquet
+
+            points = _open_point_parquet(self.name, data_name=self.data_name, columns="all")
+            self._ds = points.pc.to_geoutils().gdf
+            self._ds = _apply_crop_filters(self._ds, self._crop_filters)
+            self._crop_filters = []
+            self._apply_downsample()
+            return
+
         if not self._is_las:
             Vector.load(self, **kwargs)
-            if not all(p == "Point" for p in self.ds.geom_type):
+            if not all(p == "Point" for p in self.gdf.geom_type):
                 raise ValueError(
                     "This vector file contains non-point geometries, cannot be instantiated as a point cloud."
                 )
-            self.set_data_column(new_data_column=self._data_column)
+            self.set_data_name(new_data_name=self._data_name)
             self._apply_downsample()
             return
 
         if columns == "all":
             columns_to_load = self._nongeo_columns
         elif columns == "main":
-            columns_to_load = [self.data_column]
+            columns_to_load = [self.data_name]
         else:
             columns_to_load = columns
 
@@ -386,11 +431,11 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
                 filename=self.name,
                 columns=columns_to_load,
                 bounds=read_bbox,
-                data_column=self.data_column,
+                data_name=self.data_name,
             )
             ds = _apply_crop_filters(ds, self._crop_filters)
         elif mp_config is None:
-            ds = _load_laspy_data(filename=self.name, columns=columns_to_load, data_column=self.data_column)
+            ds = _load_laspy_data(filename=self.name, columns=columns_to_load, data_name=self.data_name)
         else:
             ds = _load_laspy_data_partitions(
                 filename=self.name,
@@ -410,13 +455,13 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
             return
 
         # Match Raster opening behavior by preserving at least one row and rounding the target size upward
-        source_count = len(self.ds)
+        source_count = len(self.gdf)
         target_count = max(1, int(np.ceil(source_count / self._downsample)))
         if target_count < source_count:
             request: int | float = target_count if target_count > 1 else 1 / source_count
             sampled = self.subsample(request, random_state=0)
             source_name = self._name
-            self.ds = sampled.ds
+            self.gdf = sampled._dataset
             self._name = source_name
         self._downsample_applied = True
 
@@ -454,7 +499,7 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
         inplace: bool = False,
     ) -> PointCloud | None:
         """
-        Convert data type of the point cloud data column.
+        Convert data type of the point cloud data attribute.
 
         :param dtype: Any numpy dtype or string accepted by numpy.astype.
         :param convert_coords: Whether to convert the data type of coordinates values as well.
@@ -475,7 +520,7 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
             x = geometry.x.to_numpy().astype(dtype)
             y = geometry.y.to_numpy().astype(dtype)
             z = geometry.z.to_numpy() if output._has_z else None
-            output.ds.geometry = gpd.points_from_xy(x=x, y=y, z=z, crs=output.crs)
+            output.gdf.geometry = gpd.points_from_xy(x=x, y=y, z=z, crs=output.crs)
 
         return None if inplace else output
 
@@ -505,8 +550,8 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
 
         _write_laspy(
             filename=filename,
-            pc=self.ds,
-            data_column=self.data_column,
+            pc=self.gdf,
+            data_name=self.data_name,
             version=version,
             point_format=point_format,
             offsets=offsets,
@@ -532,7 +577,7 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
                 ind = index  # type: ignore
             ind = ind.astype(bool)  # In case the 3D Z column was used, it can only be stored as floating
 
-            return PointCloud(self.ds.loc[ind], data_column=self.data_column)
+            return PointCloud(self.gdf.loc[ind], data_name=self.data_name)
 
         # Otherwise, use index and leave it to GeoPandas
         else:
@@ -561,9 +606,9 @@ class PointCloud(PointCloudBase, Vector):  # type: ignore[misc]
                     z=assign,
                     crs=self.crs,
                 )
-                self.ds.loc[ind, "geometry"] = new_geo
+                self.gdf.loc[ind, "geometry"] = new_geo
             else:
-                self.ds.loc[ind, [self.data_column]] = assign
+                self.gdf.loc[ind, [self.data_name]] = assign
 
         else:
             # Let the vector class do the job

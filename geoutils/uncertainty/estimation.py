@@ -146,6 +146,10 @@ def _difference_proxy(sampled: Any, scale: float, mp_config: MultiprocConfig | N
     raster = _get_raster_interface(sampled)
     points = _get_pointcloud_interface(sampled) if raster is None else None
 
+    if points is not None and points._is_xr:
+        difference = (points.data - points._get_column_values("other")) / scale
+        return points.copy(new_array=difference)
+
     # Multiprocessing: raster tiles or ordered point chunks
     if mp_config is not None:
         if raster is not None:
@@ -159,7 +163,7 @@ def _difference_proxy(sampled: Any, scale: float, mp_config: MultiprocConfig | N
         from geoutils.multiproc.cluster import _map_bounded
 
         assert points is not None
-        dataframe = points.ds
+        dataframe = points._dataset
         chunks = mp_config.chunks
         if not isinstance(chunks, int):
             raise ValueError("Point cloud multiprocessing requires an integer chunk size.")
@@ -175,8 +179,8 @@ def _difference_proxy(sampled: Any, scale: float, mp_config: MultiprocConfig | N
         if isinstance(sampled, xr.DataArray):
             return sampled.copy(data=values, deep=False)
         return sampled.copy(new_array=values)
-    if points is not None and hasattr(points.ds, "map_partitions"):
-        dataframe = points.ds
+    if points is not None and hasattr(points._dataset, "map_partitions"):
+        dataframe = points._dataset
         result = dataframe.map_partitions(_difference_point_partition, scale, meta=dataframe._meta)
         return points._cast_pointcloud_output(result)
 
@@ -188,7 +192,7 @@ def _difference_proxy(sampled: Any, scale: float, mp_config: MultiprocConfig | N
         return sampled.copy(new_array=values)
 
     assert points is not None
-    dataframe = points.ds
+    dataframe = points._dataset
     return points._cast_pointcloud_output(_difference_point_partition(dataframe, scale))
 
 
@@ -368,6 +372,19 @@ def _standardized_point_partition(
     return result
 
 
+def _standardized_array_point_values(
+    values: Any, *predictors: Any, names: tuple[str, ...], magnitude: ErrorMagnitude
+) -> Any:
+    """Divide point errors by positive finite magnitudes within one array block."""
+    local_magnitude = np.asarray(magnitude.predict(dict(zip(names, predictors))), dtype=float)
+    return np.divide(
+        values,
+        local_magnitude,
+        out=np.full(values.shape, np.nan, dtype=float),
+        where=np.isfinite(local_magnitude) & (local_magnitude > 0),
+    )
+
+
 def _standardize_proxy(
     sampled: Any,
     output_names: Mapping[str, str],
@@ -386,6 +403,19 @@ def _standardize_proxy(
     raster = _is_raster(sampled)
     point_sample: Any = None if raster else _get_pointcloud_interface(sampled)
 
+    if point_sample is not None and point_sample._is_xr:
+        # Predict and divide within array blocks, leaving the sampled support lazy
+        predictors = [point_sample._dataset.coords[column] for column in output_names.values()]
+        inputs = xr.unify_chunks(point_sample._dataset, *predictors)
+        values = xr.apply_ufunc(
+            _standardized_array_point_values,
+            *inputs,
+            kwargs={"names": tuple(output_names), "magnitude": magnitude},
+            dask="parallelized",
+            output_dtypes=[float],
+        )
+        return point_sample.copy(new_array=values.data)
+
     # Multiprocessing: write temporary raster or point file with standardized error proxy
     if mp_config is not None:
         if raster:
@@ -395,7 +425,7 @@ def _standardize_proxy(
             return map_overlap(_wrapper_standardize_raster_multiproc, sampled, output_config, output_names, magnitude)
 
         # Point cosampling already selected eager rows; a Dask point input stays lazy
-        dataframe = point_sample.ds
+        dataframe = point_sample._dataset
         if not hasattr(dataframe, "map_partitions"):
             standardized_values = _standardized_point_values(dataframe, output_names, magnitude)
             return point_sample.copy(new_array=standardized_values)
@@ -419,7 +449,7 @@ def _standardize_proxy(
             )
             return sampled.isel(band=0).copy(data=standardized, deep=False)
     else:
-        dataframe = point_sample.ds
+        dataframe = point_sample._dataset
         if hasattr(dataframe, "map_partitions"):
             standardized = dataframe.map_partitions(
                 _standardized_point_partition,

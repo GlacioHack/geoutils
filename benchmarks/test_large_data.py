@@ -76,8 +76,6 @@ def large_data_config(tmp_path_factory: pytest.TempPathFactory) -> RuntimeConfig
         chunks=_shape_from_env("GEOUTILS_LARGE_DATA_CHUNKS", (1024, 1024)),
         memory_limit=os.environ.get("GEOUTILS_LARGE_DATA_MEMORY_LIMIT", "512MB"),
         profile_interval=float(os.environ.get("GEOUTILS_LARGE_DATA_PROFILE_INTERVAL", "0.1")),
-        # Release native workspaces between bounded writes for the strict memory contract
-        trim_dask_memory=True,
         directory=str(directory),
     )
 

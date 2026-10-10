@@ -148,6 +148,7 @@ WRITE = Operation(
     prepare_raster_operation,
     run_raster_operation,
     raster_options,
+    call_name=".to_file",
     order=12,
     large_data_cases=(Case(execution="dask", options={"operation": "write"}),),
 )

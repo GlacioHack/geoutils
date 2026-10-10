@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from importlib.util import find_spec
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -62,8 +62,8 @@ def stats_file(request: pytest.FixtureRequest, tmp_path: Path) -> tuple[Any, Any
         dataframe.to_file(filename, index=False)
 
     # Open one unloaded source for Multiproc and one eager source for the expected result
-    source = gu.PointCloud(filename, data_column="first")
-    reference = gu.PointCloud(filename, data_column="first")
+    source = gu.PointCloud(filename, data_name="first")
+    reference = gu.PointCloud(filename, data_name="first")
     reference.load(columns="all")
     return source, reference, {"first": "first", "second": "second"}, "group"
 
@@ -146,7 +146,7 @@ class TestSelection:
 
         # Give the additional column a distinct scale so active-column fallback is detectable
         pointcloud = gu.PointCloud.from_xyz(np.arange(4), np.zeros(4), np.arange(1, 5), crs=4326)
-        pointcloud.ds["temperature"] = [10.0, 20.0, 30.0, 40.0]
+        pointcloud.gdf["temperature"] = [10.0, 20.0, 30.0, 40.0]
 
         # Calculate default and selected summaries through both public entry points
         default = gu.stats.stats(pointcloud)
@@ -296,7 +296,8 @@ class TestSelectionChunked:
         assert result == pytest.approx(expected)
         assert isinstance(lazy_raster.data, da.Array) and isinstance(lazy_keep.data, da.Array)
 
-    def test_stats__dask_point_vector_mask(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_stats__dask_point_vector_mask(self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path) -> None:
         """Checks that eager and Dask points agree on points lying along a polygon boundary."""
 
         # Write a point file to disk with two points inside the polygon, one on its edge, and one outside it
@@ -309,7 +310,7 @@ class TestSelectionChunked:
         mask = gu.Vector(gpd.GeoDataFrame(geometry=[box(0, 0, 2, 2)], crs=points.crs))
         filename = tmp_path / "masked_points.gpkg"
         points.to_file(filename)
-        lazy_points = gu.open_pointcloud(str(filename), data_column=points.data_column, chunks=2).pc
+        lazy_points = gu.open_pointcloud(str(filename), data_name=points.data_name, chunks=2, as_type=as_type).pc
         assert not lazy_points.is_loaded
 
         # Calculate the same masked summary from Dask partitions and eager points
@@ -462,7 +463,7 @@ class TestSelectionChunked:
         )
         filename = tmp_path / "missing_points.gpkg"
         dataframe.to_file(filename, index=False)
-        source = gu.PointCloud(filename, data_column="value")
+        source = gu.PointCloud(filename, data_name="value")
 
         # Selecting all six rows includes the row with nodata in the sample without changing the mean
         statistics = ["mean", "min", "max", "sum", "validcount", "totalcount"]
@@ -484,7 +485,7 @@ class TestSelectionChunked:
         )
         filename = tmp_path / "infinite_points.gpkg"
         dataframe.to_file(filename, index=False)
-        source = gu.PointCloud(filename, data_column="value")
+        source = gu.PointCloud(filename, data_name="value")
 
         # A sample size of four reads every row through sampling, while one uses the complete summary directly
         statistics = ["mean", "min", "max", "sum", "validcount", "totalcount"]
@@ -520,8 +521,8 @@ class TestSelectionChunked:
             )
             path = tmp_path / "masked.gpkg"
             dataframe.to_file(path, index=False)
-            source = gu.PointCloud(path, data_column="height")
-            reference = gu.PointCloud(dataframe, data_column="height")
+            source = gu.PointCloud(path, data_name="height")
+            reference = gu.PointCloud(dataframe, data_name="height")
 
         # Use edge tiles with one row or column and retain counts from before the vector mask
         statistics = ["mean", "validcount", "totalcount", "validinliercount", "totalinliercount"]
@@ -555,8 +556,8 @@ class TestSelectionChunked:
         # Write the raster and point files to disk with values at the matching locations
         raster.to_file(raster_filename)
         points.to_file(point_filename, index=False)
-        source, support = gu.Raster(raster_filename), gu.PointCloud(point_filename, data_column="height")
-        expected = raster.stats("mean", at=gu.PointCloud(points, data_column="height"), interpolation="nearest")
+        source, support = gu.Raster(raster_filename), gu.PointCloud(point_filename, data_name="height")
+        expected = raster.stats("mean", at=gu.PointCloud(points, data_name="height"), interpolation="nearest")
 
         # Reject full-file loading so Multiproc must read raster windows and matching point rows
         def reject_load(*args: Any, **kwargs: Any) -> None:
@@ -593,8 +594,8 @@ class TestSelectionChunked:
         value_filename, point_filename = tmp_path / "values.gpkg", tmp_path / "locations.gpkg"
         values.to_file(value_filename, index=False)
         locations.to_file(point_filename, index=False)
-        source = gu.PointCloud(value_filename, data_column="height")
-        support = gu.PointCloud(point_filename, data_column="height")
+        source = gu.PointCloud(value_filename, data_name="height")
+        support = gu.PointCloud(point_filename, data_name="height")
 
         # Compare all ordered coordinates in Multiproc row blocks without loading either complete file
         with ClusterGenerator("multi", nb_workers=2) as cluster:
@@ -729,8 +730,8 @@ class TestSelectionErrors:
         value_filename, point_filename = tmp_path / "values.gpkg", tmp_path / "locations.gpkg"
         values.to_file(value_filename, index=False)
         locations.to_file(point_filename, index=False)
-        source = gu.PointCloud(value_filename, data_column="height")
-        support = gu.PointCloud(point_filename, data_column="height")
+        source = gu.PointCloud(value_filename, data_name="height")
+        support = gu.PointCloud(point_filename, data_name="height")
 
         # Reject reordered support without loading either complete point file
         with ClusterGenerator("multi", nb_workers=2) as cluster:

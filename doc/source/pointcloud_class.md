@@ -38,10 +38,10 @@ Below, a summary of the {class}`~geoutils.PointCloud` object and its methods.
 ## Object definition and attributes
 
 A {class}`~geoutils.PointCloud` is a {class}`~geoutils.Vector` is a vector of 2D point geometries associated to
-numeric values from a main {attr}`~geoutils.PointCloud.data` column, and can also contain auxiliary data columns.
+numeric values from a named {attr}`~geoutils.PointCloud.data` attribute, and can also contain auxiliary attributes.
 
-It inherits the main {class}`~geoutils.Vector` attribute {attr}`~geoutils.Vector.ds` containing the geodataframe, and adds **another
-main attribute** {attr}`~geoutils.PointCloud.data_column` that identifies the name of the main data associated to the
+It inherits the main {class}`~geoutils.Vector` attribute {attr}`~geoutils.Vector.gdf` containing the geodataframe, and adds **another
+main attribute** {attr}`~geoutils.PointCloud.data_name` that identifies the name of the main data associated to the
 point geometries.
 
 Additionally, new attributes such as {attr}`~geoutils.PointCloud.point_count` and new methods specific to point clouds are detailed further below.
@@ -74,7 +74,7 @@ import numpy as np
 
 # Instantiate a point cloud from a filename on disk
 filename_dem = geoutils.examples.get_path("coromandel_lidar")
-pc = geoutils.PointCloud(filename_dem, data_column="Z")
+pc = geoutils.PointCloud(filename_dem, data_name="Z")
 pc
 ```
 
@@ -117,7 +117,7 @@ nearest and circular methods except `average_distance_pts`, which can be faster 
 A {class}`~geoutils.PointCloud` can be applied any pythonic arithmetic operation ({func}`+<operator.add>`, {func}`-<operator.sub>`, {func}`/<operator.truediv>`, {func}`//<operator.floordiv>`, {func}`*<operator.mul>`,
 {func}`**<operator.pow>`, {func}`%<operator.mod>`) with another {class}`~geoutils.PointCloud`, {class}`~numpy.ndarray` or number. It will output one or two
 {class}`PointClouds<geoutils.PointCloud>`. NumPy coercion rules apply for {class}`dtype<numpy.dtype>`.
-The operation is applied to the {attr}`~geoutils.PointCloud.data_column` of the point cloud.
+The operation is applied to the {attr}`~geoutils.PointCloud.data_name` of the point cloud.
 
 ```{code-cell} ipython3
 # Add 1 and divide point cloud by 2
@@ -139,7 +139,7 @@ See {ref}`core-py-ops` for more details.
 
 A {class}`~geoutils.PointCloud` can be applied any NumPy universal functions and most mathematical, logical or masked-array functions with another
 {class}`~geoutils.PointCloud`, {class}`~numpy.ndarray` or number.
-The operation is applied to the {attr}`~geoutils.PointCloud.data_column` of the point cloud.
+The operation is applied to the {attr}`~geoutils.PointCloud.data_name` of the point cloud.
 
 ```{code-cell} ipython3
 # Compute the element-wise square-root

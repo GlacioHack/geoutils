@@ -727,7 +727,7 @@ def _rasterize(
     # Reproject only when the source and destination reference systems differ
     if out_crs is not None and source_vector.crs != out_crs:
         source_vector = source_vector.to_crs(out_crs)
-    vect = source_vector.ds
+    vect = source_vector._dataset
 
     # Cannot use Multiprocessing backend and Dask backend simultaneously
     mp_backend = mp_config is not None
@@ -770,7 +770,7 @@ def _rasterize(
 
         # Import concrete raster classes here to avoid a circular import with the interface package
         from geoutils.raster import Raster
-        from geoutils.raster.xr_accessor import RasterAccessor
+        from geoutils.raster.xr_accessor import DataArrayRasterAccessor
 
         if not mp_backend and not dask_backend:
             data = _fractional_rasterize_base(
@@ -806,7 +806,7 @@ def _rasterize(
             )
             if mode == "union":
                 data = data[0]
-            return RasterAccessor.from_array(
+            return DataArrayRasterAccessor.from_array(
                 data=data,
                 transform=out_transform,
                 crs=out_crs,
@@ -848,7 +848,7 @@ def _rasterize(
 
     # Runtime import to avoid circular import
     from geoutils.raster import Raster
-    from geoutils.raster.xr_accessor import RasterAccessor
+    from geoutils.raster.xr_accessor import DataArrayRasterAccessor
 
     # Base backend (eager)
     if not mp_backend and not dask_backend:
@@ -906,7 +906,7 @@ def _rasterize(
             data = data.view(np.bool_)
         elif not np.isfinite(out_value):
             data = da.where(da.isfinite(data), data, np.nan)
-        return RasterAccessor.from_array(data=data, transform=out_transform, crs=out_crs, nodata=nodata)
+        return DataArrayRasterAccessor.from_array(data=data, transform=out_transform, crs=out_crs, nodata=nodata)
 
     # Multiprocessing backend (lazy and writes to file)
 
@@ -955,7 +955,7 @@ def _create_mask_pointcloud(
     points_gs = points_gs.to_crs(crs=source_vector.crs)
 
     # Check whether points are contained in any source geometry
-    contained = points_gs.within(source_vector.ds.geometry.union_all())
+    contained = points_gs.within(source_vector._dataset.geometry.union_all())
 
     if as_array:
         # Extract resulting boolean array
@@ -1009,7 +1009,7 @@ def _create_mask_pointcloud_dask(source_vector: Vector, points: Any, as_array: b
 
     # Reproject lazily and prepare one geometry shared by all partition tasks
     points_in_crs = points if points.crs == source_vector.crs else points.to_crs(source_vector.crs)
-    source_geom = source_vector.ds.geometry.union_all()
+    source_geom = source_vector._dataset.geometry.union_all()
     meta = _empty_point_mask_meta(source_vector.crs)
     # Each point partition becomes an equally partitioned boolean point cloud
     out = points_in_crs.map_partitions(_mask_pointcloud_partition, source_geom, source_vector.crs, meta=meta)
@@ -1022,7 +1022,7 @@ def _create_mask_pointcloud_dask(source_vector: Vector, points: Any, as_array: b
     from geoutils.pointcloud.dataframe import _build_pointcloud_output
 
     # Set point output metadata without computing the mask values
-    return _build_pointcloud_output(out, data_column="z", as_dataframe=True)
+    return _build_pointcloud_output(out, data_name="z", as_dataframe=True)
 
 
 def _create_mask_raster(

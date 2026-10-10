@@ -5,7 +5,7 @@ from __future__ import annotations
 import warnings
 from importlib.util import find_spec
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -16,6 +16,39 @@ from scipy.ndimage import gaussian_filter
 import geoutils as gu
 from geoutils.multiproc import MultiprocConfig
 from geoutils.stats.variography import VariogramModel
+
+
+@pytest.fixture
+def pointcloud_file(tmp_path: Any) -> Any:
+    """Write point fixtures as GeoParquet row groups with their original labels and attribute dtypes."""
+
+    import geopandas as gpd
+
+    pytest.importorskip("pyarrow")
+    filenames = []
+
+    def write_points(frame: gpd.GeoDataFrame, partitions: int) -> tuple[str, int, str | None]:
+        """Save one point fixture and return its filename, row chunk size and active value column."""
+
+        # Preserve explicit elevation selection, otherwise infer the common point value columns
+        frame = frame.copy()
+        column = frame.pc.data_name
+        if "data_name" not in frame.attrs and column is None:
+            column = next((name for name in ("height", "z", "intensity") if name in frame), None)
+        if column is None and not frame.geometry.has_z.all():
+            frame["z"] = np.zeros(len(frame))
+            column = "z"
+
+        # A final shorter row group checks that file readers preserve every row
+        chunks = max(1, int(np.ceil(len(frame) / partitions)))
+        filename = tmp_path / f"points-{len(filenames)}.parquet"
+        filenames.append(filename)
+        frame.to_parquet(
+            filename, index=True, geometry_encoding="geoarrow", schema_version="1.1.0", row_group_size=chunks
+        )
+        return str(filename), chunks, column
+
+    return write_points
 
 
 class TestErrorStructureEstimation:
@@ -110,12 +143,12 @@ class TestErrorStructureEstimation:
         quality = np.linspace(0, 1, len(positions))
         values = (0.5 + quality) * rng.normal(size=len(positions))
         proxy = gu.PointCloud.from_xyz(positions, np.zeros_like(positions), values, crs=32632)
-        proxy.ds["quality"] = quality
+        proxy.gdf["quality"] = quality
 
         # Exclude masked points and missing predictor together
         selected = np.ones(len(positions), dtype=bool)
         selected[:40] = False
-        proxy.ds.loc[100, "quality"] = np.nan
+        proxy.gdf.loc[100, "quality"] = np.nan
         structure = gu.ErrorStructure.estimate(
             proxy,
             predictors={"quality": "quality"},
@@ -311,8 +344,11 @@ class TestErrorStructureEstimationChunked:
             ),
         ],
     )
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
     def test_estimate__chunked_inputs_and_components_match_eager(
         self,
+        as_type: Literal["dataarray", "geodataframe"],
+        pointcloud_file: Any,
         backend: str,
         input_type: str,
         components: dict[str, dict[str, Any]],
@@ -353,7 +389,7 @@ class TestErrorStructureEstimationChunked:
         # Point locations match raster pixel centers for exact gridding
         x, y = raster_source.ij2xy(rows.ravel(), columns.ravel())
         point_source = gu.PointCloud.from_xyz(x, y, measured.ravel(), crs=32632)
-        point_source.ds["quality"] = quality.ravel()
+        point_source.gdf["quality"] = quality.ravel()
         point_reference = gu.PointCloud.from_xyz(x, y, reference.ravel(), crs=32632)
         source = raster_source if source_kind == "raster" else point_source
         if other_kind == "raster":
@@ -397,22 +433,36 @@ class TestErrorStructureEstimationChunked:
                 chunked_source = source.to_xarray().chunk({"y": 5, "x": 4})
                 source_interface = chunked_source.rst
             else:
-                dask_geopandas = pytest.importorskip("dask_geopandas")
+                pytest.importorskip("dask_geopandas")
                 from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
                 _register_dask_pointcloud_accessor()
-                chunked_source = dask_geopandas.from_geopandas(source.ds, npartitions=7, sort=False)
+                chunked_source_filename, chunked_source_chunks, chunked_source_column = pointcloud_file(source.gdf, 7)
+                chunked_source = gu.open_pointcloud(
+                    chunked_source_filename,
+                    data_name=chunked_source_column,
+                    columns="all",
+                    chunks=chunked_source_chunks,
+                    as_type=as_type,
+                )
                 source_interface = chunked_source.pc
-                source_interface.data_column = source.data_column
+
             mp_config = None
 
             if other_kind == "raster":
                 chunked_other = other.to_xarray().chunk({"y": 5, "x": 4})
                 input_states.append((chunked_other.rst, "raster"))
             elif other_kind == "point":
-                dask_geopandas = pytest.importorskip("dask_geopandas")
-                chunked_other = dask_geopandas.from_geopandas(other.ds, npartitions=7, sort=False)
-                chunked_other.pc.data_column = other.data_column
+                pytest.importorskip("dask_geopandas")
+                chunked_other_filename, chunked_other_chunks, chunked_other_column = pointcloud_file(other.gdf, 7)
+                chunked_other = gu.open_pointcloud(
+                    chunked_other_filename,
+                    data_name=chunked_other_column,
+                    columns="all",
+                    chunks=chunked_other_chunks,
+                    as_type=as_type,
+                )
+
                 input_states.append((chunked_other.pc, "point"))
             if variable and source_kind == "raster":
                 chunked_predictor = raster_predictor.to_xarray().chunk({"y": 5, "x": 4})

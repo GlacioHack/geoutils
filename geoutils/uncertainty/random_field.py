@@ -215,7 +215,7 @@ def _spatial_bounds(like: RasterBase | PointCloudBase) -> tuple[tuple[float, flo
         return (float(x.min()), float(x.max())), (float(y.min()), float(y.max()))
     bounds = like.bounds
     if bounds is None:
-        extent = like.ds.total_bounds
+        extent = like._dataset.total_bounds
         extent = extent.compute() if hasattr(extent, "compute") else extent
         return (float(extent[0]), float(extent[2])), (float(extent[1]), float(extent[3]))
     return (float(bounds.left), float(bounds.right)), (float(bounds.bottom), float(bounds.top))
@@ -509,7 +509,7 @@ def _chunked_raster_fields_dask(
     import dask.array as da
 
     from geoutils.multiproc.chunked import normalize_chunks
-    from geoutils.raster.xr_accessor import RasterAccessor
+    from geoutils.raster.xr_accessor import DataArrayRasterAccessor
 
     if chunksizes is not None:
         chunks = normalize_chunks(chunks=chunksizes, shape=like.shape)
@@ -554,7 +554,7 @@ def _chunked_raster_fields_dask(
 
         # Assemble the chunks without calculating them, then attach the raster georeferencing
         fields.append(
-            RasterAccessor.from_array(
+            DataArrayRasterAccessor.from_array(
                 data=da.block(rows),
                 transform=like.transform,
                 crs=like.crs,
@@ -571,7 +571,7 @@ def _draw_point_rows(
     predictor_columns: Mapping[str, str | float],
     component_seeds: tuple[int, ...],
     start: int,
-    data_column: str | None,
+    data_name: str | None,
     backend: Literal["gstools", "gpytorch"],
     inducing_fields: tuple[GPyTorchInducingField | None, ...] | None,
 ) -> Any:
@@ -590,12 +590,12 @@ def _draw_point_rows(
         model, indexes, coordinates, predictors, component_seeds, backend=backend, inducing_fields=inducing_fields
     )
     output = dataframe.copy()
-    if data_column is None:
+    if data_name is None:
         import geopandas as gpd
 
         output.geometry = gpd.points_from_xy(coordinates[:, 0], coordinates[:, 1], values, crs=dataframe.crs)
     else:
-        output[data_column] = values
+        output[data_name] = values
     return output
 
 
@@ -605,7 +605,7 @@ def _wrapper_draw_point_partition_dask(
     predictor_columns: Mapping[str, str | float],
     component_seeds: tuple[int, ...],
     starts: NDArray[np.int64],
-    data_column: str | None,
+    data_name: str | None,
     original_columns: list[str],
     backend: Literal["gstools", "gpytorch"],
     inducing_fields: tuple[GPyTorchInducingField | None, ...] | None,
@@ -617,9 +617,79 @@ def _wrapper_draw_point_partition_dask(
         raise RuntimeError("Dask did not provide the point partition number.")
     start = int(starts[partition_info["number"]])
     result = _draw_point_rows(
-        dataframe, model, predictor_columns, component_seeds, start, data_column, backend, inducing_fields
+        dataframe, model, predictor_columns, component_seeds, start, data_name, backend, inducing_fields
     )
     return result[original_columns]
+
+
+def _draw_array_point_chunk(
+    indexes: Any,
+    x: Any,
+    y: Any,
+    *predictors: Any,
+    model: ErrorStructure,
+    names: tuple[str, ...],
+    seeds: tuple[int, ...],
+    backend: Literal["gstools", "gpytorch"],
+    inducing_fields: Any,
+) -> Any:
+    """Draw point errors using global row indexes so results do not depend on chunk boundaries."""
+    coordinates = np.column_stack((x, y))
+    return _draw_error_chunk(
+        model,
+        indexes,
+        coordinates,
+        dict(zip(names, predictors)),
+        seeds,
+        backend=backend,
+        inducing_fields=inducing_fields,
+    )
+
+
+def _array_point_fields_dask(
+    like: PointCloudBase,
+    error_structure: ErrorStructure,
+    *,
+    predictors: Mapping[str, Any] | None,
+    n_fields: int,
+    random_state: int | np.random.Generator | None,
+    chunksize: int | None,
+    backend: Literal["gstools", "gpytorch"],
+    gpytorch_inducing_points: int | None,
+) -> Any:
+    """Draw lazy point fields from raw coordinate blocks and shared component seeds."""
+
+    import dask.array as da
+    import xarray as xr
+
+    from geoutils.uncertainty.predictors import _point_array_predictors
+
+    # Global row numbers make independent noise identical to an eager draw
+    source = like._dataset.chunk({like._dataset.dims[0]: chunksize}) if chunksize is not None else like._dataset
+    chunks = source.chunks[0] if source.chunks is not None else (like.point_count,)
+    indexes = xr.DataArray(da.arange(like.point_count, chunks=chunks), dims=source.dims)
+    aligned = _point_array_predictors(like, predictors, max(chunks))
+    inputs = xr.unify_chunks(indexes, source.coords["x"], source.coords["y"], *aligned.values())
+
+    # Correlated draws share an inducing field; every block reads the same model and seeds
+    fields = []
+    draws = _field_draws(error_structure, like, n_fields, random_state, backend, gpytorch_inducing_points)
+    for seeds, inducing_fields in draws:
+        values = xr.apply_ufunc(
+            _draw_array_point_chunk,
+            *inputs,
+            kwargs={
+                "model": error_structure._drawing_model(),
+                "names": tuple(aligned),
+                "seeds": seeds,
+                "backend": backend,
+                "inducing_fields": inducing_fields,
+            },
+            dask="parallelized",
+            output_dtypes=[float],
+        )
+        fields.append(like.copy(new_array=values.data))
+    return fields[0] if n_fields == 1 else fields
 
 
 def _chunked_point_fields_dask(
@@ -641,19 +711,20 @@ def _chunked_point_fields_dask(
     from geoutils.pointcloud.dataframe import _assign_point_values, _point_partition_lengths
 
     if chunksize is None:
-        dataframe = like.ds
+        dataframe = like._dataset
     elif like._is_dask:
-        dataframe = like.ds.repartition(npartitions=max(1, int(np.ceil(like.point_count / chunksize))))
+        dataframe = like._dataset.repartition(npartitions=max(1, int(np.ceil(like.point_count / chunksize))))
     elif not like.is_loaded:
-        from geoutils.pointcloud.pd_accessor import open_pointcloud
+        from geoutils.pointcloud.loading import open_pointcloud
 
         assert like.name is not None
         dataframe = open_pointcloud(
             like.name,
-            data_column=like.data_column,
+            data_name=like.data_name,
             columns=list(like._nongeo_columns),
             chunks=chunksize,
             downsample=getattr(like, "_downsample", 1),
+            as_type="geodataframe",
         )
     else:
         dask_geopandas = import_optional("dask_geopandas")
@@ -661,7 +732,7 @@ def _chunked_point_fields_dask(
 
         _register_dask_pointcloud_accessor()
         dataframe = dask_geopandas.from_geopandas(
-            like.ds, npartitions=max(1, int(np.ceil(like.point_count / chunksize))), sort=False
+            like._dataset, npartitions=max(1, int(np.ceil(like.point_count / chunksize))), sort=False
         )
     from geoutils.pointcloud.dataframe import _get_dataframe_attrs
 
@@ -673,8 +744,8 @@ def _chunked_point_fields_dask(
     if arrays:
         dataframe = _assign_point_values(dataframe, arrays, partition_lengths=lengths)
     meta = dataframe._meta[original_columns].copy()
-    if like.data_column is not None:
-        meta[like.data_column] = pd.Series([], dtype=np.float64)
+    if like.data_name is not None:
+        meta[like.data_name] = pd.Series([], dtype=np.float64)
 
     fields = []
     model = error_structure._drawing_model()
@@ -686,7 +757,7 @@ def _chunked_point_fields_dask(
             predictor_columns,
             seeds,
             starts,
-            like.data_column,
+            like.data_name,
             original_columns,
             backend,
             inducing_fields,
@@ -697,7 +768,7 @@ def _chunked_point_fields_dask(
         fields.append(
             _build_pointcloud_output(
                 result,
-                data_column=like.data_column,
+                data_name=like.data_name,
                 as_dataframe=True,
                 attrs=source_attrs,
                 preserve_locations=True,
@@ -819,7 +890,7 @@ def _wrapper_draw_point_partition_multiproc(
     predictor_arrays: Mapping[str, Any],
     component_seeds: tuple[int, ...],
     start: int,
-    data_column: str | None,
+    data_name: str | None,
     original_columns: list[str],
     backend: Literal["gstools", "gpytorch"],
     inducing_fields: tuple[GPyTorchInducingField | None, ...] | None,
@@ -830,7 +901,7 @@ def _wrapper_draw_point_partition_multiproc(
     for name, values in predictor_arrays.items():
         source[name] = values
     result = _draw_point_rows(
-        source, model, predictor_columns, component_seeds, start, data_column, backend, inducing_fields
+        source, model, predictor_columns, component_seeds, start, data_name, backend, inducing_fields
     )
     return result[original_columns]
 
@@ -871,7 +942,7 @@ def _chunked_point_fields_multiproc(
         output_path, driver = _resolve_pointcloud_output(
             output_config.outfile,
             output_config.driver,
-            supported_drivers=("GPKG",),
+            supported_drivers=("GPKG", "PARQUET"),
             operation_name="random field generation",
         )
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -893,7 +964,7 @@ def _chunked_point_fields_multiproc(
                         tile_arrays,
                         field_seeds,
                         start,
-                        like.data_column,
+                        like.data_name,
                         original_columns,
                         backend,
                         field_inducing,
@@ -907,7 +978,7 @@ def _chunked_point_fields_multiproc(
                 output_path,
                 saved,
                 driver=driver,
-                data_column=like.data_column,
+                data_name=like.data_name,
                 geometry_type="Point Z" if like._has_z else "Point",
             )
         if like._is_pd:
@@ -1014,12 +1085,12 @@ def random_field(
             raise ValueError("Point cloud chunk size must be a positive integer.")
         if isinstance(like, RasterBase) and not like._is_xr:
             raise ValueError("Dask raster chunks require an Xarray input.")
-        if isinstance(like, PointCloudBase) and not like._is_dask:
+        if isinstance(like, PointCloudBase) and not like._is_dask and not like._is_xr:
             raise ValueError("Dask point chunks require a Dask GeoDataFrame input.")
     if mp_config is not None:
         if isinstance(like, RasterBase) and like._is_xr:
             raise ValueError("Multiprocessing raster fields require a Raster input.")
-        if isinstance(like, PointCloudBase) and like._is_dask:
+        if isinstance(like, PointCloudBase) and (like._is_dask or like._is_xr):
             raise ValueError("Multiprocessing point fields require a PointCloud or GeoDataFrame input.")
     dask_raster = isinstance(like, RasterBase) and like._is_xr and hasattr(like.data, "compute")
     dask_points = isinstance(like, PointCloudBase) and like._is_dask
@@ -1083,7 +1154,8 @@ def random_field(
             )
         # Dask
         if chunksizes is not None or dask_points:
-            return _chunked_point_fields_dask(
+            point_fields = _array_point_fields_dask if like._is_xr else _chunked_point_fields_dask
+            return point_fields(
                 like,
                 error_structure,
                 predictors=predictors,

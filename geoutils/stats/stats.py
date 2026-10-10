@@ -184,7 +184,7 @@ def stats(
         bins={"elevation": elevation_bins})
 
     Use ``values`` with index of band (for raster) or label of column (for point cloud) to select input, which
-    defaults to all bands for a raster, and the main data column for a point cloud.
+    defaults to all bands for a raster, and the main data attribute for a point cloud.
 
         # Select only band 2 (defaults to all bands)
         raster.stats(["mean", "std"], values=[1, 2])
@@ -302,7 +302,7 @@ def stats(
     :param by: Named variables to group by (e.g. {"elevation": dem}); use {"glacier": (outlines, "id")}
         for vector zones. Arrays must match the source input shape. Omit for global statistics.
     :param values: Bands (e.g. [1, 3]) or point columns (e.g. "height") to summarize; defaults to all raster bands
-        or the main point data column. Use a mapping to name your band inputs (e.g. {"elevation": (dem, 1)}).
+        or the main point data attribute. Use a mapping to name your band inputs (e.g. {"elevation": (dem, 1)}).
     :param bins: Continuous bins keyed by grouping name (e.g. {"elevation": 10}). Each definition is a count of
         equal-width bins, increasing edges (e.g. [0, 2, 5]), or a Pandas IntervalIndex to choose open/closed sides.
     :param categories: Ordered categories keyed by grouping name (e.g. {"landcover": [100, 110, 120]}).

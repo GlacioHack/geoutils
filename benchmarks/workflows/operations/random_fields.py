@@ -95,13 +95,12 @@ def random_field_size(parameter: int | float | None, case: Case) -> Mapping[str,
 
     assert parameter is not None
     size = int(parameter)
-    # One worker calculates the tiles; one Dask request covers at most 16 tiles
+    # One worker calculates and writes the tiles through to_file()
     return {
         "shape": (size, size),
         "chunks": (FIELD_CHUNK_SIZE, FIELD_CHUNK_SIZE),
         "n_workers": 1,
         "threads_per_worker": 1,
-        "dask_write_batch_size": 16,
     }
 
 
@@ -112,8 +111,7 @@ def describe_random_field_workload(parameter: int | float, configs: tuple[Runtim
     size = int(parameter)
     return (
         f"{size:,} × {size:,} raster; {config.chunks[0]:,} × {config.chunks[1]:,} chunks; "
-        f"{config.n_workers} worker, {config.threads_per_worker} thread; "
-        f"Dask writes up to {config.dask_write_batch_size} tiles per request"
+        f"{config.n_workers} worker, {config.threads_per_worker} thread"
     )
 
 

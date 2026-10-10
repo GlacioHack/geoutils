@@ -900,20 +900,29 @@ _GRID_QUERY_ROWS = 128
 
 def _prepare_point_gridding_data(
     pc: gpd.GeoDataFrame,
-    data_column_name: str | None,
+    data_name: str | None,
 ) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum, NDArrayBool]:
     """
     Read point coordinates and values, separating finite values from all points with usable X/Y coordinates.
 
     :param pc: Input point cloud.
-    :param data_column_name: Name of the data column, or None to use geometry elevations.
+    :param data_name: Name of the data attribute, or None to use geometry elevations.
 
     :returns: Coordinates and values for valid points, then coordinates and validity flags for all points with
         finite X/Y coordinates (including points with nodata values).
     """
 
-    values = np.asarray(pc[data_column_name].values if data_column_name is not None else pc.geometry.z.values)
-    points = np.column_stack((pc.geometry.x.values, pc.geometry.y.values))
+    from geoutils._dispatch import _get_pointcloud_interface
+
+    interface = _get_pointcloud_interface(pc)
+    if getattr(interface, "_is_xr", False):
+        x, y, active_values = interface.to_xyz()
+        values = active_values if data_name in (None, interface.data_name) else pc.coords[data_name].data
+        points = np.column_stack((x, y))
+        values = np.asarray(values)
+    else:
+        values = np.asarray(pc[data_name].values if data_name is not None else pc.geometry.z.values)
+        points = np.column_stack((pc.geometry.x.values, pc.geometry.y.values))
 
     # Coordinates must be finite for either values or nodata positions to affect the output
     finite_coordinates = np.isfinite(points).all(axis=1)
@@ -938,19 +947,30 @@ def _prepare_point_gridding_data(
 
 def _prepare_point_operator_data(
     pc: gpd.GeoDataFrame,
-    data_column_name: str | None,
+    data_name: str | None,
 ) -> tuple[NDArrayNum, NDArrayNum, NDArrayBool, NDArray[Any]]:
     """Read point coordinates, values, validity flags and unique row IDs for an interpolator or reducer."""
 
-    raw_values = np.asarray(pc[data_column_name].values if data_column_name is not None else pc.geometry.z.values)
-    raw_points = np.column_stack((pc.geometry.x.values, pc.geometry.y.values))
+    from geoutils._dispatch import _get_pointcloud_interface
+
+    interface = _get_pointcloud_interface(pc)
+    if getattr(interface, "_is_xr", False):
+        x, y, active_values = interface.to_xyz()
+        raw_values = active_values if data_name in (None, interface.data_name) else pc.coords[data_name].data
+        raw_values = np.asarray(raw_values)
+        raw_points = np.column_stack((x, y))
+    else:
+        raw_values = np.asarray(pc[data_name].values if data_name is not None else pc.geometry.z.values)
+        raw_points = np.column_stack((pc.geometry.x.values, pc.geometry.y.values))
     finite_coordinates = np.isfinite(raw_points).all(axis=1)
 
     # Include nodata values here: the interpolator/reducer decides whether to ignore or propagate them
     points = np.ascontiguousarray(raw_points[finite_coordinates], dtype=np.float64)
     values = np.ascontiguousarray(raw_values[finite_coordinates], dtype=np.float64)
     valid = np.isfinite(values)
-    source_ids = np.asarray(pc.index)[finite_coordinates]
+    source_ids = np.asarray(pc.get_index(pc.dims[0]) if getattr(interface, "_is_xr", False) else pc.index)[
+        finite_coordinates
+    ]
 
     # A dataframe index can contain duplicates; use row positions instead when it cannot identify points uniquely
     if not pd.Index(source_ids.tolist()).is_unique:
@@ -1114,7 +1134,7 @@ def _query_point_neighbours(
 def _prepare_point_neighbours_data(
     pc: gpd.GeoDataFrame,
     grid_coords: tuple[NDArrayNum, NDArrayNum],
-    data_column_name: str | None,
+    data_name: str | None,
     operator: Interpolator | Reducer,
     *,
     res_x: float,
@@ -1127,7 +1147,7 @@ def _prepare_point_neighbours_data(
     from geoutils.operators.execution import _get_builtin_gridding_method
     from geoutils.operators.interpolator import Interpolator
 
-    points, values, valid, source_ids = _prepare_point_operator_data(pc, data_column_name=data_column_name)
+    points, values, valid, source_ids = _prepare_point_operator_data(pc, data_name=data_name)
     if len(points) == 0:
         return [], []
     builtin_method = _get_builtin_gridding_method(operator, default_neighborhood_only=False)

@@ -408,7 +408,7 @@ class TestPointInterpolationAccuracy:
         result, _ = _grid_pointcloud(
             pc,
             grid_coords=grid_coords,
-            data_column_name="z",
+            data_name="z",
             resampling=resampling,
             dist_nodata_pixel=1.1,
         )
@@ -429,7 +429,7 @@ class TestPointInterpolationAccuracy:
         result, _ = _grid_pointcloud(
             pc,
             grid_coords=grid_coords,
-            data_column_name="z",
+            data_name="z",
             resampling="idw",
             dist_nodata_pixel=2.1,
             distance_power=2,
@@ -820,7 +820,7 @@ class TestPointInterpolationEngines:
         scipy_result, _ = _grid_pointcloud(
             pc,
             grid_coords=grid_coords,
-            data_column_name="z",
+            data_name="z",
             resampling=resampling,
             dist_nodata_pixel=2,
             engine="scipy",
@@ -830,7 +830,7 @@ class TestPointInterpolationEngines:
         numba_result, _ = _grid_pointcloud(
             pc,
             grid_coords=grid_coords,
-            data_column_name="z",
+            data_name="z",
             resampling=resampling,
             dist_nodata_pixel=2,
             engine="numba",
@@ -852,7 +852,7 @@ class TestPointInterpolationEngines:
                 pc,
                 grid_coords=(np.arange(3, dtype=float), np.array([0.0])),
                 grid_res=(1.0, 1.0),
-                data_column_name="z",
+                data_name="z",
                 resampling=resampling,
                 dist_nodata_pixel=1,
                 engine=engine,
@@ -874,7 +874,7 @@ class TestPointInterpolationEngines:
                 pc,
                 grid_coords=(np.array([0.0]), np.array([0.0])),
                 grid_res=(1.0, 1.0),
-                data_column_name="z",
+                data_name="z",
                 resampling="idw",
                 dist_nodata_pixel=1.1,
                 min_points=4,
@@ -1113,7 +1113,7 @@ class TestPointInterpolationGDAL:
         expected, _ = _grid_pointcloud(
             points,
             grid_coords=grid_coords,
-            data_column_name="z",
+            data_name="z",
             resampling=geoutils_method,
             dist_nodata_pixel=float("inf"),
             engine="scipy",
@@ -1159,7 +1159,7 @@ class TestPointInterpolationGDAL:
             points,
             grid_coords=(x_coords, y_coords),
             grid_res=(1.0, 1.0),
-            data_column_name="z",
+            data_name="z",
             resampling=geoutils_method,
             dist_nodata_pixel=1.1,
             nodata_handling="ignore",
@@ -1196,7 +1196,7 @@ class TestPointInterpolationGDAL:
             points,
             grid_coords=(np.arange(3, dtype=float), np.array([0.0])),
             grid_res=(1.0, 1.0),
-            data_column_name="z",
+            data_name="z",
             resampling="idw",
             dist_nodata_pixel=1.1,
             min_points=2,
@@ -1240,7 +1240,7 @@ class TestPointInterpolationGDAL:
         expected, _ = _grid_pointcloud(
             points,
             grid_coords=(np.arange(0, 30, 10, dtype=float), np.arange(3, dtype=float)),
-            data_column_name="z",
+            data_name="z",
             resampling="idw",
             dist_nodata_pixel=1.1,
             engine=engine,  # type: ignore[arg-type]
@@ -1308,7 +1308,7 @@ class TestPointInterpolationGDAL:
         actual, _ = _grid_pointcloud(
             point_cloud,
             grid_coords=reference.coords(grid=False),
-            data_column_name="z",
+            data_name="z",
             resampling=resampling,
             dist_nodata_pixel=np.inf,
         )
@@ -1318,7 +1318,7 @@ class TestPointInterpolationGDAL:
         ignored, _ = _grid_pointcloud(
             point_cloud,
             grid_coords=reference.coords(grid=False),
-            data_column_name="z",
+            data_name="z",
             resampling=resampling,
             dist_nodata_pixel=np.inf,
             nodata_handling="ignore",
@@ -1326,7 +1326,7 @@ class TestPointInterpolationGDAL:
         propagated, _ = _grid_pointcloud(
             point_cloud,
             grid_coords=reference.coords(grid=False),
-            data_column_name="z",
+            data_name="z",
             resampling=resampling,
             dist_nodata_pixel=np.inf,
             nodata_handling="propagate",

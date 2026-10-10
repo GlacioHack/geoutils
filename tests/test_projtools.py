@@ -169,13 +169,13 @@ class TestProjTools:
 
         # Check with gpd.GeoDataFrame
         outlines = gu.Vector(gu.examples.get_path_test("everest_rgi_outlines"))
-        outlines = gu.Vector(outlines.ds.to_crs(img1.crs))  # reproject to img1's CRS
-        out_bounds = pt.merge_bounds((img1, outlines.ds))
+        outlines = gu.Vector(outlines.gdf.to_crs(img1.crs))  # reproject to img1's CRS
+        out_bounds = pt.merge_bounds((img1, outlines.gdf))
 
-        assert out_bounds[0] == min(img1.bounds.left, outlines.ds.total_bounds[0])
-        assert out_bounds[1] == min(img1.bounds.bottom, outlines.ds.total_bounds[1])
-        assert out_bounds[2] == max(img1.bounds.right, outlines.ds.total_bounds[2])
-        assert out_bounds[3] == max(img1.bounds.top, outlines.ds.total_bounds[3])
+        assert out_bounds[0] == min(img1.bounds.left, outlines.gdf.total_bounds[0])
+        assert out_bounds[1] == min(img1.bounds.bottom, outlines.gdf.total_bounds[1])
+        assert out_bounds[2] == max(img1.bounds.right, outlines.gdf.total_bounds[2])
+        assert out_bounds[3] == max(img1.bounds.top, outlines.gdf.total_bounds[3])
 
     # Try all vectors and rasters
     @pytest.mark.parametrize(

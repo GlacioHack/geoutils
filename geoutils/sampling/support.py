@@ -56,7 +56,11 @@ if TYPE_CHECKING:
 def _normalize_sampling_input(value: Any) -> Any:
     """Treat Xarray inputs without both x and y coordinates as plain arrays, preserving Dask storage."""
 
-    if isinstance(value, xr.DataArray) and not {"x", "y"}.issubset(value.coords):
+    if (
+        isinstance(value, xr.DataArray)
+        and _get_pointcloud_interface(value) is None
+        and not {"x", "y"}.issubset(value.coords)
+    ):
         return value.data
     return value
 
@@ -145,9 +149,9 @@ def _raster_from_input(
     # Keep raw Dask arrays lazy even when their grid comes from a GeoUtils Raster
     from_array = input_raster.from_array
     if is_dask_array(array):
-        from geoutils.raster.xr_accessor import RasterAccessor
+        from geoutils.raster.xr_accessor import DataArrayRasterAccessor
 
-        from_array = RasterAccessor.from_array
+        from_array = DataArrayRasterAccessor.from_array
 
     # Create a raster with the array values and the original grid's coordinates
     # Mark missing array values without applying the original raster's nodata value
@@ -339,6 +343,18 @@ def _vector_values_at_points(points: gpd.GeoDataFrame, features: gpd.GeoDataFram
     return pd.Series(output, index=points.index, name="value")
 
 
+def _vector_values_at_array_points(x: NDArrayNum, y: NDArrayNum, features: gpd.GeoDataFrame) -> NDArrayNum:
+    """Assign intersecting feature values to numeric X/Y coordinates, with later features winning overlaps."""
+    import shapely
+
+    # Test coordinate arrays directly rather than constructing a Shapely point for each row
+    output = np.full(x.shape, np.nan)
+    for geometry, value in zip(features.geometry, features["value"]):
+        selected = shapely.intersects_xy(geometry, x, y)
+        output[selected] = value
+    return output
+
+
 def _sample_vector_values(
     dataframe: gpd.GeoDataFrame,
     values: NDArrayNum,
@@ -386,8 +402,22 @@ def _sample_vector_values(
     )
 
     # Match feature coordinates to the output CRS once before sampling every point partition
-    if features.crs != support_dataframe.crs:
-        features = features.to_crs(support_dataframe.crs)
+    point_crs = get_geo_attr(support_dataframe, "crs", ("pc",))
+    if features.crs != point_crs:
+        features = features.to_crs(point_crs)
+
+    # Numeric point blocks use the same feature order and boundary rule without allocating point geometry
+    pointcloud = _get_pointcloud_interface(support_dataframe)
+    if pointcloud._is_xr:
+        x, y, _ = pointcloud.to_xyz()
+        if is_dask_array(x) or is_dask_array(y):
+            import_optional("dask")
+            import dask.array as da
+
+            chunks = x.chunks if is_dask_array(x) else y.chunks
+            x, y = (da.asarray(axis).rechunk(chunks) for axis in (x, y))
+            return da.map_blocks(_vector_values_at_array_points, x, y, features=features, dtype=float, meta=np.empty(0))
+        return _vector_values_at_array_points(x, y, features)
 
     # Assign feature values to output points, processing each Dask chunk separately when needed
     if is_dask_dataframe(support_dataframe):
@@ -454,8 +484,13 @@ def _point_values_at_support(
     # Read the requested column, or use Z coordinates when no column is selected
     source_pointcloud = _get_pointcloud_interface(source)
     if source_pointcloud is not None:
-        dataframe = source_pointcloud.ds
-        column = source_pointcloud.data_column if selector is None else selector
+        dataframe = source_pointcloud._dataset
+        if source_pointcloud._is_xr:
+            column = source_pointcloud.data_name if selector is None else selector
+            if column not in source_pointcloud.columns:
+                raise ValueError(f"Point column {column!r} selected for {name!r} does not exist.")
+            return source_pointcloud.data if column == source_pointcloud.data_name else dataframe.coords[column].data
+        column = source_pointcloud.data_name if selector is None else selector
         if column is not None and (not isinstance(column, str) or column not in dataframe.columns):
             raise ValueError(f"Point column {column!r} selected for {name!r} does not exist.")
         values = dataframe.geometry.z if column is None else dataframe[column]
@@ -579,11 +614,14 @@ def _values_at_support(
         # Interpolate raster values at the output point coordinates
         if support_dataframe is None:
             raise RuntimeError("Point support coordinates were not prepared.")
-        points = (
-            support_dataframe
-            if is_dask_dataframe(support_dataframe)
-            else (support_dataframe.geometry.x.to_numpy(), support_dataframe.geometry.y.to_numpy())
-        )
+        if isinstance(support_dataframe, xr.DataArray):
+            points = support_dataframe
+        else:
+            points = (
+                support_dataframe
+                if is_dask_dataframe(support_dataframe)
+                else (support_dataframe.geometry.x.to_numpy(), support_dataframe.geometry.y.to_numpy())
+            )
         known_partitions = is_dask_dataframe(points) and point_partition_lengths is not None
         values = raster.interp_at_points(
             points=points,
@@ -655,7 +693,7 @@ def _mask_at_support(
     if _is_raster(support):
         return _mask_on_raster(mask, cast("RasterBase", support), mask_mode, align, mp_config=mp_config)
     if support_dataframe is None:
-        support_dataframe = get_geo_attr(support, "ds", accessors=("pc",))
+        support_dataframe = get_geo_attr(support, "_dataset", accessors=("pc",))
     mask = _normalize_sampling_input(mask)
 
     # Check for point clouds before vectors because point clouds also have vector methods
@@ -668,6 +706,20 @@ def _mask_at_support(
     # If input is a vector
     if is_vector:
         # Use create_mask() to find points inside vector shapes, excluding their boundaries
+        if isinstance(support_dataframe, xr.DataArray):
+            import shapely
+
+            from geoutils._dispatch import _clip_geometry
+
+            geometry = _clip_geometry(mask, target_crs=support.crs)
+            values = xr.apply_ufunc(
+                lambda x, y: shapely.contains_xy(geometry, x, y),
+                support_dataframe.coords["x"],
+                support_dataframe.coords["y"],
+                dask="parallelized",
+                output_dtypes=[bool],
+            ).data
+            return ~values if mask_mode == "outside" else values
         create_mask = get_geo_attr(mask, "create_mask", accessors=("vct",))
         known_partitions = is_dask_dataframe(support_dataframe) and point_partition_lengths is not None
         values = create_mask(ref=support_dataframe, as_array=not known_partitions, mp_config=mp_config)

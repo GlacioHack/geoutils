@@ -33,6 +33,37 @@ from geoutils.sampling.subsampling import (
 from geoutils.sampling.subsampling import _subsample as _subsample_values
 
 
+@pytest.fixture
+def pointcloud_file(tmp_path: Any) -> Any:
+    """Write point fixtures as GeoParquet row groups with their original labels and attribute dtypes."""
+
+    pytest.importorskip("pyarrow")
+    filenames = []
+
+    def write_points(frame: gpd.GeoDataFrame, partitions: int) -> tuple[str, int, str | None]:
+        """Save one point fixture and return its filename, row chunk size and active value column."""
+
+        # Preserve explicit elevation selection, otherwise infer the common point value columns
+        frame = frame.copy()
+        column = frame.pc.data_name
+        if "data_name" not in frame.attrs and column is None:
+            column = next((name for name in ("height", "z", "intensity") if name in frame), None)
+        if column is None and not frame.geometry.has_z.all():
+            frame["z"] = np.zeros(len(frame))
+            column = "z"
+
+        # A final shorter row group checks that file readers preserve every row
+        chunks = max(1, int(np.ceil(len(frame) / partitions)))
+        filename = tmp_path / f"points-{len(filenames)}.parquet"
+        filenames.append(filename)
+        frame.to_parquet(
+            filename, index=True, geometry_encoding="geoarrow", schema_version="1.1.0", row_group_size=chunks
+        )
+        return str(filename), chunks, column
+
+    return write_points
+
+
 class TestArraySubsample:
     """
     Test module for eager subsampling with one-, two-, and three-dimensional masked arrays.
@@ -136,7 +167,8 @@ class TestArraySubsample:
 
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestArraySubsampleChunked:
-    """Test module for subsample() across eager, Dask and multiprocessing inputs.
+    """
+    Test module for subsample() across eager, Dask and multiprocessing inputs.
 
     We check that backends return the requested sample size and exactly the same values (for "topk" strategy).
     We also check behaviour with selected bands, mask input and chunk size.
@@ -499,7 +531,7 @@ class TestArraySubsampleChunked:
         values = np.arange(99, dtype=np.float32).reshape((9, 11))
         values.ravel()[::13] = np.nan
         lazy_values = da.from_array(values, chunks=(4, 5))
-        source = gu.RasterAccessor.from_array(lazy_values, from_origin(0, 9, 1, 1), 32633)
+        source = gu.DataArrayRasterAccessor.from_array(lazy_values, from_origin(0, 9, 1, 1), 32633)
         source_file = tmp_path / "topk-reference.tif"
         gu.Raster.from_array(values, from_origin(0, 9, 1, 1), 32633, nodata=-99999).to_file(source_file)
         unloaded = gu.Raster(source_file)
@@ -754,19 +786,19 @@ class TestPointSubsample:
         # Give the source extra attributes so the point output must preserve more than its sampled data values
         values = np.arange(12, dtype=np.int16)
         points = gu.PointCloud.from_xyz(values, np.zeros(12), values, crs=32633)
-        points.ds["label"] = [f"point-{index}" for index in range(12)]
+        points.gdf["label"] = [f"point-{index}" for index in range(12)]
         expected_indices = points.subsample(5, return_indices=True, as_array=True, random_state=42)[0]
 
         # Request the default point output and the explicit one-dimensional array output
         sampled_points = points.subsample(5, random_state=42)
-        sampled_dataframe = points.ds.pc.subsample(5, random_state=42)
+        sampled_dataframe = points.gdf.pc.subsample(5, random_state=42)
         sampled_values = points.subsample(5, as_array=True, random_state=42)
 
         # Check point and array outputs
         assert isinstance(sampled_points, gu.PointCloud)
         assert isinstance(sampled_dataframe, gpd.GeoDataFrame)
-        assert sampled_points.ds.equals(points.ds.iloc[expected_indices])
-        assert sampled_dataframe.equals(points.ds.iloc[expected_indices])
+        assert sampled_points.gdf.equals(points.gdf.iloc[expected_indices])
+        assert sampled_dataframe.equals(points.gdf.iloc[expected_indices])
         np.testing.assert_array_equal(sampled_values, values[expected_indices])
 
     @pytest.mark.parametrize(
@@ -792,8 +824,8 @@ class TestPointSubsample:
         y, x = np.mgrid[:6, :6]
         values = np.arange(36, dtype=np.int16)
         points = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), values, crs=32633)
-        points.ds.index = np.arange(36) % 3
-        original = points.ds.copy()
+        points.gdf.index = np.arange(36) % 3
+        original = points.gdf.copy()
         eligible = (x < 3).ravel()
         mask: Any = eligible.copy()
 
@@ -817,10 +849,10 @@ class TestPointSubsample:
             if mask_form == "raster":
                 mask = gu.Raster.from_array(raster_values, transform, points.crs)
             else:
-                mask = gu.RasterAccessor.from_array(raster_values, transform, points.crs)
+                mask = gu.DataArrayRasterAccessor.from_array(raster_values, transform, points.crs)
         elif mask_form in {"pointcloud", "point_accessor"}:
             point_mask = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), eligible, crs=points.crs)
-            mask = point_mask if mask_form == "pointcloud" else point_mask.ds
+            mask = point_mask if mask_form == "pointcloud" else point_mask.gdf
 
         # Draw the expected top-k samples for a generator and an integer seed
         eligible_values = np.ma.array(values, mask=~eligible)
@@ -836,12 +868,13 @@ class TestPointSubsample:
         np.testing.assert_array_equal(sampled, values[expected_seed_indices])
         assert sampled.dtype == values.dtype
         assert actual_rng.integers(100000) == expected_rng.integers(100000)
-        assert points.ds.equals(original)
+        assert points.gdf.equals(original)
 
 
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestPointSubsampleChunked:
-    """Test module for point subsample() across Dask and multiprocessing inputs.
+    """
+    Test module for point subsample() across Dask and multiprocessing inputs.
 
     We check lazy point values, masks, file outputs, and backend validation.
     """
@@ -849,11 +882,18 @@ class TestPointSubsampleChunked:
     @pytest.mark.parametrize("subsample", [1, 5, 0.25, 0.001])
     @pytest.mark.parametrize("return_indices", [False, True])
     @pytest.mark.parametrize("mask_form", ["none", "array", "dask", "vector"])
-    def test_subsample__lazy_point_values(self, subsample: int | float, return_indices: bool, mask_form: str) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_subsample__lazy_point_values(
+        self,
+        as_type: Literal["dataarray", "geodataframe"],
+        pointcloud_file: Any,
+        subsample: int | float,
+        return_indices: bool,
+        mask_form: str,
+    ) -> None:
         """Checks that lazy point sampling gathers the requested values in the same seeded order as NumPy."""
 
         # Give several points the same labels so returned indexes must refer to row positions
-        import dask_geopandas as dgpd
 
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
@@ -865,7 +905,10 @@ class TestPointSubsampleChunked:
         )
         dataframe.index = np.arange(40) % 3
         _register_dask_pointcloud_accessor()
-        lazy = dgpd.from_geopandas(dataframe, npartitions=6, sort=False)
+        lazy_filename, lazy_chunks, lazy_column = pointcloud_file(dataframe, 6)
+        lazy = gu.open_pointcloud(
+            lazy_filename, data_name=lazy_column, columns="all", chunks=lazy_chunks, as_type=as_type
+        )
         assert not lazy.pc.is_loaded
 
         # Restrict the population before applying counts or fractions, without changing the point data
@@ -889,7 +932,8 @@ class TestPointSubsampleChunked:
         expected_rng = np.random.default_rng(42)
         expected_indices = _subsample_numpy(expected_values, subsample, return_indices=True, random_state=expected_rng)
         expected = expected_indices if return_indices else values[expected_indices]
-        series_type = type(lazy["height"])
+        series_type = type(lazy.pc.data)
+        source_name = lazy.pc.data.name
         with patch.object(series_type, "compute", autospec=True, side_effect=series_type.compute) as compute:
             result = lazy.pc.subsample(
                 subsample,
@@ -900,7 +944,7 @@ class TestPointSubsampleChunked:
             )
 
         # Only row-count summaries may be collected as Series; the full original data column stays partitioned
-        assert all(call.args[0].name != "height" for call in compute.call_args_list)
+        assert all(call.args[0].name != source_name for call in compute.call_args_list)
         np.testing.assert_array_equal(result, expected)
         assert not lazy.pc.is_loaded
         assert actual_rng.integers(100000) == expected_rng.integers(100000)
@@ -916,10 +960,10 @@ class TestPointSubsampleChunked:
         # Add an attribute beside the active values so the output must keep every point column
         values = np.arange(40, dtype=np.float64)
         points = gu.PointCloud.from_xyz(values, np.zeros(40), values, crs=32633)
-        points.ds["label"] = [f"point-{index}" for index in range(40)]
+        points.gdf["label"] = [f"point-{index}" for index in range(40)]
         source_file = tmp_path / "point-source.gpkg"
         points.to_file(source_file, index=False)
-        source = points if loaded else gu.PointCloud(source_file, data_column="z")
+        source = points if loaded else gu.PointCloud(source_file, data_name="z")
         output_file = tmp_path / f"point-sample-{loaded}.gpkg"
 
         # Select more rows than one seven-row partition and write complete point rows in source order
@@ -941,9 +985,9 @@ class TestPointSubsampleChunked:
         assert isinstance(result, gu.PointCloud)
         assert not result.is_loaded
         assert source.is_loaded == loaded
-        expected = points.ds.iloc[np.sort(expected_indices)].reset_index(drop=True)
+        expected = points.gdf.iloc[np.sort(expected_indices)].reset_index(drop=True)
         gpd.testing.assert_geodataframe_equal(
-            result.ds.reset_index(drop=True), expected, check_dtype=False, check_like=True
+            result.gdf.reset_index(drop=True), expected, check_dtype=False, check_like=True
         )
         assert source.is_loaded == loaded
 
@@ -953,11 +997,11 @@ class TestPointSubsampleChunked:
         # Add a second attribute so the accessor result must keep complete source rows
         values = np.arange(40, dtype=np.float64)
         points = gu.PointCloud.from_xyz(values, np.zeros(40), values, crs=32633)
-        points.ds["label"] = [f"point-{index}" for index in range(40)]
+        points.gdf["label"] = [f"point-{index}" for index in range(40)]
         output_file = tmp_path / "accessor-sample.gpkg"
 
         # Write a sample larger than one seven-row partition through the GeoDataFrame accessor
-        result = points.ds.pc.subsample(
+        result = points.gdf.pc.subsample(
             17,
             random_state=42,
             strategy="topk",
@@ -973,8 +1017,8 @@ class TestPointSubsampleChunked:
 
         # Check the GeoDataFrame and all selected columns
         assert isinstance(result, gpd.GeoDataFrame)
-        assert result.pc.data_column == "z"
-        expected = points.ds.iloc[np.sort(expected_indices)].reset_index(drop=True)
+        assert result.pc.data_name == "z"
+        expected = points.gdf.iloc[np.sort(expected_indices)].reset_index(drop=True)
         gpd.testing.assert_geodataframe_equal(
             result.reset_index(drop=True), expected, check_dtype=False, check_like=True
         )
@@ -992,8 +1036,8 @@ class TestPointSubsampleChunked:
             geometry=gpd.points_from_xy(np.arange(20), np.arange(20) + 50),
             crs=32633,
         )
-        source = gu.PointCloud(dataframe, data_column="height")
-        expected = source.subsample(7, random_state=42).ds
+        source = gu.PointCloud(dataframe, data_name="height")
+        expected = source.subsample(7, random_state=42).gdf
         output_file = tmp_path / f"sampled-points{suffix}"
 
         # Select the same rows into LAS/LAZ, mapping the active height values to native Z
@@ -1005,13 +1049,13 @@ class TestPointSubsampleChunked:
 
         # Keep the result unloaded, then compare its elevations and auxiliary values with the eager sample
         assert output_file.exists() and not result.is_loaded
-        assert result.data_column == "Z"
+        assert result.data_name == "Z"
         result.load(columns=["Z", "quality"])
         expected = expected.sort_values("height").reset_index(drop=True)
         np.testing.assert_array_equal(result.geometry.x, expected.geometry.x)
         np.testing.assert_array_equal(result.geometry.y, expected.geometry.y)
         np.testing.assert_array_equal(result.data, expected["height"])
-        np.testing.assert_array_equal(result.ds["quality"], expected["quality"])
+        np.testing.assert_array_equal(result.gdf["quality"], expected["quality"])
 
     def test_subsample__unloaded_point_output_uses_npy(self, tmp_path: Path) -> None:
         """Checks that point values are read and written in partitions without loading their source file."""
@@ -1022,7 +1066,7 @@ class TestPointSubsampleChunked:
         source_file = tmp_path / "point-source.gpkg"
         output_file = tmp_path / "point-values.npy"
         points.to_file(source_file, index=False)
-        source = gu.PointCloud(source_file, data_column="z")
+        source = gu.PointCloud(source_file, data_name="z")
         expected = points.subsample(17, as_array=True, random_state=42, strategy="topk")
         assert not source.is_loaded
 
@@ -1083,10 +1127,11 @@ class TestPointSubsampleChunked:
         else:
             assert isinstance(result, np.memmap)
 
-    def test_subsample__point_topk_cutoff_and_force_memory(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_subsample__point_topk_cutoff_and_force_memory(
+        self, as_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Checks that large lazy point samples use cutoff search unless memory output is forced."""
-
-        import dask_geopandas as dgpd
 
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
         from geoutils.sampling import subsampling as subsampling_module
@@ -1096,7 +1141,10 @@ class TestPointSubsampleChunked:
         points = gu.PointCloud.from_xyz(values, np.zeros(40), values, crs=32633)
         expected = points.subsample(17, as_array=True, random_state=42, strategy="topk")
         _register_dask_pointcloud_accessor()
-        lazy = dgpd.from_geopandas(points.ds, npartitions=6, sort=False)
+        lazy_filename, lazy_chunks, lazy_column = pointcloud_file(points.gdf, 6)
+        lazy = gu.open_pointcloud(
+            lazy_filename, data_name=lazy_column, columns="all", chunks=lazy_chunks, as_type=as_type
+        )
 
         # Record the automatic cutoff search while preserving its result
         cutoff = subsampling_module._dask_array_topk_cutoff
@@ -1128,16 +1176,22 @@ class TestPointSubsampleChunked:
         assert cutoff_calls == [1]
         np.testing.assert_array_equal(result, expected)
         np.testing.assert_array_equal(forced, expected)
-        assert isinstance(forced_points, gpd.GeoDataFrame)
+        assert isinstance(forced_points, xr.DataArray if as_type == "dataarray" else gpd.GeoDataFrame)
+        assert forced_points.pc.is_loaded
+        if as_type == "dataarray":
+            forced_points = forced_points.pc.to_geoutils().gdf
         gpd.testing.assert_geodataframe_equal(
             forced_points,
-            points.subsample(17, random_state=42, strategy="topk").ds,
+            points.subsample(17, random_state=42, strategy="topk").gdf,
         )
         assert not lazy.pc.is_loaded
 
     @pytest.mark.parametrize("lazy", [False, True])
     @pytest.mark.parametrize("tiny_fraction", [False, True])
-    def test_subsample__point_empty_masks(self, lazy: bool, tiny_fraction: bool) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_subsample__point_empty_masks(
+        self, as_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, lazy: bool, tiny_fraction: bool
+    ) -> None:
         """Checks that empty point populations and fractions rounded to zero return empty values and positions."""
 
         # Either exclude every point or select one point whose half-sample rounds down to zero
@@ -1158,14 +1212,15 @@ class TestPointSubsampleChunked:
         )
         source = points
         if lazy:
-            import dask_geopandas as dgpd
-
             from geoutils.pointcloud.pd_accessor import (
                 _register_dask_pointcloud_accessor,
             )
 
             _register_dask_pointcloud_accessor()
-            source = dgpd.from_geopandas(points.ds, npartitions=2, sort=False).pc
+            source_filename, source_chunks, source_column = pointcloud_file(points.gdf, 2)
+            source = gu.open_pointcloud(
+                source_filename, data_name=source_column, columns="all", chunks=source_chunks, as_type=as_type
+            ).pc
             assert not source.is_loaded
 
         # Preserve the ordinary value dtype and the one-dimensional positional-index layout
@@ -1204,15 +1259,15 @@ class TestRasterSubsample:
         pointcloud = raster.subsample(1, bands=bands)
 
         # Preserve both selected values with their default band names
-        assert list(pointcloud.ds.columns) == ["b1", "b3", "geometry"]
+        assert list(pointcloud.gdf.columns) == ["b1", "b3", "geometry"]
         np.testing.assert_array_equal(pointcloud["b1"].to_numpy(), values[0].ravel())
         np.testing.assert_array_equal(pointcloud["b3"].to_numpy(), values[2].ravel())
 
         # Select one band directly, then name and reorder several bands with a mapping
         single_band = raster.subsample(1, bands=2)
         named_bands = raster.subsample(1, bands={"third": 3, "first": 1})
-        assert list(single_band.ds.columns) == ["b2", "geometry"]
-        assert list(named_bands.ds.columns) == ["third", "first", "geometry"]
+        assert list(single_band.gdf.columns) == ["b2", "geometry"]
+        assert list(named_bands.gdf.columns) == ["third", "first", "geometry"]
         np.testing.assert_array_equal(single_band["b2"].to_numpy(), values[1].ravel())
         np.testing.assert_array_equal(named_bands["third"].to_numpy(), values[2].ravel())
         np.testing.assert_array_equal(named_bands["first"].to_numpy(), values[0].ravel())
@@ -1227,9 +1282,9 @@ class TestRasterSubsample:
         # Compare both public entry points row for row with the same deterministic selection
         sampled = raster.subsample(7, random_state=42)
         converted = raster.to_pointcloud(subsample=7, random_state=42)
-        assert list(sampled.ds.columns) == ["b1", "b2", "b3", "geometry"]
-        assert sampled.data_column == converted.data_column
-        assert sampled.ds.equals(converted.ds)
+        assert list(sampled.gdf.columns) == ["b1", "b2", "b3", "geometry"]
+        assert sampled.data_name == converted.data_name
+        assert sampled.gdf.equals(converted.gdf)
 
     def test_to_pointcloud__bands_offsets(self) -> None:
         """Checks that selected bands and cell offsets behave properly during conversion to point cloud."""
@@ -1240,7 +1295,7 @@ class TestRasterSubsample:
 
         # We use the second band as point values and save the first under its own name
         points = raster.to_pointcloud(
-            data_column_name="height",
+            data_name="height",
             data_band=2,
             auxiliary_data_bands=[1],
             auxiliary_column_names=["first"],
@@ -1248,18 +1303,18 @@ class TestRasterSubsample:
         )
 
         # We check values and coordinates
-        assert list(points.ds.columns) == ["height", "first", "geometry"]
-        np.testing.assert_array_equal(points.ds["height"], values[1].ravel())
-        np.testing.assert_array_equal(points.ds["first"], values[0].ravel())
-        np.testing.assert_array_equal(points.ds.geometry.x, [0.5, 1.5, 0.5, 1.5])
-        np.testing.assert_array_equal(points.ds.geometry.y, [1.5, 1.5, 0.5, 0.5])
+        assert list(points.gdf.columns) == ["height", "first", "geometry"]
+        np.testing.assert_array_equal(points.gdf["height"], values[1].ravel())
+        np.testing.assert_array_equal(points.gdf["first"], values[0].ravel())
+        np.testing.assert_array_equal(points.gdf.geometry.x, [0.5, 1.5, 0.5, 1.5])
+        np.testing.assert_array_equal(points.gdf.geometry.y, [1.5, 1.5, 0.5, 0.5])
 
     def test_subsample__accessor_returns_geodataframe(self) -> None:
         """Checks that an eager raster accessor returns a GeoDataFrame by default."""
 
         # Create an accessor with two bands to check both its output type and default band selection
         values = np.arange(16).reshape((2, 2, 4))
-        accessor = gu.RasterAccessor.from_array(values, rio.transform.from_origin(0, 2, 1, 1), 32633)
+        accessor = gu.DataArrayRasterAccessor.from_array(values, rio.transform.from_origin(0, 2, 1, 1), 32633)
 
         # Sample through the accessor and keep every band in the dataframe
         sampled = accessor.rst.subsample(5, random_state=42)
@@ -1309,7 +1364,7 @@ class TestRasterSubsample:
         elif mask_form == "raster":
             mask = gu.Raster.from_array(mask, raster.transform, raster.crs)
         elif mask_form == "raster_accessor":
-            mask = gu.RasterAccessor.from_array(mask, raster.transform, raster.crs)
+            mask = gu.DataArrayRasterAccessor.from_array(mask, raster.transform, raster.crs)
         eligible &= ~data.mask[1]
 
         # Draw the expected top-k samples to check the count, order and generator advancement
@@ -1410,7 +1465,7 @@ class TestRasterSubsampleChunked:
             )
             assert cutoff_calls == [1]
             assert not source.is_loaded and not result.is_loaded
-            computed_values = result.ds["b1"].to_numpy()
+            computed_values = result.gdf["b1"].to_numpy()
             assert not source.is_loaded
 
         # Compare with the eager result
@@ -1433,7 +1488,7 @@ class TestRasterSubsampleChunked:
         output_file = tmp_path / "unused-forced-output.gpkg"
         raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 8, 1, 1), 32633)
         raster.to_file(source_file)
-        expected = raster.subsample(17, random_state=42).ds
+        expected = raster.subsample(17, random_state=42).gdf
 
         # Make cutoff search fail if it is used
         cutoff_name = "_dask_array_topk_cutoff" if backend == "dask" else "_multiproc_array_topk_cutoff"
@@ -1460,7 +1515,7 @@ class TestRasterSubsampleChunked:
                 mp_config=MultiprocConfig(chunks=(3, 4), outfile=str(output_file)),
                 force_output_to_memory=True,
             )
-            actual = result.ds
+            actual = result.gdf
             assert result.is_loaded and not source.is_loaded
             assert not output_file.exists()
 
@@ -1526,7 +1581,7 @@ class TestRasterSubsampleChunked:
 
         # Confirm the returned point cloud stays unopened until its values are requested for comparison
         assert not source.is_loaded and not result.is_loaded
-        np.testing.assert_array_equal(np.sort(result.ds["b1"].to_numpy()), np.sort(expected))
+        np.testing.assert_array_equal(np.sort(result.gdf["b1"].to_numpy()), np.sort(expected))
         assert not source.is_loaded
 
     @pytest.mark.parametrize("skip_nodata", [False, True])
@@ -1734,7 +1789,7 @@ class TestRasterSubsampleChunked:
         gu.Raster.from_array(values, rio.transform.from_origin(500000, 8600000, 20, 20), 32633).to_file(source_file)
         source = gu.Raster(source_file)
         options = {"subsample": 17, "bands": {"height": 1, "quality": 2}, "random_state": 42}
-        expected = source.subsample(**options).ds
+        expected = source.subsample(**options).gdf
 
         # Select the same cells into LAS/LAZ, mapping height to native Z and quality to an extra dimension
         result = source.subsample(
@@ -1744,14 +1799,16 @@ class TestRasterSubsampleChunked:
 
         # Compare tile-ordered file rows with the eager sample after sorting both by X/Y coordinates
         assert output_file.exists() and not source.is_loaded and not result.is_loaded
-        assert result.data_column == "Z"
+        assert result.data_name == "Z"
         result.load(columns=["Z", "quality"])
         expected_order = np.lexsort((expected.geometry.x, expected.geometry.y))
         result_order = np.lexsort((result.geometry.x, result.geometry.y))
         np.testing.assert_allclose(result.geometry.x.iloc[result_order], expected.geometry.x.iloc[expected_order])
         np.testing.assert_allclose(result.geometry.y.iloc[result_order], expected.geometry.y.iloc[expected_order])
         np.testing.assert_array_equal(result.data[result_order], expected["height"].iloc[expected_order])
-        np.testing.assert_array_equal(result.ds["quality"].iloc[result_order], expected["quality"].iloc[expected_order])
+        np.testing.assert_array_equal(
+            result.gdf["quality"].iloc[result_order], expected["quality"].iloc[expected_order]
+        )
 
     @pytest.mark.parametrize("backend", ["dask", "multiprocessing"])
     @pytest.mark.parametrize("as_array", [False, True])
@@ -1790,7 +1847,7 @@ class TestRasterSubsampleChunked:
             assert not result.is_loaded
             assert result.point_count == 0
             assert not result.is_loaded
-            assert list(result.ds.columns) == ["b1", "geometry"]
+            assert list(result.gdf.columns) == ["b1", "geometry"]
             assert result.is_loaded
         if backend == "dask":
             assert not source._in_memory
@@ -1863,13 +1920,13 @@ class TestSubsampleErrors:
     @pytest.mark.parametrize(
         "options,message",
         [
-            ({"data_column_name": 1}, "Data column name must be a string"),
+            ({"data_name": 1}, "Data column name must be a string"),
             ({"data_band": 0}, "Data band number must be an integer between"),
             ({"auxiliary_column_names": ["first"]}, "Passing auxiliary column names requires"),
             ({"auxiliary_data_bands": [3]}, "Auxiliary data band numbers must be between"),
             ({"auxiliary_data_bands": [1]}, "Main data band 1 should not be listed"),
             (
-                {"data_column_name": "height", "auxiliary_data_bands": [2], "auxiliary_column_names": ["height"]},
+                {"data_name": "height", "auxiliary_data_bands": [2], "auxiliary_column_names": ["height"]},
                 "Point cloud data column names must be unique",
             ),
             ({"force_pixel_offset": "side"}, "Unknown pixel offset"),
@@ -1887,25 +1944,36 @@ class TestSubsampleErrors:
 
     @pytest.mark.parametrize("source_kind", ["point", "raster"])
     @pytest.mark.parametrize("as_array", [False, True])
-    def test_subsample__error_multiproc_with_dask(self, source_kind: str, as_array: bool, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_subsample__error_multiproc_with_dask(
+        self,
+        as_type: Literal["dataarray", "geodataframe"],
+        pointcloud_file: Any,
+        source_kind: str,
+        as_array: bool,
+        tmp_path: Path,
+    ) -> None:
         """Checks that point and raster subsampling cannot combine Dask with multiprocessing."""
 
         # Create a Dask point or raster input
         values = np.arange(40, dtype=np.float64)
         if source_kind == "point":
-            dgpd = pytest.importorskip("dask_geopandas")
+            pytest.importorskip("dask_geopandas")
             from geoutils.pointcloud.pd_accessor import (
                 _register_dask_pointcloud_accessor as register_accessor,
             )
 
             points = gu.PointCloud.from_xyz(values, np.zeros(40), values, crs=32633)
             register_accessor()
-            source = dgpd.from_geopandas(points.ds, npartitions=6, sort=False).pc
+            source_filename, source_chunks, source_column = pointcloud_file(points.gdf, 6)
+            source = gu.open_pointcloud(
+                source_filename, data_name=source_column, columns="all", chunks=source_chunks, as_type=as_type
+            ).pc
             chunks: int | tuple[int, int] = 7
         else:
             da = pytest.importorskip("dask.array")
             lazy_values = da.from_array(values.reshape(5, 8), chunks=(2, 3))
-            raster = gu.RasterAccessor.from_array(lazy_values, from_origin(0, 5, 1, 1), 32633)
+            raster = gu.DataArrayRasterAccessor.from_array(lazy_values, from_origin(0, 5, 1, 1), 32633)
             source = raster.rst
             chunks = (2, 3)
         suffix = ".npy" if as_array else ".gpkg"

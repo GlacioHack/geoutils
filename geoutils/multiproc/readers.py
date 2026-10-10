@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import copy
 import math
+import pathlib
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
@@ -100,7 +101,7 @@ class _ValueReader:
                 kind = "interpolated"
         else:
             # Record the point count and selected column type from the file
-            selector = source.data_column if self.selector is None else self.selector
+            selector = source.data_name if self.selector is None else self.selector
             if selector is not None and (not isinstance(selector, str) or selector not in source.columns):
                 raise ValueError(f"Point column {selector!r} does not exist.")
             from geoutils.pointcloud.las import _is_laspy_supported
@@ -116,6 +117,18 @@ class _ValueReader:
                         dtype = np.dtype(float)
                     else:
                         dtype = np.dtype("uint8") if dimension.dtype is None else dimension.dtype
+            elif pathlib.Path(source.name).suffix.lower() == ".parquet" or pathlib.Path(source.name).is_dir():
+                from geoutils.pointcloud.parquet import _point_parquet_metadata
+
+                metadata = _point_parquet_metadata(source.name)
+                import_optional("pyarrow")
+                import pyarrow.parquet as pq
+
+                from geoutils.pointcloud.parquet import _parquet_files
+
+                count = metadata["point_count"]
+                schema = pq.ParquetFile(_parquet_files(source.name)[0]).schema_arrow
+                dtype = np.dtype(float if selector is None else schema.field(selector).type.to_pandas_dtype())
             else:
                 info = pyogrio.read_info(source.name, force_feature_count=True)
                 count = info["features"]
@@ -366,13 +379,19 @@ def _read_point_rows(source: PointCloudBase, rows: slice, selector: int | str | 
 
     # Read in-memory rows directly and otherwise use the reader for the file format
     if source.is_loaded or source._is_pd:
-        dataframe = source.ds.iloc[rows]
+        dataframe = source._dataset.iloc[rows]
         return dataframe[[*columns, dataframe.geometry.name]]
     assert source.name is not None
     from geoutils.pointcloud.las import _is_laspy_supported, _load_laspy_data_slice
 
     if _is_laspy_supported(source.name):
         return _load_laspy_data_slice(source.name, columns=columns, start=rows.start, count=count)
+
+    if pathlib.Path(source.name).suffix.lower() == ".parquet" or pathlib.Path(source.name).is_dir():
+        from geoutils.pointcloud.loading import _read_point_file_rows
+
+        dataframe = _read_point_file_rows(source.name, columns, rows.start, count)
+        return dataframe[[*columns, dataframe.geometry.name]]
 
     # A zero max_features means unlimited rows in Pyogrio, so empty requests read at most one row for their schema
     dataframe = pyogrio.read_dataframe(

@@ -74,7 +74,7 @@ class TestVector:
         assert not vector.is_loaded
 
         # Accessing the full dataframe triggers loading and matches GeoPandas
-        assert_geodataframe_equal(vector.ds, eager)
+        assert_geodataframe_equal(vector.gdf, eager)
         assert vector.is_loaded
 
     def test_init__select_file_layer(self, tmp_path: pathlib.Path) -> None:
@@ -93,7 +93,7 @@ class TestVector:
         np.testing.assert_array_equal(vector.total_bounds, second.total_bounds)
 
         # Load the selected layer and compare it with the original frame
-        assert_geodataframe_equal(vector.ds, second)
+        assert_geodataframe_equal(vector.gdf, second)
 
     def test_copy(self) -> None:
 
@@ -104,8 +104,8 @@ class TestVector:
         assert vector2 is not vector
 
         # Modify vector2, and check vector is not affected
-        vector2.ds = vector2.ds.query("RGIId == 'RGI60-17.08409'")
-        assert vector2.ds.shape[0] < vector.ds.shape[0]
+        vector2.gdf = vector2.gdf.query("RGIId == 'RGI60-17.08409'")
+        assert vector2.gdf.shape[0] < vector.gdf.shape[0]
 
     def test_info(self) -> None:
 
@@ -145,10 +145,10 @@ class TestVector:
         assert bounds.left < bounds.right
         assert bounds.bottom < bounds.top
 
-        assert bounds.left == vector.ds.total_bounds[0]
-        assert bounds.bottom == vector.ds.total_bounds[1]
-        assert bounds.right == vector.ds.total_bounds[2]
-        assert bounds.top == vector.ds.total_bounds[3]
+        assert bounds.left == vector.gdf.total_bounds[0]
+        assert bounds.bottom == vector.gdf.total_bounds[1]
+        assert bounds.right == vector.gdf.total_bounds[2]
+        assert bounds.top == vector.gdf.total_bounds[3]
 
     def test_footprint(self) -> None:
 
@@ -443,7 +443,7 @@ class TestGeoPandasMethods:
 
         # Get method for each class
         output_geoutils = getattr(vector, method)
-        output_geopandas = getattr(vector.ds, method)
+        output_geopandas = getattr(vector.gdf, method)
 
         # Assert equality
         assert_series_equal(output_geoutils, output_geopandas)
@@ -475,19 +475,19 @@ class TestGeoPandasMethods:
             "hilbert_distance",
         ]:
             output_geoutils = getattr(vector1, method)()
-            output_geopandas = getattr(vector1.ds, method)()
+            output_geopandas = getattr(vector1.gdf, method)()
         elif method == "geom_equals_exact":
             output_geoutils = getattr(vector1, method)(vector2, tolerance=0.1)
-            output_geopandas = getattr(vector1.ds, method)(vector2.ds, tolerance=0.1)
+            output_geopandas = getattr(vector1.gdf, method)(vector2.gdf, tolerance=0.1)
         elif method == "dwithin":
             output_geoutils = getattr(vector1, method)(vector2, distance=0.1)
-            output_geopandas = getattr(vector1.ds, method)(vector2.ds, distance=0.1)
+            output_geopandas = getattr(vector1.gdf, method)(vector2.gdf, distance=0.1)
         elif method == "relate_pattern":
             output_geoutils = getattr(vector1, method)(vector2, pattern="*T*******")
-            output_geopandas = getattr(vector1.ds, method)(vector2.ds, pattern="*T*******")
+            output_geopandas = getattr(vector1.gdf, method)(vector2.gdf, pattern="*T*******")
         else:
             output_geoutils = getattr(vector1, method)(vector2)
-            output_geopandas = getattr(vector1.ds, method)(vector2.ds)
+            output_geopandas = getattr(vector1.gdf, method)(vector2.gdf)
 
         # Assert equality
         assert_series_equal(output_geoutils, output_geopandas)
@@ -503,7 +503,7 @@ class TestGeoPandasMethods:
 
         # Get method for each class
         output_geoutils = getattr(vector, method)
-        output_geopandas = getattr(vector.ds, method)
+        output_geopandas = getattr(vector.gdf, method)
 
         # Assert output types
         assert isinstance(output_geoutils, gu.Vector)
@@ -512,13 +512,13 @@ class TestGeoPandasMethods:
         # Separate cases depending on GeoPandas' output
         if isinstance(output_geopandas, gpd.GeoSeries):
             # Assert geoseries equality
-            assert_geoseries_equal(output_geoutils.ds.geometry, output_geopandas)
+            assert_geoseries_equal(output_geoutils.gdf.geometry, output_geopandas)
         elif isinstance(output_geopandas, BaseGeometry):
             assert_geodataframe_equal(
-                output_geoutils.ds, gpd.GeoDataFrame({"geometry": [output_geopandas]}, crs=vector.crs)
+                output_geoutils.gdf, gpd.GeoDataFrame({"geometry": [output_geopandas]}, crs=vector.crs)
             )
         else:
-            assert_geodataframe_equal(output_geoutils.ds, output_geopandas)
+            assert_geodataframe_equal(output_geoutils.gdf, output_geopandas)
 
     specific_method_args = {
         "buffer": {"distance": 1},
@@ -569,7 +569,7 @@ class TestGeoPandasMethods:
             "shortest_line",
         ]:
             output_geoutils = getattr(vector1, method)(vector2)
-            output_geopandas = getattr(vector1.ds, method)(vector2.ds)
+            output_geopandas = getattr(vector1.gdf, method)(vector2.gdf)
         # Methods that require zero input
         elif method in [
             "representative_point",
@@ -590,13 +590,13 @@ class TestGeoPandasMethods:
             "line_merge",
         ]:
             output_geoutils = getattr(vector1, method)()
-            output_geopandas = getattr(vector1.ds, method)()
+            output_geopandas = getattr(vector1.gdf, method)()
         elif method in ["snap"]:
             output_geoutils = getattr(vector1, method)(vector2, tolerance=0.1)
-            output_geopandas = getattr(vector1.ds, method)(vector2.ds, tolerance=0.1)
+            output_geopandas = getattr(vector1.gdf, method)(vector2.gdf, tolerance=0.1)
         elif method in self.specific_method_args.keys():
             output_geoutils = getattr(vector1, method)(**self.specific_method_args[method])
-            output_geopandas = getattr(vector1.ds, method)(**self.specific_method_args[method])
+            output_geopandas = getattr(vector1.gdf, method)(**self.specific_method_args[method])
         else:
             raise ValueError(f"The method '{method}' is not covered by this test.")
 
@@ -608,16 +608,16 @@ class TestGeoPandasMethods:
         # Simplify can make geometries invalid, so compare their repaired results
         if method == "simplify":
             assert_geoseries_equal(
-                output_geopandas.make_valid(), output_geoutils.ds.geometry.make_valid(), check_less_precise=True
+                output_geopandas.make_valid(), output_geoutils.gdf.geometry.make_valid(), check_less_precise=True
             )
         elif isinstance(output_geopandas, BaseGeometry):
-            output_geopandas.equals(output_geoutils.ds.geometry)
+            output_geopandas.equals(output_geoutils.gdf.geometry)
         # For geoseries output, check equality of it
         elif isinstance(output_geopandas, gpd.GeoSeries):
-            assert_geoseries_equal(output_geoutils.ds.geometry, output_geopandas)
+            assert_geoseries_equal(output_geoutils.gdf.geometry, output_geopandas)
         # For geodataframe output, check equality
         else:
-            assert_geodataframe_equal(output_geoutils.ds, output_geopandas)
+            assert_geodataframe_equal(output_geoutils.gdf, output_geopandas)
 
     def test_project(self) -> None:
         """Checks that project() returns the distance of a point along a line."""
@@ -628,7 +628,7 @@ class TestGeoPandasMethods:
 
         # Compare with GeoPandas and known position
         distance = line.project(point)
-        assert_series_equal(distance, line.ds.project(point.ds))
+        assert_series_equal(distance, line.gdf.project(point.gdf))
         assert distance.iloc[0] == 1
 
     def test_interpolate(self) -> None:
@@ -639,8 +639,8 @@ class TestGeoPandasMethods:
 
         # Compare with GeoPandas and midpoint
         point = line.interpolate(1)
-        assert_geoseries_equal(point.ds.geometry, line.ds.interpolate(1))
-        assert point.ds.geometry.iloc[0].equals(Point(1, 0))
+        assert_geoseries_equal(point.gdf.geometry, line.gdf.interpolate(1))
+        assert point.gdf.geometry.iloc[0].equals(Point(1, 0))
 
     def test_shared_paths(self) -> None:
         """Checks that shared_paths() returns the common segment of two lines."""
@@ -651,5 +651,5 @@ class TestGeoPandasMethods:
 
         # Compare with GeoPandas
         shared = line.shared_paths(other)
-        assert_geoseries_equal(shared.ds.geometry, line.ds.shared_paths(other.ds))
-        assert shared.ds.geometry.iloc[0].length == 1
+        assert_geoseries_equal(shared.gdf.geometry, line.gdf.shared_paths(other.gdf))
+        assert shared.gdf.geometry.iloc[0].length == 1

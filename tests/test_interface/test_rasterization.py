@@ -266,7 +266,7 @@ class TestRasterVectorInterface:
         np.testing.assert_array_equal(custom_nodata.data.compressed(), np.ones(custom_nodata.data.count()))
 
         # Check with a float32 array with NaNs
-        dataarray = self.vector.ds.vct.rasterize(
+        dataarray = self.vector.gdf.vct.rasterize(
             res=1, bounds=(9, 9, 13, 13), crs=4326, in_value=1, out_value=np.nan, out_dtype=np.float32
         )
         assert isinstance(dataarray, xr.DataArray)
@@ -328,7 +328,7 @@ class TestRasterVectorInterface:
 
         # Check that vector has not been modified by accident
         assert vector.bounds == self.vector.bounds
-        assert len(vector.ds) == len(self.vector.ds)
+        assert len(vector.gdf) == len(self.vector.gdf)
         assert vector.crs == self.vector.crs
 
         # Then with a gu.Raster as reference, single band
@@ -362,12 +362,12 @@ class TestRasterVectorInterface:
 
         # Check that both names are actually the same implementation, on Vector and the vct accessor
         assert self.vector.geometry_mask.__func__ is self.vector.create_mask.__func__
-        assert self.vector.ds.vct.geometry_mask.__func__ is self.vector.ds.vct.create_mask.__func__
+        assert self.vector.gdf.vct.geometry_mask.__func__ is self.vector.gdf.vct.create_mask.__func__
 
         # They should return the same boolean array
         expected = self.vector.create_mask(res=1, bounds=(0, 0, 21, 21), as_array=True)
         actual = self.vector.geometry_mask(res=1, bounds=(0, 0, 21, 21), as_array=True)
-        accessor_actual = self.vector.ds.vct.geometry_mask(res=1, bounds=(0, 0, 21, 21), as_array=True)
+        accessor_actual = self.vector.gdf.vct.geometry_mask(res=1, bounds=(0, 0, 21, 21), as_array=True)
         np.testing.assert_array_equal(actual, expected)
         np.testing.assert_array_equal(accessor_actual, expected)
 

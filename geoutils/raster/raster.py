@@ -40,7 +40,7 @@ from rasterio.crs import CRS
 
 import geoutils as gu
 from geoutils import profiler
-from geoutils._misc import deprecate
+from geoutils._misc import _validate_downsample, deprecate
 from geoutils._typing import (
     DTypeLike,
     MArrayNum,
@@ -48,7 +48,7 @@ from geoutils._typing import (
     NDArrayNum,
     Number,
 )
-from geoutils.raster.base import RasterBase, RasterType, _validate_downsample
+from geoutils.raster.base import RasterBase, RasterType
 from geoutils.raster.referencing import (
     _cast_nodata,
     _cast_pixel_interpretation,

@@ -13,7 +13,7 @@ from shapely.geometry import box
 
 from benchmarks.workflows.config import RuntimeConfig
 from benchmarks.workflows.core import ExecutionMode
-from geoutils._misc import _trim_process_memory, import_optional
+from geoutils._misc import import_optional
 
 ############################
 # Shared size and I/O helpers
@@ -106,93 +106,11 @@ def prepare_output_file(
     return filename
 
 
-def _write_dask_raster(
-    raster: Any,
-    filename: str,
-    config: RuntimeConfig,
-    client: Any | None,
-) -> None:
-    """Compute and write one lazy raster in bounded groups of blocks."""
-
-    block_y = tiff_block_size(config.shape[0], config.chunks[0])
-    block_x = tiff_block_size(config.shape[1], config.chunks[1])
-
-    # GeoTIFF has no boolean sample type, so masks use the equivalent byte values
-    if np.issubdtype(raster.dtype, np.bool_):
-        raster = raster.astype("uint8")
-
-    # Read georeferencing from metadata without evaluating any raster value
-    data = raster.data
-    if data.chunks is None:
-        raise ValueError("Dask benchmark output must remain chunked before writing")
-    if config.dask_write_batch_size < 1:
-        raise ValueError("Dask write batch size must be strictly positive")
-    nodata = raster.rio.nodata
-
-    # Computing a few blocks together reduces scheduling overhead while retaining a fixed memory bound
-    dask = import_optional("dask", extra_name="benchmark")
-    pending_blocks = []
-    pending_windows: list[rio.windows.Window] = []
-
-    def write_pending_blocks(destination: rio.io.DatasetWriter) -> None:
-        """Compute and write the current bounded group of output blocks."""
-
-        if not pending_blocks:
-            return
-
-        # One scheduler request computes the independent blocks as a group
-        computed_blocks = dask.compute(*pending_blocks)
-        for block, window in zip(computed_blocks, pending_windows):
-            destination.write(np.asarray(block), indexes=1, window=window)
-        pending_blocks.clear()
-        pending_windows.clear()
-
-        # Large data contracts may release native workspaces between bounded groups
-        if config.trim_dask_memory:
-            _trim_process_memory()
-            if client is not None:
-                client.run(_trim_process_memory)
-
-    # Open one tiled destination shared by all bounded block groups
-    with rio.open(
-        filename,
-        "w",
-        driver="GTiff",
-        height=int(data.shape[0]),
-        width=int(data.shape[1]),
-        count=1,
-        dtype=np.dtype(data.dtype),
-        crs=raster.rio.crs,
-        transform=raster.rio.transform(),
-        nodata=nodata,
-        tiled=True,
-        blockxsize=block_x,
-        blockysize=block_y,
-        BIGTIFF="IF_NEEDED",
-    ) as destination:
-        row_offset = 0
-        for row_index, row_size in enumerate(data.chunks[0]):
-            col_offset = 0
-            for col_index, col_size in enumerate(data.chunks[1]):
-                # Retain lazy blocks only until the fixed batch is ready to compute
-                pending_blocks.append(data.blocks[row_index, col_index])
-                window = rio.windows.Window(col_offset, row_offset, col_size, row_size)
-                pending_windows.append(window)
-                if len(pending_blocks) == config.dask_write_batch_size:
-                    write_pending_blocks(destination)
-                col_offset += col_size
-            row_offset += row_size
-
-        # Write a final partial group at the edge of the output raster
-        write_pending_blocks(destination)
-
-
 def materialize_raster_output(
     raster: Any,
     backend: ExecutionMode,
     filename: str | None,
     config: RuntimeConfig,
-    client: Any | None,
 ) -> str:
     """Write a complete raster output and return its file path."""
 
@@ -201,13 +119,32 @@ def materialize_raster_output(
         return str(raster.name)
     if filename is None:
         raise ValueError("A raster output path is required outside multiprocessing")
+
+    # Match the tiled, uncompressed output used by the external commands
+    block_y = tiff_block_size(config.shape[0], config.chunks[0])
+    block_x = tiff_block_size(config.shape[1], config.chunks[1])
     if backend == "dask":
-        _write_dask_raster(raster, filename, config, client)
+        if raster.chunks is None:
+            raise ValueError("Dask benchmark output must remain chunked before writing")
+
+        # GeoTIFF stores boolean masks as bytes
+        dtype = "uint8" if np.issubdtype(raster.dtype, np.bool_) else raster.dtype
+        raster.rst.to_file(
+            filename,
+            driver="GTiff",
+            dtype=dtype,
+            compute=True,
+            tiled=True,
+            blockysize=block_y,
+            blockxsize=block_x,
+            compress="NONE",
+            BIGTIFF="IF_NEEDED",
+        )
+        if raster.rst.is_loaded:
+            raise AssertionError("Writing a Dask raster must leave its source array lazy.")
         return filename
 
     # In-memory results use the same tiled output contract
-    block_y = tiff_block_size(config.shape[0], config.chunks[0])
-    block_x = tiff_block_size(config.shape[1], config.chunks[1])
     raster.to_file(
         filename,
         co_opts={

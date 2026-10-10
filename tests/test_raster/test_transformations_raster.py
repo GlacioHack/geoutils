@@ -205,7 +205,7 @@ class TestTransformation:
         outlines = gu.Vector(outlines_path)
 
         # First, we reproject manually the outline
-        outlines_reproj = gu.Vector(outlines.ds.to_crs(r.crs))
+        outlines_reproj = gu.Vector(outlines.gdf.to_crs(r.crs))
         r_cropped = r.crop(outlines_reproj)
 
         # Calculate intersection of the two bounding boxes and make sure crop has same bounds

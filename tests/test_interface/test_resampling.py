@@ -12,10 +12,13 @@ import geopandas as gpd
 import numpy as np
 import pytest
 import rasterio as rio
+import xarray as xr
 from affine import Affine
+from rasterio.transform import from_origin
 
 import geoutils as gu
 from geoutils import examples, open_raster
+from geoutils._misc import import_optional
 from geoutils.interface.resampling import (
     _interpolate_array,
 )
@@ -39,6 +42,37 @@ from tests.operator_helpers import (
     PropagatingMeanReducer,
     WindowRangeInterpolator,
 )
+
+
+@pytest.fixture
+def pointcloud_file(tmp_path: Any) -> Any:
+    """Write point fixtures as GeoParquet row groups with their original labels and attribute dtypes."""
+
+    pytest.importorskip("pyarrow")
+    filenames = []
+
+    def write_points(frame: gpd.GeoDataFrame, partitions: int) -> tuple[str, int, str | None]:
+        """Save one point fixture and return its filename, row chunk size and active value column."""
+
+        # Preserve explicit elevation selection, otherwise infer the common point value columns
+        frame = frame.copy()
+        column = frame.pc.data_name
+        if "data_name" not in frame.attrs and column is None:
+            column = next((name for name in ("height", "z", "intensity") if name in frame), None)
+        if column is None and not frame.geometry.has_z.all():
+            frame["z"] = np.zeros(len(frame))
+            column = "z"
+
+        # A final shorter row group checks that file readers preserve every row
+        chunks = max(1, int(np.ceil(len(frame) / partitions)))
+        filename = tmp_path / f"points-{len(filenames)}.parquet"
+        filenames.append(filename)
+        frame.to_parquet(
+            filename, index=True, geometry_encoding="geoarrow", schema_version="1.1.0", row_group_size=chunks
+        )
+        return str(filename), chunks, column
+
+    return write_points
 
 
 class TestResampling:
@@ -194,8 +228,8 @@ class TestResampling:
         pointcloud = gu.PointCloud.from_xyz(longitude, latitude, np.zeros(2), crs=4326)
         point_inputs = {
             "pointcloud": pointcloud,
-            "accessor": pointcloud.ds.pc,
-            "geodataframe": pointcloud.ds,
+            "accessor": pointcloud.gdf.pc,
+            "geodataframe": pointcloud.gdf,
             "latlon": (longitude, latitude),
         }
         point_input = point_inputs[point_input_type]
@@ -760,7 +794,8 @@ class TestKrigingRaster:
 
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestInterpPointsChunked:
-    """Test module for point interpolation across eager, Dask and Multiprocessing backends.
+    """
+    Test module for point interpolation across eager, Dask and Multiprocessing backends.
 
     Numerical accuracy and SciPy comparisons are covered in test_operators/test_interpolator.py.
     """
@@ -877,14 +912,18 @@ class TestInterpPointsChunked:
 
     @pytest.mark.parametrize("validity_only", [False, True])
     @pytest.mark.parametrize("as_array", [False, True])
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
     def test_interp_points__dask_points_defer_interpolation(
-        self, validity_only: bool, as_array: bool, monkeypatch: pytest.MonkeyPatch
+        self,
+        as_type: Literal["dataarray", "geodataframe"],
+        pointcloud_file: Any,
+        validity_only: bool,
+        as_array: bool,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """
         Checks that sizing a lazy point result does not interpolate values or discard duplicate labels and geometry.
         """
-
-        import dask_geopandas as dgpd
 
         import geoutils.interface.resampling as resampling
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
@@ -898,7 +937,14 @@ class TestInterpPointsChunked:
         raster = gu.Raster.from_array(data, Affine(1, 0, 0, 0, -1, 5), 32632, nodata=-9999)
         x, y = raster.ij2xy(np.array([1, 2, 3]), np.array([1, 3, 4]))
         points = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x, y), index=["a", "a", "b"], crs=raster.crs)
-        lazy_points = dgpd.from_geopandas(points, npartitions=2, sort=False)
+        lazy_points_filename, lazy_points_chunks, lazy_points_column = pointcloud_file(points, 2)
+        lazy_points = gu.open_pointcloud(
+            lazy_points_filename,
+            data_name=lazy_points_column,
+            columns="all",
+            chunks=lazy_points_chunks,
+            as_type=as_type,
+        )
 
         # Reject kernel execution while constructing the graph; computing input partition lengths is allowed
         def fail_interpolation(*args: Any, **kwargs: Any) -> None:
@@ -914,6 +960,9 @@ class TestInterpPointsChunked:
 
         # Compute only after restoring the kernel, then compare values and the complete point output when requested
         computed = output.compute()
+        assert not lazy_points.pc.is_loaded
+        if not as_array and as_type == "dataarray":
+            computed = computed.pc.to_geoutils().gdf
         expected = [1, np.nan, 1] if validity_only else [7, np.nan, 22]
         if as_array:
             np.testing.assert_array_equal(computed, expected)
@@ -922,7 +971,7 @@ class TestInterpPointsChunked:
             np.testing.assert_array_equal(computed.geometry.to_numpy(), points.geometry.to_numpy())
             assert computed.crs == points.crs
             np.testing.assert_array_equal(computed.index, points.index)
-            assert output.pc.data_column == "z"
+            assert output.pc.data_name == "z"
 
     def test_interp_points__boolean_outside_bounds(self) -> None:
         """Checks that nearest interpolation of booleans returns NaNs outside the raster with every backend."""
@@ -1009,8 +1058,8 @@ class TestInterpPointsChunked:
         # Cosampling keeps exactly the four points with finite interpolated values
         points = gu.PointCloud.from_xyz(x, y, np.ones(len(x)), crs=raster.crs)
         sample = raster.cosample(points, resample_method=method)
-        np.testing.assert_array_equal(sample.ds.index, np.arange(4))
-        np.testing.assert_allclose(sample.ds["self"], expected[:4])
+        np.testing.assert_array_equal(sample.gdf.index, np.arange(4))
+        np.testing.assert_allclose(sample.gdf["self"], expected[:4])
 
     @pytest.mark.parametrize("path_index", [0, 2])
     @pytest.mark.parametrize("method", ["nearest", "linear"])
@@ -1195,8 +1244,10 @@ class TestInterpPointsChunked:
     @pytest.mark.parametrize("raster_dask", [False, True], ids=["raster-eager", "raster-dask"])
     @pytest.mark.parametrize("point_dask", [False, True], ids=["point-eager", "point-dask"])
     @pytest.mark.parametrize("method", ["nearest", "linear"])
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
     def test_interp_points__raster_point_input_combinations(
         self,
+        as_type: Literal["dataarray", "geodataframe"],
         raster_dask: bool,
         point_dask: bool,
         method: Literal["nearest", "linear"],
@@ -1231,7 +1282,9 @@ class TestInterpPointsChunked:
         raster.to_file(raster_file)
         points.to_file(point_file)
         raster_input = open_raster(str(raster_file), chunks={"x": 3, "y": 3}) if raster_dask else raster
-        point_input = gu.open_pointcloud(str(point_file), data_column="id", chunks=2) if point_dask else points
+        point_input = (
+            gu.open_pointcloud(str(point_file), data_name="id", chunks=2, as_type=as_type) if point_dask else points
+        )
 
         # The complete in-memory calculation defines the exact expected values
         expected = raster.interp_at_points(points=points, method=method, as_array=True)
@@ -1257,7 +1310,10 @@ class TestInterpPointsChunked:
         if point_dask:
             assert not point_input.pc.is_loaded
 
-    def test_interp_points__dask_pointcloud_multiprocessing_error(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_interp_points__dask_pointcloud_multiprocessing_error(
+        self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path
+    ) -> None:
         """Reject Multiprocessing when Dask already partitions the point-cloud input."""
 
         # Store one point source and reopen it lazily through the public helper
@@ -1274,10 +1330,10 @@ class TestInterpPointsChunked:
         )
         point_file = tmp_path / "points.gpkg"
         points.to_file(point_file)
-        dask_points = gu.open_pointcloud(str(point_file), data_column="id", chunks=1)
+        dask_points = gu.open_pointcloud(str(point_file), data_name="id", chunks=1, as_type=as_type)
 
         # One operation cannot be scheduled by both Dask and Multiprocessing
-        with pytest.raises(ValueError, match="Dask point-cloud inputs cannot be combined with Multiprocessing"):
+        with pytest.raises(ValueError, match="Dask"):
             raster.interp_at_points(
                 points=dask_points,
                 method="nearest",
@@ -1286,7 +1342,10 @@ class TestInterpPointsChunked:
             )
         assert not dask_points.pc.is_loaded
 
-    def test_interp_points__dask_pointcloud_input(self, lazy_test_files_tiny: list[str]) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_interp_points__dask_pointcloud_input(
+        self, as_type: Literal["dataarray", "geodataframe"], lazy_test_files_tiny: list[str]
+    ) -> None:
         """Test interpolation to Dask-GeoPandas point-cloud inputs."""
 
         # Load the lazy dataframe and array types used in assertions
@@ -1309,7 +1368,7 @@ class TestInterpPointsChunked:
         temp_dir = tempfile.TemporaryDirectory()
         temp_file = os.path.join(temp_dir.name, "points.gpkg")
         points.to_file(temp_file)
-        dask_points = gu.open_pointcloud(temp_file, data_column="id", chunks=2)
+        dask_points = gu.open_pointcloud(temp_file, data_name="id", chunks=2, as_type=as_type)
 
         # Compute the eager values once as the expected result
         expected = raster.interp_at_points(points=points, method="nearest", as_array=True)
@@ -1323,14 +1382,15 @@ class TestInterpPointsChunked:
 
         # Point-cloud output should remain a Dask-GeoPandas collection with ``pc`` metadata
         out_points = ds_dask.rst.interp_at_points(points=dask_points, method="nearest")
-        assert isinstance(out_points, dgpd.GeoDataFrame)
+        assert isinstance(out_points, xr.DataArray if as_type == "dataarray" else dgpd.GeoDataFrame)
         assert not out_points.pc.is_loaded
-        assert np.array_equal(np.asarray(expected), out_points.compute()["z"].to_numpy(), equal_nan=True)
+        assert np.array_equal(np.asarray(expected), np.asarray(out_points.compute().pc.data), equal_nan=True)
         assert not ds_dask._in_memory
         assert not dask_points.pc.is_loaded
         assert not out_points.pc.is_loaded
 
-    def test_interp_points_las__dask_pointcloud_input(self) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_interp_points_las__dask_pointcloud_input(self, as_type: Literal["dataarray", "geodataframe"]) -> None:
         """Test interpolation to Dask point-cloud inputs opened from LAS."""
 
         # The class marker covers lazy GeoDataFrames; this case also needs the optional LAS reader
@@ -1354,13 +1414,53 @@ class TestInterpPointsChunked:
         raster = gu.Raster.from_array(data=np.full((4, 4), 5, dtype=np.float32), transform=transform, crs=pc.crs)
 
         # Interpolation should compute LAS partitions without loading the accessor
-        dask_points = gu.open_pointcloud(fn_las, chunks=100)
+        dask_points = gu.open_pointcloud(fn_las, chunks=100, as_type=as_type)
         output = raster.interp_at_points(points=dask_points, method="nearest", as_array=True)
 
         # Every in-bounds point must receive the constant raster value
         assert isinstance(output, da.Array)
         assert np.array_equal(output.compute(), np.full(dask_points.pc.point_count, 5, dtype=np.float32))
         assert not dask_points.pc.is_loaded
+
+    @pytest.mark.parametrize("raster_chunks", [False, True])
+    @pytest.mark.parametrize("operation", ["interp_at_points", "reduce_at_points"])
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_raster_sampling__point_loading_laziness(
+        self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path, raster_chunks: bool, operation: str
+    ) -> None:
+        """Checks that raw point blocks sample raster values lazily and agree exactly with eager coordinates."""
+        import_optional("dask")
+        # Point blocks end at uneven row positions and include a location outside the raster
+        raster = gu.Raster.from_array(np.arange(12, dtype=np.float32).reshape(3, 4), from_origin(0, 3, 1, 1), 32633)
+        points = gu.DataArrayPointCloudAccessor.from_xyz(
+            [0.5, 1.5, 2.5, 3.5, 4.5],
+            [2.5] * 5,
+            np.ones(5),
+            32633,
+            auxiliary={"id": np.arange(5, dtype=np.uint64)},
+        )
+        filename = tmp_path / "points.parquet"
+        points.pc.to_parquet(filename, chunks=2)
+        points = gu.open_pointcloud(filename, as_type=as_type)
+        lazy_points = gu.open_pointcloud(filename, chunks=2, as_type=as_type)
+        source = raster.to_xarray().chunk(y=2, x=3).rst if raster_chunks else raster
+        options: dict[str, Any] = (
+            {"method": "nearest"} if operation == "interp_at_points" else {"reducer_function": np.mean}
+        )
+
+        # Call the same public operation with eager coordinates and lazy point support
+        expected = getattr(raster, operation)(points, **options)
+        result = getattr(source, operation)(lazy_points, **options)
+        assert not lazy_points.pc.is_loaded
+        assert not result.pc.is_loaded
+        assert source.is_loaded != raster_chunks
+        expected_pointcloud = expected.pc.to_geoutils() if isinstance(expected, xr.DataArray) else expected
+        computed = result.compute()
+        if isinstance(computed, gpd.GeoDataFrame):
+            computed = gu.PointCloud(computed, data_name=expected_pointcloud.data_name)
+        assert expected_pointcloud.pointcloud_equal(computed)
+        assert not lazy_points.pc.is_loaded
+        assert source.is_loaded != raster_chunks
 
 
 @pytest.mark.skipif(find_spec("dask") is None, reason="Requires Dask")
@@ -1456,7 +1556,8 @@ class TestRegularInterpolationNeighboursChunked:
 
 @pytest.mark.skipif(find_spec("dask") is None, reason="Requires Dask")
 class TestReductionChunked:
-    """Test module for reducer windows, callable reductions and lazy point output across Dask/MP chunks.
+    """
+    Test module for reducer windows, callable reductions and lazy point output across Dask/MP chunks.
 
     Window accuracy and fractional area calculations are covered in test_operators/test_reducer.py.
     """
@@ -1551,8 +1652,14 @@ class TestReductionChunked:
 
     @pytest.mark.parametrize("lazy_points", [False, True])
     @pytest.mark.parametrize("as_array", [False, True])
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
     def test_reduce_at_points__lazy_output(
-        self, lazy_points: bool, as_array: bool, monkeypatch: pytest.MonkeyPatch
+        self,
+        as_type: Literal["dataarray", "geodataframe"],
+        pointcloud_file: Any,
+        lazy_points: bool,
+        as_array: bool,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Checks that constructing a Dask reduction result defers calculation for arrays and point clouds."""
 
@@ -1563,13 +1670,16 @@ class TestReductionChunked:
         values = np.arange(35, dtype=float).reshape(5, 7)
         raster = gu.Raster.from_array(values, Affine(1, 0, 0, 0, -1, 5), 32631)
         x, y = np.array([0.25, 2.5, 6.75, 8]), np.array([4.75, 2.5, 0.25, 1])
-        points = gu.PointCloud.from_xyz(x, y, np.zeros(4), crs=raster.crs).ds
+        points = gu.PointCloud.from_xyz(x, y, np.zeros(4), crs=raster.crs).gdf
         points.index = [2, 2, 7, 9]
         source = raster.to_xarray().chunk({"y": 2, "x": 3})
         expected = raster.reduce_at_points((x, y), reducer_function=Sum(), window=3, as_array=True)
         if lazy_points:
-            dask_geopandas = import_optional("dask_geopandas")
-            targets = dask_geopandas.from_geopandas(points, npartitions=2, sort=False)
+            import_optional("dask_geopandas")
+            targets_filename, targets_chunks, targets_column = pointcloud_file(points, 2)
+            targets = gu.open_pointcloud(
+                targets_filename, data_name=targets_column, columns="all", chunks=targets_chunks, as_type=as_type
+            )
         else:
             targets = (x, y)
 
@@ -1587,6 +1697,10 @@ class TestReductionChunked:
 
         # Computed values match the eager call; point output preserves target geometry and labels
         computed = result.compute()
+        if lazy_points:
+            assert not targets.pc.is_loaded
+        if not as_array and lazy_points and as_type == "dataarray":
+            computed = computed.pc.to_geoutils().gdf
         np.testing.assert_array_equal(computed if as_array else computed["z"], expected)
         if not as_array:
             np.testing.assert_array_equal(computed.geometry.x, x)

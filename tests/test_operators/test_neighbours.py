@@ -524,10 +524,10 @@ class TestRegularInterpolationData:
 class TestPointSourceData:
     """Test module for usable coordinates, missing values, geometry elevations and unique observation identifiers."""
 
-    @pytest.mark.parametrize("data_column_name", ["value", None])
+    @pytest.mark.parametrize("data_name", ["value", None])
     @pytest.mark.parametrize("duplicate_ids", [False, True])
     def test_prepare_point_data__invalid_coordinates_and_source_ids(
-        self, data_column_name: str | None, duplicate_ids: bool
+        self, data_name: str | None, duplicate_ids: bool
     ) -> None:
         """Checks that point preparation excludes unusable coordinates and gives duplicate labels unique row IDs."""
 
@@ -542,7 +542,7 @@ class TestPointSourceData:
 
         # Built-in gridding separates finite observations from positions used to propagate nodata
         finite_points, finite_values, positioned_points, positioned_valid = _prepare_point_gridding_data(
-            points, data_column_name
+            points, data_name
         )
         np.testing.assert_array_equal(finite_points, [[0, 0], [3, 3]])
         np.testing.assert_array_equal(finite_values, [10, 30])
@@ -550,7 +550,7 @@ class TestPointSourceData:
         np.testing.assert_array_equal(positioned_valid, [True, False, True])
 
         # Operators receive nodata observations too, with original row positions when labels are duplicated
-        coordinates, observed_values, valid, source_ids = _prepare_point_operator_data(points, data_column_name)
+        coordinates, observed_values, valid, source_ids = _prepare_point_operator_data(points, data_name)
         expected_ids = [0, 2, 3] if duplicate_ids else [10, 12, 13]
         np.testing.assert_array_equal(coordinates, positioned_points)
         np.testing.assert_array_equal(observed_values, [10, np.nan, 30])

@@ -49,23 +49,23 @@ class TestGeometric:
         Test that extract_vertices works with simple geometries.
         """
         # Polygons
-        vertices = _extract_vertices(self.vector.ds)
+        vertices = _extract_vertices(self.vector.gdf)
         assert len(vertices) == 1
         assert vertices == [[(10.0, 10.0), (11.0, 10.0), (11.0, 11.0), (10.0, 11.0), (10.0, 10.0)]]
 
         # MultiPolygons
-        vertices = _extract_vertices(self.vector_multipoly.ds)
+        vertices = _extract_vertices(self.vector_multipoly.gdf)
         assert len(vertices) == 2
         assert vertices[0] == [(10.0, 10.0), (11.0, 10.0), (11.0, 11.0), (10.0, 11.0), (10.0, 10.0)]
         assert vertices[1] == [(5.0, 5.0), (6.0, 5.0), (6.0, 6.0), (5.0, 6.0), (5.0, 5.0)]
 
         # LineString
-        vertices = _extract_vertices(self.vector_lines.ds)
+        vertices = _extract_vertices(self.vector_lines.gdf)
         assert len(vertices) == 1
         assert vertices == [[(10.0, 10.0), (11.0, 10.0), (11.0, 11.0)]]
 
         # MultiLineString
-        vertices = _extract_vertices(self.vector_multilines.ds)
+        vertices = _extract_vertices(self.vector_multilines.gdf)
         assert len(vertices) == 2
         assert vertices[0] == [(10.0, 10.0), (11.0, 10.0), (11.0, 11.0)]
         assert vertices[1] == [(5.0, 5.0), (6.0, 5.0), (6.0, 6.0)]
@@ -77,7 +77,7 @@ class TestGeometric:
         For now, test on a set of two squares.
         """
         # Check with a multipolygon
-        voronoi = _generate_voronoi_polygons(self.vector_multipoly.ds)
+        voronoi = _generate_voronoi_polygons(self.vector_multipoly.gdf)
         assert len(voronoi) == 2
         vertices = _extract_vertices(voronoi)
         assert vertices == [
@@ -88,7 +88,7 @@ class TestGeometric:
         # Check that it fails with proper error for too simple geometries
         expected_message = "Invalid geometry, cannot generate finite Voronoi polygons"
         with pytest.raises(ValueError, match=expected_message):
-            voronoi = _generate_voronoi_polygons(self.vector.ds)
+            voronoi = _generate_voronoi_polygons(self.vector.gdf)
 
     def test_buffer_metric(self) -> None:
         """Check that metric buffering works"""
@@ -119,8 +119,8 @@ class TestGeometric:
         two_squares = gu.Vector(gpd.GeoDataFrame(geometry=[poly1_utm31, poly2_utm31], crs="EPSG:32631"))
 
         # Their area should now be 1 for each polygon
-        assert two_squares.ds.area.values[0] == 1
-        assert two_squares.ds.area.values[1] == 1
+        assert two_squares.gdf.area.values[0] == 1
+        assert two_squares.gdf.area.values[1] == 1
 
         # We buffer them
         two_squares_utm_buffered = two_squares.buffer_metric(buffer_size=1.0)
@@ -128,30 +128,30 @@ class TestGeometric:
         # Their area should now be 1 (square) + 4 (buffer along the sides) + 4*(pi*1**2 /4)
         # (buffer of corners = quarter-disks)
         expected_area = 1 + 4 + np.pi
-        assert two_squares_utm_buffered.ds.area.values[0] == pytest.approx(expected_area, abs=0.01)
-        assert two_squares_utm_buffered.ds.area.values[1] == pytest.approx(expected_area, abs=0.01)
+        assert two_squares_utm_buffered.gdf.area.values[0] == pytest.approx(expected_area, abs=0.01)
+        assert two_squares_utm_buffered.gdf.area.values[1] == pytest.approx(expected_area, abs=0.01)
 
         # And the new GeoDataFrame should exactly match that of one buffer from the original one
         direct_gpd_buffer = gu.Vector(
-            gpd.GeoDataFrame(geometry=two_squares.ds.buffer(distance=1.0).geometry, crs=two_squares.crs)
+            gpd.GeoDataFrame(geometry=two_squares.gdf.buffer(distance=1.0).geometry, crs=two_squares.crs)
         )
-        assert_geodataframe_equal(direct_gpd_buffer.ds, two_squares_utm_buffered.ds)
+        assert_geodataframe_equal(direct_gpd_buffer.gdf, two_squares_utm_buffered.gdf)
 
         # Now, if we reproject the original vector in a non-metric system
-        two_squares_geographic = gu.Vector(two_squares.ds.to_crs(epsg=4326))
+        two_squares_geographic = gu.Vector(two_squares.gdf.to_crs(epsg=4326))
         # We buffer directly the Vector object in the non-metric system
         two_squares_geographic_buffered = two_squares_geographic.buffer_metric(buffer_size=1.0)
         # Then, we reproject that vector in the UTM zone
         two_squares_geographic_buffered_reproj = gu.Vector(
-            two_squares_geographic_buffered.ds.to_crs(crs=two_squares.crs)
+            two_squares_geographic_buffered.gdf.to_crs(crs=two_squares.crs)
         )
 
         # Their area should now be the same as before for each polygon
-        assert two_squares_geographic_buffered_reproj.ds.area.values[0] == pytest.approx(expected_area, abs=0.01)
-        assert two_squares_geographic_buffered_reproj.ds.area.values[0] == pytest.approx(expected_area, abs=0.01)
+        assert two_squares_geographic_buffered_reproj.gdf.area.values[0] == pytest.approx(expected_area, abs=0.01)
+        assert two_squares_geographic_buffered_reproj.gdf.area.values[0] == pytest.approx(expected_area, abs=0.01)
 
         # And this time, it is the reprojected GeoDataFrame that should almost match (within a tolerance of 10e-06)
-        assert all(direct_gpd_buffer.ds.geom_equals_exact(two_squares_geographic_buffered_reproj.ds, tolerance=10e-6))
+        assert all(direct_gpd_buffer.gdf.geom_equals_exact(two_squares_geographic_buffered_reproj.gdf, tolerance=10e-6))
 
     def test_buffer_without_overlap(self, monkeypatch) -> None:  # type: ignore
         """
@@ -169,13 +169,13 @@ class TestGeometric:
             buffer = two_squares.buffer_without_overlap(buffer_size, metric=False)
 
         # Output should be of same size as input and same geometry type
-        assert len(buffer.ds) == len(two_squares.ds)
-        assert np.all(buffer.ds.geometry.geom_type == two_squares.ds.geometry.geom_type)
+        assert len(buffer.gdf) == len(two_squares.gdf)
+        assert np.all(buffer.gdf.geometry.geom_type == two_squares.gdf.geometry.geom_type)
         assert buffer.crs == two_squares.crs
 
         # Extract individual geometries
         polys = []
-        for geom in buffer.ds.geometry:
+        for geom in buffer.gdf.geometry:
             if geom.geom_type in ["MultiPolygon"]:
                 polys.extend(list(geom))
             else:
@@ -202,12 +202,12 @@ class TestGeometric:
             buffer = two_squares.buffer_without_overlap(buffer_size, metric=False)
 
         # Output should be of same size as input and same geometry type
-        assert len(buffer.ds) == len(two_squares.ds)
-        assert np.all(buffer.ds.geometry.geom_type == two_squares.ds.geometry.geom_type)
+        assert len(buffer.gdf) == len(two_squares.gdf)
+        assert np.all(buffer.gdf.geometry.geom_type == two_squares.gdf.geometry.geom_type)
 
         # Extract individual geometries
         polys = []
-        for geom in buffer.ds.geometry:
+        for geom in buffer.gdf.geometry:
             if geom.geom_type in ["MultiPolygon"]:
                 polys.extend(list(geom))
             else:

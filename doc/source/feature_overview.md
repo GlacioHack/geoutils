@@ -19,7 +19,7 @@ GeoUtils exposes a **consistent API across raster, vector and point-cloud object
 
 At its core, GeoUtils provides two interchangeable ways to work with geospatial data, exposing **identical APIs**:
 
-- **Accessors** that extend existing data structures ({class}`rst <geoutils.RasterAccessor>` for **rasters** with **Xarray**, `pc` and `vct` for **point clouds** and **vectors** with **GeoPandas**),
+- **Accessors** that extend existing data structures ({class}`rst <geoutils.DataArrayRasterAccessor>` for **rasters** with **Xarray**, `pc` and `vct` for **point clouds** and **vectors** with **GeoPandas**),
 - **GeoUtils objects** {class}`~geoutils.Raster`, {class}`~geoutils.PointCloud`, {class}`~geoutils.Vector`.
 
 Nearly all **raster operations** support **scalable execution** using [Dask](https://www.dask.org/) or Multiprocessing, allowing large datasets to be processed **chunk-by-chunk without loading the full array into memory**. Some **vector** and **point-cloud** accessor operations are also lazy with [Dask-GeoPandas](https://dask-geopandas.readthedocs.io/en/stable/), with support still partial and ongoing.

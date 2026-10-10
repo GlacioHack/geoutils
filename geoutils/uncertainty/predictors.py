@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import pandas as pd
+import xarray as xr
 from numpy.typing import NDArray
 from scipy.interpolate import RegularGridInterpolator, griddata
 from scipy.spatial import QhullError
@@ -63,9 +64,9 @@ def _spatial_predictors(
     for name, predictor in predictors.items():
         # A point cloud column name is a convenient alternative to supplying its values
         if isinstance(like, PointCloudBase) and isinstance(predictor, str):
-            if predictor not in like.ds.columns:
+            if predictor not in like.columns:
                 raise ValueError(f"Point cloud predictor column {predictor!r} does not exist.")
-            value: Any = like.ds[predictor]
+            value: Any = like._get_column_values(predictor)
         else:
             value = (
                 predictor.data if hasattr(predictor, "data") and not isinstance(predictor, np.ndarray) else predictor
@@ -86,6 +87,29 @@ def _spatial_predictors(
             aligned[name] = np.broadcast_to(array.reshape(like.shape), (like.count, *like.shape)).reshape(-1)
         else:
             raise ValueError(f"Spatial predictor {name!r} must be scalar or match every output location.")
+    return aligned
+
+
+def _point_array_predictors(
+    like: PointCloudBase, predictors: Mapping[str, Any] | None, chunksize: int | None = None
+) -> dict[str, xr.DataArray]:
+    """Align scalar and per-point predictors without computing their arrays."""
+
+    dimension = like._dataset.dims[0]
+    aligned = {}
+    for name, predictor in (predictors or {}).items():
+        # Named attributes already follow the point order; external arrays must match its length
+        if isinstance(predictor, str):
+            values = like._get_column_values(predictor)
+        else:
+            values = predictor.data if isinstance(predictor, xr.DataArray) else predictor
+        if np.ndim(values) == 0:
+            aligned[name] = xr.DataArray(values)
+            continue
+        if np.shape(values) != (like.point_count,):
+            raise ValueError(f"Spatial predictor {name!r} must be scalar or match every output location.")
+        value = xr.DataArray(values, dims=dimension)
+        aligned[name] = value.chunk({dimension: chunksize}) if chunksize is not None else value
     return aligned
 
 
@@ -357,7 +381,7 @@ def _point_magnitude_rows(
     model: ErrorStructure,
     columns: Mapping[str, Any],
     component: str | None,
-    data_column: str | None,
+    data_name: str | None,
 ) -> Any:
     """Replace a point partition's values with its predicted error magnitudes."""
 
@@ -375,14 +399,14 @@ def _point_magnitude_rows(
 
     # Write magnitudes to the selected data column or to geometry Z
     result = dataframe.copy()
-    if data_column is None:
+    if data_name is None:
         import geopandas as gpd
 
         result.geometry = gpd.points_from_xy(
             dataframe.geometry.x.to_numpy(), dataframe.geometry.y.to_numpy(), values, crs=dataframe.crs
         )
     else:
-        result[data_column] = values
+        result[data_name] = values
     return result
 
 
@@ -396,13 +420,13 @@ def _eager_raster_magnitude(
 ) -> Any:
     """Predict raster error magnitudes with the entire array in-memory."""
 
-    from geoutils.raster.xr_accessor import RasterAccessor
+    from geoutils.raster.xr_accessor import DataArrayRasterAccessor
 
     # Predict every band before rebuilding the raster on its original grid
     aligned = _spatial_predictors(like, predictors, size=int(like.count * np.prod(like.shape)))
     values = _raster_magnitude_values(like.data, aligned, model, component, like.nodata)
     if like._is_xr:
-        return RasterAccessor.from_array(
+        return DataArrayRasterAccessor.from_array(
             values, transform=like.transform, crs=like.crs, nodata=like.nodata, area_or_point=like.area_or_point
         )
     return like.copy(new_array=np.ma.masked_invalid(values))
@@ -415,7 +439,7 @@ def _eager_point_magnitude(
 
     # Share row prediction with chunked point clouds, then restore the source type
     aligned = _spatial_predictors(like, predictors, size=like.point_count)
-    result = _point_magnitude_rows(like.ds, model, aligned or {}, component, like.data_column)
+    result = _point_magnitude_rows(like._dataset, model, aligned or {}, component, like.data_name)
     return like._cast_pointcloud_output(result)
 
 
@@ -474,7 +498,7 @@ def _dask_raster_magnitude(
     import_optional("dask")
     import dask.array as da
 
-    from geoutils.raster.xr_accessor import RasterAccessor
+    from geoutils.raster.xr_accessor import DataArrayRasterAccessor
 
     # 1/ Get output chunks to use, and map all predictors to those chunks
     chunks = _raster_dask_chunks(like, predictors, chunksizes)
@@ -511,7 +535,7 @@ def _dask_raster_magnitude(
         meta=np.empty((0,) * source.ndim, dtype=np.float64),
     )
 
-    return RasterAccessor.from_array(
+    return DataArrayRasterAccessor.from_array(
         values, transform=like.transform, crs=like.crs, nodata=like.nodata, area_or_point=like.area_or_point
     )
 
@@ -540,19 +564,20 @@ def _dask_point_magnitude(
         chunksize = max(1, min(like.point_count, 100_000))
 
     if chunksize is None:
-        dataframe = like.ds
+        dataframe = like._dataset
     elif like._is_dask:
-        dataframe = like.ds.repartition(npartitions=max(1, int(np.ceil(like.point_count / chunksize))))
+        dataframe = like._dataset.repartition(npartitions=max(1, int(np.ceil(like.point_count / chunksize))))
     elif not like.is_loaded:
-        from geoutils.pointcloud.pd_accessor import open_pointcloud
+        from geoutils.pointcloud.loading import open_pointcloud
 
         assert like.name is not None
         dataframe = open_pointcloud(
             like.name,
-            data_column=like.data_column,
+            data_name=like.data_name,
             columns=list(like._nongeo_columns),
             chunks=chunksize,
             downsample=getattr(like, "_downsample", 1),
+            as_type="geodataframe",
         )
     else:
         dask_geopandas = import_optional("dask_geopandas")
@@ -560,7 +585,7 @@ def _dask_point_magnitude(
 
         _register_dask_pointcloud_accessor()
         dataframe = dask_geopandas.from_geopandas(
-            like.ds, npartitions=max(1, int(np.ceil(like.point_count / chunksize))), sort=False
+            like._dataset, npartitions=max(1, int(np.ceil(like.point_count / chunksize))), sort=False
         )
 
     # Attach arrays by row position
@@ -571,8 +596,8 @@ def _dask_point_magnitude(
     if arrays:
         dataframe = _assign_point_values(dataframe, arrays, partition_lengths=lengths)
     meta = dataframe._meta.copy()
-    if like.data_column is not None:
-        meta[like.data_column] = pd.Series([], dtype=np.float64)
+    if like.data_name is not None:
+        meta[like.data_name] = pd.Series([], dtype=np.float64)
 
     # 2/ Run map_partitions and build lazy output
     result = dataframe.map_partitions(
@@ -580,14 +605,51 @@ def _dask_point_magnitude(
         model,
         columns,
         component,
-        like.data_column,
+        like.data_name,
         meta=meta,
     )
     # Remove columns added only to carry predictor values
     result = result[original_columns]
     return _build_pointcloud_output(
-        result, data_column=like.data_column, as_dataframe=True, attrs=source_attrs, preserve_locations=True
+        result, data_name=like.data_name, as_dataframe=True, attrs=source_attrs, preserve_locations=True
     )
+
+
+############################################
+# ARRAY POINT MAGNITUDES (EAGER OR DASK)
+############################################
+
+
+def _array_point_magnitudes(
+    values: Any, *predictors: Any, model: ErrorStructure, names: tuple[str, ...], component: str | None
+) -> Any:
+    """Predict one magnitude per point in an eager array or a Dask block."""
+    predicted = model.predict_magnitude(dict(zip(names, predictors)), component=component)
+    return np.broadcast_to(np.asarray(predicted, dtype=float), values.shape).copy()
+
+
+def _array_point_magnitude(
+    like: PointCloudBase,
+    model: ErrorStructure,
+    predictors: Mapping[str, Any] | None,
+    component: str | None,
+    chunksize: int | None,
+) -> Any:
+    """Predict point magnitudes with raw arrays, preserving lazy output and auxiliary attributes."""
+
+    # Match predictor chunks to point values before evaluating independent rows
+    source = like._dataset.chunk({like._dataset.dims[0]: chunksize}) if chunksize is not None else like._dataset
+    size = max(source.chunks[0]) if source.chunks is not None else None
+    aligned = _point_array_predictors(like, predictors, size)
+    inputs = xr.unify_chunks(source, *aligned.values())
+    values = xr.apply_ufunc(
+        _array_point_magnitudes,
+        *inputs,
+        kwargs={"model": model, "names": tuple(aligned), "component": component},
+        dask="parallelized",
+        output_dtypes=[float],
+    )
+    return like.copy(new_array=values.data)
 
 
 ############################################
@@ -664,7 +726,7 @@ def _wrapper_point_magnitude_partition_multiproc(
     columns: Mapping[str, str | float],
     arrays: Mapping[str, Any],
     component: str | None,
-    data_column: str | None,
+    data_name: str | None,
     original_columns: list[str],
     filename: Path,
 ) -> Any:
@@ -675,7 +737,7 @@ def _wrapper_point_magnitude_partition_multiproc(
     source = dataframe.copy()
     for name, values in arrays.items():
         source[name] = values
-    result = _point_magnitude_rows(source, model, columns, component, data_column)[original_columns]
+    result = _point_magnitude_rows(source, model, columns, component, data_name)[original_columns]
     return _stage_pointcloud_partition(result, filename)
 
 
@@ -702,7 +764,10 @@ def _multiproc_point_magnitude(
     columns, arrays = _point_predictor_columns(like, predictors, size=point_count)
     original_columns = list(like.columns)
     output_path, driver = _resolve_pointcloud_output(
-        mp_config.outfile, mp_config.driver, supported_drivers=("GPKG",), operation_name="error magnitude prediction"
+        mp_config.outfile,
+        mp_config.driver,
+        supported_drivers=("GPKG", "PARQUET"),
+        operation_name="error magnitude prediction",
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -719,7 +784,7 @@ def _multiproc_point_magnitude(
                 # Slice predictor arrays by the same row positions
                 tile_arrays = {name: np.asarray(value)[start : start + count] for name, value in arrays.items()}
                 filename = Path(directory) / f"magnitude_{start}.pkl"
-                yield partition, model, columns, tile_arrays, component, like.data_column, original_columns, filename
+                yield partition, model, columns, tile_arrays, component, like.data_name, original_columns, filename
 
         saved = []
         for _, filename in _map_bounded(mp_config.cluster, _wrapper_point_magnitude_partition_multiproc, arguments()):
@@ -730,8 +795,8 @@ def _multiproc_point_magnitude(
             output_path,
             saved,
             driver=driver,
-            data_column=like.data_column,
-            geometry_type="Point Z" if like._has_z or like.data_column is None else "Point",
+            data_name=like.data_name,
+            geometry_type="Point Z" if like._has_z or like.data_name is None else "Point",
         )
 
     # 3/ Return depending on input point cloud type
@@ -799,6 +864,10 @@ def predict_magnitude_map(
     assert point is not None
     if chunksizes is not None and (isinstance(chunksizes, bool) or not isinstance(chunksizes, int) or chunksizes < 1):
         raise ValueError("Point cloud chunk size must be a positive integer.")
+    if point._is_xr:
+        if mp_config is not None:
+            raise ValueError("Array point magnitude maps use Dask chunks instead of multiprocessing.")
+        return _array_point_magnitude(point, model, predictors, component, chunksizes)
     if mp_config is not None:
         if point._is_dask or has_dask_predictor:
             raise ValueError("Multiprocessing cannot be combined with Dask point inputs.")

@@ -19,7 +19,7 @@ This **summary page** introduces scalability concepts, demonstrates usage, and l
 
 GeoUtils relies on two execution backends:
 
-- **Dask**, through its {class}`rst <geoutils.RasterAccessor>` Xarray accessor and `pc` Pandas accessor (**lazy** and **chunked** execution),
+- **Dask**, through its {class}`rst <geoutils.DataArrayRasterAccessor>` Xarray accessor and `pc` Pandas accessor (**lazy** and **chunked** execution),
 - **Multiprocessing**, through its {class}`~geoutils.Raster` and {class}`~geoutils.PointCloud` objects (**chunked** execution only) .
 
 Both backends mirror the **exact same object operations and chunked logic**, and yield **identical** results as in-memory operations.
@@ -28,7 +28,7 @@ For details on scalability concepts, see the {ref}`scalability-concept` page.
 
 As a rule of thumb:
 
-- Use **Dask** to work on **Xarray and GeoPandas objects** through our accessors {class}`rst <geoutils.RasterAccessor>` and `pc`, and if you want to chain several operations lazily.
+- Use **Dask** to work on **Xarray and GeoPandas objects** through our accessors {class}`rst <geoutils.DataArrayRasterAccessor>` and `pc`, and if you want to chain several operations lazily.
 - Use **Multiprocessing** to work with our {class}`~geoutils.Raster` and {class}`~geoutils.PointCloud` objects, and if you are fine with intermediate writing/reading between steps.
 - Use standard **in-memory execution** to work efficiently on small rasters, which is possible even if those were loaded from larger rasters (use {class}`~geoutils.Raster.crop`).
 
@@ -55,7 +55,7 @@ ds = gu.open_raster(filename_rast, chunks={"x": 200, "y": 200})
 ds
 ```
 
-GeoUtils, through the {class}`rst <geoutils.RasterAccessor>` accessor, automatically detects the **Dask** input and switches to a chunked implementation for the given operation, for example to {meth}`~geoutils.Raster.reproject` to a different resolution:
+GeoUtils, through the {class}`rst <geoutils.DataArrayRasterAccessor>` accessor, automatically detects the **Dask** input and switches to a chunked implementation for the given operation, for example to {meth}`~geoutils.Raster.reproject` to a different resolution:
 
 ```{code-cell} python
 # Change output resolution

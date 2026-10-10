@@ -6,6 +6,7 @@ import os
 import pathlib
 import tempfile
 from importlib.util import find_spec
+from typing import Literal
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
@@ -34,7 +35,7 @@ class TestPlot:
         """Checks that established axes, colorbar, styling, and save options remain available."""
 
         # Create a small point cloud that does not need automatic subsampling
-        pointcloud = gu.PointCloud(_point_grid(5), data_column="value")
+        pointcloud = gu.PointCloud(_point_grid(5), data_name="value")
 
         # Plot on supplied axes with explicit color limits and return both axes
         ax = plt.subplot(111)
@@ -61,7 +62,7 @@ class TestPlot:
         """Checks that a point limit draws the deterministic subsample and keeps the complete source extent."""
 
         # Create 100 points whose edge coordinates may not appear in a small random sample
-        pointcloud = gu.PointCloud(_point_grid(), data_column="value")
+        pointcloud = gu.PointCloud(_point_grid(), data_name="value")
         expected = pointcloud.subsample(7, random_state=0)
 
         # Draw only seven points with the same deterministic sampler
@@ -88,7 +89,7 @@ class TestPlot:
             geometry=gpd.points_from_xy(longitudes, latitudes),
             crs=4326,
         )
-        pointcloud = gu.PointCloud(dataframe, data_column="value")
+        pointcloud = gu.PointCloud(dataframe, data_name="value")
 
         # Draw the figure before comparing the final map and colorbar positions
         ax, colorbar_ax = pointcloud.plot(return_axes=True)
@@ -107,9 +108,9 @@ class TestPlot:
         """Checks that reference matching reprojects the point sample CRS and crops to bounds."""
 
         # Create points in geographic coordinates and a point cloud that supplies the reference CRS
-        pointcloud = gu.PointCloud(_point_grid(3), data_column="value")
-        reference = gu.PointCloud(_point_grid(2).to_crs(3857), data_column="value")
-        original = pointcloud.ds.geometry.copy()
+        pointcloud = gu.PointCloud(_point_grid(3), data_name="value")
+        reference = gu.PointCloud(_point_grid(2).to_crs(3857), data_name="value")
+        original = pointcloud.gdf.geometry.copy()
 
         # Plot every point in Web Mercator coordinates
         pointcloud.plot(ref=reference, max_points=None, add_cbar=False)
@@ -118,7 +119,7 @@ class TestPlot:
 
         # Check input and plot are in the expected CRS and bounds
         assert pointcloud.crs.to_epsg() == 4326
-        assert pointcloud.ds.geometry.equals(original)
+        assert pointcloud.gdf.geometry.equals(original)
         assert offsets[:, 0].max() > 100_000
         assert ax.get_xlim() == pytest.approx((reference.bounds.left, reference.bounds.right))
         assert ax.get_ylim() == pytest.approx((reference.bounds.bottom, reference.bounds.top))
@@ -128,8 +129,8 @@ class TestPlot:
         """Checks that the old ref_crs argument warns and uses only the reference CRS."""
 
         # Create a reference in Web Mercator that covers less area than the source
-        pointcloud = gu.PointCloud(_point_grid(3), data_column="value")
-        reference = gu.PointCloud(_point_grid(2).to_crs(3857), data_column="value")
+        pointcloud = gu.PointCloud(_point_grid(3), data_name="value")
+        reference = gu.PointCloud(_point_grid(2).to_crs(3857), data_name="value")
 
         # Check that ref_crs changes the CRS without limiting the plotted area
         with pytest.warns(DeprecationWarning, match="Argument 'ref_crs' is deprecated"):
@@ -145,8 +146,8 @@ class TestPlot:
         """Checks that the Pandas point cloud accessor exposes the shared plotting implementation."""
 
         # Use PointCloud construction to attach the main data column metadata to the dataframe
-        pointcloud = gu.PointCloud(_point_grid(4), data_column="value")
-        dataframe = pointcloud.ds
+        pointcloud = gu.PointCloud(_point_grid(4), data_name="value")
+        dataframe = pointcloud.gdf
         dataframe.pc.plot(max_points=5, add_cbar=False)
 
         assert len(plt.gca().collections[0].get_offsets()) == 5
@@ -155,7 +156,7 @@ class TestPlot:
     def test_plot__errors(self) -> None:
         """Checks that invalid axes and point limits raise clear errors."""
 
-        pointcloud = gu.PointCloud(_point_grid(3), data_column="value")
+        pointcloud = gu.PointCloud(_point_grid(3), data_name="value")
 
         with pytest.raises(ValueError, match="ax must be a matplotlib.axes.Axes instance"):
             pointcloud.plot(ax="wrong_type")  # type: ignore[arg-type]
@@ -168,14 +169,17 @@ class TestPlot:
 class TestPlotChunked:
     """Test module for lazy point plotting, bounded row loading, and eager result equivalence."""
 
-    def test_plot__loading_laziness(self, tmp_path: pathlib.Path) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_plot__loading_laziness(
+        self, as_type: Literal["dataarray", "geodataframe"], tmp_path: pathlib.Path
+    ) -> None:
         """Checks that plotting materializes only selected rows and keeps the source dataframe lazy."""
 
         # Write 100 points and reopen them in partitions of 17, including a shorter final partition
         filename = tmp_path / "points.gpkg"
         _point_grid().to_file(filename, index=False)
-        lazy = gu.open_pointcloud(str(filename), data_column="value", chunks=17)
-        eager = gu.open_pointcloud(str(filename), data_column="value")
+        lazy = gu.open_pointcloud(str(filename), data_name="value", chunks=17, as_type=as_type)
+        eager = gu.open_pointcloud(str(filename), data_name="value", as_type=as_type)
         assert lazy.pc._is_dask
 
         # Plot the same deterministic seven-row sample from both backends

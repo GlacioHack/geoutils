@@ -22,7 +22,6 @@ DEFAULT_THREADS_PER_WORKER = 1
 DEFAULT_GDAL_CACHEMAX_MB = 64
 DEFAULT_PROFILE_INTERVAL = 0.05
 DEFAULT_RASTER_VALUE = 1.0
-DEFAULT_DASK_WRITE_BATCH_SIZE = 4
 DEFAULT_POINT_COUNT = 2_048
 
 # Values for variable inputs
@@ -64,8 +63,6 @@ class RuntimeConfig:
     gdal_cachemax_mb: int = DEFAULT_GDAL_CACHEMAX_MB
     profile_interval: float = DEFAULT_PROFILE_INTERVAL
     raster_value: float = DEFAULT_RASTER_VALUE
-    dask_write_batch_size: int = DEFAULT_DASK_WRITE_BATCH_SIZE
-    trim_dask_memory: bool = False
     directory: str | None = None
     workload: Mapping[str, Any] = field(default_factory=dict)
 

@@ -30,7 +30,7 @@ class TestVectorAccessor:
         ds = gu.open_vector(self.aster_outlines_path)
 
         assert isinstance(ds, gpd.GeoDataFrame)
-        assert_geodataframe_equal(ds, gu.Vector(self.aster_outlines_path).ds)
+        assert_geodataframe_equal(ds, gu.Vector(self.aster_outlines_path).gdf)
 
     def test_open_vector__dask_geopandas(self) -> None:
         """Open and reproject vector partitions without eagerly loading them."""
@@ -213,15 +213,15 @@ class TestVectorAccessor:
         # Compare each operation independently to make failures easy to locate
         cropped_ds = ds.vct.crop(ds.vct.bounds)
         cropped_vector = vector.crop(vector.bounds)
-        assert_geodataframe_equal(cropped_ds, cropped_vector.ds)
+        assert_geodataframe_equal(cropped_ds, cropped_vector.gdf)
 
         reproj_ds = ds.vct.reproject(crs=CRS.from_epsg(4326))
         reproj_vector = vector.reproject(crs=CRS.from_epsg(4326))
-        assert_geodataframe_equal(reproj_ds, reproj_vector.ds)
+        assert_geodataframe_equal(reproj_ds, reproj_vector.gdf)
 
         translated_ds = ds.vct.translate(xoff=1, yoff=2)
         translated_vector = vector.translate(xoff=1, yoff=2)
-        assert_geodataframe_equal(translated_ds, translated_vector.ds)
+        assert_geodataframe_equal(translated_ds, translated_vector.gdf)
 
     def test_to_file(self) -> None:
         """Write an eager accessor-backed dataframe through the Vector-compatible API."""
@@ -288,7 +288,7 @@ class TestVectorAccessor:
         # Point masks should return a GeoDataFrame carrying the ``pc`` accessor
         point_mask = ds.vct.create_mask(points=(np.array([0.5, 2.0]), np.array([0.5, 2.0])))
         assert isinstance(point_mask, gpd.GeoDataFrame)
-        assert point_mask.pc.data_column == "z"
+        assert point_mask.pc.data_name == "z"
 
         proximity = ds.vct.proximity(size=(5, 5))
         assert isinstance(proximity, xr.DataArray)
@@ -311,7 +311,7 @@ class TestVectorAccessor:
         temp_dir = tempfile.TemporaryDirectory()
         temp_file = os.path.join(temp_dir.name, "points.gpkg")
         points.to_file(temp_file)
-        dask_points = gu.open_pointcloud(temp_file, data_column="id", chunks=2)
+        dask_points = gu.open_pointcloud(temp_file, data_name="id", chunks=2, as_type="geodataframe")
 
         # Compare lazy point-cloud output with the eager mask
         expected = vector.vct.create_mask(points=points)

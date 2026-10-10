@@ -287,7 +287,7 @@ class TestPointReducerAccuracy:
             geometry=gpd.points_from_xy([0.0, 1.0, 2.0], [0.0] * 3),
             crs=32632,
         )
-        points = gu.PointCloud(frame, data_column="height")
+        points = gu.PointCloud(frame, data_name="height")
 
         # Apply nodata rules and minimum point count
         omitted = points.filter(method="mean", radius=3.0, nodata_propagation="ignore")
@@ -314,7 +314,7 @@ class TestPointReducerAccuracy:
         result, _ = _grid_pointcloud(
             pc,
             grid_coords=grid_coords,
-            data_column_name="z",
+            data_name="z",
             resampling=resampling,
             dist_nodata_pixel=1.1,
         )
@@ -352,7 +352,7 @@ class TestPointReducerAccuracy:
             pc,
             grid_coords=grid_coords,
             grid_res=(1.0, 1.0),
-            data_column_name="z",
+            data_name="z",
             resampling=resampling,
             dist_nodata_pixel=1.1,
         )
@@ -378,7 +378,7 @@ class TestPointReducerAccuracy:
             pc,
             grid_coords=(np.arange(3, dtype=float), np.arange(3, dtype=float)),
             grid_res=(1.0, 1.0),
-            data_column_name="z",
+            data_name="z",
             resampling=resampling,
             dist_nodata_pixel=0.1,
         )
@@ -397,7 +397,7 @@ class TestPointReducerAccuracy:
             pc,
             grid_coords=(np.array([0.0, 1.0, 2.0]), np.array([0.0])),
             grid_res=(1.0, 1.0),
-            data_column_name="z",
+            data_name="z",
             resampling="mean",
             dist_nodata_pixel=1.1,
             min_points=2,
@@ -417,7 +417,7 @@ class TestPointReducerAccuracy:
             pc,
             grid_coords=grid_coords,
             grid_res=(1.0, 1.0),
-            data_column_name="z",
+            data_name="z",
             resampling="mean",
             dist_nodata_pixel=1.1,
         )
@@ -425,7 +425,7 @@ class TestPointReducerAccuracy:
             pc,
             grid_coords=grid_coords,
             grid_res=(1.0, 1.0),
-            data_column_name="z",
+            data_name="z",
             resampling="mean",
             dist_nodata_pixel=1.1,
             nodata_handling="propagate",
@@ -639,7 +639,7 @@ class TestPointReducerEngines:
         scipy_result, _ = _grid_pointcloud(
             pc,
             grid_coords=grid_coords,
-            data_column_name="z",
+            data_name="z",
             resampling=resampling,
             dist_nodata_pixel=2,
             engine="scipy",
@@ -649,7 +649,7 @@ class TestPointReducerEngines:
         numba_result, _ = _grid_pointcloud(
             pc,
             grid_coords=grid_coords,
-            data_column_name="z",
+            data_name="z",
             resampling=resampling,
             dist_nodata_pixel=2,
             engine="numba",
@@ -671,7 +671,7 @@ class TestPointReducerEngines:
                 pc,
                 grid_coords=(np.arange(3, dtype=float), np.array([0.0])),
                 grid_res=(1.0, 1.0),
-                data_column_name="z",
+                data_name="z",
                 resampling=resampling,
                 dist_nodata_pixel=1,
                 engine=engine,
@@ -739,7 +739,7 @@ class TestPointReducerReferences:
             geometry=gpd.points_from_xy(coordinates, np.zeros(5)),
             crs=32632,
         )
-        filtered = gu.PointCloud(frame, data_column="height").filter(method="median", radius=1.1, include_self=False)
+        filtered = gu.PointCloud(frame, data_name="height").filter(method="median", radius=1.1, include_self=False)
 
         # Check exact agreement for same neighborhood medians
         np.testing.assert_array_equal(filtered.data, pipeline.arrays[0]["SmoothedZ"])
@@ -778,7 +778,7 @@ class TestPointReducerReferences:
             points,
             grid_coords=(x_coords, y_coords),
             grid_res=(1.0, 1.0),
-            data_column_name="z",
+            data_name="z",
             resampling=geoutils_method,
             dist_nodata_pixel=1.1,
             nodata_handling="ignore",

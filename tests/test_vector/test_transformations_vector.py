@@ -43,8 +43,8 @@ class TestTransformation:
         v2.vector_equal(v1)
 
         # Check that the reprojection is the same as with geopandas
-        gpd1 = v0.ds.to_crs(epsg=32617)
-        assert_geodataframe_equal(gpd1, v1.ds)
+        gpd1 = v0.gdf.to_crs(epsg=32617)
+        assert_geodataframe_equal(gpd1, v1.gdf)
 
         # Second, with a Raster object
         v2 = v0.reproject(r0)
@@ -77,7 +77,7 @@ class TestTransformation:
 
         # Need to reproject to r.crs. Otherwise, crop will work but will be approximate
         # Because outlines might be warped in a different crs
-        outlines.ds = outlines.ds.to_crs(rst.crs)
+        outlines.gdf = outlines.gdf.to_crs(rst.crs)
 
         # Crop
         outlines_new = outlines.copy()
@@ -89,21 +89,21 @@ class TestTransformation:
         # Crop by passing bounds
         outlines_new_bounds = outlines.copy()
         outlines_new_bounds.crop(list(rst.bounds), inplace=True)
-        assert_geodataframe_equal(outlines_new.ds, outlines_new_bounds.ds)
+        assert_geodataframe_equal(outlines_new.gdf, outlines_new_bounds.gdf)
         # Check the return-by-copy as well
-        assert_geodataframe_equal(outlines_copy.ds, outlines_new_bounds.ds)
+        assert_geodataframe_equal(outlines_copy.gdf, outlines_new_bounds.gdf)
 
         # Verify that geometries intersect with raster bound
         rst_poly = gu.projtools.bounds2poly(rst.bounds)
         intersects_new = []
-        for poly in outlines_new.ds.geometry:
+        for poly in outlines_new.gdf.geometry:
             intersects_new.append(poly.intersects(rst_poly))
 
         assert np.all(intersects_new)
 
         # Check that some of the original outlines did not intersect and were removed
         intersects_old = []
-        for poly in outlines.ds.geometry:
+        for poly in outlines.gdf.geometry:
             intersects_old.append(poly.intersects(rst_poly))
 
         assert np.sum(intersects_old) == np.sum(intersects_new)
@@ -131,12 +131,12 @@ class TestTransformation:
         # Check that the default mode keeps both polygons that touch the box
         intersecting = vector.crop(bbox)
         assert list(intersecting["name"]) == ["inside", "crossing"]
-        assert_geodataframe_equal(intersecting.ds, source.iloc[:2])
+        assert_geodataframe_equal(intersecting.gdf, source.iloc[:2])
 
         # Check that the within mode keeps only the polygon inside the box
         contained = vector.crop(bbox, mode="within")
         assert list(contained["name"]) == ["inside"]
-        assert_geodataframe_equal(contained.ds, source.iloc[[0]])
+        assert_geodataframe_equal(contained.gdf, source.iloc[[0]])
 
         # Reject an unknown selection mode
         with pytest.raises(ValueError, match="must be either 'intersects' or 'within'"):
@@ -179,21 +179,21 @@ class TestTransformation:
         # Compare the clipped polygon with GeoPandas and check its new bounds
         clipped = gu.Vector(source).clip(clipping_geometry)
         expected = source.clip(clipping_geometry)
-        assert_geodataframe_equal(clipped.ds, expected)
+        assert_geodataframe_equal(clipped.gdf, expected)
         assert tuple(clipped.bounds) == (0, 1, 1, 2)
 
         # Check that the old crop option warns and keeps its previous behavior
         with pytest.warns(DeprecationWarning, match="Argument 'clip' is deprecated"):
             deprecated_clipped = gu.Vector(source).crop(clipping_geometry.bounds, clip=True)
-        assert_geodataframe_equal(deprecated_clipped.ds, expected)
+        assert_geodataframe_equal(deprecated_clipped.gdf, expected)
         with pytest.warns(DeprecationWarning, match="Argument 'clip' is deprecated"):
             deprecated_cropped = gu.Vector(source).crop(clipping_geometry.bounds, clip=False)
-        assert_geodataframe_equal(deprecated_cropped.ds, gu.Vector(source).crop(clipping_geometry.bounds).ds)
+        assert_geodataframe_equal(deprecated_cropped.gdf, gu.Vector(source).crop(clipping_geometry.bounds).gdf)
         inplace = gu.Vector(source)
         with pytest.warns(DeprecationWarning, match="Argument 'clip' is deprecated"):
             output = inplace.crop(clipping_geometry.bounds, clip=True, inplace=True)
         assert output is None
-        assert_geodataframe_equal(inplace.ds, expected)
+        assert_geodataframe_equal(inplace.gdf, expected)
 
     def test_translate(self) -> None:
 
@@ -254,7 +254,7 @@ class TestTransformationChunked:
 
         # Read results and check exact equality of clipped geometry in original order with in-memory
         computed_lazy = lazy_result.compute().sort_values("row_id").reset_index(drop=True)
-        computed_multiproc = multiproc_result.ds.sort_values("row_id").reset_index(drop=True)
+        computed_multiproc = multiproc_result.gdf.sort_values("row_id").reset_index(drop=True)
         assert_geodataframe_equal(computed_lazy, expected, check_dtype=False)
         assert_geodataframe_equal(computed_multiproc, expected, check_dtype=False)
         assert not multiproc.is_loaded
@@ -287,4 +287,4 @@ class TestTransformationErrors:
         with pytest.raises(ValueError, match=message):
             vector.clip(box(0, 0, 1, 1), mp_config=config)
         assert not outfile.exists()
-        assert_geodataframe_equal(vector.ds, source)
+        assert_geodataframe_equal(vector.gdf, source)

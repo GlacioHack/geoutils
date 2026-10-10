@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from importlib.util import find_spec
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -17,6 +17,37 @@ import geoutils as gu
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc import ClusterGenerator, MultiprocConfig
 from geoutils.sampling.pairsampling import _IrregularPairSampler, _RegularPairSampler
+
+
+@pytest.fixture
+def pointcloud_file(tmp_path: Any) -> Any:
+    """Write point fixtures as GeoParquet row groups with their original labels and attribute dtypes."""
+
+    pytest.importorskip("pyarrow")
+    filenames = []
+
+    def write_points(frame: gpd.GeoDataFrame, partitions: int) -> tuple[str, int, str | None]:
+        """Save one point fixture and return its filename, row chunk size and active value column."""
+
+        # Preserve explicit elevation selection, otherwise infer the common point value columns
+        frame = frame.copy()
+        column = frame.pc.data_name
+        if "data_name" not in frame.attrs and column is None:
+            column = next((name for name in ("height", "z", "intensity") if name in frame), None)
+        if column is None and not frame.geometry.has_z.all():
+            frame["z"] = np.zeros(len(frame))
+            column = "z"
+
+        # A final shorter row group checks that file readers preserve every row
+        chunks = max(1, int(np.ceil(len(frame) / partitions)))
+        filename = tmp_path / f"points-{len(filenames)}.parquet"
+        filenames.append(filename)
+        frame.to_parquet(
+            filename, index=True, geometry_encoding="geoarrow", schema_version="1.1.0", row_group_size=chunks
+        )
+        return str(filename), chunks, column
+
+    return write_points
 
 
 @pytest.fixture
@@ -305,7 +336,7 @@ class TestPairSampleChunked:
         chunks = ((4, 9, 7), (5, 3, 12))
         eager = np.arange(400, dtype=float).reshape(20, 20)
         array = da.from_array(eager, chunks=chunks)
-        raster = gu.RasterAccessor.from_array(array, from_origin(0, 20, 1, 1), 32633)
+        raster = gu.DataArrayRasterAccessor.from_array(array, from_origin(0, 20, 1, 1), 32633)
 
         # Draw only local pairs so both endpoints must belong to one original Dask chunk
         pairs = raster.rst.pairsample(
@@ -350,7 +381,7 @@ class TestPairSampleChunked:
 
         monkeypatch.setattr(_RegularPairSampler, "_candidates", candidates)
         array = da.from_delayed(load_values(), shape=(20, 20), dtype=float)
-        raster = gu.RasterAccessor.from_array(array, from_origin(0, 20, 1, 1), 32633)
+        raster = gu.DataArrayRasterAccessor.from_array(array, from_origin(0, 20, 1, 1), 32633)
         with dask.config.set(scheduler="synchronous"):
             pairs = raster.rst.pairsample(n_pairs=80, strategy="independent", random_state=2)
         dask_candidate_count = len(candidate_counts)
@@ -373,7 +404,7 @@ class TestPairSampleChunked:
         import dask.array as da
 
         array = np.arange(600, dtype=float).reshape(24, 25)
-        raster = gu.RasterAccessor.from_array(
+        raster = gu.DataArrayRasterAccessor.from_array(
             da.from_array(array, chunks=array.shape), from_origin(0, 24, 2, 2), 32633, nodata=None
         )
 
@@ -397,7 +428,7 @@ class TestPairSampleChunked:
         import dask.array as da
 
         array = np.arange(576, dtype=float).reshape(24, 24)
-        raster = gu.RasterAccessor.from_array(
+        raster = gu.DataArrayRasterAccessor.from_array(
             da.from_array(array, chunks=(6, 8)), from_origin(0, 24, 1, 1), 32633, nodata=None
         )
 
@@ -434,28 +465,41 @@ class TestPairSampleChunked:
         assert pairs["distance"].dtype == np.float32
 
     @pytest.mark.parametrize("mask_form", ["vector", "raster", "pointcloud"])
-    def test_pairsample__point_masks_reuse_loaded_coordinates(self, mask_form: str) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_pairsample__point_masks_reuse_loaded_coordinates(
+        self, as_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, mask_form: str
+    ) -> None:
         """Checks that spatial masking reads each Dask source partition once and matches eager sampling."""
 
         # Count reads from three source partitions so a second coordinate load would be visible
         import dask
-        import dask_geopandas as dgpd
 
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
         _register_dask_pointcloud_accessor()
         y, x = np.mgrid[:12, :12]
-        dataframe = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), (x + y).ravel(), crs=32633).ds
+        dataframe = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), (x + y).ravel(), crs=32633).gdf
         reads: list[int] = []
 
-        def read_partition(partition: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+        def read_partition(partition: gpd.GeoDataFrame | xr.DataArray) -> gpd.GeoDataFrame | xr.DataArray:
             """Record a source read before returning the point partition."""
             reads.append(1)
             return partition
 
-        lazy_points = dgpd.from_geopandas(dataframe, npartitions=3, sort=False).map_partitions(
-            read_partition, meta=dataframe.iloc[:0]
+        lazy_points_filename, lazy_points_chunks, lazy_points_column = pointcloud_file(dataframe, 3)
+        lazy_points = gu.open_pointcloud(
+            lazy_points_filename,
+            data_name=lazy_points_column,
+            columns="all",
+            chunks=lazy_points_chunks,
+            as_type=as_type,
         )
+        if as_type == "dataarray":
+            # An implicit index avoids Xarray loading stored row labels while constructing map_blocks()
+            lazy_points = lazy_points.drop_vars("point")
+            lazy_points = lazy_points.map_blocks(read_partition, template=lazy_points)
+        else:
+            lazy_points = lazy_points.map_partitions(read_partition, meta=dataframe.iloc[:0])
 
         # Define the same left-half mask, matching integer raster coordinates to the point grid
         mask: Any
@@ -479,12 +523,14 @@ class TestPairSampleChunked:
         assert pairs.sizes["pair"] == 100
         assert np.all(pairs.x < 6)
 
-    def test_pairsample__point_dask_mask_matches_eager(self) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_pairsample__point_dask_mask_matches_eager(
+        self, as_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any
+    ) -> None:
         """Checks that a Dask point mask stays lazy and selects the same pairs as an eager point mask."""
 
         # Create matching eager and Dask point tables, with a four-partition boolean point mask
         import dask
-        import dask_geopandas as dgpd
 
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
@@ -492,8 +538,18 @@ class TestPairSampleChunked:
         y, x = np.mgrid[:12, :12]
         points = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), (x + y).ravel(), crs=32633)
         point_mask = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), (x < 6).ravel(), crs=32633)
-        lazy_points = dgpd.from_geopandas(points.ds, npartitions=3, sort=False)
-        lazy_mask = dgpd.from_geopandas(point_mask.ds, npartitions=4, sort=False)
+        lazy_points_filename, lazy_points_chunks, lazy_points_column = pointcloud_file(points.gdf, 3)
+        lazy_points = gu.open_pointcloud(
+            lazy_points_filename,
+            data_name=lazy_points_column,
+            columns="all",
+            chunks=lazy_points_chunks,
+            as_type=as_type,
+        )
+        lazy_mask_filename, lazy_mask_chunks, lazy_mask_column = pointcloud_file(point_mask.gdf, 4)
+        lazy_mask = gu.open_pointcloud(
+            lazy_mask_filename, data_name=lazy_mask_column, columns="all", chunks=lazy_mask_chunks, as_type=as_type
+        )
         options = {"n_pairs": 100, "sampling": "random_xy", "random_state": 9}
 
         # Sample through both lazy tables and compute the same call with eager source and mask rows
@@ -516,10 +572,10 @@ class TestPairSampleChunked:
         y, x = np.mgrid[:12, :12]
         values = (x + y).astype(float).ravel()
         values[5] = np.nan
-        points = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), values, crs=32633, data_column="height")
+        points = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), values, crs=32633, data_name="height")
         filename = tmp_path / "points.gpkg"
         points.to_file(filename)
-        file_points = gu.PointCloud(filename, data_column="height")
+        file_points = gu.PointCloud(filename, data_name="height")
 
         # 2/ Define the same left-half mask, writing a point mask so it can also be read by row
         mask: Any
@@ -528,10 +584,10 @@ class TestPairSampleChunked:
             mask = gu.Raster.from_array((x < 6)[::-1], from_origin(0, 11, 1, 1), points.crs)
             file_mask = mask
         elif mask_form == "pointcloud":
-            mask = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), (x < 6).ravel(), crs=points.crs, data_column="keep")
+            mask = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), (x < 6).ravel(), crs=points.crs, data_name="keep")
             mask_filename = tmp_path / "point-mask.gpkg"
             mask.to_file(mask_filename)
-            file_mask = gu.PointCloud(mask_filename, data_column="keep")
+            file_mask = gu.PointCloud(mask_filename, data_name="keep")
         else:
             mask = gpd.GeoDataFrame(geometry=[box(-0.5, -0.5, 5.5, 11.5)], crs=points.crs)
             file_mask = mask
@@ -553,14 +609,19 @@ class TestPairSampleChunked:
             assert not file_mask.is_loaded
 
     @pytest.mark.parametrize("strategy", ["kdtree", "hashgrid", "nn_logvector"])
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
     def test_pairsample__point_chunked_loglag_matches_eager(
-        self, strategy: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        as_type: Literal["dataarray", "geodataframe"],
+        pointcloud_file: Any,
+        strategy: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Checks that every chunked point search uses disk-backed rows and matches eager sampling exactly."""
 
         # 1/ Create matching eager, four-partition Dask, and file-backed point clouds with one nodata value
         import dask
-        import dask_geopandas as dgpd
 
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
@@ -568,12 +629,19 @@ class TestPairSampleChunked:
         y, x = np.mgrid[:16, :16]
         values = (np.sin(x / 3) + np.cos(y / 4)).ravel()
         values[9] = np.nan
-        points = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), values, crs=32633, data_column="height")
-        dataframe = points.ds
-        lazy_points = dgpd.from_geopandas(dataframe, npartitions=4, sort=False)
+        points = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), values, crs=32633, data_name="height")
+        dataframe = points.gdf
+        lazy_points_filename, lazy_points_chunks, lazy_points_column = pointcloud_file(dataframe, 4)
+        lazy_points = gu.open_pointcloud(
+            lazy_points_filename,
+            data_name=lazy_points_column,
+            columns="all",
+            chunks=lazy_points_chunks,
+            as_type=as_type,
+        )
         filename = tmp_path / "loglag-points.gpkg"
         points.to_file(filename)
-        file_points = gu.PointCloud(filename, data_column="height")
+        file_points = gu.PointCloud(filename, data_name="height")
         options = {
             "n_pairs": 75,
             "min_distance": 1,
@@ -672,8 +740,8 @@ class TestPairSampleChunked:
         transform = from_origin(0, 24, 1, 1)
         eager_source = gu.Raster.from_array(values, transform, 32633)
         eager_mask = gu.Raster.from_array(keep, transform, 32633)
-        dask_source = gu.RasterAccessor.from_array(da.from_array(values, chunks=(7, 9)), transform, 32633)
-        dask_mask = gu.RasterAccessor.from_array(da.from_array(keep, chunks=(7, 9)), transform, 32633)
+        dask_source = gu.DataArrayRasterAccessor.from_array(da.from_array(values, chunks=(7, 9)), transform, 32633)
+        dask_mask = gu.DataArrayRasterAccessor.from_array(da.from_array(keep, chunks=(7, 9)), transform, 32633)
         source_filename = tmp_path / "local-values.tif"
         mask_filename = tmp_path / "local-mask.tif"
         gu.Raster.from_array(values, transform, 32633).to_file(source_filename)
@@ -725,7 +793,7 @@ class TestPairSampleErrors:
         # Create a lazy raster and keep its original Dask array for the loading state check
         dask_array = pytest.importorskip("dask.array")
         values = dask_array.from_array(np.arange(100, dtype=float).reshape(10, 10), chunks=(4, 6))
-        source = gu.RasterAccessor.from_array(values, from_origin(0, 10, 1, 1), 32633)
+        source = gu.DataArrayRasterAccessor.from_array(values, from_origin(0, 10, 1, 1), 32633)
 
         # Reject the second scheduler without computing or replacing the lazy source array
         with pytest.raises(ValueError, match="Cannot use Multiprocessing and Dask simultaneously"):
@@ -821,27 +889,36 @@ class TestPairSampleErrors:
         "mask_change, message",
         [("crs", "does not share the support CRS"), ("order", "does not share the ordered support coordinates")],
     )
-    def test_pairsample__error_dask_point_mask_support(self, mask_change: str, message: str) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_pairsample__error_dask_point_mask_support(
+        self, as_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, mask_change: str, message: str
+    ) -> None:
         """Checks an error is raised when a Dask point mask has a different CRS or row order."""
 
         # We create lazy source and boolean mask with different partition sizes
         dask = pytest.importorskip("dask")
 
-        dgpd = pytest.importorskip("dask_geopandas")
+        pytest.importorskip("dask_geopandas")
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
         _register_dask_pointcloud_accessor()
         y, x = np.mgrid[:4, :4]
         points = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), np.arange(16), crs=32633)
-        source = dgpd.from_geopandas(points.ds, npartitions=2, sort=False)
+        source_filename, source_chunks, source_column = pointcloud_file(points.gdf, 2)
+        source = gu.open_pointcloud(
+            source_filename, data_name=source_column, columns="all", chunks=source_chunks, as_type=as_type
+        )
 
         # We reverse the mask, or change the CRS
         order = slice(None, None, -1) if mask_change == "order" else slice(None)
         mask_crs = 4326 if mask_change == "crs" else points.crs
         mask_points = gu.PointCloud.from_xyz(
-            x.ravel()[order], y.ravel()[order], np.ones(16, dtype=bool), crs=mask_crs, data_column="include"
+            x.ravel()[order], y.ravel()[order], np.ones(16, dtype=bool), crs=mask_crs, data_name="include"
         )
-        mask = dgpd.from_geopandas(mask_points.ds, npartitions=3, sort=False)
+        mask_filename, mask_chunks, mask_column = pointcloud_file(mask_points.gdf, 3)
+        mask = gu.open_pointcloud(
+            mask_filename, data_name=mask_column, columns="all", chunks=mask_chunks, as_type=as_type
+        )
 
         # We check an error is raised
         with dask.config.set(scheduler="synchronous"):
@@ -863,20 +940,20 @@ class TestPairSampleErrors:
         y, x = np.mgrid[:4, :4]
         coordinates_x = x.ravel()
         coordinates_y = y.ravel()
-        points = gu.PointCloud.from_xyz(coordinates_x, coordinates_y, np.arange(16), crs=32633, data_column="height")
+        points = gu.PointCloud.from_xyz(coordinates_x, coordinates_y, np.arange(16), crs=32633, data_name="height")
         source_path = tmp_path / "source.gpkg"
         points.to_file(source_path)
-        source = gu.PointCloud(source_path, data_column="height")
+        source = gu.PointCloud(source_path, data_name="height")
 
         # We change the mask CRS or reverse its row order
         order = slice(None, None, -1) if mask_change == "order" else slice(None)
         mask_crs = 4326 if mask_change == "crs" else points.crs
         point_mask = gu.PointCloud.from_xyz(
-            coordinates_x[order], coordinates_y[order], np.ones(16, dtype=bool), crs=mask_crs, data_column="include"
+            coordinates_x[order], coordinates_y[order], np.ones(16, dtype=bool), crs=mask_crs, data_name="include"
         )
         mask_path = tmp_path / "mask.gpkg"
         point_mask.to_file(mask_path)
-        file_mask = gu.PointCloud(mask_path, data_column="include")
+        file_mask = gu.PointCloud(mask_path, data_name="include")
 
         # We check we raise an error
         with ClusterGenerator("multi", nb_workers=2) as cluster:

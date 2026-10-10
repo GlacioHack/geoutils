@@ -71,7 +71,7 @@ VectorLike = Union["VectorBase", gpd.GeoDataFrame]
 def _as_geodataframe(obj: Any) -> gpd.GeoDataFrame:
     """Return a GeoDataFrame from a Vector-like object."""
 
-    ds = obj if isinstance(obj, gpd.GeoDataFrame) else get_geo_attr(obj, "ds")
+    ds = obj if isinstance(obj, gpd.GeoDataFrame) else get_geo_attr(obj, "_dataset")
     if is_dask_dataframe(ds):
         ds = ds.compute()
     if not isinstance(ds, gpd.GeoDataFrame):
@@ -109,11 +109,11 @@ class VectorBase(ABC):
         if hasattr(raster, "rst"):
             return raster
 
-        from geoutils.raster.xr_accessor import RasterAccessor, open_raster
+        from geoutils.raster.xr_accessor import DataArrayRasterAccessor, open_raster
 
         if raster.name is not None and not raster.is_loaded:
             return open_raster(raster.name, is_mask=raster.is_mask)
-        return RasterAccessor.from_array(
+        return DataArrayRasterAccessor.from_array(
             data=raster.data,
             transform=raster.transform,
             crs=raster.crs,
@@ -129,20 +129,20 @@ class VectorBase(ABC):
             return pointcloud
 
         if self._is_pd:
-            ds = pointcloud.ds
-            ds.attrs["data_column"] = pointcloud.data_column
+            ds = pointcloud._dataset
+            ds.attrs["data_name"] = pointcloud.data_name
             return ds
         return pointcloud
 
     @property
     @abstractmethod
-    def ds(self) -> gpd.GeoDataFrame:
+    def _dataset(self) -> gpd.GeoDataFrame:
         """GeoDataFrame of the vector."""
         ...
 
-    @ds.setter
+    @_dataset.setter
     @abstractmethod
-    def ds(self, new_ds: gpd.GeoDataFrame | gpd.GeoSeries) -> None:
+    def _dataset(self, new_ds: gpd.GeoDataFrame | gpd.GeoSeries) -> None:
         """Set a new GeoDataFrame."""
         ...
 
@@ -174,7 +174,7 @@ class VectorBase(ABC):
     def crs(self) -> CRS:
         """Coordinate reference system of the vector."""
 
-        return self.ds.crs
+        return self._dataset.crs
 
     @property
     def name(self) -> str | None:
@@ -186,25 +186,25 @@ class VectorBase(ABC):
     def is_loaded(self) -> bool:
         """Whether the vector data are loaded in memory."""
 
-        return not is_dask_dataframe(self.ds)
+        return not is_dask_dataframe(self._dataset)
 
     @property
     def geometry(self) -> gpd.GeoSeries:
         """Active geometry column of the vector."""
 
-        return self.ds.geometry
+        return self._dataset.geometry
 
     @property
     def columns(self) -> pd.Index:
         """Column names available on the vector dataframe."""
 
-        return self.ds.columns
+        return self._dataset.columns
 
     @property
     def index(self) -> pd.Index:
         """Row index of the vector dataframe."""
 
-        return self.ds.index
+        return self._dataset.index
 
     def vector_equal(self, other: Any, **kwargs: Any) -> bool:
         """
@@ -250,7 +250,7 @@ class VectorBase(ABC):
     def _repr_html_(self) -> str:
         """Convert vector to HTML string representation for documentation."""
 
-        str_ds = "\n       ".join(self.ds.__str__().split("\n"))
+        str_ds = "\n       ".join(self._dataset.__str__().split("\n"))
 
         return str(
             '<pre><span style="white-space: pre-wrap"><b><em>'
@@ -268,7 +268,7 @@ class VectorBase(ABC):
     def __str__(self) -> str:
         """Provide simplified vector string representation for print()."""
 
-        return str(self.ds.__str__())
+        return str(self._dataset.__str__())
 
     @overload
     def info(self, verbose: Literal[True] = ...) -> None: ...
@@ -286,9 +286,9 @@ class VectorBase(ABC):
         as_str = [
             f"Filename:           {self.name} \n",
             f"Coordinate system:  {[CRS(self.crs).name if self.crs is not None else None]}\n",
-            f"Extent:             {self.ds.total_bounds.tolist()} \n",
-            f"Number of features: {len(self.ds)} \n",
-            f"Attributes:         {self.ds.columns.tolist()}",
+            f"Extent:             {self._dataset.total_bounds.tolist()} \n",
+            f"Number of features: {len(self._dataset)} \n",
+            f"Attributes:         {self._dataset.columns.tolist()}",
         ]
 
         if verbose:
@@ -381,14 +381,14 @@ class VectorBase(ABC):
     def total_bounds(self) -> rio.coords.BoundingBox:
         """Total bounds of the vector."""
 
-        return self.ds.total_bounds
+        return self._dataset.total_bounds
 
     @property
     def bbox(self) -> rio.coords.BoundingBox:
         """Total bounding box of the vector."""
 
         # Reduce lazy partitions to four coordinates without replacing the Dask collection
-        dataframe = self.ds
+        dataframe = self._dataset
         total_bounds = dataframe.total_bounds
         if is_dask_dataframe(dataframe):
             total_bounds = total_bounds.compute()
@@ -410,7 +410,7 @@ class VectorBase(ABC):
     def active_geometry_name(self) -> str:
         """Name of the active geometry column."""
 
-        return self.ds.active_geometry_name
+        return self._dataset.active_geometry_name
 
     @overload
     def crop(
@@ -490,7 +490,7 @@ class VectorBase(ABC):
             raise ValueError("Argument 'bbox' must be passed.")
         if mode not in ("intersects", "within"):
             raise ValueError("Argument 'mode' must be either 'intersects' or 'within'.")
-        if inplace and self._is_pd and is_dask_dataframe(self.ds):
+        if inplace and self._is_pd and is_dask_dataframe(self._dataset):
             raise ValueError("Dask-backed vectors cannot be modified in place; use the returned dataframe instead.")
 
         # Preserve crop(..., clip=True) by clipping to the normalized rectangular crop extent
@@ -498,7 +498,7 @@ class VectorBase(ABC):
             normalized_bbox = tuple(float(value) for value in _check_match_bbox(self, bbox))
             new_ds = _clip(self, mask=normalized_bbox, keep_geom_type=False, sort=False)
             if inplace:
-                self.ds = new_ds
+                self._dataset = new_ds
                 return None
             return self._override_gdf_output(new_ds)
 
@@ -520,7 +520,7 @@ class VectorBase(ABC):
         new_ds = _crop(self, bbox=bbox, mode=mode)
 
         if inplace:
-            self.ds = new_ds
+            self._dataset = new_ds
             return None
         return self._override_gdf_output(new_ds)
 
@@ -547,7 +547,7 @@ class VectorBase(ABC):
         """
 
         if mp_config is not None:
-            if self._is_pd and is_dask_dataframe(self.ds):
+            if self._is_pd and is_dask_dataframe(self._dataset):
                 raise ValueError("Argument ``mp_config`` cannot be combined with a Dask vector.")
 
             # Keep file-backed vectors unloaded while workers clip independent source row ranges
@@ -562,7 +562,7 @@ class VectorBase(ABC):
             )
             if self._is_pd:
                 clipped_vector.load()
-                return clipped_vector.ds
+                return clipped_vector._dataset
             return cast(VectorBaseType, clipped_vector)
 
         clipped = _clip(self, mask=mask, keep_geom_type=keep_geom_type, sort=sort)
@@ -604,13 +604,13 @@ class VectorBase(ABC):
     ) -> VectorBaseType | gpd.GeoDataFrame | None:
         """Reproject vector to a specified coordinate reference system."""
 
-        if inplace and is_dask_dataframe(self.ds):
+        if inplace and is_dask_dataframe(self._dataset):
             raise ValueError("Dask-backed vectors cannot be modified in place; use the returned dataframe instead.")
 
         new_ds = _reproject(self, ref=ref, crs=crs)
 
         if inplace:
-            self.ds = new_ds
+            self._dataset = new_ds
             return None
         return self._override_gdf_output(new_ds)
 
@@ -653,14 +653,14 @@ class VectorBase(ABC):
     ) -> VectorBaseType | gpd.GeoDataFrame | None:
         """Shift a vector by a coordinate offset."""
 
-        if inplace and is_dask_dataframe(self.ds):
+        if inplace and is_dask_dataframe(self._dataset):
             raise ValueError("Dask-backed vectors cannot be modified in place; use the returned dataframe instead.")
 
-        new_ds = self.ds.copy()
+        new_ds = self._dataset.copy()
         new_ds.geometry = self.geometry.translate(xoff=xoff, yoff=yoff, zoff=zoff)
 
         if inplace:
-            self.ds = new_ds
+            self._dataset = new_ds
             return None
         return self._override_gdf_output(new_ds)
 
@@ -738,7 +738,7 @@ class VectorBase(ABC):
         # Preserve plain arrays and cast geospatial results to their matching accessor
         if as_array:
             return output
-        if has_geo_attr(output, "data_column"):
+        if has_geo_attr(output, "data_name"):
             return self._cast_pointcloud_output(output)
         if has_geo_attr(output, "transform") and has_geo_attr(output, "shape"):
             return self._cast_raster_output(output)
@@ -777,8 +777,8 @@ class VectorBase(ABC):
 
         Alternatively, the output grid can be defined with res, shape, grid_coords, bounds and crs.
 
-        Burn value is set by user and can be either a single number, or an iterable of same length as self.ds.
-        Default is an index from 1 to len(self.ds).
+        Burn value is set by user and can be either a single number, or an iterable of same length as self._dataset.
+        Default is an index from 1 to len(self._dataset).
 
         :param ref: Reference raster whose grid is matched by the output.
         :param in_value: Burn values as a scalar, an iterable matching the number of geometries, or None for 1 to N.
@@ -875,11 +875,11 @@ class VectorBase(ABC):
     def query(self: VectorBaseType, expression: str, inplace: bool = False) -> VectorBaseType | gpd.GeoDataFrame | None:
         """Query the vector with a valid Pandas expression."""
 
-        if inplace and is_dask_dataframe(self.ds):
+        if inplace and is_dask_dataframe(self._dataset):
             raise ValueError("Dask-backed vectors cannot be modified in place; use the returned dataframe instead.")
-        new_ds = self.ds.query(expression)
+        new_ds = self._dataset.query(expression)
         if inplace:
-            self.ds = new_ds
+            self._dataset = new_ds
             return None
         return self._override_gdf_output(new_ds)
 
@@ -930,7 +930,7 @@ class VectorBase(ABC):
     def buffer_metric(self: VectorBaseType, buffer_size: float) -> VectorBaseType | gpd.GeoDataFrame:
         """Buffer the vector features in a local metric system."""
 
-        new_ds = _buffer_metric(gdf=self.ds, buffer_size=buffer_size)
+        new_ds = _buffer_metric(gdf=self._dataset, buffer_size=buffer_size)
         return self._override_gdf_output(new_ds)
 
     def get_bounds_projected(self, out_crs: CRS, densify_points: int = 5000) -> rio.coords.BoundingBox:
@@ -956,7 +956,7 @@ class VectorBase(ABC):
         """Get local metric coordinate reference system for the vector."""
 
         if local_crs_type == "universal":
-            return _get_utm_ups_crs(self.ds, method=method)
+            return _get_utm_ups_crs(self._dataset, method=method)
         raise NotImplementedError("This is not implemented yet.")
 
     def buffer_without_overlap(
@@ -964,7 +964,7 @@ class VectorBase(ABC):
     ) -> VectorBaseType | gpd.GeoDataFrame:
         """Buffer the vector geometries without overlapping each other."""
 
-        new_ds = _buffer_without_overlap(self.ds, buffer_size=buffer_size, metric=metric, plot=plot)
+        new_ds = _buffer_without_overlap(self._dataset, buffer_size=buffer_size, metric=metric, plot=plot)
         return self._override_gdf_output(new_ds)
 
     def to_geoutils(self) -> Any:
@@ -972,7 +972,7 @@ class VectorBase(ABC):
 
         from geoutils.vector.vector import Vector
 
-        return Vector(self.ds)
+        return Vector(self._dataset)
 
     @deprecate(
         removal_version=Version("0.3.0"),

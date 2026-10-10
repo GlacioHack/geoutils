@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -14,7 +14,7 @@ from rasterio.transform import from_origin
 import geoutils as gu
 from geoutils.multiproc import MultiprocConfig
 from geoutils.multiproc.cluster import MpCluster
-from geoutils.raster.xr_accessor import RasterAccessor
+from geoutils.raster.xr_accessor import DataArrayRasterAccessor
 
 
 class TestPredictors:
@@ -43,7 +43,7 @@ class TestPredictors:
 
         # Create synthetic dataarray and error structure
         values = np.array([[1.0, np.nan, 3.0], [4.0, 5.0, 6.0]])
-        raster = RasterAccessor.from_array(values, transform=from_origin(10, 20, 2, 2), crs=32631)
+        raster = DataArrayRasterAccessor.from_array(values, transform=from_origin(10, 20, 2, 2), crs=32631)
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
 
         # Check predicted errors  match shape + NaNs of raster input
@@ -78,7 +78,7 @@ class TestPredictors:
         # We create a synthetic point cloud and error structure
         points = gu.PointCloud.from_xyz([0, 1, 2], [5, 6, 7], [10, 10, 10], crs=32631)
         quality = np.array([0.0, 0.5, 1.0])
-        points.ds["quality"] = quality
+        points.gdf["quality"] = quality
         statistics = pd.DataFrame({"std": [1.0, 3.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="quality"))
         magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", magnitude)])
@@ -156,14 +156,17 @@ class TestPredictorsChunked:
         np.testing.assert_array_equal(np.asarray(lazy.compute()), expected.to_nanarray())
         np.testing.assert_array_equal(multiproc.to_nanarray(), expected.to_nanarray())
 
-    def test_predict_magnitude__point_dask_mp_equal(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_predict_magnitude__point_dask_mp_equal(
+        self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path
+    ) -> None:
         """Checks that Dask and MP point partitions predict the eager values in the same row order."""
 
         pytest.importorskip("dask_geopandas")
 
         # 1/ We create a point and error structure to evaluate in-memory for later comparison
         points = gu.PointCloud.from_xyz(np.arange(7), np.arange(7), np.ones(7), crs=32631)
-        points.ds["quality"] = np.linspace(0, 1, 7)
+        points.gdf["quality"] = np.linspace(0, 1, 7)
         statistics = pd.DataFrame({"std": [1.0, 2.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="quality"))
         magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", magnitude)])
@@ -174,8 +177,8 @@ class TestPredictorsChunked:
         # 2/ Same file creation/opening with MP/Dask
         source_path = tmp_path / "points.gpkg"
         points.to_file(source_path)
-        dask_points = gu.open_pointcloud(str(source_path), data_column=points.data_column, chunks=3)
-        file_points = gu.PointCloud(source_path, data_column=points.data_column)
+        dask_points = gu.open_pointcloud(str(source_path), data_name=points.data_name, chunks=3, as_type=as_type)
+        file_points = gu.PointCloud(source_path, data_name=points.data_name)
         lazy = structure.predict_magnitude({"quality": "quality"}, like=dask_points)
         assert not dask_points.pc.is_loaded and not lazy.pc.is_loaded
         assert hasattr(lazy, "compute")
@@ -185,7 +188,9 @@ class TestPredictorsChunked:
         assert not file_points.is_loaded and not multiproc.is_loaded
 
         # 3/ Exact equality across backends
-        np.testing.assert_array_equal(lazy.compute()[points.data_column].to_numpy(), expected.data)
+        computed = lazy.compute()
+        values = computed.data if as_type == "dataarray" else computed[points.data_name]
+        np.testing.assert_array_equal(values, expected.data)
         np.testing.assert_array_equal(multiproc.data, expected.data)
 
     def test_predict_magnitude__dask_no_predictors(self) -> None:
@@ -197,8 +202,10 @@ class TestPredictorsChunked:
         values = np.ones((3, 4))
         values[1, 2] = np.nan
         transform = from_origin(0, 3, 1, 1)
-        eager = RasterAccessor.from_array(values, transform=transform, crs=32631)
-        lazy = RasterAccessor.from_array(dask.from_array(values, chunks=(2, 3)), transform=transform, crs=32631)
+        eager = DataArrayRasterAccessor.from_array(values, transform=transform, crs=32631)
+        lazy = DataArrayRasterAccessor.from_array(
+            dask.from_array(values, chunks=(2, 3)), transform=transform, crs=32631
+        )
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
 
         # Predict in-memory and Dask
@@ -270,7 +277,7 @@ class TestPredictorsChunked:
         eager_raster = structure.predict_magnitude({"quality": np.tile(quality, (2, 1))}, like=raster)
         eager_points = structure.predict_magnitude({"quality": quality}, like=points)
         np.testing.assert_array_equal(np.asarray(raster_result.compute()), eager_raster.to_nanarray())
-        np.testing.assert_array_equal(point_result.compute()[points.data_column].to_numpy(), eager_points.data)
+        np.testing.assert_array_equal(point_result.compute()[points.data_name].to_numpy(), eager_points.data)
 
     def test_predict_magnitude__point_geometry_z_chunks(self) -> None:
         """Checks that point magnitudes replace geometry Z when no data column is selected."""
@@ -281,7 +288,7 @@ class TestPredictorsChunked:
         x = np.arange(7, dtype=float)
         y = np.array([0, 1, 0, 2, 1, 3, 2], dtype=float)
         frame = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x, y, np.arange(7)), crs=32631)
-        points = gu.PointCloud(frame, data_column=None)
+        points = gu.PointCloud(frame, data_name=None)
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
 
         # We check both in-memory and lazy write to Z
@@ -317,7 +324,7 @@ class TestPredictorsChunked:
         assert points.is_loaded and not multiproc.is_loaded
 
         # All outputs should match exactly
-        np.testing.assert_array_equal(lazy.compute()[points.data_column].to_numpy(), expected.data)
+        np.testing.assert_array_equal(lazy.compute()[points.data_name], expected.data)
         np.testing.assert_array_equal(multiproc.data, expected.data)
 
 
@@ -442,7 +449,7 @@ class TestPredictorsErrors:
 
         # We create a Dask input
         values = dask.from_array(np.ones((2, 2)), chunks=(1, 1))
-        raster = RasterAccessor.from_array(values, transform=from_origin(0, 2, 1, 1), crs=32631)
+        raster = DataArrayRasterAccessor.from_array(values, transform=from_origin(0, 2, 1, 1), crs=32631)
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
 
         # Error should be raised here

@@ -2,63 +2,73 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 import geopandas as gpd
 import numpy as np
-import pandas as pd
 import pytest
 import rasterio as rio
-from geopandas.testing import assert_geodataframe_equal, assert_geoseries_equal
-from pandas.testing import assert_series_equal
+from geopandas.testing import assert_geodataframe_equal
 from pyproj import CRS
 from pyproj.crs import CompoundCRS
 from shapely import Polygon
 
-from geoutils import Raster, Vector
+from geoutils import PointCloud, Raster, Vector
 from geoutils.vector.base import VectorBase
 from geoutils.vector.pd_accessor import VectorAccessor
-
-
-def assert_output_equal(output_vector: Any, output_ds: Any, use_allclose: bool = False) -> None:
-    """Return equality of different output types."""
-
-    # For vectors: the class returns a Vector, while the accessor usually returns a GeoDataFrame
-    if isinstance(output_vector, Vector):
-        if isinstance(output_ds, Vector):
-            assert output_vector.vector_equal(output_ds)
-        else:
-            assert isinstance(output_ds, gpd.GeoDataFrame)
-            assert output_vector.vector_equal(Vector(output_ds))
-
-    # For rasters
-    elif isinstance(output_vector, Raster):
-        if use_allclose:
-            assert output_vector.raster_allclose(output_ds, warn_failure_reason=True, strict_masked=False)
-        else:
-            assert output_vector.raster_equal(output_ds, warn_failure_reason=True, strict_masked=False)
-
-    # For GeoPandas objects
-    elif isinstance(output_vector, gpd.GeoDataFrame):
-        assert_geodataframe_equal(output_vector, output_ds)
-    elif isinstance(output_vector, gpd.GeoSeries):
-        assert_geoseries_equal(output_vector, output_ds)
-
-    # For Pandas and NumPy objects
-    elif isinstance(output_vector, pd.Series):
-        assert_series_equal(output_vector, output_ds)
-    elif isinstance(output_vector, pd.Index):
-        assert output_vector.equals(output_ds)
-    elif isinstance(output_vector, np.ndarray):
-        assert np.array_equal(output_vector, output_ds)
-
-    # For any other object type
-    else:
-        assert output_vector == output_ds
+from tests.accessor_helpers import assert_output_equal
 
 
 class NeedsTestError(ValueError):
     """Error to remember to add test when a new VectorBase method is added."""
+
+
+class TestVectorNames:
+    """Test module for native GeoDataFrame storage and deprecated ds forwarding."""
+
+    @pytest.mark.parametrize("as_pointcloud", [False, True])
+    def test_gdf__deprecated_storage(self, as_pointcloud: bool) -> None:
+        """Checks that ds warns once on reading or assigning the same GeoDataFrame exposed by gdf."""
+
+        # PointCloud inherits the native Vector storage alias
+        frame = gpd.GeoDataFrame({"height": [2.0, 3.0]}, geometry=gpd.points_from_xy([0.0, 1.0], [0.0, 1.0]), crs=32633)
+        vector = PointCloud(frame, data_name="height") if as_pointcloud else Vector(frame)
+
+        # Both getters refer to the same dataframe, and the old setter updates cached spatial metadata
+        with pytest.warns(DeprecationWarning, match="ds.*gdf") as recorded:
+            assert vector.ds is vector.gdf is frame
+        assert len(recorded) == 1
+        replacement = frame.to_crs(4326)
+        with pytest.warns(DeprecationWarning, match="ds.*gdf"):
+            vector.ds = replacement
+        assert vector.gdf is replacement
+        assert vector.crs == replacement.crs
+        assert vector.columns.equals(replacement.columns)
+
+    @pytest.mark.parametrize("as_pointcloud", [False, True])
+    def test_gdf__deferred_loading(self, tmp_path: Any, as_pointcloud: bool) -> None:
+        """Checks that gdf loads deferred native data without warnings and ds forwards to the loaded frame."""
+
+        # Opening a filename reads metadata while leaving geometries and values unloaded
+        frame = gpd.GeoDataFrame({"height": [2.0, 3.0]}, geometry=gpd.points_from_xy([0.0, 1.0], [0.0, 1.0]), crs=32633)
+        filename = tmp_path / "points.gpkg"
+        frame.to_file(filename)
+        vector = PointCloud(filename, data_name="height") if as_pointcloud else Vector(filename)
+        assert not vector.is_loaded
+
+        # The new property loads data; copying and spatial operations use it without deprecated calls
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            loaded = vector.gdf
+            copied = vector.copy()
+            projected = vector.reproject(crs=4326)
+        assert vector.is_loaded
+        assert_geodataframe_equal(loaded, frame)
+        assert copied.gdf is not loaded
+        assert projected.crs == CRS.from_epsg(4326)
+        with pytest.warns(DeprecationWarning, match="ds.*gdf"):
+            assert vector.ds is loaded
 
 
 class TestClassVsAccessorConsistency:
@@ -168,7 +178,7 @@ class TestClassVsAccessorConsistency:
         output_vector = getattr(vector, method)(**args_vector)
         output_ds = getattr(ds.vct, method)(**args_ds)
 
-        assert_output_equal(output_vector, output_ds, use_allclose=method == "proximity")
+        assert_output_equal(output_vector, output_ds, use_allclose=method == "proximity", strict_masked=False)
 
     inplace_methods_and_kwargs = [
         ("crop", {"bbox": (9, 9, 11, 11), "inplace": True}),

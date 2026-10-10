@@ -1,19 +1,177 @@
 """Test point cloud loading by bounds and row ranges."""
 
 from pathlib import Path
+from typing import Literal
 
 import geopandas as gpd
 import numpy as np
 import pytest
+import xarray as xr
+from geopandas.testing import assert_geodataframe_equal
 from rasterio.coords import BoundingBox
 
 import geoutils as gu
+from geoutils._misc import import_optional
 from geoutils.pointcloud.loading import (
     _concat_point_parts,
     _filter_points_by_bounds,
     _load_pointcloud_bounds,
     _load_pointcloud_rows,
 )
+
+
+class TestPointCloudOpening:
+    """
+    Test module for the ``open_pointcloud()`` function, to open point cloud files as a Pandas geodataframe,
+    Xarray dataarray or Xarray dataset.
+    """
+
+    @pytest.mark.parametrize("suffix", ["gpkg", "las", "parquet"])
+    @pytest.mark.parametrize("as_type", [None, "dataarray", "dataset", "geodataframe"])
+    def test_open_pointcloud__return_type(
+        self, tmp_path: Path, suffix: str, as_type: Literal["dataarray", "dataset", "geodataframe"] | None
+    ) -> None:
+        """Checks that opening defaults to a DataArray and every data type/point format loads correct values and CRS."""
+        if suffix == "las":
+            import_optional("laspy")
+        elif suffix == "parquet":
+            import_optional("pyarrow")
+
+        # Create point cloud and write to file
+        # LAS elevations are named Z, other formats store the defined name "height"
+        data_name = "Z" if suffix == "las" else "height"
+        cloud = gu.PointCloud.from_xyz([0.0, 1.0, 2.0], [2.0, 3.0, 4.0], [5.0, 6.0, 7.0], 32633, data_name)
+        cloud["quality"] = np.array([4, 5, 6], dtype=np.uint16)
+        filename = tmp_path / f"points.{suffix}"
+        if suffix == "las":
+            cloud.to_las(str(filename))
+        else:
+            cloud.to_file(str(filename))
+
+        # Check proper data type is opened
+        if as_type is None:
+            points = gu.open_pointcloud(filename, data_name=data_name, columns=["quality"])
+        else:
+            points = gu.open_pointcloud(filename, data_name=data_name, columns=["quality"], as_type=as_type)
+        if as_type == "dataset":
+            assert isinstance(points, xr.Dataset)
+            assert points.pc.variables == [data_name, "quality"]
+            assert points[data_name].dims == points.quality.dims == ("point",)
+            assert "x_point" in points.coords and "y_point" in points.coords
+            assert points.quality.pc.crs == cloud.crs
+            values = points[data_name]
+        else:
+            assert isinstance(points, gpd.GeoDataFrame if as_type == "geodataframe" else xr.DataArray)
+            values = points
+
+        # Check exact equality with initial point cloud
+        np.testing.assert_array_equal(values.pc.to_array(), cloud.to_array())
+        quality = points["quality"] if as_type in ("dataset", "geodataframe") else points.coords["quality"]
+        np.testing.assert_array_equal(quality, cloud["quality"])
+        assert values.pc.crs == cloud.crs
+        assert values.pc.point_count == 3
+        assert values.pc.is_loaded
+
+    @pytest.mark.parametrize("suffix", ["gpkg", "las", "parquet"])
+    @pytest.mark.parametrize("as_type", ["dataarray", "dataset", "geodataframe"])
+    def test_open_pointcloud__downsample(
+        self, tmp_path: Path, suffix: str, as_type: Literal["dataarray", "dataset", "geodataframe"]
+    ) -> None:
+        """Checks that every opening type/format uses the same deterministic downsampling."""
+        if suffix == "las":
+            import_optional("laspy")
+        elif suffix == "parquet":
+            import_optional("pyarrow")
+
+        # Create/write point cloud
+        data_name = "Z" if suffix == "las" else "height"
+        cloud = gu.PointCloud.from_xyz(np.arange(11.0), np.zeros(11), np.arange(11.0), 32633, data_name)
+        filename = tmp_path / f"points.{suffix}"
+        if suffix == "las":
+            cloud.to_las(str(filename))
+        else:
+            cloud.to_file(str(filename))
+        expected = cloud.subsample(3, random_state=0)
+
+        # Open with same downsampling, and check equality
+        points = gu.open_pointcloud(filename, data_name=data_name, downsample=4, as_type=as_type)
+        values = points[data_name] if as_type == "dataset" else points
+        assert values.pc.point_count == 3
+        np.testing.assert_array_equal(values.pc.to_array(), expected.to_array())
+
+
+class TestPointCloudOpeningChunked:
+    """Test module ``open_pointcloud()`` with chunked backends (Dask only)."""
+
+    @pytest.mark.parametrize("suffix", ["gpkg", "las", "parquet"])
+    @pytest.mark.parametrize("as_type", ["dataarray", "dataset", "geodataframe"])
+    def test_open_pointcloud__loading_laziness(
+        self, tmp_path: Path, suffix: str, as_type: Literal["dataarray", "dataset", "geodataframe"]
+    ) -> None:
+        """Checks that chunked opening is lazy on all point formats/data structure types."""
+
+        import_optional("dask")
+        if suffix == "las":
+            import_optional("laspy")
+        elif suffix == "parquet":
+            import_optional("pyarrow")
+
+        # Create and write chunked point cloud
+        data_name = "Z" if suffix == "las" else "height"
+        cloud = gu.PointCloud.from_xyz(np.arange(7.0), np.zeros(7), np.arange(7.0), 32633, data_name)
+        filename = tmp_path / f"points.{suffix}"
+        if suffix == "parquet":
+            cloud.to_parquet(str(filename), chunks=3)
+        elif suffix == "las":
+            cloud.to_las(str(filename))
+        else:
+            cloud.to_file(str(filename))
+
+        # Open eagerly/ lazily with an explicit type
+        eager = gu.open_pointcloud(filename, data_name=data_name, as_type=as_type)
+        lazy = gu.open_pointcloud(filename, data_name=data_name, chunks=3, as_type=as_type)
+        eager_values = eager[data_name] if as_type == "dataset" else eager
+        lazy_values = lazy[data_name] if as_type == "dataset" else lazy
+        assert eager_values.pc.is_loaded
+        assert not lazy_values.pc.is_loaded
+        assert lazy_values.pc.point_count == 7
+
+        # Check exact equality and laziness
+        actual = lazy.compute()
+        if as_type in ("dataarray", "dataset"):
+            xr.testing.assert_identical(actual, eager)
+        else:
+            assert_geodataframe_equal(actual, eager)
+        actual_values = actual[data_name] if as_type == "dataset" else actual
+        assert actual_values.pc.is_loaded
+        assert not lazy_values.pc.is_loaded
+
+
+class TestPointCloudOpeningErrors:
+    """Test module for errors in ``open_pointcloud()``."""
+
+    def test_open_pointcloud__error_invalid_type(self, tmp_path: Path) -> None:
+        """Checks an error is raised for a return type other than DataArray or GeoDataFrame."""
+        filename = tmp_path / "absent.las"
+        with pytest.raises(ValueError, match="as_type"):
+            gu.open_pointcloud(filename, as_type="scene")  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("chunks", [0, -1, False, 1.5])
+    def test_open_pointcloud__error_invalid_chunks(self, tmp_path: Path, chunks: object) -> None:
+        """Checks an error is raised before reading a file when chunks is not a positive integer."""
+        filename = tmp_path / "absent.las"
+        with pytest.raises(ValueError, match="strictly positive integer"):
+            gu.open_pointcloud(filename, chunks=chunks)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("as_type", ["dataarray", "dataset", "geodataframe"])
+    @pytest.mark.parametrize("downsample", [True, np.bool_(False), 0, -1, np.nan, np.inf, "wrong"])
+    def test_open_pointcloud__error_invalid_downsample(
+        self, tmp_path: Path, as_type: Literal["dataarray", "dataset", "geodataframe"], downsample: object
+    ) -> None:
+        """Checks an error is raised for invalid downsampling factors."""
+        filename = tmp_path / "absent.las"
+        with pytest.raises((TypeError, ValueError), match="downsample must be"):
+            gu.open_pointcloud(filename, as_type=as_type, downsample=downsample)  # type: ignore[arg-type]
 
 
 class TestPointCloudLoading:
@@ -108,7 +266,7 @@ class TestPointCloudLoading:
         )
         filename = tmp_path / "points.gpkg"
         frame.to_file(filename, index=False)
-        source = gu.PointCloud(filename, data_column="height")
+        source = gu.PointCloud(filename, data_name="height")
 
         # Read both boundary points and then the complete file through infinite support
         bounded = _load_pointcloud_bounds(source, BoundingBox(1.0, 0.0, 2.0, 0.0), "height")
@@ -131,7 +289,7 @@ class TestPointCloudLoading:
         )
         filename = tmp_path / "rows.gpkg"
         frame.to_file(filename, index=False)
-        source = gu.PointCloud(frame if loaded else filename, data_column="height")
+        source = gu.PointCloud(frame if loaded else filename, data_name="height")
 
         # Read two rows after the first and an empty slice after the second
         selected = _load_pointcloud_rows(source, start=1, count=2)
