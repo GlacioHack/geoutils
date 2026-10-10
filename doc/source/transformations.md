@@ -42,6 +42,26 @@ loss of information (value interpolation, propagation of nodata).
 For rasters, it can be useful to use {func}`~geoutils.Raster.reproject` in the same CRS simply for re-gridding,
 for instance when downsampling to a new resolution {attr}`~geoutils.Raster.res`.
 
+Rasters referenced by **ground control points (GCPs)** or **rational polynomial coefficients (RPCs)** can also be
+reprojected through Rasterio/GDAL. GeoUtils reads these models automatically and uses them instead of the affine
+transform. The result has a regular affine grid. GCPs use their stored CRS; RPCs describe WGS84 coordinates.
+Use a Rasterio resampling name or enum, such as `"bilinear"`, and pass GDAL transformer options when needed:
+
+```python
+source = gu.Raster("satellite_image.tif")
+result = source.reproject(
+    crs=32632, resampling="bilinear", transformer_options={"RPC_DEM": "elevation.tif"}
+)
+```
+
+GCP/RPC reprojection supports **lazy Dask arrays** opened with `gu.open_raster(..., chunks=...)` and
+**multiprocessing** through `mp_config`. Both use the existing chunked reprojection workflow. Copies, arithmetic,
+band selection, pixel crops and file conversions preserve the models; pixel crops adjust their image offsets.
+Reproject to an affine grid before opening with `downsample` or using GeoUtils Interpolator/Reducer objects.
+Chunked GCP reprojection uses GDAL's default polynomial order or `SRC_METHOD="GCP_TPS"`; an explicit
+`MAX_GCP_ORDER` currently requires eager execution. For transformer options, see
+[Rasterio's GCP/RPC reprojection documentation](https://rasterio.readthedocs.io/en/stable/topics/reproject.html#reprojecting-with-other-georeferencing-metadata).
+
 ```{tip}
 Due to the loss of information when re-gridding, it is important to **minimize the number of reprojections during the
 analysis of rasters** (performing only one, if possible). For the same reason, when comparing vectors and rasters in

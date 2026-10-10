@@ -86,10 +86,12 @@ from geoutils.projtools import (
 )
 from geoutils.raster.referencing import (
     _bbox,
+    _check_affine_georeferencing,
     _coords,
     _ij2xy,
     _outside_bounds,
     _res,
+    _shift_gcps_rpcs,
     _xy2ij,
 )
 from geoutils.raster.testing import _array_equal_or_close
@@ -145,6 +147,8 @@ class RasterBase(ABC):
         self._crs: CRS | None = None
         self._nodata: int | float | None = None
         self._area_or_point: Literal["Area", "Point"] | None = None
+        self._gcps: tuple[list[rio.control.GroundControlPoint], rio.crs.CRS | None] = ([], None)
+        self._rpcs: rio.rpc.RPC | None = None
 
         # Other non-derivatives attributes
         self._bands: int | list[int] | tuple[int, ...] | None = None
@@ -164,6 +168,26 @@ class RasterBase(ABC):
         self._downsample: int | float = 1
         self._profile: dict[str, Any] | None = None
         self._is_mask: bool = False
+
+    @property
+    def gcps(self) -> tuple[list[rio.control.GroundControlPoint], rio.crs.CRS | None]:
+        """Ground control points and their CRS, following Rasterio's (points, CRS) convention."""
+        return self._gcps
+
+    @gcps.setter
+    def gcps(self, new_gcps: tuple[list[rio.control.GroundControlPoint], rio.crs.CRS | None]) -> None:
+        """Set ground control points and their CRS."""
+        self._gcps = new_gcps
+
+    @property
+    def rpcs(self) -> rio.rpc.RPC | None:
+        """Rational polynomial coefficients relating image pixels to WGS84 ground coordinates."""
+        return self._rpcs
+
+    @rpcs.setter
+    def rpcs(self, new_rpcs: rio.rpc.RPC | None) -> None:
+        """Set rational polynomial coefficients."""
+        self._rpcs = new_rpcs
 
     @property
     def _is_xr(self) -> bool:
@@ -194,6 +218,8 @@ class RasterBase(ABC):
             nodata=raster.nodata,
             area_or_point=raster.area_or_point,
             tags=raster.tags,
+            gcps=raster.gcps,
+            rpcs=raster.rpcs,
         )
 
     def _cast_pointcloud_output(self, pointcloud: Any) -> Any:
@@ -223,6 +249,9 @@ class RasterBase(ABC):
         area_or_point: Literal["Area", "Point"] | None = None,
         tags: dict[str, Any] = None,
         cast_nodata: bool = True,
+        *,
+        gcps: tuple[list[rio.control.GroundControlPoint], rio.crs.CRS | None] | None = None,
+        rpcs: rio.rpc.RPC | None = None,
     ) -> RasterType: ...
 
     @abstractmethod
@@ -657,11 +686,13 @@ class RasterBase(ABC):
     @property
     def res(self) -> tuple[float | int, float | int]:
         """Resolution (X, Y) of the raster in georeferenced units."""
+        _check_affine_georeferencing(self, "res")
         return _res(self.transform)
 
     @property
     def bbox(self) -> rio.coords.BoundingBox:
         """Bounding box of the raster."""
+        _check_affine_georeferencing(self, "bbox")
         return _bbox(transform=self.transform, shape=self.shape)
 
     @property
@@ -754,6 +785,14 @@ class RasterBase(ABC):
 
         :returns: Summary string or None.
         """
+
+        # Use the model's ground CRS when it differs from the affine metadata
+        georeferencing_crs = self.crs
+        if self.rpcs is not None:
+            georeferencing_crs = CRS.from_epsg(4326)
+        elif self.gcps[0]:
+            georeferencing_crs = self.gcps[1] or self.crs
+
         as_str = [
             f"Driver:               {self.driver}",
             f"Filename:             {self.name}",
@@ -761,13 +800,27 @@ class RasterBase(ABC):
             f"Grid size:            {self.width}, {self.height}",
             f"Number of bands:      {self.count}",
             f"Data types:           {self.dtype}",
-            f"Coordinate system:    {[CRS(self.crs).name if self.crs is not None else None]}",
+            f"Coordinate system:    {[CRS(georeferencing_crs).name if georeferencing_crs is not None else None]}",
             f"Nodata value:         {self.nodata}",
             f"Pixel interpretation: {self.area_or_point}",
-            "Pixel size:           {}, {}".format(*self.res),
-            f"Upper left corner:    {self.bbox.left}, {self.bbox.top}",
-            f"Lower right corner:   {self.bbox.right}, {self.bbox.bottom}",
         ]
+
+        # Describe model referencing without reporting the affine placeholder as ground coordinates
+        if self.gcps[0] or self.rpcs is not None:
+            models = []
+            if self.gcps[0]:
+                models.append("GCPs")
+            if self.rpcs is not None:
+                models.append("RPCs")
+            as_str.append(f"Georeferencing:       {' / '.join(models)}")
+        else:
+            as_str.extend(
+                [
+                    "Pixel size:           {}, {}".format(*self.res),
+                    f"Upper left corner:    {self.bbox.left}, {self.bbox.top}",
+                    f"Lower right corner:   {self.bbox.right}, {self.bbox.bottom}",
+                ]
+            )
 
         if stats:
             as_str.append("\nStatistics:")
@@ -1145,6 +1198,15 @@ class RasterBase(ABC):
             nodata_equal = nodata_equal or bool(np.isnan(self.nodata) and np.isnan(other_nodata))
         equalities.append(nodata_equal)
 
+        # A GCP/RPC model also defines the ground location of otherwise identical image pixels
+        names.append("GCP/RPC model")
+        other_raster = other.rst if isinstance(other, xr.DataArray) else other
+        equalities.append(
+            [g.asdict() for g in self.gcps[0]] == [g.asdict() for g in other_raster.gcps[0]]
+            and self.gcps[1] == other_raster.gcps[1]
+            and self.rpcs == other_raster.rpcs
+        )
+
         complete_equality = all(equalities)
 
         if not complete_equality and warn_failure_reason:
@@ -1237,6 +1299,12 @@ class RasterBase(ABC):
         other_crs2d = other_crs.to_2d() if other_crs is not None else None
 
         same_grid = all([self.shape == shape, self.transform == transform, self_crs2d == other_crs2d])
+        other_raster = other.rst if isinstance(other, xr.DataArray) else other
+        model_coordinates = ("row", "col", "x", "y", "z")
+        own_points = [tuple(getattr(g, name) for name in model_coordinates) for g in self.gcps[0]]
+        other_points = [tuple(getattr(g, name) for name in model_coordinates) for g in other_raster.gcps[0]]
+        same_grid = same_grid and own_points == other_points and self.gcps[1] == other_raster.gcps[1]
+        same_grid = same_grid and self.rpcs == other_raster.rpcs
 
         # Report a vertical difference without treating it as a different horizontal grid
         if same_grid and self_crs is not None and other_crs is not None and self_crs != other_crs and warn_3d_crs:
@@ -1324,6 +1392,8 @@ class RasterBase(ABC):
             resolution and offset with self's origin is a multiple of the resolution
         :returns: Extent of the intersection between the 2 raster (xmin, ymin, xmax, ymax) in self's coordinate system.
         """
+
+        _check_affine_georeferencing(self, "intersection()")
 
         # Reproject the bounds of raster to self's
         raster_bounds_sameproj = (
@@ -1424,6 +1494,8 @@ class RasterBase(ABC):
         Cropping preserves the original pixel resolution, cropping to the extent that most closely aligns with the
         current coordinates. To match the extent of another dataset exactly, use reproject().
 
+        GCP/RPC referencing requires reproject() to an affine grid first. To select image pixels directly, use icrop().
+
         :param bbox: Geometry to crop raster to. Can use either a raster or vector as match-reference, or a list of
             coordinates. If ``bbox`` is a raster or vector, will crop to the bounds. If ``bbox`` is a
             list of coordinates, the order is assumed to be [xmin, ymin, xmax, ymax].
@@ -1446,6 +1518,8 @@ class RasterBase(ABC):
             return output
 
         cropped_arr, new_transform = _crop(source_raster=self, bbox=bbox)
+        col_off, row_off = (~self.transform) * (new_transform.c, new_transform.f)
+        gcps, rpcs = _shift_gcps_rpcs(self.gcps, self.rpcs, row_off=row_off, col_off=col_off)
 
         # Keep in-place for a bit with deprecation warning
         if inplace:
@@ -1462,12 +1536,16 @@ class RasterBase(ABC):
             else:
                 self._data = cropped_arr
                 self.transform = new_transform
+                self.gcps, self.rpcs = gcps, rpcs
                 return None
 
         # Not in-place
         if self._is_xr:
+            cropped_arr.rst.gcps, cropped_arr.rst.rpcs = gcps, rpcs
             return cast(RasterType, cropped_arr)
-        return self.from_array(cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point)
+        return self.from_array(
+            cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point, gcps=gcps, rpcs=rpcs
+        )
 
     def clip(
         self: RasterType,
@@ -1480,6 +1558,8 @@ class RasterBase(ABC):
 
         The raster grid and extent stay unchanged. Cells inside the geometry keep their values, while cells outside
         become masked values for Raster objects and NaN values for Xarray objects.
+
+        GCP/RPC referencing requires reproject() to an affine grid first.
 
         :param mask: Clipping geometry, vector, point cloud, raster or bounding box. Georeferenced masks are
             reprojected to this raster's CRS.
@@ -1522,6 +1602,8 @@ class RasterBase(ABC):
             return output
 
         cropped_arr, new_transform = _crop(source_raster=self, bbox=bbox, distance_unit="pixel")
+        col_off, row_off = (~self.transform) * (new_transform.c, new_transform.f)
+        gcps, rpcs = _shift_gcps_rpcs(self.gcps, self.rpcs, row_off=row_off, col_off=col_off)
 
         # Keep in-place for a bit with deprecation warning
         if inplace:
@@ -1538,12 +1620,16 @@ class RasterBase(ABC):
             else:
                 self._data = cropped_arr
                 self.transform = new_transform
+                self.gcps, self.rpcs = gcps, rpcs
                 return None
 
         # Not in-place
         if self._is_xr:
+            cropped_arr.rst.gcps, cropped_arr.rst.rpcs = gcps, rpcs
             return cast(RasterType, cropped_arr)
-        return self.from_array(cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point)
+        return self.from_array(
+            cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point, gcps=gcps, rpcs=rpcs
+        )
 
     @profiler.profile("geoutils.raster.base.reproject", memprof=True)
     def reproject(
@@ -1556,6 +1642,7 @@ class RasterBase(ABC):
         nodata: int | float | None = None,
         dtype: DTypeLike | None = None,
         resampling: Resampling | str | Interpolator | Reducer = None,
+        transformer_options: dict[str, Any] | None = None,
         force_source_nodata: int | float | None = None,
         silent: bool = False,
         inplace: bool = False,
@@ -1579,6 +1666,11 @@ class RasterBase(ABC):
 
         Any resampling algorithm implemented in Rasterio can be passed as a string.
 
+        Rasters referenced by ground control points (GCPs) or rational polynomial coefficients (RPCs) use their
+        stored model instead of the affine transform. Eager, lazy Dask and multiprocessing execution all support
+        these models with Rasterio resampling methods. GCPs use their stored CRS; RPCs use WGS84 (EPSG:4326).
+        The result has a regular affine grid.
+
         The reprojection can be computed out-of-memory in multiprocessing by passing a
         :class:`~geoutils.raster.MultiprocConfig` object.
         The reprojected raster is written to disk under the path specified in the configuration
@@ -1601,6 +1693,9 @@ class RasterBase(ABC):
             Can be configured with the global setting geoutils.config["reprojection_method"].
             See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
             for the full list.
+        :param transformer_options: GDAL transformer options, such as ``RPC_DEM`` or ``RPC_HEIGHT``, passed to
+            grid calculation and reprojection. When both GCPs and RPCs are stored, select one with
+            ``{"SRC_METHOD": "RPC"}``, ``{"SRC_METHOD": "GCP_POLYNOMIAL"}`` or ``{"SRC_METHOD": "GCP_TPS"}``.
         :param force_source_nodata: Force a source nodata value (read from the metadata by default).
         :param inplace: (DEPRECATED. Use rast = rast.reproject() instead) Whether to reproject in-place or not.
         :param silent: Whether to print warning statements.
@@ -1646,6 +1741,7 @@ class RasterBase(ABC):
             nodata=nodata,
             dtype=dtype,
             resampling=resampling,
+            transformer_options=transformer_options,
             force_source_nodata=force_source_nodata,
             silent=silent,
             n_threads=n_threads,
@@ -1687,6 +1783,9 @@ class RasterBase(ABC):
                 self._crs = crs
                 self._nodata = nodata
                 self._transform = transformed
+                self.gcps = ([], None)
+                self.rpcs = None
+                self.tags.pop("RPC", None)
                 # A little trick to force the right shape of data in,
                 # then update the mask properly through the data setter
                 self._data = data.squeeze()
@@ -1709,7 +1808,12 @@ class RasterBase(ABC):
         if data is None or transformed is None or crs is None:
             raise RuntimeError("Reprojection did not return the expected in-memory output.")
         nominal_output = self.from_array(
-            data=data, transform=transformed, crs=crs, nodata=nodata, area_or_point=self.area_or_point, tags=self.tags
+            data=data,
+            transform=transformed,
+            crs=crs,
+            nodata=nodata,
+            area_or_point=self.area_or_point,
+            tags={key: value for key, value in self.tags.items() if key != "RPC"},
         )
         return nominal_output
 
@@ -1850,6 +1954,8 @@ class RasterBase(ABC):
 
         The translation only updates the geotransform (no resampling is performed).
 
+        GCP/RPC referencing requires reproject() to an affine grid first.
+
         :param xoff: Translation x offset.
         :param yoff: Translation y offset.
         :param distance_unit: Distance unit, either 'georeferenced' (default) or 'pixel'.
@@ -1858,6 +1964,7 @@ class RasterBase(ABC):
         :returns: Translated raster (or None if inplace).
         """
 
+        _check_affine_georeferencing(self, "translate()")
         translated_transform = _translate(self.transform, xoff=xoff, yoff=yoff, distance_unit=distance_unit)
 
         if inplace:
@@ -1902,6 +2009,7 @@ class RasterBase(ABC):
         :returns i, j: Indices of (x,y) in the image.
         """
 
+        _check_affine_georeferencing(self, "xy2ij()")
         return _xy2ij(
             x=x,
             y=y,
@@ -1935,6 +2043,7 @@ class RasterBase(ABC):
         :returns x, y: x,y coordinates of i,j in reference system.
         """
 
+        _check_affine_georeferencing(self, "ij2xy()")
         return _ij2xy(
             i=i,
             j=j,
@@ -1966,6 +2075,7 @@ class RasterBase(ABC):
 
         :returns x,y: Arrays of the (x,y) coordinates.
         """
+        _check_affine_georeferencing(self, "coords()")
         dst_transform = self.transform
         if crs:
             _, dst_transform, _ = _check_match_grid(
@@ -1992,6 +2102,9 @@ class RasterBase(ABC):
         :returns is_outside: ``True`` if ij is outside the bounds.
         """
 
+        # Pixel indices remain valid without an affine grid, while ground coordinates do not
+        if not index:
+            _check_affine_georeferencing(self, "outside_image()")
         return _outside_bounds(
             xi=xi, yj=yj, transform=self.transform, shape=self.shape, area_or_point=self.area_or_point, index=index
         )

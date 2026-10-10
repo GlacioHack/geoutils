@@ -1,5 +1,6 @@
 """Tests on Xarray accessor mirroring Raster API."""
 
+from importlib.util import find_spec
 from pathlib import Path
 
 import geopandas as gpd
@@ -12,6 +13,7 @@ from shapely.geometry import box
 
 import geoutils as gu
 from geoutils import examples, open_raster
+from geoutils._misc import import_optional
 
 
 class TestAccessor:
@@ -256,6 +258,27 @@ class TestAccessor:
         with rio.open(output_file) as output:
             assert output.nodata == ds.rst.nodata
 
+    @pytest.mark.parametrize("raster_gcp_rpc", ["rpc_polynomial", "rpc_rational"], indirect=True)
+    def test_to_file__explicit_rpcs(self, raster_gcp_rpc: gu.Raster, tmp_path: Path) -> None:
+        """Checks that to_file() writes explicit RPCs without assigning them to the input DataArray."""
+
+        # Create a DataArray with nodata sentinels and no stored GCPs/RPCs
+        source = raster_gcp_rpc
+        image = gu.RasterAccessor.from_array(
+            source.data.filled(source.nodata), rio.Affine.identity(), None, nodata=source.nodata
+        )
+        filename = tmp_path / "explicit_rpcs.tif"
+
+        # Write the coefficients directly through the accessor
+        image.rst.to_file(filename, rpcs=source.rpcs)
+
+        # Rasterio must read the native RPC namespace while the input has no RPCs
+        with rio.open(filename) as dataset:
+            assert dataset.rpcs == source.rpcs
+            assert "RPC" not in dataset.tags()
+            np.testing.assert_array_equal(dataset.read(), source.data.filled(source.nodata))
+        assert image.rst.rpcs is None
+
     def test_cross_type_outputs_are_accessors(self) -> None:
         """Return accessor-backed vectors and point clouds when a raster operation changes type."""
 
@@ -365,3 +388,48 @@ class TestAccessor:
         rasterized_from_dataarray = polygons.vct.rasterize(ds, in_value=1, out_value=0, out_dtype=np.uint8)
         assert isinstance(rasterized_from_dataarray.data, da.Array)
         assert rasterized_from_dataarray.data.chunks == dask_arr.chunks
+
+
+@pytest.mark.skipif(find_spec("dask") is None, reason="Dask is not installed")
+class TestAccessorChunked:
+    """Test module for writing GCP/RPC rasters from Dask arrays without loading their inputs."""
+
+    def test_to_file__georeferencing(self, raster_gcp_rpc: gu.Raster, tmp_path: Path) -> None:
+        """Checks that chunked writing preserves GCP/RPC metadata and exactly matches eager file output."""
+
+        import_optional("dask")
+
+        # Load an eager reference and split the same image into chunks of 7/9, including shorter final chunks
+        source = raster_gcp_rpc
+        eager = gu.open_raster(source.name).load()
+        lazy = gu.open_raster(source.name, chunks={"band": 1, "y": 7, "x": 9})
+        lazy.attrs["label"] = "input"
+        graph = lazy.data
+        assert eager.rst.is_loaded
+        assert eager.rst._chunks is None
+        assert lazy.rst._chunks is not None
+        assert not lazy.rst.is_loaded
+        eager_file = tmp_path / "eager.tif"
+        lazy_file = tmp_path / "chunked.tif"
+
+        # Write both files while leaving the Dask input lazy and its metadata unchanged
+        eager.rst.to_file(eager_file, tags={"label": "output"}, tiled=True, blockxsize=256, blockysize=256)
+        lazy.rst.to_file(lazy_file, tags={"label": "output"}, tiled=True, blockxsize=256, blockysize=256)
+        assert eager.rst.is_loaded
+        assert lazy.data is graph
+        assert not lazy.rst.is_loaded
+        assert lazy.attrs["label"] == "input"
+        assert lazy.rst.rpcs == source.rpcs
+
+        # Reopen unloaded results and compare values, missing pixels and GCPs/RPCs with eager output
+        expected = gu.Raster(eager_file)
+        result = gu.Raster(lazy_file)
+        assert not expected.is_loaded
+        assert not result.is_loaded
+        assert result.raster_equal(expected)
+        assert not source.is_loaded
+        assert not lazy.rst.is_loaded
+        with rio.open(lazy_file) as dataset:
+            assert "RPC" not in dataset.tags()
+            assert bool(dataset.tags(ns="RPC")) == (source.rpcs is not None)
+            assert dataset.tags()["label"] == "output"

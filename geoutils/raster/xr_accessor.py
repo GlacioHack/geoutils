@@ -22,6 +22,7 @@ Module for the Xarray accessor "rst" mirroring the API of the Raster class.
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, Literal
 
 import numpy as np
@@ -32,6 +33,7 @@ from affine import Affine
 from rasterio.crs import CRS
 from rioxarray.rioxarray import affine_to_coords
 
+from geoutils._misc import silence_rasterio_message
 from geoutils._typing import DTypeLike, MArrayNum, NDArrayBool, NDArrayNum, Number
 from geoutils.raster.base import RasterBase, _validate_downsample
 from geoutils.raster.transformation import (
@@ -85,11 +87,21 @@ def open_raster(
         ds = rioxr.open_rasterio(filename, masked=True, **kwargs)
     else:
         with rasterio.open(filename) as source:
+            if source.gcps[0] or source.rpcs:
+                raise NotImplementedError("Reproject GCP/RPC rasters to an affine grid before opening with downsample.")
             overview_level = _overview_level_for_downsample(source, downsample)
             with _open_downsampled_raster(source, downsample) as vrt:
                 if overview_level is not None:
                     kwargs["overview_level"] = overview_level
                 ds = rioxr.open_rasterio(vrt, masked=True, **kwargs)
+
+    # Store RPCs consistently across Rioxarray versions
+    with rasterio.open(filename) as source:
+        if source.rpcs is not None:
+            ds.attrs["RPC"] = source.rpcs.to_gdal()
+        if source.gcps[0] and source.rpcs is not None:
+            # Rioxarray assigns WGS84 when reading RPCs; restore the CRS of the stored GCP coordinates
+            ds.rio.write_gcps(*source.gcps, inplace=True)
 
     # Remove the band dimension if there is only one
     if ds.sizes.get("band") == 1:
@@ -132,6 +144,42 @@ class RasterAccessor(RasterBase):
             encoding.pop("_FillValue", None)
             self._obj.rio.set_encoding(encoding, inplace=True)
             self._obj.rio.write_nodata(encoded_nodata, inplace=True)
+
+    @property
+    def gcps(self) -> tuple[list[rasterio.control.GroundControlPoint], rasterio.crs.CRS | None]:
+        """Ground control points and their CRS stored by Rioxarray."""
+        points = self._obj.rio.get_gcps() or []
+        return points, self._obj.rio.crs if points else None
+
+    @gcps.setter
+    def gcps(self, new_gcps: tuple[list[rasterio.control.GroundControlPoint], rasterio.crs.CRS | None]) -> None:
+        """Write ground control points and their CRS to the DataArray."""
+        self._obj.rio.write_gcps(new_gcps[0], new_gcps[1], inplace=True)
+
+    @property
+    def rpcs(self) -> rasterio.rpc.RPC | None:
+        """Rational polynomial coefficients stored in the RPC metadata namespace."""
+        metadata = self._obj.attrs.get("RPC")
+        if metadata:
+            return rasterio.rpc.RPC.from_gdal(metadata)
+        if hasattr(self._obj.rio, "get_rpcs"):
+            return self._obj.rio.get_rpcs()
+        return None
+
+    @rpcs.setter
+    def rpcs(self, new_rpcs: rasterio.rpc.RPC | None) -> None:
+        """Replace the RPC metadata stored in the DataArray."""
+
+        # We remove Rioxarray's cached model so it cannot supersede newly assigned metadata
+        mapping = self._obj.rio.grid_mapping
+        if mapping in self._obj.coords:
+            self._obj.coords[mapping].attrs.pop("rpcs", None)
+        if hasattr(self._obj.rio, "_rpcs"):
+            self._obj.rio._rpcs = None
+        if new_rpcs is None:
+            self._obj.attrs.pop("RPC", None)
+        else:
+            self._obj.attrs["RPC"] = new_rpcs.to_gdal()
 
     @property
     def data(self) -> xr.DataArray:
@@ -300,6 +348,9 @@ class RasterAccessor(RasterBase):
         area_or_point: Literal["Area", "Point"] | None = None,
         tags: dict[str, Any] = None,
         cast_nodata: bool = True,
+        *,
+        gcps: tuple[list[rasterio.control.GroundControlPoint], rasterio.crs.CRS | None] | None = None,
+        rpcs: rasterio.rpc.RPC | None = None,
     ) -> xr.DataArray:
 
         # Add area_or_point
@@ -359,6 +410,10 @@ class RasterAccessor(RasterBase):
         if crs is not None:
             out_ds.rio.write_crs(crs, inplace=True)
         out_ds.rio.write_nodata(nodata, inplace=True)
+        if gcps is not None and gcps[0]:
+            out_ds.rio.write_gcps(gcps[0], gcps[1], inplace=True)
+        if rpcs is not None:
+            out_ds.attrs["RPC"] = rpcs.to_gdal()
 
         return out_ds
 
@@ -381,6 +436,8 @@ class RasterAccessor(RasterBase):
             nodata=self.nodata,
             tags=self.tags,
             area_or_point=self.area_or_point,
+            gcps=self.gcps,
+            rpcs=self.rpcs,
         )
 
     def to_file(self, *args: Any, **kwargs: Any) -> None:
@@ -389,4 +446,34 @@ class RasterAccessor(RasterBase):
 
         Wrapper around rioxarray.to_raster().
         """
-        self._obj.rio.to_raster(*args, **kwargs)
+        output = self._obj
+        rpcs = kwargs.pop("rpcs", None)
+        if rpcs is None:
+            rpcs = self.rpcs
+        if rpcs is not None:
+            # RPC metadata is written by Rasterio, so omit it from the default tags without modifying the input
+            output = output.copy(deep=False)
+            output.attrs.pop("RPC", None)
+            if kwargs.get("tags") is not None:
+                kwargs["tags"] = {key: value for key, value in kwargs["tags"].items() if key != "RPC"}
+
+            # Newer Rioxarray versions serialize RPCs themselves, older versions accept the Rasterio option
+            if hasattr(output.rio, "write_rpcs"):
+                output.rio.write_rpcs(rpcs, inplace=True)
+            else:
+                kwargs["rpcs"] = rpcs
+            if self.gcps[0]:
+                # Writing RPCs assigns WGS84 in Rioxarray, but Rasterio needs the GCPs' CRS to save their coordinates
+                output.rio.write_gcps(*self.gcps, inplace=True)
+        with (
+            warnings.catch_warnings(),
+            silence_rasterio_message(param_name="geotransform previously set", warn_code="CPLE_AppDefined"),
+        ):
+            if self.gcps[0] or rpcs:
+                # The identity affine placeholder can be omitted safely when a GCP/RPC model is written
+                warnings.filterwarnings(
+                    "ignore",
+                    message="The given matrix is equal to Affine.identity",
+                    category=rasterio.errors.NotGeoreferencedWarning,
+                )
+            output.rio.to_raster(*args, **kwargs)

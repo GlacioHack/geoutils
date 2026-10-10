@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import warnings
 from importlib.util import find_spec
+from pathlib import Path
 from typing import Any, Literal
 from unittest.mock import patch
 
@@ -19,6 +20,7 @@ from shapely.geometry import Polygon
 
 import geoutils as gu
 from geoutils import examples, open_raster
+from geoutils._misc import import_optional, silence_rasterio_message
 from geoutils.exceptions import InvalidCRSError, InvalidGridError
 from geoutils.multiproc import MultiprocConfig
 from geoutils.multiproc.cluster import MpCluster
@@ -686,6 +688,166 @@ class TestTransformation:
         r2_reproj = r2.reproject(res=r2.res[0] * 2)
         assert r2_reproj.area_or_point == "Point"
 
+    @pytest.mark.parametrize("loaded", [False, True])
+    def test_reproject__gcp_rcp_match_rasterio(self, raster_gcp_rpc: gu.Raster, loaded: bool) -> None:
+        """Checks that reprojecting with GCPs/RPCs matches exactly Rasterio."""
+
+        # Use the same source loaded/unloaded
+        source = raster_gcp_rpc
+        if loaded:
+            source.load()
+        options = {"RPC_HEIGHT": 80} if source.rpcs else {}
+        georeferencing = {"gcps": source.gcps[0]} if source.gcps[0] else {"rpcs": source.rpcs}
+        src_crs = source.gcps[1] if source.gcps[0] else rio.CRS.from_epsg(4326)
+
+        # Calculate GDAL warp grid, and reproject
+        transform, width, height = rio.warp.calculate_default_transform(
+            src_crs,
+            3857,
+            source.width,
+            source.height,
+            dst_width=source.width,
+            dst_height=source.height,
+            **georeferencing,
+            **options,
+        )
+        with rio.open(source.name) as dataset:
+            values = dataset.read()
+        expected = np.empty((source.count, height, width), dtype=source.dtype)
+        with silence_rasterio_message(param_name="RPC_HEIGHT"):
+            rio.warp.reproject(
+                values,
+                expected,
+                src_crs=src_crs,
+                src_nodata=source.nodata,
+                dst_crs=3857,
+                dst_transform=transform,
+                dst_nodata=source.nodata,
+                resampling=rio.enums.Resampling.nearest,
+                tolerance=0,
+                XSCALE=1,
+                YSCALE=1,
+                **georeferencing,
+                **options,
+            )
+
+        # Check that the affine output clears GCPs/RPCs, and that we have exactly equality
+        result = source.reproject(crs=3857, resampling="nearest", transformer_options=options)
+        assert source.is_loaded
+        assert result.shape == (height, width)
+        assert result.transform == transform
+        assert result.crs == rio.CRS.from_epsg(3857)
+        np.testing.assert_array_equal(result.data.filled(source.nodata), expected)
+        assert result.gcps == ([], None)
+        assert result.rpcs is None
+
+    def test_reproject__assigned_gcp_rcp(self, raster_gcp_rpc: gu.Raster) -> None:
+        """Checks that GCPs/RPCs assigned manually before reprojection also work."""
+
+        # We recreate the array without GCPs/RCPs, then assign them manually
+        source = raster_gcp_rpc
+        image = gu.Raster.from_array(source.data, rio.Affine.identity(), None, nodata=source.nodata)
+        image.gcps, image.rpcs = source.gcps, source.rpcs
+        expected = source.reproject(crs=3857, resampling="nearest")
+        result = image.reproject(crs=3857, resampling="nearest")
+
+        # Check exact equality
+        assert result.raster_equal(expected)
+
+    @pytest.mark.parametrize("raster_gcp_rpc", ["gcp_projected", "gcp_nonlinear"], indirect=True)
+    @pytest.mark.parametrize("gcp_crs", ["supplied", "source"])
+    def test_reproject__gcp_crs(self, raster_gcp_rpc: gu.Raster, gcp_crs: str) -> None:
+        """Checks that stored GCPs use their own CRS or default to the raster CRS."""
+
+        # We recreate the image with a different raster CRS (with GCPs that also store their own CRS)
+        source = raster_gcp_rpc
+        points, point_crs = source.gcps
+        image_crs = 3857 if gcp_crs == "supplied" else point_crs
+        image = gu.Raster.from_array(source.data, rio.Affine.identity(), image_crs, nodata=source.nodata)
+        gcps = (points, point_crs if gcp_crs == "supplied" else None)
+        image.gcps = gcps
+
+        # Reproject both with own GCP CRS or raster CRS only
+        expected = source.reproject(crs=3857, resampling="nearest")
+        result = image.reproject(crs=3857, resampling="nearest")
+
+        # Check exact equality
+        assert result.raster_equal(expected)
+
+    @pytest.mark.parametrize("raster_gcp_rpc", ["gcp_rpc_polynomial", "gcp_rpc_rational"], indirect=True)
+    @pytest.mark.parametrize("source_method", ["RPC", "GCP_POLYNOMIAL", "GCP_TPS"])
+    @pytest.mark.parametrize("raster_type", ["raster", "dataarray"])
+    def test_reproject__select_gcp_rcp(self, raster_gcp_rpc: gu.Raster, source_method: str, raster_type: str) -> None:
+        """Checks that SRC_METHOD selects stored GCPs/RPCs properly for reprojection."""
+
+        # Open an image with both RPCs and GCPs defined at once
+        source = raster_gcp_rpc
+        image = source if raster_type == "raster" else gu.open_raster(source.name).rst
+        points = [point.asdict() for point in image.gcps[0]]
+        gcp_crs = image.gcps[1]
+        rpcs = image.rpcs.to_gdal()
+        options: dict[str, Any] = {"SRC_METHOD": source_method}
+        if source_method == "RPC":
+            options["RPC_HEIGHT"] = 80
+        saved_options = options.copy()
+
+        # Reproject with both at once and a transformer option selecting, or with the other GCP/RCP set to None
+        expected_source = gu.Raster(source.name)
+        if source_method == "RPC":
+            expected_source.gcps = ([], None)
+        else:
+            expected_source.rpcs = None
+        expected = expected_source.reproject(crs=3857, resampling="nearest", transformer_options=options)
+        result = image.reproject(crs=3857, resampling="nearest", transformer_options=options)
+
+        # Compare exact equality
+        result_raster = result if raster_type == "raster" else result.rst
+        assert result_raster.transform == expected.transform
+        assert result_raster.crs == expected.crs
+        np.testing.assert_array_equal(result_raster.to_nanarray(), expected.to_nanarray())
+        assert result_raster.gcps == ([], None)
+        assert result_raster.rpcs is None
+
+        # Both GCPs/RCPs remain available in the source raster
+        assert [point.asdict() for point in image.gcps[0]] == points
+        assert image.gcps[1] == gcp_crs
+        assert image.rpcs.to_gdal() == rpcs
+        assert options == saved_options
+
+    def test_reproject__affine_transformations(self, raster_gcp_rpc: gu.Raster) -> None:
+        """
+        Checks that running reproject() on GCP/RPC rasters does enable later crop/clip/etc by giving an affine
+        transform (the hint we use a lot in GCP/RCP errors, so really needs to work properly!).
+        """
+
+        # We reproject a raster with stored GCPs/RPCs
+        raster = raster_gcp_rpc.reproject(crs=4326, grid_size=(40, 48), resampling="nearest")
+        assert raster.gcps == ([], None)
+        assert raster.rpcs is None
+
+        # Now we can try to crop/clip
+        left, top = raster.transform * (5, 6)
+        right, bottom = raster.transform * (30, 28)
+        bounds = (left, bottom, right, top)
+        cropped = raster.crop(bounds)
+        clipped = raster.clip(bounds)
+
+        # We check cropping does select the bounds, while clipping create appropriate NaNs
+        np.testing.assert_array_equal(cropped.to_nanarray(), raster.to_nanarray()[:, 6:28, 5:30])
+        expected_mask = np.ones(raster.shape, dtype=bool)
+        expected_mask[6:28, 5:30] = False
+        expected_mask = np.ma.getmaskarray(raster.data) | expected_mask
+        np.testing.assert_array_equal(np.ma.getmaskarray(clipped.data), expected_mask)
+        np.testing.assert_array_equal(clipped.to_nanarray()[:, 6:28, 5:30], cropped.to_nanarray())
+
+        # We can now also translate the affine grid
+        translated = raster.translate(0.01, -0.02)
+        assert translated.transform.c == raster.transform.c + 0.01
+        assert translated.transform.f == raster.transform.f - 0.02
+        np.testing.assert_array_equal(translated.to_nanarray(), raster.to_nanarray())
+        assert raster.res == (abs(raster.transform.a), abs(raster.transform.e))
+        assert tuple(raster.bbox) == rio.transform.array_bounds(*raster.shape, raster.transform)
+
 
 class TestMaskGeotransformations:
     # Paths to example data
@@ -1167,6 +1329,231 @@ class TestTransformationChunked:
         assert base.raster_allclose(xr_base, warn_failure_reason=True, strict_masked=False)
         assert base.raster_allclose(dask_r, warn_failure_reason=True, strict_masked=False)
         assert base.raster_allclose(mp_r, warn_failure_reason=True, strict_masked=False)
+
+    def test_icrop__gcp_rcp_pixel_offsets(self, raster_gcp_rpc: gu.Raster) -> None:
+        """Checks that lazy pixel cropping shifts GCPs/RPCs and matches eager exactly."""
+
+        # We open a GCP/RCPs raster (with chunking defined so that crop crosses several chunks)
+        import_optional("dask")
+        source = raster_gcp_rpc
+        lazy = gu.open_raster(source.name, chunks={"band": 1, "y": 7, "x": 9})
+        expected = gu.Raster(source.name, load_data=True).icrop((9, 7, 50, 45))
+        assert not source.is_loaded
+        assert not lazy.rst.is_loaded
+
+        # We crop to the same pixel window lazily and eagerly
+        result = lazy.rst.icrop((9, 7, 50, 45))
+        assert not result.rst.is_loaded
+        assert result.rst._chunks is not None
+        assert not lazy.rst.is_loaded
+
+        # We check the GCP/RPC image offsets, and that we exactly match the eager call
+        assert [point.asdict() for point in result.rst.gcps[0]] == [point.asdict() for point in expected.gcps[0]]
+        assert result.rst.gcps[1] == expected.gcps[1]
+        assert result.rst.rpcs == expected.rpcs
+        np.testing.assert_array_equal(result.compute().values, expected.to_nanarray())
+        assert not source.is_loaded
+        assert not lazy.rst.is_loaded
+
+    @pytest.mark.parametrize("resampling", ["nearest", "bilinear"])
+    @pytest.mark.parametrize("backend", ["dask", "mp"])
+    def test_reproject__chunk_invariance(
+        self, raster_gcp_rpc: gu.Raster, tmp_path: Path, resampling: str, backend: str
+    ) -> None:
+        """Checks that uneven GCP/RPC chunks reproduce eager values exactly, and respect laziness."""
+
+        # We use the GCP/RCP raster, and reproject with eager, also using a transformer option
+        source = raster_gcp_rpc
+        options = {"RPC_HEIGHT": 80} if source.rpcs else {}
+        expected = gu.Raster(source.name).reproject(crs=3857, resampling=resampling, transformer_options=options)
+        assert not source.is_loaded
+
+        # We open in chunks (uneven size to leave a shorter final chunk)
+        # Then we run with Dask/MP, which should stay lazy/unloaded
+        if backend == "dask":
+            import_optional("dask")
+            lazy = gu.open_raster(source.name, chunks={"band": 1, "y": 7, "x": 9})
+            result = lazy.rst.reproject(crs=3857, resampling=resampling, transformer_options=options)
+            assert lazy.rst._chunks is not None
+            assert result.rst._chunks is not None
+            assert not lazy.rst.is_loaded
+            assert not result.rst.is_loaded
+            values = result.compute().values
+            assert not lazy.rst.is_loaded
+            assert result.rst.rpcs is None
+            assert result.rst.gcps == ([], None)
+        else:
+            with MpCluster({"nb_workers": 2}) as cluster:
+                config = MultiprocConfig(cluster=cluster, chunks=(7, 9), outfile=str(tmp_path / "warped.tif"))
+                result = source.reproject(
+                    crs=3857, resampling=resampling, transformer_options=options, mp_config=config
+                )
+            assert not result.is_loaded
+            assert not source.is_loaded
+            assert result.rpcs is None
+            assert result.gcps == ([], None)
+            values = result.data.filled(np.nan)
+
+        # Finally we compare for exact equality
+        np.testing.assert_array_equal(values, expected.data.filled(np.nan))
+        assert not source.is_loaded
+
+    def test_reproject__rpc_transformer_option(self, raster_gcp_rpc: gu.Raster, tmp_path: Path) -> None:
+        """Checks that RPC_HEIGHT transformer option behaves properly with eager/lazy reprojection."""
+
+        # We create a DEM with a height of 80 m everywhere across the image
+        # RPCs use ground height to locate image pixels, so supplying this DEM through RPC_DEM should give
+        # the same reprojection as RPC_HEIGHT=80, which sets the height directly without an elevation file
+        source = raster_gcp_rpc
+        if source.rpcs is None:
+            pytest.skip("RPC elevation options do not apply to GCPs")
+        dem_file = tmp_path / "elevation.tif"
+        dem = gu.Raster.from_array(
+            np.full((200, 200), 80, dtype="float32"), rio.transform.from_origin(9, 51, 0.01, 0.01), 4326
+        )
+        dem.to_file(dem_file)
+        expected = gu.Raster(source.name).reproject(
+            crs=3857, resampling="nearest", transformer_options={"RPC_HEIGHT": 80}
+        )
+        options = {"RPC_DEM": str(dem_file)}
+
+        # We run reproject, and check exact equality
+        eager = gu.Raster(source.name).reproject(crs=3857, resampling="nearest", transformer_options=options)
+        lazy = gu.open_raster(source.name, chunks={"y": 7, "x": 9})
+        result = lazy.rst.reproject(ref=eager, resampling="nearest", transformer_options=options)
+        assert result.rst._chunks is not None
+        assert not lazy.rst.is_loaded
+        assert not result.rst.is_loaded
+        np.testing.assert_array_equal(result.compute().values, eager.data.filled(np.nan))
+        np.testing.assert_array_equal(eager.data.filled(np.nan), expected.data.filled(np.nan))
+        assert not lazy.rst.is_loaded
+        assert not source.is_loaded
+
+    def test_reproject__gcp_transformer_option(self, raster_gcp_rpc: gu.Raster) -> None:
+        """Checks that TPS transformer option for GCP behaves properly, and matches lazy/eager."""
+
+        # We use thin plate splines (GCP_TPS) to map image pixels to ground coordinates
+        # This bends the image smoothly through the control points
+        # Dask must use this mapping both to find the source chunks and to reproject their pixels
+        source = raster_gcp_rpc
+        if not source.gcps[0]:
+            pytest.skip("Thin plate splines do not apply to RPCs")
+        options = {"SRC_METHOD": "GCP_TPS"}
+        expected = gu.Raster(source.name).reproject(crs=3857, resampling="nearest", transformer_options=options)
+        lazy = gu.open_raster(source.name, chunks={"y": 7, "x": 9})
+        result = lazy.rst.reproject(crs=3857, resampling="nearest", transformer_options=options)
+
+        # Check exact equality and laziness
+        assert result.rst._chunks is not None
+        assert not lazy.rst.is_loaded
+        assert not result.rst.is_loaded
+        np.testing.assert_array_equal(result.compute().values, expected.data.filled(np.nan))
+        assert not lazy.rst.is_loaded
+        assert not source.is_loaded
+
+    @pytest.mark.parametrize("raster_gcp_rpc", ["gcp_rpc_polynomial", "gcp_rpc_rational"], indirect=True)
+    @pytest.mark.parametrize("source_method", ["RPC", "GCP_POLYNOMIAL", "GCP_TPS"])
+    @pytest.mark.parametrize("backend", ["dask", "mp"])
+    def test_reproject__selected_gcp_rcp_chunk_invariance(
+        self, raster_gcp_rpc: gu.Raster, tmp_path: Path, source_method: str, backend: str
+    ) -> None:
+        """Checks that Dask/MP uses the same selected GCPs/RPCs as eager reprojection and preserves laziness."""
+
+        # Open an image with both GCPs and RPCs, and select one through transformers options
+        source = raster_gcp_rpc
+        points = [point.asdict() for point in source.gcps[0]]
+        gcp_crs = source.gcps[1]
+        rpcs = source.rpcs.to_gdal()
+        options: dict[str, Any] = {"SRC_METHOD": source_method}
+        if source_method == "RPC":
+            options["RPC_HEIGHT"] = 80
+        saved_options = options.copy()
+        assert not source.is_loaded
+
+        # Run reproject eagerly, then in chunks with Dask/MP
+        expected_source = gu.Raster(source.name)
+        expected = expected_source.reproject(crs=3857, resampling="nearest", transformer_options=options)
+        assert expected_source.is_loaded
+        assert expected.is_loaded
+        if backend == "dask":
+            import_optional("dask")
+            lazy = gu.open_raster(source.name, chunks={"band": 1, "y": 7, "x": 9})
+            assert not lazy.rst.is_loaded
+            assert lazy.rst._chunks is not None
+            result = lazy.rst.reproject(crs=3857, resampling="nearest", transformer_options=options)
+            assert not lazy.rst.is_loaded
+            assert not result.rst.is_loaded
+            assert result.rst._chunks is not None
+            values = result.compute().values
+            assert not lazy.rst.is_loaded
+            assert [point.asdict() for point in lazy.rst.gcps[0]] == points
+            assert lazy.rst.gcps[1] == gcp_crs
+            assert lazy.rst.rpcs.to_gdal() == rpcs
+            result_raster = result.rst
+        else:
+            with MpCluster({"nb_workers": 2}) as cluster:
+                config = MultiprocConfig(cluster=cluster, chunks=(7, 9), outfile=str(tmp_path / "selected.tif"))
+                result = source.reproject(crs=3857, resampling="nearest", transformer_options=options, mp_config=config)
+            assert not source.is_loaded
+            assert not result.is_loaded
+            values = result.to_nanarray()
+            result_raster = result
+
+        # Check exact equality and laziness, and that GCPs/RCPs are still present in the source
+        assert result_raster.transform == expected.transform
+        assert result_raster.crs == expected.crs
+        np.testing.assert_array_equal(values, expected.to_nanarray())
+        assert result_raster.gcps == ([], None)
+        assert result_raster.rpcs is None
+        assert not source.is_loaded
+        assert [point.asdict() for point in source.gcps[0]] == points
+        assert source.gcps[1] == gcp_crs
+        assert source.rpcs.to_gdal() == rpcs
+        assert options == saved_options
+
+    @pytest.mark.parametrize("backend", ["dask", "mp"])
+    @pytest.mark.parametrize("georeferencing", ["gcp_rcp", "affine"])
+    def test_reproject__empty_multiband_chunks(
+        self, raster_gcp_rpc: gu.Raster, tmp_path: Path, backend: str, georeferencing: str
+    ) -> None:
+        """ Checks that empty chunks keep the right number of bands during reprojection. """
+
+        # We use several bands and request a reprojected extent larger than source to create empty output chunks
+        filename = tmp_path / "integer_image.tif"
+        raster_gcp_rpc.load()
+        integer_image = raster_gcp_rpc.astype("int16", convert_nodata=False)
+        if georeferencing == "affine":
+            integer_image.gcps, integer_image.rpcs = ([], None), None
+            integer_image.crs = 4326
+            integer_image.transform = rio.transform.from_origin(10, 50, 0.001, 0.001)
+        integer_image.to_file(filename)
+        source = gu.Raster(filename)
+        options = {"crs": 4326, "bounds": (9.95, 49.85, 10.15, 50.1), "grid_size": (53, 67), "resampling": "nearest"}
+
+        # Reproject eagerly, and check we have nodata on the area outside the original image
+        expected = gu.Raster(filename).reproject(**options)
+        assert np.ma.getmaskarray(expected.data)[:, :7, :9].all()
+
+        # Do the same with Dask/MP in chunks, check laziness/loading
+        if backend == "dask":
+            lazy = gu.open_raster(str(filename), chunks={"band": 1, "y": 7, "x": 9})
+            result = lazy.rst.reproject(**options)
+            assert not lazy.rst.is_loaded
+            assert not result.rst.is_loaded
+            assert result.rst._chunks is not None
+            values = result.compute().values
+            assert not lazy.rst.is_loaded
+        else:
+            config = MultiprocConfig(chunks=(7, 9), outfile=str(tmp_path / "empty_chunks.tif"))
+            result = source.reproject(mp_config=config, **options)
+            assert not source.is_loaded
+            assert not result.is_loaded
+            assert result.dtype == np.dtype("int16")
+            values = result.to_nanarray()
+
+        # Check exact equality with eager
+        np.testing.assert_array_equal(values, expected.to_nanarray())
+        assert not source.is_loaded
 
 
 class TestReprojectionOperators:
@@ -1988,3 +2375,151 @@ class TestReprojectionErrors:
         with pytest.warns(UserWarning, match="extra GridNeighbours offsets are ignored"):
             result = raster.reproject(reference, resampling=operator_type(neighborhood=GridNeighbours(size=3)))
         np.testing.assert_array_equal(result.to_nanarray(), expected.to_nanarray())
+
+    @pytest.mark.parametrize("raster_gcp_rpc", ["rpc_polynomial", "rpc_rational"], indirect=True)
+    @pytest.mark.parametrize("source_method", [None, "GEOTRANSFORM", "GEOLOC_ARRAY", "unknown"])
+    def test_reproject__error_conflicting_gcp_rcp(self, raster_gcp_rpc: gu.Raster, source_method: str | None) -> None:
+        """Checks an error is raised when a raster stores both GCPs and RPCs at once."""
+
+        # Add GCPs to a raster that already stores RPCs
+        source = raster_gcp_rpc
+        points = [
+            rio.control.GroundControlPoint(row=row, col=col, x=10 + col * 0.001, y=50 - row * 0.001)
+            for row in (0, source.height)
+            for col in (0, source.width)
+        ]
+        source.gcps = points, rio.CRS.from_epsg(4326)
+        options = {"SRC_METHOD": source_method} if source_method is not None else None
+        # We raise an error
+        with pytest.raises(ValueError, match="Source has both GCPs and RPCs.*SRC_METHOD"):
+            source.reproject(crs=3857, transformer_options=options)
+        assert not source.is_loaded
+        assert source.gcps == (points, rio.CRS.from_epsg(4326))
+        assert source.rpcs is not None
+
+    def test_reproject__error_operator(self, raster_gcp_rpc: gu.Raster) -> None:
+        """Checks an error is raised for a generic GeoUtils interpolator on a GCP/RPC source."""
+        with pytest.raises(ValueError, match="requires a Rasterio resampling method"):
+            raster_gcp_rpc.reproject(crs=3857, resampling=Linear())
+
+    @pytest.mark.parametrize("reference_type", ["raster", "dataarray"])
+    def test_reproject__error_gcp_rcp_reference(self, raster_gcp_rpc: gu.Raster, reference_type: str) -> None:
+        """Checks an error is raised when GCP/RPC referencing is used as an affine destination grid."""
+
+        reference = raster_gcp_rpc
+        reference.crs = 4326
+        destination = reference if reference_type == "raster" else gu.open_raster(reference.name)
+        if reference_type == "dataarray":
+            destination.rst.crs = 4326
+        source = gu.Raster.from_array(np.ones((10, 10)), rio.transform.from_origin(10, 50, 0.01, 0.01), crs=4326)
+
+        with pytest.raises(ValueError, match="Reference grid requires an affine grid"):
+            source.reproject(ref=destination)
+        assert not reference.is_loaded
+
+
+class TestTransformationErrors:
+    """Test module for errors/warnings in transformation functions."""
+
+    @pytest.mark.parametrize("raster_type", ["raster", "dataarray"])
+    @pytest.mark.parametrize("loaded", [False, True])
+    @pytest.mark.parametrize(
+        "method,options",
+        [
+            pytest.param("crop", {}, id="crop"),
+            pytest.param("clip", {}, id="clip"),
+            pytest.param("translate", {}, id="translate_georeferenced"),
+            pytest.param("translate", {"distance_unit": "pixel", "inplace": True}, id="translate_pixel_inplace"),
+        ],
+    )
+    def test_methods__error_gcp_rcp_georeferencing(
+        self, raster_gcp_rpc: gu.Raster, raster_type: str, loaded: bool, method: str, options: dict[str, Any]
+    ) -> None:
+        """Checks an error is raised for affine transformations on GCP/RPC rasters without changing loading."""
+
+        # Open image referenced only by GCPs/RPCs
+        raster = raster_gcp_rpc if raster_type == "raster" else gu.open_raster(raster_gcp_rpc.name).rst
+        if loaded:
+            raster.load()
+        arguments = (1, 2) if method == "translate" else ((10, 49.95, 10.05, 50),)
+        assert raster.is_loaded is loaded
+
+        # We save the GCPs/RPCs to check the error is raised BEFORE modifying the metadata
+        transform = raster.transform
+        points = [point.asdict() for point in raster.gcps[0]]
+        gcp_crs = raster.gcps[1]
+        rpcs = raster.rpcs.to_gdal() if raster.rpcs is not None else None
+
+        # We raise an error, saying to use reproject() before to define an affine grid
+        with pytest.raises(ValueError, match=r"requires an affine grid.*Call reproject\(\) first"):
+            getattr(raster, method)(*arguments, **options)
+        assert raster.is_loaded is loaded
+
+        # Then, we check metadata did not change
+        assert raster.transform == transform
+        assert [point.asdict() for point in raster.gcps[0]] == points
+        assert raster.gcps[1] == gcp_crs
+        assert (raster.rpcs.to_gdal() if raster.rpcs is not None else None) == rpcs
+
+    @pytest.mark.parametrize("method", ["crop", "clip"])
+    def test_methods__error_gcp_rcp_reference(self, raster_gcp_rpc: gu.Raster, method: str) -> None:
+        """Checks an error is raised for crop/clip with a GCP/RPC raster."""
+
+        reference = raster_gcp_rpc
+        reference.crs = 4326
+        source = gu.Raster.from_array(np.ones((10, 10)), rio.transform.from_origin(10, 50, 0.01, 0.01), crs=4326)
+        with pytest.raises(ValueError, match="requires an affine grid"):
+            getattr(source, method)(reference)
+        assert not reference.is_loaded
+
+
+class TestTransformationErrorsChunked:
+    """Test module for crop(), clip() and translate() errors before Dask/MP loads inputs or writes files."""
+
+    @pytest.mark.parametrize(
+        "backend,method", [("dask", "crop"), ("dask", "clip"), ("dask", "translate"), ("mp", "clip")]
+    )
+    def test_methods__error_gcp_rcp_georeferencing(
+        self, raster_gcp_rpc: gu.Raster, tmp_path: Path, backend: str, method: str
+    ) -> None:
+        """Checks an error is raised for crop(), clip() or translate() before Dask/MP loads inputs or writes files."""
+
+        # Open both loaded/unloaded rasters with GCPs/RCPs
+        source = raster_gcp_rpc
+        eager = gu.Raster(source.name, load_data=True)
+        arguments = (1, 2) if method == "translate" else ((10, 49.95, 10.05, 50),)
+        assert eager.is_loaded
+        assert not source.is_loaded
+
+        # We open in chunks with Dask/MP, check loading/laziness
+        chunked: gu.Raster | gu.RasterAccessor
+        options: dict[str, Any] = {}
+        if backend == "dask":
+            import_optional("dask")
+            lazy = gu.open_raster(source.name, chunks={"band": 1, "y": 7, "x": 9})
+            chunked = lazy.rst
+            original_data = lazy.data
+            assert chunked._chunks is not None
+        else:
+            outfile = tmp_path / "clipped.tif"
+            config = MultiprocConfig(chunks=(7, 9), outfile=str(outfile))
+            chunked = source
+            options["mp_config"] = config
+            assert not outfile.exists()
+        assert not chunked.is_loaded
+
+        # We check all raise the same error correctly, and laziness is maintained (error happens early enough that we
+        # don't update the source data or create a result from the method)
+        with pytest.raises(ValueError, match="requires an affine grid") as eager_error:
+            getattr(eager, method)(*arguments)
+        with pytest.raises(ValueError, match="requires an affine grid") as chunked_error:
+            getattr(chunked, method)(*arguments, **options)
+        assert str(chunked_error.value) == str(eager_error.value)
+        assert eager.is_loaded
+        assert not chunked.is_loaded
+        assert not source.is_loaded
+        if backend == "dask":
+            assert lazy.data is original_data
+            assert lazy.rst._chunks is not None
+        else:
+            assert not outfile.exists()
