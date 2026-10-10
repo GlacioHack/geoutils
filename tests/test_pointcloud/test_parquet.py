@@ -15,7 +15,6 @@ from geopandas.testing import assert_geodataframe_equal
 from shapely.geometry import box
 
 import geoutils as gu
-from geoutils._misc import import_optional
 
 
 class TestPointParquet:
@@ -24,7 +23,7 @@ class TestPointParquet:
     @pytest.mark.parametrize("partitioned", [False, True])
     def test_to_parquet__coords_attrs(self, tmp_path: Path, partitioned: bool) -> None:
         """Checks that GeoParquet stores coordinates/attribute dtypes exactly."""
-        import_optional("pyarrow")
+        pytest.importorskip("pyarrow")
         import pyarrow.parquet as pq
 
         # Create point cloud with mixed dtypes and large IDs (to reveal loss from conversion)
@@ -67,7 +66,7 @@ class TestPointParquet:
     @pytest.mark.parametrize("method", ["to_parquet", "to_file"])
     def test_to_parquet__roundtrip(self, tmp_path: Path, use_z: bool, interface: str, method: str) -> None:
         """Checks that GeoParquet reading/writing keeps consistent geometries in a round trip."""
-        import_optional("pyarrow")
+        pytest.importorskip("pyarrow")
 
         # We create synthetic geometry elevations as well as a named value column
         cloud = gu.PointCloud.from_xyz([0.0, 1.0], [2.0, 3.0], [4.0, 5.0], 32633, use_z=use_z)
@@ -89,7 +88,7 @@ class TestPointParquet:
 
     def test_open_pointcloud__wkb(self, tmp_path: Path) -> None:
         """Checks that existing WKB GeoParquet points can be read with the array accessor."""
-        import_optional("pyarrow")
+        pytest.importorskip("pyarrow")
 
         # GeoPandas defaults to WKB, which needs geometry decoding at the input boundary
         frame = gu.PointCloud.from_xyz([0.0, 1.0], [2.0, 3.0], [4.0, 5.0], 32633).gdf
@@ -103,7 +102,7 @@ class TestPointParquet:
 
     def test_open_pointcloud__empty(self, tmp_path: Path) -> None:
         """Checks the edge case of an empty GeoParquet point output ."""
-        import_optional("pyarrow")
+        pytest.importorskip("pyarrow")
 
         # Create empty result, which still needs readable coordinate/attributes
         values = np.empty(0, dtype=np.float32)
@@ -130,7 +129,10 @@ class TestPointParquetChunked:
         self, tmp_path: Path, as_type: Literal["dataarray", "geodataframe"]
     ) -> None:
         """Checks that selecting an auxiliary attribute leaves the original geometry elevations unchanged."""
-        import_optional("pyarrow")
+        pytest.importorskip("pyarrow")
+        pytest.importorskip("dask")
+        if as_type == "geodataframe":
+            pytest.importorskip("dask_geopandas")
 
         # We create + write points with attribute IDs different from default Z elevation
         points = gu.DataArrayPointCloudAccessor.from_xyz(
@@ -177,8 +179,10 @@ class TestPointParquetChunked:
     ) -> None:
         """Checks that duplicate row labels stay lazy and are preserved through either point interface."""
 
-        import_optional("pyarrow")
-        import_optional("dask")
+        pytest.importorskip("pyarrow")
+        pytest.importorskip("dask")
+        if as_type == "geodataframe":
+            pytest.importorskip("dask_geopandas")
         import dask
 
         # We create + write point with labels distinguishing row positions from a Pandas index
@@ -222,8 +226,10 @@ class TestPointParquetChunked:
         columns: Literal["main", "all"],
     ) -> None:
         """Checks that GeoParquet reads are lazy and match eager exactly."""
-        import_optional("pyarrow")
-        import_optional("dask")
+        pytest.importorskip("pyarrow")
+        pytest.importorskip("dask")
+        if as_type == "geodataframe":
+            pytest.importorskip("dask_geopandas")
         import dask
 
         # 1/ Create + write point cloud in chunks
@@ -270,7 +276,7 @@ class TestPointParquetChunked:
         self, tmp_path: Path, as_type: Literal["dataarray", "geodataframe"]
     ) -> None:
         """Checks that both DataArrays and GeoDataFrame partitions write ordered GeoParquet row groups properly."""
-        import_optional("pyarrow")
+        pytest.importorskip("pyarrow")
         import pyarrow.parquet as pq
 
         from geoutils.pointcloud.parquet import _write_parquet_row_groups
@@ -306,7 +312,7 @@ class TestPointParquetErrors:
 
     def test_open_pointcloud__error_invalid_geometry(self, tmp_path: Path) -> None:
         """Checks an error is raised for a GeoParquet file with invalid geometry (e.g. polygons) instead of points."""
-        import_optional("pyarrow")
+        pytest.importorskip("pyarrow")
 
         filename = tmp_path / "polygon.parquet"
         gpd.GeoDataFrame({"value": [1]}, geometry=[box(0, 0, 1, 1)], crs=32633).to_parquet(filename)
@@ -317,7 +323,7 @@ class TestPointParquetErrors:
     def test_open_pointcloud__error_mismatched_partitions(self, tmp_path: Path, difference: str) -> None:
         """Checks an error is raised before combining partitions with different CRS or schemas."""
 
-        import_optional("pyarrow")
+        pytest.importorskip("pyarrow")
 
         # Create two point clouds with incompatible CRS/dtype/Z geometry
         first = gu.DataArrayPointCloudAccessor.from_xyz([0.0], [1.0], np.array([2.0], dtype=np.float32), 32633)
@@ -337,7 +343,7 @@ class TestPointParquetErrors:
 
     def test_to_parquet__error_existing_partition(self, tmp_path: Path) -> None:
         """Checks an error is raised before overwriting an existing partitioned dataset."""
-        import_optional("pyarrow")
+        pytest.importorskip("pyarrow")
 
         # We write an original file to check survival later
         points = gu.DataArrayPointCloudAccessor.from_xyz([0], [1], [2], 32633)
@@ -355,7 +361,7 @@ class TestPointParquetErrors:
 
     def test_to_parquet__error_preserves_existing(self, tmp_path: Path) -> None:
         """Checks an error while writing a later row group leaves an existing destination unchanged."""
-        import_optional("pyarrow")
+        pytest.importorskip("pyarrow")
 
         # We create an erroneous input with last attribute changing Arrow type,
         # causing a schema error after the first row group is written

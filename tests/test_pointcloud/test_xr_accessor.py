@@ -16,7 +16,6 @@ from shapely.geometry import box
 
 import geoutils as gu
 from geoutils._dispatch import _get_pointcloud_interface, _is_pointcloud, _is_raster
-from geoutils._misc import import_optional
 from geoutils.pointcloud.base import GeometryPointCloudBase, PointCloudBase
 from tests.accessor_helpers import (
     assert_dataset_output_equal,
@@ -213,8 +212,9 @@ class TestDataArrayPointCloudAccessor:
     def test_to_geoutils__loading_laziness(self, tmp_path: Path, lazy: bool) -> None:
         """Checks that to_geoutils() loads exact values, while keep source lazy (if Dask)."""
 
+        pytest.importorskip("pyarrow")
         if lazy:
-            import_optional("dask")
+            pytest.importorskip("dask")
 
         # We write points with float32 values and uint64 IDs in groups of 3/3/1
         reference = gu.PointCloud.from_xyz(np.arange(7), np.arange(7), np.arange(7, dtype=np.float32), 32633)
@@ -881,7 +881,7 @@ class TestDatasetPointCloudAccessor:
         We need this test for writing a selected Dataset point field rather than automatically using the first one.
         """
 
-        import_optional("pyarrow")
+        pytest.importorskip("pyarrow")
 
         # We write only point_sigma to check that the writer uses the selected variable
         filename = tmp_path / "points.parquet"
@@ -903,7 +903,7 @@ class TestDatasetPointCloudAccessor:
         dimensions.
         """
 
-        laspy = import_optional("laspy")
+        laspy = pytest.importorskip("laspy")
 
         # We select uncertainty before elevation to check that the writer uses the requested order for LAS Z
         names = ["point_sigma", "point_z"]
@@ -927,8 +927,8 @@ class TestDatasetPointCloudAccessor:
         We need this test for writing categorical/integer point fields and duplicate row labels to GeoParquet.
         """
 
-        import_optional("pyarrow")
-        import_optional("dask")
+        pytest.importorskip("pyarrow")
+        pytest.importorskip("dask")
 
         # 1/ Create a test mixed Xarray Dataset by modifying the mixed_dataset fixture
         # We add categorical values, large integer IDs and duplicate labels to test their saved values and dtypes
@@ -982,7 +982,7 @@ class TestDatasetPointCloudAccessor:
 
         import geopandas as gpd
 
-        import_optional("dask")
+        pytest.importorskip("dask")
         from dask.callbacks import Callback
 
         # 1/ Write and open a GeoParquet point file
@@ -1182,7 +1182,7 @@ class TestDatasetPointCloudAccessorErrors:
         We need this additional test for requiring grid bounds when finding the point extent would load lazy X/Y.
         """
 
-        import_optional("dask")
+        pytest.importorskip("dask")
         from dask.callbacks import Callback
 
         # We chunk the points so finding their extent would require computing X/Y coordinates
@@ -1202,7 +1202,7 @@ class TestDatasetPointCloudAccessorErrors:
     def test_methods__error_lazy_coordinates(self, mixed_dataset: xr.Dataset, method: str) -> None:
         """Checks an error is raised before implicitly computing lazy coordinates for row selection."""
 
-        import_optional("dask")
+        pytest.importorskip("dask")
         from dask.callbacks import Callback
 
         # We chunk point values and X/Y so finding the selected row count would require reading coordinates
@@ -1225,7 +1225,7 @@ class TestDatasetPointCloudAccessorErrors:
         We need this test for requiring a loaded mask when Dataset subsampling must know how many point rows it selects.
         """
 
-        import_optional("dask")
+        pytest.importorskip("dask")
         from dask.callbacks import Callback
 
         # We chunk the points so a mask calculated from their values has an unknown selected row count

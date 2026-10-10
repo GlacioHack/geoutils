@@ -9,7 +9,6 @@ import pytest
 import xarray as xr
 from pyproj import CRS
 
-from geoutils._misc import import_optional
 from geoutils.pointcloud.referencing import _point_coordinates, _point_crs
 from tests.accessor_helpers import mixed_dataset as mixed_dataset
 
@@ -138,7 +137,7 @@ class TestPointReferencingChunked:
     def test_methods__loading_laziness(self, representation: str) -> None:
         """Checks that coordinate and CRS resolution run no tasks and match the same calls on eager point data."""
 
-        import_optional("dask")
+        pytest.importorskip("dask")
         from dask.callbacks import Callback
 
         # Create + write chunked data array with point coords

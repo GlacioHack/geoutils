@@ -7,7 +7,6 @@ import pytest
 import xarray as xr
 from pyproj import CRS
 
-from geoutils._misc import import_optional
 from geoutils._xarray import _rebuild_dataset, _same_coordinate, _select_dataset_variables
 from tests.accessor_helpers import mixed_dataset as mixed_dataset
 
@@ -238,7 +237,7 @@ class TestXarrayChunked:
     def test_same_coordinate__loading_laziness(self, changed: bool) -> None:
         """Checks that lazy coordinate comparison runs no tasks and matches eager equality."""
 
-        import_optional("dask")
+        pytest.importorskip("dask")
         import dask.array as da
         from dask.callbacks import Callback
 
@@ -261,7 +260,7 @@ class TestXarrayChunked:
     def test_rebuild_dataset__loading_laziness(self, mixed_dataset: xr.Dataset) -> None:
         """Checks that reconstruction preserves lazy point labels and independent raster graphs until computation."""
 
-        import_optional("dask")
+        pytest.importorskip("dask")
         import dask.array as da
         from dask.callbacks import Callback
 

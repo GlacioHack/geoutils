@@ -11,7 +11,6 @@ from geopandas.testing import assert_geodataframe_equal
 from rasterio.coords import BoundingBox
 
 import geoutils as gu
-from geoutils._misc import import_optional
 from geoutils.pointcloud.loading import (
     _concat_point_parts,
     _filter_points_by_bounds,
@@ -33,9 +32,9 @@ class TestPointCloudOpening:
     ) -> None:
         """Checks that opening defaults to a DataArray and every data type/point format loads correct values and CRS."""
         if suffix == "las":
-            import_optional("laspy")
+            pytest.importorskip("laspy")
         elif suffix == "parquet":
-            import_optional("pyarrow")
+            pytest.importorskip("pyarrow")
 
         # Create point cloud and write to file
         # LAS elevations are named Z, other formats store the defined name "height"
@@ -79,9 +78,9 @@ class TestPointCloudOpening:
     ) -> None:
         """Checks that every opening type/format uses the same deterministic downsampling."""
         if suffix == "las":
-            import_optional("laspy")
+            pytest.importorskip("laspy")
         elif suffix == "parquet":
-            import_optional("pyarrow")
+            pytest.importorskip("pyarrow")
 
         # Create/write point cloud
         data_name = "Z" if suffix == "las" else "height"
@@ -110,11 +109,13 @@ class TestPointCloudOpeningChunked:
     ) -> None:
         """Checks that chunked opening is lazy on all point formats/data structure types."""
 
-        import_optional("dask")
+        pytest.importorskip("dask")
+        if as_type == "geodataframe" or suffix == "gpkg":
+            pytest.importorskip("dask_geopandas")
         if suffix == "las":
-            import_optional("laspy")
+            pytest.importorskip("laspy")
         elif suffix == "parquet":
-            import_optional("pyarrow")
+            pytest.importorskip("pyarrow")
 
         # Create and write chunked point cloud
         data_name = "Z" if suffix == "las" else "height"

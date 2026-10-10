@@ -25,7 +25,6 @@ from shapely.geometry import Polygon, box
 import geoutils as gu
 from geoutils import PointCloud, Raster
 from geoutils._dispatch import is_dask_array, is_dask_dataframe
-from geoutils._misc import import_optional
 from geoutils.multiproc import MultiprocConfig
 from geoutils.pointcloud.base import GeometryPointCloudBase, PointCloudBase
 from geoutils.pointcloud.pd_accessor import GeoPandasPointCloudAccessor
@@ -584,7 +583,7 @@ class TestArrayVsGeometryConsistency:
         """Checks that array and geometry point cloud error structures are equivalent."""
 
         if correlated:
-            import_optional("skgstat")
+            pytest.importorskip("skgstat")
 
         # Synthetic data for error structures (variable magnitude)
         rng = np.random.default_rng(11)
@@ -859,7 +858,10 @@ class TestAccessorDask:
         self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path, method: str, options: dict[str, Any]
     ) -> None:
         """Checks that point operations return lazy Dask arrays whether they use DataArrays or GeoDataFrames."""
-        import_optional("dask")
+        pytest.importorskip("dask")
+        pytest.importorskip("pyarrow")
+        if as_type == "geodataframe":
+            pytest.importorskip("dask_geopandas")
 
         # Write then read a chunked point cloud file as Geodataframe/DatArray
         points = gu.DataArrayPointCloudAccessor.from_xyz(
@@ -896,9 +898,12 @@ class TestAccessorDask:
     ) -> None:
         """Checks that uncertainty maps stay lazy and agree exactly across uneven point chunks."""
 
-        import_optional("dask")
+        pytest.importorskip("dask")
+        pytest.importorskip("pyarrow")
+        if as_type == "geodataframe":
+            pytest.importorskip("dask_geopandas")
         if correlated:
-            import_optional("gstools")
+            pytest.importorskip("gstools")
         # We define variable magnitudes, and a final shorter chunk to check edge case
         statistics = pd.DataFrame({"std": [1.0, 3.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="quality"))
         magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
@@ -934,7 +939,10 @@ class TestAccessorDask:
     def test_grid__loading_laziness(self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path) -> None:
         """Checks that grid keeps laziness on both point cloud types."""
 
-        import_optional("dask")
+        pytest.importorskip("dask")
+        pytest.importorskip("pyarrow")
+        if as_type == "geodataframe":
+            pytest.importorskip("dask_geopandas")
 
         # Open file lazily
         x, y = np.meshgrid(np.arange(4.0), np.arange(4.0))

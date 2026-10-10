@@ -16,7 +16,6 @@ from shapely.geometry import box
 
 import geoutils as gu
 from geoutils import examples, open_raster
-from geoutils._misc import import_optional
 from geoutils.raster.base import RasterBase
 from tests.accessor_helpers import (
     assert_dataset_output_equal,
@@ -1062,7 +1061,7 @@ class TestDatasetRasterAccessor:
     ) -> None:
         """Checks that chunk writing match eager files, and stays lazy."""
 
-        dask = import_optional("dask")
+        dask = pytest.importorskip("dask")
         import dask.array as da
         from dask.callbacks import Callback
 
@@ -1151,7 +1150,7 @@ class TestDatasetRasterAccessor:
         We need this test to cover NetCDF encoding that is absent from the method combinations.
         """
 
-        import_optional("dask")
+        pytest.importorskip("dask")
         from dask.callbacks import Callback
 
         # 1/ Write and open a packed CF NetCDF file
@@ -1206,9 +1205,9 @@ class TestDatasetRasterAccessor:
     def test_accessors__file_backed_workflow(self, raster_name: str, tmp_path: Path) -> None:
         """Checks that real GeoTIFF/LAZ data stays lazy through both accessors."""
 
-        import_optional("dask")
-        import_optional("pyarrow")
-        import_optional("laspy")
+        pytest.importorskip("dask")
+        pytest.importorskip("pyarrow")
+        pytest.importorskip("laspy")
         from dask.callbacks import Callback
 
         # 1/ Open independent raster and point files
@@ -1338,7 +1337,7 @@ class TestDatasetRasterAccessorErrors:
     def test_interp_at_points__error_lazy_geodataframe(self, mixed_dataset: xr.Dataset) -> None:
         """Checks an error is raised with a lazy GeoDataFrame point input."""
 
-        dgpd = import_optional("dask_geopandas")
+        dgpd = pytest.importorskip("dask_geopandas")
         from dask.callbacks import Callback
 
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
