@@ -11,6 +11,7 @@ import pytest
 import rasterio as rio
 import xarray as xr
 from affine import Affine
+from packaging.version import Version
 from rasterio.transform import from_origin
 from shapely.geometry import box
 
@@ -1203,6 +1204,10 @@ class TestDatasetRasterAccessor:
 
     @pytest.mark.parametrize("raster_name", ["exploradores_aster_dem", "everest_landsat_rgb"])
     @pytest.mark.parametrize("raster_dtype", [None, "float64"], ids=["native", "float64"])
+    @pytest.mark.skipif(
+        Version(rio.__version__) < Version("1.5.0"),
+        reason="Rasterio before 1.5 cannot set reprojection tolerance for exact comparison with chunks.",
+    )
     def test_accessors__file_backed_workflow(self, raster_name: str, raster_dtype: str | None, tmp_path: Path) -> None:
         """Checks that real GeoTIFF/LAZ data stays lazy and matches eager results through both accessors."""
 
@@ -1225,14 +1230,14 @@ class TestDatasetRasterAccessor:
         raster = gu.open_raster(raster_path).to_dataset(name="image")
         points = gu.open_pointcloud(point_path, columns="all", as_type="dataset")
         eager = xr.merge([raster, points], compat="no_conflicts")
-        # Open both files in chunks of 64/51 pixels and 2001 points, leaving shorter final blocks
+        # Open both files in chunks (leaving shorter final blocks)
         lazy_raster = gu.open_raster(raster_path, chunks={"x": 64, "y": 51}).to_dataset(name="image")
         lazy_points = gu.open_pointcloud(point_path, columns="all", chunks=2001, as_type="dataset")
         lazy = xr.merge([lazy_raster, lazy_points], compat="no_conflicts")
         original = lazy.copy(deep=True)
         encoding = lazy.image.encoding.copy()
 
-        # 2/ Perform raster and point transformations without reading either file
+        # 2/ Perform raster and point transformations
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(1)):
             result = lazy.rst.reproject(crs=4326, nodata=-99999).rst.filter("mean", size=3)
@@ -1244,14 +1249,14 @@ class TestDatasetRasterAccessor:
         assert result.image.chunks and result.Z.chunks
         assert result.sizes["point"] == 17
 
-        # Run the same transformation chain eagerly for the reference result
+        # Run the same transformation eagerly
         expected = eager.rst.reproject(crs=4326, nodata=-99999).rst.filter("mean", size=3)
         expected = expected.pc.subsample(17, random_state=7).pc.reproject(crs=4326)
 
         # 3/ Compare computation/outputs
         actual = result.compute()
 
-        # Chunked interpolation and mean sums can round differently; compare other values and metadata exactly
+        # Chunked interpolation and mean sums can round differently, we compare other values and metadata exactly
         np.testing.assert_allclose(actual.image.data, expected.image.data, rtol=1e-10, atol=0)
         assert actual.image.dtype == expected.image.dtype
         comparison = actual.copy(deep=False)
