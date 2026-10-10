@@ -1202,8 +1202,9 @@ class TestDatasetRasterAccessor:
         lazy.close()
 
     @pytest.mark.parametrize("raster_name", ["exploradores_aster_dem", "everest_landsat_rgb"])
-    def test_accessors__file_backed_workflow(self, raster_name: str, tmp_path: Path) -> None:
-        """Checks that real GeoTIFF/LAZ data stays lazy through both accessors."""
+    @pytest.mark.parametrize("raster_dtype", [None, "float64"], ids=["native", "float64"])
+    def test_accessors__file_backed_workflow(self, raster_name: str, raster_dtype: str | None, tmp_path: Path) -> None:
+        """Checks that real GeoTIFF/LAZ data stays lazy and matches eager results through both accessors."""
 
         pytest.importorskip("dask")
         pytest.importorskip("pyarrow")
@@ -1214,6 +1215,13 @@ class TestDatasetRasterAccessor:
         # We merge raster and point data from different continents and CRSs to test independent georeferencing
         raster_path = examples.get_path_test(raster_name)
         point_path = examples.get_path_test("coromandel_lidar")
+
+        # Write float64 inputs to expose rounding that float32 decoding can hide across dependency versions
+        if raster_dtype is not None:
+            converted_path = tmp_path / "image.tif"
+            gu.Raster(raster_path).astype(raster_dtype).to_file(converted_path)
+            raster_path = str(converted_path)
+
         raster = gu.open_raster(raster_path).to_dataset(name="image")
         points = gu.open_pointcloud(point_path, columns="all", as_type="dataset")
         eager = xr.merge([raster, points], compat="no_conflicts")
@@ -1242,7 +1250,13 @@ class TestDatasetRasterAccessor:
 
         # 3/ Compare computation/outputs
         actual = result.compute()
-        xr.testing.assert_identical(actual, expected)
+
+        # Chunked interpolation and mean sums can round differently; compare other values and metadata exactly
+        np.testing.assert_allclose(actual.image.data, expected.image.data, rtol=1e-10, atol=0)
+        assert actual.image.dtype == expected.image.dtype
+        comparison = actual.copy(deep=False)
+        comparison.image.data = expected.image.data
+        xr.testing.assert_identical(comparison, expected)
         xr.testing.assert_identical(lazy, original)
         assert lazy.image.encoding == encoding
         assert actual.image.rst.crs.to_epsg() == actual.Z.pc.crs.to_epsg() == 4326
