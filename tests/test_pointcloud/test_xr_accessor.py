@@ -15,7 +15,7 @@ from pyproj import CRS
 from shapely.geometry import box
 
 import geoutils as gu
-from geoutils._dispatch import _get_pointcloud_interface, _is_pointcloud, _is_raster, is_dask_array
+from geoutils._dispatch import _get_pointcloud_interface, _is_pointcloud, _is_raster
 from geoutils._misc import import_optional
 from geoutils.pointcloud.base import GeometryPointCloudBase, PointCloudBase
 from tests.accessor_helpers import (
@@ -179,7 +179,7 @@ class TestDataArrayPointCloudAccessor:
         points = gu.DataArrayPointCloudAccessor.from_xyz([0, 1], [2, 3], [4, 5], 32633, auxiliary={"id": [6, 7]})
         copied = points.pc.copy(new_array=np.array([8, 9]))
 
-        # We then moodify the metadata and IDs (to check that the source is independent, no back-propag)
+        # We then modify the metadata and IDs (to check that the source is independent, no back-propag)
         copied.attrs["label"] = "copy"
         copied.coords["id"][0] = 10
 

@@ -304,7 +304,6 @@ class TestPointParquetChunked:
 class TestPointParquetErrors:
     """Test module for errors/warnings of GeoParquet I/P."""
 
-
     def test_open_pointcloud__error_invalid_geometry(self, tmp_path: Path) -> None:
         """Checks an error is raised for a GeoParquet file with invalid geometry (e.g. polygons) instead of points."""
         import_optional("pyarrow")

@@ -103,7 +103,8 @@ def _same_coordinate(left: xr.Variable, right: xr.Variable) -> bool:
 
 def _rebuild_dataset(dataset: xr.Dataset, transformed: Mapping[str, xr.DataArray]) -> xr.Dataset:
     """
-    Rebuild Xarray Dataset by replacing selected variables, and checking untouched variables against changed coordinates.
+    Rebuild Xarray Dataset by replacing selected variables, and checking untouched variables against changed
+    coordinates.
 
     The internal logic is the following:
     - _same_coordinate() identifies changed axes and georeferencing without computing lazy arrays.

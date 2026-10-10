@@ -580,7 +580,6 @@ class DatasetRasterAccessor:
 
         # Looping through each variable
         for name in selected:
-
             # Normalize CF spatial names and the optional band/time dimension for DataArray methods
             original = self._obj[name]
             x_dimension, y_dimension = original.rio.x_dim, original.rio.y_dim

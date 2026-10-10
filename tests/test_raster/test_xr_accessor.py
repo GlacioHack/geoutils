@@ -708,7 +708,6 @@ class TestDatasetRasterAccessor:
             if representation != "geodataframe":
                 assert source.x_point.chunks and source.y_point.chunks
 
-
     @pytest.mark.parametrize("lazy", [False, True])
     @pytest.mark.parametrize(
         "method,options,with_mask,compare_outputs",
@@ -910,9 +909,7 @@ class TestDatasetRasterAccessor:
 
     @pytest.mark.parametrize(
         "method,options,positional",
-        [("fill_nodata", {"interpolation": "nearest"}, False),
-         ("clip", {}, False),
-         ("clip", {}, True)],
+        [("fill_nodata", {"interpolation": "nearest"}, False), ("clip", {}, False), ("clip", {}, True)],
     )
     def test_methods__mask(
         self, mixed_dataset: xr.Dataset, method: str, options: dict[str, Any], positional: bool
@@ -945,7 +942,6 @@ class TestDatasetRasterAccessor:
         # And check that point values and source dataset are unchanged
         xr.testing.assert_identical(result.point_z.variable, source.point_z.variable)
         xr.testing.assert_identical(source, original)
-
 
     @pytest.mark.parametrize("dimensions", ["native", "transposed", "cf"])
     def test_stats__shared_grouping(self, mixed_dataset: xr.Dataset, dimensions: str) -> None:
@@ -1037,6 +1033,7 @@ class TestDatasetRasterAccessor:
         # the Dataset method computes it only once
         intersect = fractional._grid_intersection_fractions
         calls = []
+
         def count_intersections(*args: Any, **kwargs: Any) -> Any:
             calls.append(1)
             return intersect(*args, **kwargs)
@@ -1096,6 +1093,7 @@ class TestDatasetRasterAccessor:
 
         # 2/ Write chunked rasters with the selected scheduler
         task_keys = []
+
         def fail_array_conversion(*args: Any, **kwargs: Any) -> Any:
             """Fail if the writer gathers the Dask raster into a NumPy array."""
             raise AssertionError("to_file() must write chunks without converting the complete Dask array to NumPy")
@@ -1314,9 +1312,7 @@ class TestDatasetRasterAccessorErrors:
             getattr(mixed_dataset.rst, method)(variables=variables, **options)
 
     @pytest.mark.parametrize("method,options", [("reproject", {"res": 2}), ("crop", {"bbox": (1, 1, 5, 4)})])
-    def test_methods__error_shared_grid(
-        self, mixed_dataset: xr.Dataset, method: str, options: dict[str, Any]
-    ) -> None:
+    def test_methods__error_shared_grid(self, mixed_dataset: xr.Dataset, method: str, options: dict[str, Any]) -> None:
         """Checks an error is raised when an unselected raster would be attached to new axes coordinates."""
 
         # Change only "dem" but not "slope" (that shares the same exes)
@@ -1346,6 +1342,7 @@ class TestDatasetRasterAccessorErrors:
         from dask.callbacks import Callback
 
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
+
         _register_dask_pointcloud_accessor()
         points = mixed_dataset.point_z.pc.to_geoutils().gdf
         lazy_points = dgpd.from_geopandas(points, npartitions=2)

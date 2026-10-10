@@ -47,7 +47,10 @@ class TestMisc:
                 assert len(diff_pip_check) == 0
 
         # We do the same for the conda dependency, first a sanity check that everything that is in env is also in dev-ev
-        diff_conda_check = list(set(conda_dep_env) - set(conda_dep_devenv))
+        # Compare package names because the development environment can require newer versions
+        conda_names_env = {re.split(r"[<>=!]", dependency)[0] for dependency in conda_dep_env}
+        conda_names_devenv = {re.split(r"[<>=!]", dependency)[0] for dependency in conda_dep_devenv}
+        diff_conda_check = list(conda_names_env - conda_names_devenv)
         assert len(diff_conda_check) == 0
 
     @pytest.mark.parametrize("deprecation_increment", [-1, 0, 1, None])

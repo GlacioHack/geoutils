@@ -167,11 +167,11 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
     :template: raster_method.rst
 
     ~raster.base.RasterBase.copy
-    ~raster.base.RasterBase.astype
-    ~raster.base.RasterBase.set_mask
+    ~raster.raster.Raster.astype
+    ~raster.raster.Raster.set_mask
     ~raster.base.RasterBase.set_nodata
     ~raster.base.RasterBase.to_nanarray
-    ~raster.base.RasterBase.get_mask
+    ~raster.raster.Raster.get_mask
     ~raster.base.RasterBase.subsample
 ```
 
@@ -183,11 +183,11 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
     :template: raster_method.rst
 
     ~raster.base.RasterBase.load
-    ~raster.base.RasterBase.to_file
+    ~raster.raster.Raster.to_file
     ~raster.base.RasterBase.to_pointcloud
     ~raster.base.RasterBase.from_pointcloud_regular
-    ~raster.base.RasterBase.to_rio_dataset
-    ~raster.base.RasterBase.to_xarray
+    ~raster.raster.Raster.to_rio_dataset
+    ~raster.raster.Raster.to_xarray
 ```
 
 ### Georeferencing utilities

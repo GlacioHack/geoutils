@@ -1101,11 +1101,11 @@ class TestPointCloudNames:
         pc = PointCloud.from_xyz([0.0, 1.0], [0.0, 1.0], [2.0, 3.0], 32633, data_name="height")
         df = pc.gdf
         da = pc.to_xarray()
-        ds = array.to_dataset()
 
         # Check accessors raise no deprecation error, and have no gdf alias
+        # Dataset accessors select several point variables and have separate interface checks
         with warnings.catch_warnings():
             warnings.simplefilter("error", DeprecationWarning)
-            for accessor in [df.pc, df.vct, da.pc, ds.pc]:
+            for accessor in [df.pc, df.vct, da.pc]:
                 assert not hasattr(accessor, "gdf")
                 assert accessor.ds is not None

@@ -176,6 +176,7 @@ def _assign_filtered_point_values(
 # 2/ IN-MEMORY FILTERING: NEIGHBOURS + REDUCED VALUES
 ###################################################
 
+
 def _reduce_point_pairs_generic(
     reducer: Reducer,
     source_coordinates: NDArrayNum,
