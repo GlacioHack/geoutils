@@ -29,6 +29,7 @@ from contextlib import ExitStack, contextmanager
 from copy import copy
 from dataclasses import replace
 from importlib.util import find_spec
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Callable, Literal, cast
 
 import affine
@@ -110,9 +111,12 @@ from geoutils.operators.reducer import (
     _reduce_overlap_batch,
 )
 from geoutils.raster.referencing import (
+    _bbox,
+    _check_affine_georeferencing,
     _default_nodata,
     _ij2xy,
     _res,
+    _shift_gcps_rpcs,
     _xy2ij,
 )
 
@@ -259,6 +263,8 @@ def _check_reproj_nodata_dtype(
 def _is_reproj_needed(src_shape: tuple[int, int], reproj_kwargs: dict[str, Any]) -> bool:
     """Check if reprojection is actually needed based on transformation parameters."""
 
+    if reproj_kwargs.get("gcps") or reproj_kwargs.get("rpcs"):
+        return False
     src_transform = reproj_kwargs["src_transform"]
     transform = reproj_kwargs["dst_transform"]
     src_crs = reproj_kwargs["src_crs"]
@@ -373,7 +379,9 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
 
     # XSCALE/YSCALE have been supported for a while, but not officially exposed in the API until Rasterio 1.5,
     # so we need to silence them in warnings to avoid noise for users
-    with silence_rasterio_message(param_name="SCALE"):
+    with ExitStack() as stack:
+        for option in ("SCALE", "RPC_", "SRC_METHOD", "MAX_GCP_ORDER"):
+            stack.enter_context(silence_rasterio_message(param_name=option))
         # Run reprojection
         _ = rio.warp.reproject(src_arr, dst_arr, **reproj_kwargs)
 
@@ -848,6 +856,9 @@ def _build_geotiling_and_meta(
     src_chunks: tuple[tuple[int, ...], tuple[int, ...]],
     dst_chunksizes: tuple[int, int],
     source_pixel_overlap: tuple[int, int] = (0, 0),
+    gcps: list[rio.control.GroundControlPoint] | None = None,
+    rpcs: rio.rpc.RPC | None = None,
+    transformer_options: dict[str, Any] | None = None,
 ) -> tuple[
     ChunkedGeoGrid,
     ChunkedGeoGrid,
@@ -884,7 +895,8 @@ def _build_geotiling_and_meta(
     # which allow to consistently derive shape/transform for each block and their CRS-projected footprints
 
     # Define GeoGrids for source/destination array
-    src_geogrid = GeoGrid(transform=src_transform, shape=src_shape, crs=src_crs)
+    pixel_transform = rio.Affine.identity() if gcps or rpcs else src_transform
+    src_geogrid = GeoGrid(transform=pixel_transform, shape=src_shape, crs=src_crs)
     dst_geogrid = GeoGrid(transform=dst_transform, shape=dst_shape, crs=dst_crs)
 
     # Create tilings
@@ -894,7 +906,10 @@ def _build_geotiling_and_meta(
 
     # 2/ Get bounds of tiles in CRS of destination array, with a buffer of 2 pixels for destination ones to ensure
     # overlap, then map indexes of source blocks that intersect a given destination block
-    src_boxes = [box(*gg.bounds_projected(crs=dst_crs)) for gg in src_geotiling.get_blocks_as_geogrids()]
+    if gcps or rpcs:
+        src_boxes = _gcp_rpc_block_footprints(src_geotiling, src_crs, dst_crs, gcps, rpcs, transformer_options or {})
+    else:
+        src_boxes = [box(*gg.bounds_projected(crs=dst_crs)) for gg in src_geotiling.get_blocks_as_geogrids()]
     dst_boxes = [
         box(*gg.bounds_projected(crs=dst_crs)).buffer(2 * max(dst_geogrid.res))
         for gg in dst_geotiling.get_blocks_as_geogrids()
@@ -967,6 +982,44 @@ def _build_geotiling_and_meta(
     return src_geotiling, dst_geotiling, dst_chunks, dest2source, src_block_ids, meta_params, dst_block_geogrids
 
 
+def _gcp_rpc_block_footprints(
+    geotiling: ChunkedGeoGrid,
+    src_crs: CRS,
+    dst_crs: CRS,
+    gcps: list[rio.control.GroundControlPoint] | None,
+    rpcs: rio.rpc.RPC | None,
+    transformer_options: dict[str, Any],
+) -> list[Any]:
+    """Get bounds of source chunks in the destination CRS using GDAL's GCP or RPC pixel transformer."""
+
+    # Sample across each chunk (because a nonlinear model can curve both edges and interior)
+    fractions = np.linspace(0, 1, 21)
+    boxes = []
+    if rpcs is not None:
+        transformer = rio.transform.RPCTransformer(rpcs, **transformer_options)
+    else:
+        if transformer_options.get("MAX_GCP_ORDER") is not None:
+            raise NotImplementedError("Chunked GCP reprojection does not support MAX_GCP_ORDER.")
+        transformer = rio.transform.GCPTransformer(gcps, tps=transformer_options.get("SRC_METHOD") == "GCP_TPS")
+
+    # Close the GDAL transformer after mapping all chunk footprints (no source values are read)
+    with transformer:
+        for block in geotiling.get_block_locations():
+            cols = block["xs"] + fractions * (block["xe"] - block["xs"])
+            rows = block["ys"] + fractions * (block["ye"] - block["ys"])
+            cols, rows = np.meshgrid(cols, rows)
+            x, y = transformer.xy(rows.ravel(), cols.ravel(), offset="ul")
+            if src_crs != dst_crs:
+                x, y = projtools.reproject_points((x, y), in_crs=src_crs, out_crs=dst_crs)
+            x, y = np.asarray(x), np.asarray(y)
+            finite = np.isfinite(x) & np.isfinite(y)
+            # Fail-safe, should normally not happen
+            if not np.all(finite):
+                raise ValueError("GCP/RPC transformation failed to locate a source chunk; use eager reprojection.")
+            boxes.append(box(x.min(), y.min(), x.max(), y.max()))
+    return boxes
+
+
 def _reproject_per_block(
     *src_arrs: tuple[NDArrayNum],
     block_ids: list[dict[str, int]],
@@ -979,7 +1032,10 @@ def _reproject_per_block(
     """
 
     # A single-band Xarray block still has a leading band dimension, so include it in the delayed array shape
-    is_multiband = src_arrs[0].ndim == 3 if src_arrs else combined_meta["dst_count"] >= 2
+    if src_arrs:
+        is_multiband = src_arrs[0].ndim == 3
+    else:
+        is_multiband = combined_meta.get("dst_ndim") == 3 or combined_meta["dst_count"] >= 2
 
     # If no source chunk intersects, we return a chunk of destination nodata values
     if len(src_arrs) == 0:
@@ -987,8 +1043,8 @@ def _reproject_per_block(
         dst_shape = (
             (combined_meta["dst_count"], *combined_meta["dst_shape"]) if is_multiband else combined_meta["dst_shape"]
         )
-        dst_arr = np.zeros(dst_shape, dtype=np.dtype("float32"))
-        dst_arr[:] = np.nan
+        dst_arr = np.ma.masked_all(dst_shape, dtype=np.dtype("float32"))
+        dst_arr.data[:] = np.nan
         return dst_arr
 
     # First, we build an empty array with the combined shape, only with nodata values
@@ -1057,6 +1113,15 @@ def _reproject_per_block(
             "num_threads": 1,
         }
     )
+    if kwargs.get("gcps") or kwargs.get("rpcs"):
+        # The assembled array starts at these global pixel offsets, rather than at the full image origin
+        gcps, rpcs = _shift_gcps_rpcs(
+            (kwargs.get("gcps") or [], None),
+            kwargs.get("rpcs"),
+            row_off=src_transform.f,
+            col_off=src_transform.c,
+        )
+        kwargs.update(src_transform=None, gcps=gcps[0] or None, rpcs=rpcs)
     # Define dtype if undefined
     if "dtype" not in kwargs:
         kwargs.update({"dtype": comb_src_arr.dtype})
@@ -1116,6 +1181,10 @@ def _dask_reproject(
     # To raise appropriate error on missing optional dependency
     import_optional("dask")
 
+    # Warp GCP/RPC bands together so GDAL uses the same unified nodata mask as eager reprojection
+    if darr.ndim == 3 and (kwargs.get("gcps") or kwargs.get("rpcs")):
+        darr = darr.rechunk({0: -1})
+
     # Define the chunking
     # For source, we can use the .chunks attribute
     src_chunks = darr.chunks[-2:]  # In case input is multi-band
@@ -1136,12 +1205,16 @@ def _dask_reproject(
             src_chunks=src_chunks,
             dst_chunksizes=dst_chunksizes,
             source_pixel_overlap=source_pixel_overlap,
+            gcps=kwargs.get("gcps"),
+            rpcs=kwargs.get("rpcs"),
+            transformer_options=kwargs.get("transformer_options"),
         )
     )
 
     # We call a delayed function that uses rio.warp to reproject the combined source block(s) to each destination block
 
     # Add fixed arguments to keywords
+    kwargs.update(kwargs.pop("transformer_options", {}) or {})
     kwargs.update(
         {
             "src_nodata": src_nodata,
@@ -1184,10 +1257,12 @@ def _dask_reproject(
             return [blocks_delayed[bb, y, x] for (y, x) in coords]
 
         def _one_group(bb: int | None, nb: int) -> da.Array:
+            # Empty spatial chunks still need this band's count and the original number of array dimensions
+            combined_meta = {**meta_params[i][0], "dst_count": nb if bb is not None else 1, "dst_ndim": darr.ndim}
             r = _delayed_reproject_per_block(
                 *_src_chunks_for_group(bb),
                 block_ids=meta_params[i][1],
-                combined_meta=meta_params[i][0],
+                combined_meta=combined_meta,
                 source_band_offset=0 if bb is None else sum(darr.chunks[0][:bb]),
                 **kwargs,
             )
@@ -1268,17 +1343,21 @@ def _multiproc_reproject(
             src_count=rst.count,
             src_shape=rst.shape,
             src_transform=rst.transform,
-            src_crs=rst.crs,
+            src_crs=src_crs,
             dst_shape=dst_shape,
             dst_transform=dst_transform,
             dst_crs=dst_crs,
             src_chunks=src_chunks,
             dst_chunksizes=_split_chunk_size(mp_config.chunks),
             source_pixel_overlap=source_pixel_overlap,
+            gcps=kwargs.get("gcps"),
+            rpcs=kwargs.get("rpcs"),
+            transformer_options=kwargs.get("transformer_options"),
         )
     )
 
     # 4/ Call a delayed function that uses rio.warp to reproject the combined source block(s) to each destination block
+    kwargs.update(kwargs.pop("transformer_options", {}) or {})
     kwargs.update(
         {
             "src_nodata": src_nodata,
@@ -1332,6 +1411,7 @@ def _reproject(
     nodata: int | float | None = None,
     dtype: DTypeLike | None = None,
     resampling: Resampling | str | Interpolator | Reducer = None,
+    transformer_options: dict[str, Any] | None = None,
     force_source_nodata: int | float | None = None,
     silent: bool = False,
     n_threads: int = 0,
@@ -1345,7 +1425,11 @@ def _reproject(
     area_weighting: Literal["diagonal_bounds", "intersection"] = "diagonal_bounds",
 ) -> Any:
     """
-    Reproject raster. See Raster.reproject() for details.
+    Reproject a raster using its affine transform, GCPs or RPCs. See Raster.reproject() for options.
+
+    _check_match_grid() calculates the affine destination grid through GDAL. Eager sources use _rio_reproject(),
+    while _dask_reproject() and _multiproc_reproject() share _build_geotiling_and_meta() to select source chunks
+    and _reproject_per_block() to warp their combined pixels. GCP/RPC models are shifted to each source window.
     """
 
     # If resampling method undefined, default to the global system config
@@ -1353,9 +1437,59 @@ def _reproject(
         resampling = config["reprojection_method"]
 
     # 1/ Check and normalize match-grid inputs
-    _check_crs(source_raster.crs)
+    # Read the source model and its CRS from the raster's georeferencing
+    gcp_points, gcp_crs = source_raster.gcps
+    rpcs = source_raster.rpcs
+    if gcp_points and rpcs:
+        # Select one method for grid calculation and every backend without changing the stored metadata
+        source_method = (transformer_options or {}).get("SRC_METHOD")
+        if source_method == "RPC":
+            gcp_points = []
+        elif source_method in ("GCP_POLYNOMIAL", "GCP_TPS"):
+            rpcs = None
+        else:
+            raise ValueError(
+                "Source has both GCPs and RPCs; set transformer_options['SRC_METHOD'] to "
+                "'RPC', 'GCP_POLYNOMIAL' or 'GCP_TPS' before calling reproject()."
+            )
+
+    # Use the selected method's CRS for the destination grid and pixel transformation
+    src_crs = source_raster.crs
+    if rpcs is not None:
+        src_crs = CRS.from_epsg(4326)
+    elif gcp_points:
+        src_crs = gcp_crs or src_crs
+    _check_crs(src_crs)
+
+    # Model coordinates supply the source CRS even when the dataset has no affine CRS
+    georeferencing = None
+    grid_source: Any = source_raster
+    if gcp_points or rpcs:
+        if isinstance(resampling, (Interpolator, Reducer)):
+            raise ValueError("GCP/RPC reprojection requires a Rasterio resampling method.")
+        georeferencing = {"gcps": gcp_points or None, "rpcs": rpcs, **(transformer_options or {})}
+        # Pixel bounds describe the source image; GDAL uses the model to calculate the ground grid
+        pixel_bounds = _bbox(source_raster.transform, source_raster.shape)
+        grid_source = SimpleNamespace(
+            crs=src_crs,
+            shape=source_raster.shape,
+            width=source_raster.width,
+            height=source_raster.height,
+            transform=source_raster.transform,
+            res=_res(source_raster.transform),
+            bbox=pixel_bounds,
+            bounds=pixel_bounds,
+            area_or_point=source_raster.area_or_point,
+        )
     dst_shape, dst_transform, dst_crs = _check_match_grid(
-        src=source_raster, ref=ref, res=res, shape=grid_size, bounds=bounds, crs=crs, coords=None
+        src=grid_source,
+        ref=ref,
+        res=res,
+        shape=grid_size,
+        bounds=bounds,
+        crs=crs,
+        coords=None,
+        georeferencing=georeferencing,
     )
 
     # 2/ Check user input for nodata and dtype
@@ -1423,7 +1557,7 @@ def _reproject(
     reproj_kwargs = {
         "src_transform": source_raster.transform,
         "dst_transform": dst_transform,
-        "src_crs": source_raster.crs,
+        "src_crs": src_crs,
         "dst_crs": dst_crs,
         "resampling": resolved_resampling,
         "src_nodata": src_nodata,
@@ -1431,6 +1565,8 @@ def _reproject(
         "dtype": dtype,
         "dst_shape": dst_shape,
     }
+    if georeferencing is not None:
+        reproj_kwargs.update(src_transform=None, gcps=gcp_points or None, rpcs=rpcs)
 
     # 4/ Check if reprojection is needed, otherwise return source raster with warning
     if not is_operator and _is_reproj_needed(src_shape=source_raster.shape, reproj_kwargs=reproj_kwargs):
@@ -1509,15 +1645,20 @@ def _reproject(
 
     # If using Multiprocessing backend, process and return None (files written on disk)
     if mp_config is not None:
+        if georeferencing is not None:
+            reproj_kwargs.update(transformer_options=transformer_options)
         _multiproc_reproject(source_raster, mp_config=mp_config, **reproj_kwargs)  # type: ignore
         return False, None, None, None, None
 
     # If using Dask backend, process and return Dask array
     if da is not None and isinstance(source_raster.data, da.Array):
+        if georeferencing is not None:
+            reproj_kwargs.update(transformer_options=transformer_options)
         dst_arr = _dask_reproject(darr=source_raster.data, **reproj_kwargs)
 
     # If using direct reprojection, process and return NumPy array
     else:
+        reproj_kwargs.update(transformer_options or {})
         dst_arr = _rio_reproject(src_arr=source_raster.data, reproj_kwargs=reproj_kwargs)
 
     result = False, dst_arr, reproj_kwargs["dst_transform"], reproj_kwargs["dst_crs"], reproj_kwargs["dst_nodata"]
@@ -1535,6 +1676,10 @@ def _crop_window(
     distance_unit: Literal["georeferenced", "pixel"] = "georeferenced",
 ) -> tuple[rio.windows.Window, affine.Affine]:
     """Return the aligned source window and transform selected by a bounding box."""
+
+    # Geographic bounds require an affine grid; pixel windows can shift a GCP/RPC model directly
+    if distance_unit == "georeferenced":
+        _check_affine_georeferencing(source_raster, "crop()")
 
     # Check input, raise appropriate errors and warnings
     bbox = _check_match_bbox(source_raster, bbox)
@@ -1756,6 +1901,9 @@ def _clip(
     those features for eager or Dask masking, while _multiproc_clip() selects the matching features before dispatching
     each raster block.
     """
+
+    # Rasterization uses an affine grid, so check before reading values or scheduling workers
+    _check_affine_georeferencing(source_raster, "clip()")
 
     from geoutils.vector.vector import Vector
 

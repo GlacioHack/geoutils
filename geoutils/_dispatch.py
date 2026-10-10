@@ -47,7 +47,7 @@ from geoutils.projtools import (
     _get_bounds_projected,
     reproject_points,
 )
-from geoutils.raster.referencing import _cast_pixel_interpretation
+from geoutils.raster.referencing import _cast_pixel_interpretation, _check_affine_georeferencing
 
 if TYPE_CHECKING:
     from geoutils.pointcloud.pointcloud import PointCloudLike
@@ -613,6 +613,7 @@ def _grid_from_src(
     shape: tuple[int, int] | None = None,
     res: tuple[Number, Number] | Number | None = None,
     bounds: tuple[Number, Number, Number, Number] | None = None,
+    georeferencing: dict[str, Any] | None = None,
 ) -> tuple[tuple[int, int], rio.Affine]:
     """
     Helper function to get default grid shape/transform from user inputs, including "fallback" from source.
@@ -648,7 +649,7 @@ def _grid_from_src(
 
     # First, for a raster source, if all are the same, return exactly source transform and size
     # (to avoid approximation errors from calculations below)
-    if hasattr(src, "transform") and isinstance(src.transform, rio.Affine):
+    if georeferencing is None and hasattr(src, "transform") and isinstance(src.transform, rio.Affine):
         if (
             (dst_crs == src.crs)
             & ((shape is None) | (shape == src.shape))
@@ -678,19 +679,23 @@ def _grid_from_src(
     if res is None and shape is None:
         width, height = src.width, src.height
 
+    # Bounds and GCP/RPC models are mutually exclusive in Rasterio
+    source_location = (
+        georeferencing
+        if georeferencing is not None
+        else {"left": src_bbox[0], "bottom": src_bbox[1], "right": src_bbox[2], "top": src_bbox[3]}
+    )
+
     # We let Rasterio figure out the default transform (i.e. resolution) in the new CRS with same size output
     transform, width, height = rio.warp.calculate_default_transform(
         src.crs,
         dst_crs,
         src_width,
         src_height,
-        left=src_bbox[0],
-        right=src_bbox[2],
-        top=src_bbox[3],
-        bottom=src_bbox[1],
         resolution=res,  # Only defined if shape is None
         dst_width=width,  # Only defined if res is None
         dst_height=height,  # Only defined if res is None
+        **source_location,
     )
     out_shape = height, width
 
@@ -743,6 +748,7 @@ def _check_match_grid(
     bounds: tuple[Number, Number, Number, Number] | None,
     coords: tuple[NDArrayNum, NDArrayNum] | None,
     crs: pyproj.CRS | None,
+    georeferencing: dict[str, Any] | None = None,
 ) -> tuple[tuple[int, int], rio.Affine, pyproj.CRS]:
     """
     Function for checking and normalizing input of match feature on grids consistently.
@@ -793,6 +799,10 @@ def _check_match_grid(
             and has_geo_attr(ref, "crs")
             and isinstance(get_geo_attr(ref, "transform"), rio.Affine)
         ):
+            # A GCP/RPC image does not define the regular affine grid required for a destination
+            raster_reference = get_geo_interface(ref, "transform", accessors=("rst",))
+            _check_affine_georeferencing(raster_reference, "Reference grid")
+
             # Match the spatial grid even when a native Xarray reference includes a band dimension
             dst_shape = get_geo_attr(ref, "shape")[-2:]
             dst_transform = get_geo_attr(ref, "transform")
@@ -855,7 +865,9 @@ def _check_match_grid(
                         "resolution of source object."
                     )
                     # We calculate for potential differing CRS and target bounds
-                    dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src, bounds=dst_bounds)
+                    dst_shape, dst_transform = _grid_from_src(
+                        dst_crs=dst_crs, src=src, georeferencing=georeferencing, bounds=dst_bounds
+                    )
             if coords is not None:
                 msg = (
                     f"Reference input from object of type {type(ref).__name__!r} and provided 'res' or 'shape' already "
@@ -867,9 +879,13 @@ def _check_match_grid(
             # Resolution and shape: after the above, one or the other must not be None
             # (Note: Both are already defined in target CRS, so no need for projected calculations)
             if res is not None:
-                dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src, bounds=dst_bounds, res=res)
+                dst_shape, dst_transform = _grid_from_src(
+                    dst_crs=dst_crs, src=src, georeferencing=georeferencing, bounds=dst_bounds, res=res
+                )
             elif shape is not None:
-                dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src, bounds=dst_bounds, shape=shape)
+                dst_shape, dst_transform = _grid_from_src(
+                    dst_crs=dst_crs, src=src, georeferencing=georeferencing, bounds=dst_bounds, shape=shape
+                )
 
         else:
             raise InvalidGridError(
@@ -910,20 +926,28 @@ def _check_match_grid(
                 # If user-input was passed
                 if res is not None and bounds is not None:
                     logging.debug("Match grid input: using bounds and resolution to derive grid.")
-                    dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src, bounds=bounds, res=res)
+                    dst_shape, dst_transform = _grid_from_src(
+                        dst_crs=dst_crs, src=src, georeferencing=georeferencing, bounds=bounds, res=res
+                    )
                 if shape is not None and bounds is not None:
                     logging.debug("Match grid input: using bounds and shape to derive grid.")
-                    dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src, bounds=bounds, shape=shape)
+                    dst_shape, dst_transform = _grid_from_src(
+                        dst_crs=dst_crs, src=src, georeferencing=georeferencing, bounds=bounds, shape=shape
+                    )
 
                 # Fallback to source if res/shape or bounds undefined
                 if bounds is None and (shape is not None or res is not None):
                     logging.debug("Match grid input: no bounds defined, fallback on source object.")
-                    dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src, shape=shape, res=res)
+                    dst_shape, dst_transform = _grid_from_src(
+                        dst_crs=dst_crs, src=src, georeferencing=georeferencing, shape=shape, res=res
+                    )
                 if bounds is not None and (res is None and shape is None):
                     logging.debug("Match grid input: no resolution defined, fallback on source object.")
-                    dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src, bounds=bounds)
+                    dst_shape, dst_transform = _grid_from_src(
+                        dst_crs=dst_crs, src=src, georeferencing=georeferencing, bounds=bounds
+                    )
                 if bounds is None and (res is None and shape is None):
-                    dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src)
+                    dst_shape, dst_transform = _grid_from_src(dst_crs=dst_crs, src=src, georeferencing=georeferencing)
 
         # If coordinates are defined
         if coords is not None:
