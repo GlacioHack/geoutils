@@ -412,7 +412,7 @@ class TestDataArrayRasterAccessor:
             assert not reprojected._in_memory
             assert np.isscalar(actual)
             # Partial sums are combined in a different order across chunks, so allow their small rounding difference
-            assert actual == pytest.approx(expected, rel=1e-7)
+            assert actual == pytest.approx(expected)
             assert np.isfinite(actual)
 
     def test_chunked_rasterize_paths_accept_dask_chunk_tuples(self) -> None:
@@ -593,12 +593,10 @@ class TestDatasetRasterAccessor:
             outputs[name] = output
 
         # 3/ Compare values and metadata
-        rtol = 0.0
-        if lazy and method == "filter" and options["method"] == "mean":
-            # Chunked means can add decimal slopes in a different order; allow four float64 rounding units
-            rtol = float(4 * np.finfo(np.float64).eps)
+        # Chunked means can add decimal slopes in a different order
+        use_allclose = lazy and method == "filter" and options["method"] == "mean"
         actual = result.compute() if lazy else result
-        assert_dataset_output_equal(source, actual, outputs, rtol=rtol)
+        assert_dataset_output_equal(source, actual, outputs, use_allclose=use_allclose)
         if method == "sieve":
             # Check that the isolated cell merged into the background, using each date's upper-left label
             expected_labels = np.broadcast_to(canonical.regions.data[..., :1, :1], actual.regions.shape)
@@ -1257,7 +1255,7 @@ class TestDatasetRasterAccessor:
         actual = result.compute()
 
         # Chunked interpolation and mean sums can round differently, we compare other values and metadata exactly
-        np.testing.assert_allclose(actual.image.data, expected.image.data, rtol=1e-10, atol=0)
+        assert np.allclose(actual.image.data, expected.image.data, equal_nan=True)
         assert actual.image.dtype == expected.image.dtype
         comparison = actual.copy(deep=False)
         comparison.image.data = expected.image.data

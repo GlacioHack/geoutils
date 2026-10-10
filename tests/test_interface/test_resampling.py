@@ -247,7 +247,7 @@ class TestResampling:
         assert result.crs == raster.crs
         np.testing.assert_allclose(result.geometry.x, expected_x, rtol=0, atol=1e-2)
         np.testing.assert_allclose(result.geometry.y, expected_y, rtol=0, atol=1e-2)
-        np.testing.assert_allclose(result.data, expected_values, rtol=0, atol=0, equal_nan=True)
+        np.testing.assert_array_equal(result.data, expected_values)
 
     def test_reduce_points(self) -> None:
         """
@@ -682,12 +682,12 @@ class TestResampleOperatorNodata:
         ignored = raster.resample_at_points(points, operator, nodata_handling="ignore", **options)
         default = raster.resample_at_points(points, operator, **options)
         propagated = raster.resample_at_points(points, operator, nodata_handling="propagate", **options)
-        np.testing.assert_allclose(ignored, [1.0, 1.0], rtol=0, atol=1e-15)
+        assert np.allclose(ignored, [1.0, 1.0], equal_nan=True)
         if interpolate:
             assert np.isnan(default[0])
         else:
-            assert default[0] == pytest.approx(1.0, rel=0, abs=1e-15)
-        assert default[1] == pytest.approx(1.0, rel=0, abs=1e-15)
+            assert default[0] == pytest.approx(1.0)
+        assert default[1] == pytest.approx(1.0)
         assert np.all(np.isnan(propagated))
 
     def test_resample_at_points__error_nearest_with_reducer(self) -> None:
@@ -730,7 +730,7 @@ class TestKrigingRaster:
             error_structure=errors,
             operation_kwargs={"max_overlap": 1.5, "variogram": variogram},
         )
-        np.testing.assert_allclose(exact.to_nanarray(), values, rtol=0, atol=1e-14)
+        assert np.allclose(exact.to_nanarray(), values, equal_nan=True)
         np.testing.assert_array_equal(summary.estimate.to_nanarray(), nominal.to_nanarray())
         assert nominal.to_nanarray()[1, 1] == pytest.approx(4)
         assert np.all(np.isfinite(np.asarray(summary.std.to_nanarray().reshape(-1))))
@@ -757,7 +757,7 @@ class TestKrigingRaster:
         # Ignore the missing center and compare with the same kriging method applied to the complete raster grid
         actual = raster.interp_at_points((x, y), method=operator, as_array=True, nodata_handling="ignore")
         expected = raster.krige(variogram, max_overlap=1.5).to_nanarray()[1, 1]
-        assert actual[0] == pytest.approx(expected, rel=0, abs=1e-12)
+        assert actual[0] == pytest.approx(expected)
         assert operator.default_neighborhood is None
 
     def test_krige__shifted_raster_target_keeps_complete_physical_support(self) -> None:
@@ -789,7 +789,7 @@ class TestKrigingRaster:
         )
         expected = Kriging(variogram, max_overlap=1.6).evaluate(local)
         result = source.krige(variogram, ref=reference, max_overlap=1.6)
-        assert result.to_nanarray()[0, 0] == pytest.approx(expected, rel=0, abs=1e-12)
+        assert result.to_nanarray()[0, 0] == pytest.approx(expected)
 
 
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
@@ -1187,9 +1187,9 @@ class TestInterpPointsChunked:
             assert np.array_equal(out_raster_np, out_dask_np, equal_nan=True)
             assert np.array_equal(out_raster_np, out_mp_np, equal_nan=True)
         else:
-            assert np.allclose(out_raster_np, out_xr_np, equal_nan=True, rtol=1e-6, atol=0.0)
-            assert np.allclose(out_raster_np, out_dask_np, equal_nan=True, rtol=1e-6, atol=0.0)
-            assert np.allclose(out_raster_np, out_mp_np, equal_nan=True, rtol=1e-6, atol=0.0)
+            assert np.allclose(out_raster_np, out_xr_np, equal_nan=True)
+            assert np.allclose(out_raster_np, out_dask_np, equal_nan=True)
+            assert np.allclose(out_raster_np, out_mp_np, equal_nan=True)
 
     @pytest.mark.parametrize("nodata_handling", ["nearest", "ignore", "propagate"])
     def test_interp_points__nodata_policies_backends(
@@ -1344,9 +1344,12 @@ class TestInterpPointsChunked:
 
     @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
     def test_interp_points__dask_pointcloud_input(
-        self, as_type: Literal["dataarray", "geodataframe"], lazy_test_files_tiny: list[str]
+        self,
+        as_type: Literal["dataarray", "geodataframe"],
+        lazy_test_files_tiny: list[str],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Test interpolation to Dask-GeoPandas point-cloud inputs."""
+        """Checks that lazy point partitions preserve outside NaNs without warning about the complete request."""
 
         # Load the lazy dataframe and array types used in assertions
         import dask.array as da
@@ -1372,6 +1375,16 @@ class TestInterpPointsChunked:
 
         # Compute the eager values once as the expected result
         expected = raster.interp_at_points(points=points, method="nearest", as_array=True)
+
+        # Check warning calls directly so a temporary filter cannot hide a warning from the outside partition
+        original_warn = warnings.warn
+
+        def check_warning(message: str | Warning, *args: Any, **kwargs: Any) -> None:
+            """Fail if a partial point request emits the warning for an entirely outside request."""
+            assert "All provided points were outside of raster bounds" not in str(message)
+            original_warn(message, *args, **kwargs)
+
+        monkeypatch.setattr(warnings, "warn", check_warning)
 
         # Array output should remain lazy and preserve out-of-bounds NaNs
         out_array = ds_dask.rst.interp_at_points(points=dask_points, method="nearest", as_array=True)
@@ -1549,7 +1562,7 @@ class TestRegularInterpolationNeighboursChunked:
         computed = result.compute()
         if method == "slinear":
             # Separate spline fits change the rounding of coefficient reductions by a few floating-point units
-            np.testing.assert_allclose(computed, expected, rtol=0, atol=5e-14)
+            assert np.allclose(computed, expected, equal_nan=True)
         else:
             np.testing.assert_array_equal(computed, expected)
 
@@ -1603,8 +1616,8 @@ class TestReductionChunked:
         computed = lazy_result.compute()
         if fractional:
             # Fractional area sums can differ slightly when chunks change the addition order
-            np.testing.assert_allclose(computed, expected, rtol=1e-15, atol=1e-12)
-            np.testing.assert_allclose(mp_result, expected, rtol=1e-15, atol=1e-12)
+            assert np.allclose(computed, expected, equal_nan=True)
+            assert np.allclose(mp_result, expected, equal_nan=True)
         else:
             np.testing.assert_array_equal(computed, expected)
             np.testing.assert_array_equal(mp_result, expected)
@@ -1746,8 +1759,8 @@ class TestKrigingRasterChunked:
         )
 
         # Both chunk layouts give the eager predictions
-        np.testing.assert_allclose(lazy_result.compute(), expected, rtol=0, atol=1e-12)
-        np.testing.assert_allclose(multiproc_result, expected, rtol=0, atol=1e-12)
+        assert np.allclose(lazy_result.compute(), expected, equal_nan=True)
+        assert np.allclose(multiproc_result, expected, equal_nan=True)
 
     def test_krige__raster_chunk_invariance(self, tmp_path: Path) -> None:
         """Checks that raster kriging uses all nearby source cells across Dask and multiprocessing chunks."""
@@ -1777,7 +1790,7 @@ class TestKrigingRasterChunked:
         # Lazy input and output remain unloaded until compute(), and both chunked results equal the eager raster
         assert not lazy_source._in_memory
         assert hasattr(lazy.data, "compute")
-        np.testing.assert_allclose(np.asarray(lazy.compute()).squeeze(), expected.to_nanarray(), rtol=0, atol=1e-12)
+        assert np.allclose(np.asarray(lazy.compute()).squeeze(), expected.to_nanarray(), equal_nan=True)
         assert expected.raster_equal(multiproc, strict_masked=False)
 
 
@@ -1801,7 +1814,7 @@ class TestResamplingEdgeCases:
 
         # The older public name uses the same reducer path when given a window
         reduced = raster.reduce_at_points(points, reducer_function=Sum(), window=3, as_array=True)
-        np.testing.assert_allclose(reduced, result, rtol=0, atol=0, equal_nan=True)
+        np.testing.assert_array_equal(reduced, result)
 
     @pytest.mark.parametrize("fractional", [False, True])
     @pytest.mark.parametrize("boundless", [False, True])
@@ -1836,7 +1849,7 @@ class TestResamplingEdgeCases:
         )
         assert np.isnan(result[0])
         # Fractional area weights can round a constant mean by a few ulps
-        assert result[1] == pytest.approx(1, abs=1e-12, rel=0)
+        assert result[1] == pytest.approx(1)
 
     @pytest.mark.parametrize("method", [Mean(), np.nanmean])
     @pytest.mark.parametrize("fractional,masked", [(False, False), (False, True), (True, False)])

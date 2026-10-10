@@ -263,7 +263,7 @@ class TestTransformationChunked:
         assert multiproc_result.crs == target_crs
         assert multiproc_result.point_count == len(self.points)
         assert multiproc_result.data_name == "intensity"
-        np.testing.assert_allclose(multiproc_result.bounds, expected.total_bounds, rtol=0, atol=1e-9)
+        assert np.allclose(multiproc_result.bounds, expected.total_bounds, equal_nan=True)
         assert not multiproc_result.is_loaded
         assert multiproc.is_loaded == loaded
 

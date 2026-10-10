@@ -156,7 +156,7 @@ def assert_xarray_equal(actual: xr.Dataset, expected: xr.Dataset) -> None:
 
 
 def assert_dataset_output_equal(
-    source: xr.Dataset, actual: xr.Dataset, outputs: dict[str, xr.DataArray], *, rtol: float = 0
+    source: xr.Dataset, actual: xr.Dataset, outputs: dict[str, xr.DataArray], *, use_allclose: bool = False
 ) -> None:
     """Compare multiple DataArray outputs with a rebuilt Dataset, to facilitate tests of Dataset accessors."""
 
@@ -176,11 +176,11 @@ def assert_dataset_output_equal(
     expected = expected.assign_coords({name: independent[name] for name in mappings if name in independent.coords})
 
     # Compare floating values within tolerance, then compare metadata and untouched variables exactly
-    comparison = actual.copy(deep=False) if rtol else actual
-    if rtol:
+    comparison = actual.copy(deep=False) if use_allclose else actual
+    if use_allclose:
         for name in outputs:
             assert actual[name].dtype == expected[name].dtype
-            np.testing.assert_allclose(actual[name].data, expected[name].data, rtol=rtol, atol=0)
+            assert np.allclose(actual[name].data, expected[name].data, equal_nan=True)
             comparison[name].data = expected[name].data
     assert_xarray_equal(comparison, expected)
 

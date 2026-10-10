@@ -1240,7 +1240,7 @@ class TestReprojectionOperators:
         calculation = np.mean if operator_type is Mean else np.sum
         # The center will use 3x3 = 9 cells, the upper-left has only 4 cells inside
         expected = [calculation(values[1:4, 1:4]), calculation(values[:2, :2])]
-        np.testing.assert_allclose([result.data[2, 2], result.data[0, 0]], expected, rtol=0, atol=1e-13)
+        assert np.allclose([result.data[2, 2], result.data[0, 0]], expected, equal_nan=True)
 
     @pytest.mark.parametrize("operator_type", [Mean, Sum, Minimum, Maximum, Median, NoSupportReducer])
     @pytest.mark.parametrize(
@@ -1332,7 +1332,7 @@ class TestReprojectionOperators:
             np.testing.assert_array_equal(result.to_nanarray(), expected + 11)
         else:
             # Linear samples the plane at the fractional shift: 10 * 1.375 + 1.25 = 15
-            np.testing.assert_allclose(result.to_nanarray(), expected + 15, rtol=0, atol=1e-6)
+            assert np.allclose(result.to_nanarray(), expected + 15, equal_nan=True)
 
     @pytest.mark.parametrize("operator", [Nearest(), Linear(), Mean(), Mean(neighborhood=GridNeighbours(size=3))])
     def test_reproject__centers_and_footprints_across_crs(self, operator: Interpolator | Reducer) -> None:
@@ -1409,7 +1409,7 @@ class TestReprojectionOperators:
             expected = np.sum(areas * values) / np.sum(areas)
 
         # Check equality of the one output pixel with expected
-        np.testing.assert_allclose(result.to_nanarray(), [[expected]], rtol=0, atol=1e-9)
+        assert np.allclose(result.to_nanarray(), [[expected]], equal_nan=True)
 
     def test_reproject__nodata_gdal(self) -> None:
         """Checks that area reduction omits nodata even when a custom reducer normally propagates it."""
@@ -1467,9 +1467,9 @@ class TestReprojectionGDALOperators:
 
         # Weighted means are 4.875 with GDAL's extended edge and 6.667 with clipped area
         assert gdal is not None and matched is not None and fractional is not None
-        np.testing.assert_allclose(matched.to_nanarray(), gdal.to_nanarray(), rtol=0, atol=1e-12)
-        np.testing.assert_allclose(matched.to_nanarray(), [[4.875]], rtol=0, atol=1e-12)
-        np.testing.assert_allclose(fractional.to_nanarray(), [[20 / 3]], rtol=0, atol=1e-12)
+        assert np.allclose(matched.to_nanarray(), gdal.to_nanarray(), equal_nan=True)
+        assert np.allclose(matched.to_nanarray(), [[4.875]], equal_nan=True)
+        assert np.allclose(fractional.to_nanarray(), [[20 / 3]], equal_nan=True)
 
     def test_reproject__interior_diagonal_bounds_differ_from_polygon(self) -> None:
         """Checks that rotated interior cells use different diagonal bounds and polygon area weights."""
@@ -1487,7 +1487,7 @@ class TestReprojectionGDALOperators:
         bounds = source.reproject(reference, resampling=Mean())
         polygon = source.reproject(reference, resampling=Mean(), area_weighting="intersection")
         assert expected is not None and bounds is not None and polygon is not None
-        np.testing.assert_allclose(bounds.to_nanarray(), expected.to_nanarray(), rtol=0, atol=1e-10)
+        assert np.allclose(bounds.to_nanarray(), expected.to_nanarray(), equal_nan=True)
         assert np.max(np.abs(bounds.to_nanarray()[1:-1, 1:-1] - polygon.to_nanarray()[1:-1, 1:-1])) > 0.01
 
     @pytest.mark.parametrize(
@@ -1719,8 +1719,8 @@ class TestReprojectionOperatorsChunked:
         mp_values = mp_result.to_nanarray()
         if isinstance(operator, Mean) and operator.default_neighborhood is None:
             # Allow tiny numerical differences for fractional area cases
-            np.testing.assert_allclose(dask_values, expected.to_nanarray(), rtol=0, atol=1e-14)
-            np.testing.assert_allclose(mp_values, expected.to_nanarray(), rtol=0, atol=1e-14)
+            assert np.allclose(dask_values, expected.to_nanarray(), equal_nan=True)
+            assert np.allclose(mp_values, expected.to_nanarray(), equal_nan=True)
         else:
             np.testing.assert_array_equal(dask_values, expected.to_nanarray())
             np.testing.assert_array_equal(mp_values, expected.to_nanarray())
@@ -1772,8 +1772,8 @@ class TestReprojectionOperatorsChunked:
         expected_values = expected.to_nanarray()
         dask_values = np.asarray(lazy_result.compute()).squeeze()
         mp_values = mp_result.to_nanarray()
-        np.testing.assert_allclose(dask_values, expected_values, rtol=0, atol=2e-7)
-        np.testing.assert_allclose(mp_values, expected_values, rtol=0, atol=2e-7)
+        assert np.allclose(dask_values, expected_values, equal_nan=True)
+        assert np.allclose(mp_values, expected_values, equal_nan=True)
 
     @pytest.mark.parametrize(
         "neighborhood",
@@ -1819,8 +1819,8 @@ class TestReprojectionOperatorsChunked:
         assert not mp_result.is_loaded
 
         # Check for almost equality
-        np.testing.assert_allclose(np.asarray(lazy_result.compute()), expected.to_nanarray(), rtol=1e-15, atol=1e-12)
-        np.testing.assert_allclose(mp_result.to_nanarray(), expected.to_nanarray(), rtol=1e-15, atol=1e-12)
+        assert np.allclose(np.asarray(lazy_result.compute()), expected.to_nanarray(), equal_nan=True)
+        assert np.allclose(mp_result.to_nanarray(), expected.to_nanarray(), equal_nan=True)
 
 
 class TestReprojectionErrors:

@@ -895,12 +895,10 @@ def _resample_points_dask_pointcloud(
 
 def _resample_array_point_partition(source: Any, x: Any, y: Any, options: dict[str, Any]) -> Any:
     """Resample raster values at one raw point block without constructing geometry objects."""
+
     # A block outside the raster yields NaN without warning about the complete point input
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore", message="All provided points were outside of raster bounds", category=UserWarning
-        )
-        values = _resample_at_points(source, (x, y), as_array=True, **options)
+    values = _resample_at_points(source, (x, y), as_array=True, _warn_outside=False, **options)
+
     # Nested raster work runs within this task so a single distributed worker cannot wait for itself
     return values.compute(scheduler="synchronous") if hasattr(values, "compute") else values
 
@@ -1248,6 +1246,7 @@ def _prepare_resampling_points(
     input_latlon: bool,
     boundless: bool,
     options: dict[str, Any],
+    warn_outside: bool,
 ) -> tuple[tuple[NDArrayNum, NDArrayNum] | None, NDArrayBool, bool]:
     """Normalize target coordinates and select points with enough source cells for resampling."""
 
@@ -1310,9 +1309,8 @@ def _prepare_resampling_points(
                 ind_outofbounds |= (np.floor(j) + lower[1] < 0) | (np.floor(j) + upper[1] >= shape[1])
 
         # Warn before returning missing values for an entirely outside interpolation request
-        if np.count_nonzero(~ind_outofbounds) == 0:
-            if isinstance(operator, Interpolator):
-                warnings.warn("All provided points were outside of raster bounds, returning only NaNs.")
+        if warn_outside and not np.any(~ind_outofbounds) and isinstance(operator, Interpolator):
+            warnings.warn("All provided points were outside of raster bounds, returning only NaNs.")
         return (x, y), ~ind_outofbounds, input_scalar
     return None, np.empty(0, dtype=bool), input_scalar
 
@@ -1405,6 +1403,7 @@ def _resample_at_points(
     window: int | None = None,
     window_shape: Literal["square", "circular"] | None = None,
     masked: bool = False,
+    _warn_outside: bool = True,
     **kwargs: Any,
 ) -> Any:
     """
@@ -1417,6 +1416,7 @@ def _resample_at_points(
 
     :param _validity_only: Sample availability using float32 one for finite cells and NaN for missing cells.
         Conversion happens within each loaded band or worker tile, without loading a complete validity raster.
+    :param _warn_outside: Warn when every point is outside the raster. Disable for individual lazy point partitions.
     """
 
     # Validate band selection before resolving method and neighborhood options
@@ -1513,7 +1513,12 @@ def _resample_at_points(
 
     # Normalize coordinates and select targets within the complete raster
     coordinates, inside, input_scalar = _prepare_resampling_points(
-        source_raster, points, input_latlon=input_latlon, boundless=boundless, options=options
+        source_raster,
+        points,
+        input_latlon=input_latlon,
+        boundless=boundless,
+        options=options,
+        warn_outside=_warn_outside,
     )
     selected_points = None
     if coordinates is not None:

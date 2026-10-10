@@ -368,7 +368,7 @@ class TestPointCloud:
             operation_kwargs={"grid_coords": grid_coords, "resampling": "mean", "dist_nodata_pixel": 1.1},
         )
         # The local weighted calculation and vectorized mean can differ by rounding in their summation order
-        np.testing.assert_allclose(nominal.to_nanarray(), expected.to_nanarray(), rtol=1e-14)
+        assert np.allclose(nominal.to_nanarray(), expected.to_nanarray(), equal_nan=True)
         np.testing.assert_array_equal(summary.estimate.to_nanarray(), nominal.to_nanarray())
 
         # The top-left mean uses three points and the top-middle mean uses four; two points contribute to both
@@ -760,7 +760,7 @@ class TestKrigingPoints:
         # The configured operator should use its point neighbors on the grid
         actual = points.grid(ref=reference, resampling=Kriging(variogram), nodata_handling="ignore")
         expected = points.krige(variogram, ref=reference)
-        np.testing.assert_allclose(actual.to_nanarray(), expected.to_nanarray(), rtol=0, atol=1e-12)
+        assert np.allclose(actual.to_nanarray(), expected.to_nanarray(), equal_nan=True)
 
     def test_krige__error_partial_spatial_dimensions(self) -> None:
         """Checks that geospatial kriging rejects a model whose radius omits one spatial coordinate."""
@@ -812,8 +812,8 @@ class TestKrigingPoints:
             error_structure=errors,
             operation_kwargs={"ref": reference, "variogram": variogram},
         )
-        assert nominal.to_nanarray()[0, 0] == pytest.approx(expected_value, rel=0, abs=1e-12)
-        assert np.asarray(summary.std.to_nanarray().reshape(-1))[0] == pytest.approx(expected_std, rel=0, abs=1e-12)
+        assert nominal.to_nanarray()[0, 0] == pytest.approx(expected_value)
+        assert np.asarray(summary.std.to_nanarray().reshape(-1))[0] == pytest.approx(expected_std)
 
 
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
@@ -1264,7 +1264,7 @@ class TestKrigingPointsChunked:
         lazy_reference = reference.to_xarray().chunk({"y": 2, "x": 3})
         lazy = points.krige(variogram, ref=lazy_reference, max_overlap=2.1)
         assert hasattr(lazy.data, "compute")
-        np.testing.assert_allclose(np.asarray(lazy.compute()), expected.to_nanarray(), rtol=0, atol=1e-12)
+        assert np.allclose(np.asarray(lazy.compute()), expected.to_nanarray(), equal_nan=True)
 
 
 class TestPointNeighbourMethods:

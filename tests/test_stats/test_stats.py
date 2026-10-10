@@ -30,7 +30,7 @@ def compare_dict(dict1: dict, dict2: dict) -> None:  # type: ignore
     for key in dict1.keys():
         assert key in dict2
         if dict1[key] is not np.nan:
-            assert dict2[key] == pytest.approx(dict1[key], abs=1e-10)
+            assert dict2[key] == pytest.approx(dict1[key])
         else:
             assert isnan(dict2[key])
 

@@ -697,7 +697,7 @@ class TestCosampleChunked:
         assert np.array_equal(result.compute().values, expected.data.filled(np.nan), equal_nan=True)
         assert not lazy_points.pc.is_loaded
 
-    @pytest.mark.parametrize("chunks", [(7, 11), (32, 47), (256, 256)])
+    @pytest.mark.parametrize("chunks", [(7, 11), (12, 17), (256, 256)])
     @pytest.mark.parametrize("caller", ["raster", "points"])
     @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
     def test_cosample__dask_gridding_chunks(
@@ -706,17 +706,19 @@ class TestCosampleChunked:
         """Checks that Dask point gridding returns the same seeded sample as eager gridding for each chunk size."""
 
         # Place one point at each grid pixel so the nearest-neighbor gridding is exact
-        values = np.arange(65 * 97, dtype=float).reshape(65, 97)
+        # The small grid covers nine tiles, four tiles and one tile, with shorter edge tiles
+        values = np.arange(17 * 23, dtype=float).reshape(17, 23)
         raster = _raster(values)
         points = raster.to_pointcloud()
         lazy_raster = raster.to_xarray().chunk({"y": chunks[0], "x": chunks[1]})
 
         # Write the points and reopen them as lazy partitions
+        # Four partitions include a shorter final partition of 88 points
         point_file = tmp_path / "observations.gpkg"
         points.to_file(point_file)
-        lazy_points = gu.open_pointcloud(str(point_file), data_name=points.data_name, chunks=1400, as_type=as_type)
+        lazy_points = gu.open_pointcloud(str(point_file), data_name=points.data_name, chunks=101, as_type=as_type)
 
-        # Grid lazy point data with two partition sizes and both public calling objects
+        # Grid lazy point data with three tile sizes and both public calling objects
         source, other = (lazy_raster.rst, lazy_points) if caller == "raster" else (lazy_points.pc, lazy_raster)
         result = source.cosample(
             other,
@@ -731,8 +733,10 @@ class TestCosampleChunked:
 
         # Check that all runs stay lazy and select the same pixels and values as the eager call
         assert result.data.chunks is not None
+        assert not lazy_raster.rst.is_loaded
         assert not lazy_points.pc.is_loaded
         assert np.array_equal(result.compute().values, expected.data.filled(np.nan), equal_nan=True)
+        assert not lazy_raster.rst.is_loaded
         assert not lazy_points.pc.is_loaded
 
     @pytest.mark.parametrize("reproject", [False, True])

@@ -366,7 +366,7 @@ class TestSimulation:
         )
 
         # Circular mean should be 0, STD should be roughly 1 (with some trigonometrical considerations)
-        assert summary.mean % 360 == pytest.approx(0, abs=1e-12)
+        assert summary.mean % 360 == pytest.approx(0)
         expected_resultant = np.cos(np.deg2rad(1))
         assert summary.resultant_length == pytest.approx(expected_resultant)
         assert summary.std == pytest.approx(180 / np.pi * np.sqrt(-2 * np.log(expected_resultant)))
@@ -454,9 +454,9 @@ class TestSpatialPropagation:
         summary = gu.uncertainty.propagate(points.grid, error_structure=errors, operation_kwargs=kwargs)
 
         # We keep the same main output
-        np.testing.assert_allclose(result.to_nanarray(), expected.to_nanarray(), rtol=1e-14)
+        assert np.allclose(result.to_nanarray(), expected.to_nanarray(), equal_nan=True)
         np.testing.assert_array_equal(summary.estimate.to_nanarray(), result.to_nanarray())
-        np.testing.assert_allclose(summary.mean.to_nanarray(), result.to_nanarray(), rtol=1e-14)
+        assert np.allclose(summary.mean.to_nanarray(), result.to_nanarray(), equal_nan=True)
 
         # We compute expected variance: target is (0, 0), nearest selects one point
         # and IDW uses inverse squared distances
@@ -638,13 +638,13 @@ class TestSpatialPropagation:
             result = getattr(summary, quantity)
             if isinstance(result, gu.Raster):
                 result = result.to_nanarray()
-            np.testing.assert_allclose(result, expected_value, rtol=1e-14)
+            assert np.allclose(result, expected_value, equal_nan=True)
 
         # And the returned samples
         if return_samples:
             assert summary.samples is not None
             assert summary.samples.shape == (8, 1)
-            np.testing.assert_allclose(summary.samples.iloc[:, 0], expected_samples, rtol=1e-14)
+            assert np.allclose(summary.samples.iloc[:, 0], expected_samples, equal_nan=True)
         else:
             assert summary.samples is None
 

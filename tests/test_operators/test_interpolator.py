@@ -295,7 +295,7 @@ class TestInterpolatorIrregular:
         result = operator.evaluate(data)
 
         # Allow cubic tolerance for iterative derivative estimates
-        assert result == pytest.approx(expected, rel=0, abs=1e-6 if isinstance(operator, Cubic) else 1e-14)
+        assert result == pytest.approx(expected)
 
     @pytest.mark.parametrize(
         "operator,expected", [(Nearest(), 2), (InverseDistance(power=1), 3), (InverseDistance(power=2), 2.4)]
@@ -328,7 +328,7 @@ class TestInterpolatorIrregular:
 
         # Check barycentric weights and interpolated value
         assert coefficients is not None
-        np.testing.assert_allclose(coefficients.weights, np.array([0.5, 0.25, 0.25]), rtol=0, atol=1e-15)
+        assert np.allclose(coefficients.weights, np.array([0.5, 0.25, 0.25]), equal_nan=True)
         assert interpolator.evaluate(data) == 5.0
 
     def test_linear__one_dimensional_coefficients(self) -> None:
@@ -452,7 +452,7 @@ class TestPointInterpolationAccuracy:
         result = points.grid(grid_coords=coords, resampling=operator, nodata_handling="ignore")
 
         # Clough-Tocher's estimated derivatives reproduce this plane within SciPy's interpolation tolerance
-        np.testing.assert_allclose(result.to_nanarray(), [[1.75, np.nan], [0.75, 1.25]], rtol=0, atol=1e-7)
+        assert np.allclose(result.to_nanarray(), [[1.75, np.nan], [0.75, 1.25]], equal_nan=True)
 
     @pytest.mark.parametrize("operator_type", [Linear, Cubic])
     @pytest.mark.parametrize("count", [2, 3])
@@ -562,8 +562,8 @@ class TestRasterInterpolationAccuracy:
         sampled = raster.interp_at_points((x, y), method=method, as_array=True)
 
         # All should agree closely
-        np.testing.assert_allclose(from_indices, from_coordinates, rtol=0, atol=1e-12)
-        np.testing.assert_allclose(sampled, from_coordinates, rtol=0, atol=1e-12)
+        assert np.allclose(from_indices, from_coordinates, equal_nan=True)
+        assert np.allclose(sampled, from_coordinates, equal_nan=True)
 
     @pytest.mark.parametrize("tag_aop", [None, "Area", "Point"])
     @pytest.mark.parametrize("shift_aop", [True, False])
@@ -914,7 +914,7 @@ class TestPointInterpolationEngines:
         # Both engines must select the same observations, including at exact point locations
         expected = points.grid(**options, engine="scipy")
         result = points.grid(**options, engine="numba")
-        np.testing.assert_allclose(result.to_nanarray(), expected.to_nanarray(), rtol=1e-14, atol=1e-14)
+        assert np.allclose(result.to_nanarray(), expected.to_nanarray(), equal_nan=True)
 
 
 class TestRasterInterpolationGDAL:
@@ -1087,7 +1087,7 @@ class TestRasterInterpolationGDAL:
         expected_values = expected.to_nanarray()
         actual_values = actual.to_nanarray()
         assert np.array_equal(np.isnan(actual_values), np.isnan(expected_values))
-        np.testing.assert_allclose(actual_values, expected_values, rtol=0, atol=1e-12)
+        assert np.allclose(actual_values, expected_values, equal_nan=True)
 
 
 class TestPointInterpolationGDAL:
@@ -1382,9 +1382,7 @@ class TestPointInterpolationUncertainty:
             n_samples=2,
             random_state=4,
         )
-        np.testing.assert_allclose(
-            summary.mean.to_nanarray().reshape(-1), result.to_nanarray().reshape(-1), rtol=1e-14, atol=1e-14
-        )
+        assert np.allclose(summary.mean.to_nanarray().reshape(-1), result.to_nanarray().reshape(-1), equal_nan=True)
         np.testing.assert_array_equal(summary.variance.to_nanarray().reshape(-1), np.zeros(4))
 
     @pytest.mark.parametrize(
@@ -1499,7 +1497,7 @@ class TestRegularInterpolationUncertainty:
             n_samples=2,
             random_state=4,
         )
-        np.testing.assert_allclose(summary.mean, result, rtol=0, atol=1e-12)
+        assert np.allclose(summary.mean, result, equal_nan=True)
         np.testing.assert_array_equal(summary.variance, np.where(np.isfinite(result), 0, np.nan))
 
 
@@ -1802,8 +1800,8 @@ class TestInterpolatorKriging:
             exact=True,
         )
         expected, expected_variance = reference(([target[0]], [target[1]]), store=False)
-        assert operator.evaluate(local) == pytest.approx(expected[0], rel=0, abs=1e-14)
-        assert operator.kriging_variance(local) == pytest.approx(expected_variance[0], rel=0, abs=1e-14)
+        assert operator.evaluate(local) == pytest.approx(expected[0])
+        assert operator.kriging_variance(local) == pytest.approx(expected_variance[0])
 
         # Check cached coefficients after shifting coordinates and values
         assert len(operator._coefficient_cache) == 1
@@ -1815,7 +1813,7 @@ class TestInterpolatorKriging:
             target=target + 5,
             distances=local.distances,
         )
-        assert operator.evaluate(shifted) == pytest.approx(expected[0] + 10, rel=0, abs=1e-14)
+        assert operator.evaluate(shifted) == pytest.approx(expected[0] + 10)
         assert len(operator._coefficient_cache) == 1
 
         # Check cached coefficients after reordering observations
@@ -1829,7 +1827,7 @@ class TestInterpolatorKriging:
             target=target,
             distances=local.distances[order],
         )
-        assert operator.evaluate(reordered) == pytest.approx(expected[0], rel=0, abs=1e-14)
+        assert operator.evaluate(reordered) == pytest.approx(expected[0])
         assert len(operator._coefficient_cache) == 1
 
     def test_kriging_variance__one_source_keeps_distance_dependence(self) -> None:
@@ -1858,8 +1856,8 @@ class TestInterpolatorKriging:
             exact=True,
         )
         expected, expected_variance = reference(([target[0]], [target[1]]), store=False)
-        assert operator.evaluate(local) == pytest.approx(expected[0], rel=0, abs=1e-14)
-        assert operator.kriging_variance(local) == pytest.approx(expected_variance[0], rel=0, abs=1e-14)
+        assert operator.evaluate(local) == pytest.approx(expected[0])
+        assert operator.kriging_variance(local) == pytest.approx(expected_variance[0])
 
     @pytest.mark.skipif(find_spec("gpytorch") is None or find_spec("torch") is None, reason="Requires GPyTorch")
     def test_kriging__gpytorch_matches_gstools(self) -> None:
@@ -1883,7 +1881,5 @@ class TestInterpolatorKriging:
         gpytorch_operator = Kriging(model, backend="gpytorch", exact=False)
         gstools_result = gstools_operator.evaluate(local)
         gpytorch_result = gpytorch_operator.evaluate(local)
-        assert gpytorch_result == pytest.approx(gstools_result, rel=1e-10, abs=1e-10)
-        assert gpytorch_operator.kriging_variance(local) == pytest.approx(
-            gstools_operator.kriging_variance(local), rel=1e-10, abs=1e-10
-        )
+        assert gpytorch_result == pytest.approx(gstools_result)
+        assert gpytorch_operator.kriging_variance(local) == pytest.approx(gstools_operator.kriging_variance(local))

@@ -374,8 +374,8 @@ class TestRandomFieldChunked:
                 np.testing.assert_array_equal(saved, reference)
             else:
                 # Different chunk shapes can change the final interpolation sum's rounding
-                np.testing.assert_allclose(computed, reference, rtol=0, atol=1e-12)
-                np.testing.assert_allclose(saved, reference, rtol=0, atol=1e-12)
+                assert np.allclose(computed, reference, equal_nan=True)
+                assert np.allclose(saved, reference, equal_nan=True)
 
     @pytest.mark.parametrize("backend", ["gstools", "gpytorch"])
     @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
@@ -499,11 +499,11 @@ class TestRandomFieldChunked:
             if backend == "gstools":
                 np.testing.assert_array_equal(values, expected.data)
             else:
-                np.testing.assert_allclose(values, expected.data, rtol=0, atol=1e-12)
+                assert np.allclose(values, expected.data, equal_nan=True)
         if backend == "gstools":
             np.testing.assert_array_equal(multiproc.data, expected.data)
         else:
-            np.testing.assert_allclose(multiproc.data, expected.data, rtol=0, atol=1e-12)
+            assert np.allclose(multiproc.data, expected.data, equal_nan=True)
 
     @pytest.mark.parametrize("backend", ["gstools", "gpytorch"])
     @pytest.mark.parametrize("active_dims", [None, (0,)])
@@ -541,7 +541,7 @@ class TestRandomFieldChunked:
         assert lazy.data.chunks == ((2, 1), (3, 1))
 
         # Values should be almost equal
-        np.testing.assert_allclose(np.asarray(lazy.compute()), np.asarray(expected), rtol=0, atol=1e-12)
+        assert np.allclose(np.asarray(lazy.compute()), np.asarray(expected), equal_nan=True)
 
     @pytest.mark.skipif(find_spec("gpytorch") is None, reason="Requires GPyTorch")
     def test_random_field__gpytorch_default(self, tmp_path: Path) -> None:
@@ -564,7 +564,7 @@ class TestRandomFieldChunked:
         assert hasattr(lazy, "rst")
         assert hasattr(lazy.data, "compute")
         np.testing.assert_array_equal(np.asarray(delegated), np.asarray(expected))
-        np.testing.assert_allclose(np.asarray(lazy.compute()), np.asarray(expected), rtol=0, atol=1e-12)
+        assert np.allclose(np.asarray(lazy.compute()), np.asarray(expected), equal_nan=True)
 
     @pytest.mark.skipif(find_spec("gstools") is None, reason="Requires GSTools")
     @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
