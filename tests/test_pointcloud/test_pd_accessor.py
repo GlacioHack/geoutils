@@ -10,6 +10,7 @@ from typing import Literal
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 from geopandas.testing import assert_geodataframe_equal
@@ -404,6 +405,59 @@ class TestPointCloudAccessor:
 
         # Chunk scheduling must not change point order, values or metadata
         assert pc_chunked.pointcloud_equal(pc)
+
+    @pytest.mark.parametrize("storage", ["python", "pyarrow"])
+    def test_to_xarray__string_attributes(self, storage: str) -> None:
+        """Checks that Dask string attributes are converted lazily during to_xarray()."""
+
+        dgpd = pytest.importorskip("dask_geopandas")
+        if storage == "pyarrow":
+            pytest.importorskip("pyarrow")
+        import dask
+        from dask.callbacks import Callback
+
+        from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
+
+        # We create string attributes with a missing label (and other columns that must not change)
+        values = np.array([1, 2, 3], dtype=np.float32)
+        identifiers = np.arange(3, dtype=np.uint64) + 2**63
+        labels = pd.Series(["west", None, "east"], dtype=pd.StringDtype(storage=storage))
+        frame = gu.GeoPandasPointCloudAccessor.from_xyz([0, 1, 2], [3, 4, 5], values, crs=32633, data_name="height")
+        frame["label"] = labels
+        frame["id"] = identifiers
+        expected = frame.pc.to_xarray()
+
+        # We split rows into chunks
+        _register_dask_pointcloud_accessor()
+        with dask.config.set({"dataframe.convert-string": False}):
+            source = dgpd.from_geopandas(frame, chunksize=2)
+        source.pc.set_data_name("height")
+        graph = source.expr
+        assert source.label.dtype == labels.dtype
+        assert not source.pc.is_loaded
+
+        # Convert to_xarray() with partition lengths lazily
+        tasks = []
+        with Callback(pretask=lambda *args: tasks.append(args[0])):
+            result = source.pc.to_xarray(partition_lengths=(2, 1))
+        assert tasks == []
+        assert not result.pc.is_loaded
+        assert result.chunks == ((2, 1),)
+        assert result.label.chunks == result.chunks
+        assert result.label.dtype == np.dtype(object)
+        assert result.dtype == values.dtype and result.id.dtype == identifiers.dtype
+
+        # Compare labels with Pandas (because Xarray cannot compare pd.NA within object coordinates)
+        computed = result.compute()
+        pd.testing.assert_series_equal(
+            pd.Series(computed.label.values), pd.Series(expected.label.values), check_exact=True
+        )
+
+        # Check equality of values and coords
+        xr.testing.assert_identical(computed.drop_vars("label"), expected.drop_vars(["point", "label"]))
+        assert source.expr is graph
+        assert source.label.dtype == labels.dtype
+        assert not source.pc.is_loaded and not result.pc.is_loaded
 
 
 class TestPointCloudElevationMetadata:

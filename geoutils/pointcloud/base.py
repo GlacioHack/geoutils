@@ -1608,7 +1608,14 @@ class GeometryPointCloudBase(PointCloudBase, VectorBase):
                 else tuple(partition_lengths)
             )
             x, y, values = (value.to_dask_array(lengths=lengths) for value in (x, y, values))
-            auxiliary = {name: value.to_dask_array(lengths=lengths) for name, value in auxiliary.items()}
+
+            # Convert string attributes to object arrays, matching eager conversion without a Dask warning
+            auxiliary_arrays = {}
+            for name, value in auxiliary.items():
+                if isinstance(value.dtype, pd.StringDtype):
+                    value = value.astype(object)
+                auxiliary_arrays[name] = value.to_dask_array(lengths=lengths)
+            auxiliary = auxiliary_arrays
         else:
             auxiliary = {name: value.to_numpy() for name, value in auxiliary.items()}
         result = DataArrayPointCloudAccessor.from_xyz(

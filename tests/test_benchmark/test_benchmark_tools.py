@@ -310,7 +310,7 @@ class TestBenchmarkOutputsChunked:
     def test_to_file__raster_chunks(self, dtype: str, tmp_path: Path) -> None:
         """Checks that Dask benchmark files match eager raster writes without loading the original arrays."""
 
-        import_optional("distributed")
+        pytest.importorskip("distributed")
         import dask.array as da
 
         # Uneven edge chunks reveal missing windows; two workers share the destination file
@@ -354,7 +354,7 @@ class TestBenchmarkOutputsChunked:
     def test_to_file__point_outputs(self, operation_name: str, driver: str, tmp_path: Path) -> None:
         """Checks that Dask point benchmarks save every expected point and match eager file output."""
 
-        import_optional("distributed")
+        pytest.importorskip("distributed")
         if driver in ("LAS", "LAZ"):
             laspy = import_optional("laspy")
 
