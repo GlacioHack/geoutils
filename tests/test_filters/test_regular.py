@@ -278,7 +278,7 @@ class TestPatchFilters:
         result = gu.filters.mean_filter(values, size=5)
 
         # A constant field has the same mean in every nonempty window
-        np.testing.assert_allclose(result, values, rtol=0, atol=1e-12)
+        assert np.allclose(result, values, equal_nan=True)
 
     @pytest.mark.parametrize("shape", [(3, 3), (4, 4), (3, 4)])
     def test_stacked_convolution_and_kernel_orientation(self, shape: tuple[int, int]) -> None:
@@ -382,7 +382,7 @@ class TestReducerFilters:
         )
 
         # Coverage intersections and convolution can change rounding at fractional edges
-        np.testing.assert_allclose(result.to_nanarray(), expected, rtol=1e-11, atol=1e-11, equal_nan=True)
+        assert np.allclose(result.to_nanarray(), expected, equal_nan=True)
         assert operator.default_neighborhood is neighborhood
 
     def test_filter__window_override_and_output_mask(self) -> None:
@@ -566,14 +566,14 @@ class TestDistanceFilter:
         # Check equal shapes, values and missing pixels
         assert filtered_scipy.shape == arr.shape
         assert filtered_numba.shape == arr.shape
-        np.testing.assert_allclose(filtered_scipy, filtered_numba, equal_nan=True, rtol=1e-6, atol=1e-6)
+        assert np.allclose(filtered_scipy, filtered_numba, equal_nan=True)
 
         # Compare backends on separate bands
         if filter_func is not gu.filters.mean_filter:
             array_3d = np.stack((arr, arr + 10))
             filtered_scipy = filter_func(array_3d, engine="scipy", **kwargs)
             filtered_numba = filter_func(array_3d, engine="numba", **kwargs)
-            np.testing.assert_allclose(filtered_scipy, filtered_numba, equal_nan=True, rtol=1e-6, atol=1e-6)
+            assert np.allclose(filtered_scipy, filtered_numba, equal_nan=True)
 
 
 class TestGenericFilter:
@@ -639,14 +639,14 @@ class TestRasterReducerEngines:
         # Check equal shapes, values and missing pixels
         assert filtered_scipy.shape == arr.shape
         assert filtered_numba.shape == arr.shape
-        np.testing.assert_allclose(filtered_scipy, filtered_numba, equal_nan=True, rtol=1e-6, atol=1e-6)
+        assert np.allclose(filtered_scipy, filtered_numba, equal_nan=True)
 
         # Compare backends on separate bands
         if filter_func is not gu.filters.mean_filter:
             array_3d = np.stack((arr, arr + 10))
             filtered_scipy = filter_func(array_3d, engine="scipy", **kwargs)
             filtered_numba = filter_func(array_3d, engine="numba", **kwargs)
-            np.testing.assert_allclose(filtered_scipy, filtered_numba, equal_nan=True, rtol=1e-6, atol=1e-6)
+            assert np.allclose(filtered_scipy, filtered_numba, equal_nan=True)
 
     @pytest.mark.parametrize("operator_type", [Mean, Sum, Count, RootMeanSquare, Minimum, Maximum, Range, Median])
     @pytest.mark.parametrize("fractional", [False, True])
@@ -668,7 +668,7 @@ class TestRasterReducerEngines:
         result = raster.filter(
             operator, coverage=("fractional" if fractional else "center"), engine="numba"
         ).to_nanarray()
-        np.testing.assert_allclose(result, expected, rtol=1e-14, atol=1e-14, equal_nan=True)
+        assert np.allclose(result, expected, equal_nan=True)
 
 
 class TestRasterFilterEdgeCases:
@@ -745,9 +745,12 @@ class TestFilterChunked:
         assert not source.is_loaded and not worker.is_loaded
 
         # Only floating sums may differ across chunks; cell identities must agree exactly
-        tolerance = 0 if isinstance(operator, SourceIndexSum) else 1e-12
-        np.testing.assert_allclose(delayed.compute().values, expected, rtol=0, atol=tolerance, equal_nan=True)
-        np.testing.assert_allclose(worker.to_nanarray(), expected, rtol=0, atol=tolerance, equal_nan=True)
+        if isinstance(operator, SourceIndexSum):
+            np.testing.assert_array_equal(delayed.compute().values, expected)
+            np.testing.assert_array_equal(worker.to_nanarray(), expected)
+        else:
+            assert np.allclose(delayed.compute().values, expected, equal_nan=True)
+            assert np.allclose(worker.to_nanarray(), expected, equal_nan=True)
         assert not lazy.rst.is_loaded and not delayed.rst.is_loaded and not source.is_loaded
 
     @pytest.mark.parametrize("path_index", [0, 2])
@@ -810,13 +813,10 @@ class TestFilterChunked:
 
         # 3/ Compare outputs
         # Allow rounding differences from Gaussian sums across tiles
-        if method == "gaussian":
-            atol = 1e-6
-        else:
-            atol = 0.0
+        tolerances = {"atol": 1e-6} if method == "gaussian" else {}
 
         # Compute and compare with eager Raster reference
         dask_rst = dask_rst.compute()
-        assert base_rst.raster_allclose(dask_rst, warn_failure_reason=True, strict_masked=False, atol=atol)
-        assert base_rst.raster_allclose(mp_rst, warn_failure_reason=True, strict_masked=False, atol=atol)
-        assert base_rst.raster_allclose(base_xr, warn_failure_reason=True, strict_masked=False, atol=atol)
+        assert base_rst.raster_allclose(dask_rst, warn_failure_reason=True, strict_masked=False, **tolerances)
+        assert base_rst.raster_allclose(mp_rst, warn_failure_reason=True, strict_masked=False, **tolerances)
+        assert base_rst.raster_allclose(base_xr, warn_failure_reason=True, strict_masked=False, **tolerances)

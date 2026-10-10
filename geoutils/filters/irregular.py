@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
+from geoutils._dispatch import is_dask_array
 from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
@@ -133,13 +134,13 @@ def _point_filter_id_column(dataframe: gpd.GeoDataFrame) -> str:
 
 def _point_frame_arrays(
     dataframe: gpd.GeoDataFrame,
-    data_column: str | None,
+    data_name: str | None,
     id_column: str | None,
 ) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum | None]:
     """Extract X/Y coordinates, values, and optional row IDs from a point dataframe."""
 
     coordinates = np.column_stack((dataframe.geometry.x.to_numpy(), dataframe.geometry.y.to_numpy()))
-    values = np.asarray(dataframe.geometry.z if data_column is None else dataframe[data_column])
+    values = np.asarray(dataframe.geometry.z if data_name is None else dataframe[data_name])
     identifiers = None if id_column is None else np.asarray(dataframe[id_column])
     return coordinates, values, identifiers
 
@@ -147,10 +148,10 @@ def _point_frame_arrays(
 def _assign_filtered_point_values(
     dataframe: gpd.GeoDataFrame,
     values: NDArrayNum,
-    data_column: str | None,
+    data_name: str | None,
     id_column: str | None,
 ) -> gpd.GeoDataFrame:
-    """Copy the point rows and write filtered values to their data column or elevation."""
+    """Copy the point rows and write filtered values to their data attribute or elevation."""
 
     import geopandas as gpd
 
@@ -159,8 +160,8 @@ def _assign_filtered_point_values(
         output.drop(columns=id_column, inplace=True)
 
     # Write to the named data column, or rebuild the 3D geometry when the values are stored as elevation
-    if data_column is not None:
-        output[data_column] = values
+    if data_name is not None:
+        output[data_name] = values
     else:
         output.geometry = gpd.points_from_xy(
             output.geometry.x.to_numpy(),
@@ -285,7 +286,8 @@ def _filter_point_values(
     from scipy.spatial import cKDTree
 
     # We exclude invalid X/Y coordinates before building the source search tree
-    output = np.full(len(target_coordinates), np.nan, dtype=np.float64)
+    output_shape = (len(target_coordinates), *target_values.shape[1:])
+    output = np.full(output_shape, np.nan, dtype=np.float64)
     finite_source_coordinates = np.isfinite(source_coordinates).all(axis=1)
     finite_target_coordinates = np.isfinite(target_coordinates).all(axis=1)
     source_coordinates = np.ascontiguousarray(source_coordinates[finite_source_coordinates], dtype=np.float64)
@@ -310,34 +312,40 @@ def _filter_point_values(
         target_indexes, source_indexes, distances = _query_point_neighbours(
             source_tree,
             source_coordinates,
-            source_values,
+            source_values if source_values.ndim == 1 else source_values[:, 0],
             source_ids,
             batch_coordinates,
-            batch_values,
+            batch_values if batch_values.ndim == 1 else batch_values[:, 0],
             batch_ids,
             neighborhood,
             include_self,
             n_threads,
         )
-        output[positions] = _reduce_point_pairs(
-            reducer,
-            source_coordinates,
-            source_values,
-            stable_source_ids,
-            batch_coordinates,
-            target_indexes,
-            source_indexes,
-            distances,
-            nodata_handling,
-            min_points,
-        )
+        # Reuse the neighbor pairs for each value variable, handling its missing values independently
+        columns = [source_values] if source_values.ndim == 1 else source_values.T
+        reduced = [
+            _reduce_point_pairs(
+                reducer,
+                source_coordinates,
+                values,
+                stable_source_ids,
+                batch_coordinates,
+                target_indexes,
+                source_indexes,
+                distances,
+                nodata_handling,
+                min_points,
+            )
+            for values in columns
+        ]
+        output[positions] = reduced[0] if source_values.ndim == 1 else np.stack(reduced, axis=1)
     return output
 
 
 def _filter_point_dataframe(
     targets: gpd.GeoDataFrame,
     sources: gpd.GeoDataFrame,
-    data_column: str | None,
+    data_name: str | None,
     reducer: Reducer,
     neighborhood: PointNeighbours,
     *,
@@ -351,8 +359,8 @@ def _filter_point_dataframe(
     """Filter one dataframe using nearby source points, then write the values to a copy of its rows."""
 
     # Read matching arrays of X/Y coordinates, values and IDs for the source/target points
-    source_coordinates, source_values, source_ids = _point_frame_arrays(sources, data_column, id_column)
-    target_coordinates, target_values, target_ids = _point_frame_arrays(targets, data_column, id_column)
+    source_coordinates, source_values, source_ids = _point_frame_arrays(sources, data_name, id_column)
+    target_coordinates, target_values, target_ids = _point_frame_arrays(targets, data_name, id_column)
     values = _filter_point_values(
         source_coordinates,
         source_values,
@@ -368,7 +376,94 @@ def _filter_point_dataframe(
         n_threads=n_threads,
         batch_size=batch_size,
     )
-    return _assign_filtered_point_values(targets, values, data_column, id_column)
+    return _assign_filtered_point_values(targets, values, data_name, id_column)
+
+
+def _array_filter_halo(source: tuple[Any, ...], target: tuple[Any, ...], radius: float) -> tuple[Any, ...]:
+    """Select source arrays inside a target chunk's bounds expanded by the filter radius."""
+    x, y, values, identifiers = source
+    target_x, target_y = target[:2]
+    finite = np.isfinite(target_x) & np.isfinite(target_y)
+    if not finite.any():
+        return tuple(value[:0] for value in source)
+    selected = (x >= target_x[finite].min() - radius) & (x <= target_x[finite].max() + radius)
+    selected &= (y >= target_y[finite].min() - radius) & (y <= target_y[finite].max() + radius)
+    return x[selected], y[selected], values[selected], identifiers[selected]
+
+
+def _filter_array_partition(
+    target: tuple[Any, ...],
+    sources: list[tuple[Any, ...]],
+    reducer: Reducer,
+    neighborhood: PointNeighbours,
+    **options: Any,
+) -> NDArrayNum:
+    """Calculate a chunk point values from source arrays and row IDs."""
+
+    # Source chunks arrive in row order so ties and custom reducers agree with eager calculations
+    source_arrays = [np.concatenate([part[index] for part in sources]) for index in range(4)]
+    source_coordinates = np.column_stack(source_arrays[:2])
+    target_coordinates = np.column_stack(target[:2])
+    return _filter_point_values(
+        source_coordinates,
+        source_arrays[2],
+        target_coordinates,
+        target[2],
+        reducer,
+        neighborhood,
+        source_ids=source_arrays[3],
+        target_ids=target[3],
+        **options,
+    )
+
+
+def _filter_array_pointcloud(
+    point_arrays: tuple[Any, Any, Any],
+    reducer: Reducer,
+    neighborhood: PointNeighbours,
+    mp_config: Any,
+    *,
+    is_dask: bool,
+    **options: Any,
+) -> Any:
+    """Filter array point values, in-memory or with Dask/MP."""
+
+    if mp_config is not None:
+        raise ValueError("Array point clouds use Dask chunks rather than mp_config for filtering.")
+    x, y, values = point_arrays
+    if not is_dask:
+        rows = (x, y, values, np.arange(len(x), dtype=np.uint64))
+        return _filter_array_partition(rows, [rows], reducer, neighborhood, **options)
+
+    # Align coordinates and attributes with value chunks without loading their arrays
+    dask = import_optional("dask")
+    import dask.array as da
+
+    values = da.asarray(values)
+    if values.ndim == 2:
+        values = values.rechunk({1: -1})
+    lengths = values.chunks[0]
+    arrays = [da.asarray(axis).rechunk({0: lengths}) for axis in (x, y, values)]
+    blocks = [axis.to_delayed().ravel() for axis in arrays]
+    starts = np.cumsum((0, *lengths))
+    parts = [
+        (
+            blocks[0][index],
+            blocks[1][index],
+            blocks[2][index],
+            np.arange(starts[index], starts[index + 1], dtype=np.uint64),
+        )
+        for index in range(len(lengths))
+    ]
+
+    # Filter each source chunk to the required surrounding area before joining a target's neighborhood
+    outputs = []
+    assert neighborhood.radius is not None
+    for target, length in zip(parts, lengths):
+        halos = [dask.delayed(_array_filter_halo)(part, target, neighborhood.radius) for part in parts]
+        output = dask.delayed(_filter_array_partition)(target, halos, reducer, neighborhood, **options)
+        outputs.append(da.from_delayed(output, shape=(length, *values.shape[1:]), dtype=float))
+    return da.concatenate(outputs)
 
 
 ###################
@@ -422,7 +517,7 @@ def _point_filter_source_subset(
 def _filter_dask_point_partition(
     targets: gpd.GeoDataFrame,
     source_parts: list[gpd.GeoDataFrame],
-    data_column: str | None,
+    data_name: str | None,
     id_column: str,
     reducer: Reducer,
     neighborhood: PointNeighbours,
@@ -444,7 +539,7 @@ def _filter_dask_point_partition(
     return _filter_point_dataframe(
         targets,
         sources,
-        data_column,
+        data_name,
         reducer,
         neighborhood,
         id_column=id_column,
@@ -474,8 +569,8 @@ def _dask_filter_pointcloud(
 
     dask_geopandas = import_optional("dask_geopandas")
     assert neighborhood.radius is not None
-    dataframe = source_pointcloud.ds
-    data_column = source_pointcloud.data_column
+    dataframe = source_pointcloud._dataset
+    data_name = source_pointcloud.data_name
 
     # Assign IDs without loading the points, so include_self=False can distinguish otherwise identical rows
     id_column = _point_filter_id_column(dataframe._meta)
@@ -505,7 +600,7 @@ def _dask_filter_pointcloud(
             dask.delayed(_filter_dask_point_partition)(
                 targets,
                 source_subsets,
-                data_column,
+                data_name,
                 id_column,
                 reducer,
                 neighborhood,
@@ -518,8 +613,8 @@ def _dask_filter_pointcloud(
 
     # Record the output column and spatial bounds without reading any point rows
     output_meta = dataframe._meta.copy()
-    if data_column is not None:
-        output_meta[data_column] = np.asarray([], dtype=np.float64)
+    if data_name is not None:
+        output_meta[data_name] = np.asarray([], dtype=np.float64)
     with dask.config.set({"dataframe.convert-string": False}):
         output = dd.from_delayed(output_parts, meta=output_meta)
     filtered = dask_geopandas.from_dask_dataframe(output, geometry=dataframe.geometry.name)
@@ -560,13 +655,13 @@ def _stage_filtered_point_partition(
         left, bottom, right, top = targets.total_bounds
         radius = neighborhood.radius
         support_bounds = BoundingBox(left - radius, bottom - radius, right + radius, top + radius)
-        sources = _load_pointcloud_bounds(source_pointcloud, support_bounds, source_pointcloud.data_column)
+        sources = _load_pointcloud_bounds(source_pointcloud, support_bounds, source_pointcloud.data_name)
 
     # Each worker uses one thread and saves its result instead of sending a dataframe back to the parent process
     filtered = _filter_point_dataframe(
         targets,
         sources,
-        source_pointcloud.data_column,
+        source_pointcloud.data_name,
         reducer,
         neighborhood,
         id_column=None,
@@ -582,7 +677,7 @@ def _stage_filtered_point_partition(
 
         # LAS/LAZ stores coordinates as scaled integers; all partitions must use the same scale and offset
         # The combined bounds let the writer choose these for the complete output
-        bounds = _las_coordinate_bounds(filtered, source_pointcloud.data_column)
+        bounds = _las_coordinate_bounds(filtered, source_pointcloud.data_name)
     return _stage_pointcloud_partition(filtered, filename), bounds
 
 
@@ -612,7 +707,7 @@ def _multiproc_filter_pointcloud(
     output_filename, driver = _resolve_pointcloud_output(
         mp_config.outfile,
         mp_config.driver,
-        supported_drivers=("GPKG", "LAS", "LAZ"),
+        supported_drivers=("GPKG", "LAS", "LAZ", "PARQUET"),
         operation_name="point cloud filtering",
     )
     output_filename.parent.mkdir(parents=True, exist_ok=True)
@@ -636,7 +731,7 @@ def _multiproc_filter_pointcloud(
                     nodata_handling,
                     min_points,
                     batch_size,
-                    driver != "GPKG",
+                    driver in ("LAS", "LAZ"),
                 )
             )
         partition_results = [
@@ -653,15 +748,15 @@ def _multiproc_filter_pointcloud(
             output_filename,
             [filename for filename, _ in partition_results],
             driver=driver,
-            data_column=source_pointcloud.data_column if driver == "GPKG" else None,
+            data_name=source_pointcloud.data_name if driver in ("GPKG", "PARQUET") else None,
             geometry_type="Point Z" if source_pointcloud._has_z else "Point",
-            las_elevation_column=source_pointcloud.data_column,
-            las_bounds=[bounds for _, bounds in partition_results] if driver != "GPKG" else None,
+            las_elevation_column=source_pointcloud.data_name,
+            las_bounds=[bounds for _, bounds in partition_results] if driver in ("LAS", "LAZ") else None,
         )
 
     if source_pointcloud._is_pd:
         pointcloud.load(columns="all")
-        return source_pointcloud._cast_pointcloud_output(pointcloud.ds)
+        return source_pointcloud._cast_pointcloud_output(pointcloud._dataset)
     return pointcloud
 
 
@@ -671,7 +766,7 @@ def _multiproc_filter_pointcloud(
 
 
 def _filter_pointcloud(
-    source_pointcloud: PointCloudBase,
+    source_pointcloud: PointCloudBase | tuple[Any, Any, Any],
     method: PointFilterMethod = "median",
     radius: float | None | _DefaultNeighbour = _DefaultNeighbour.VALUE,
     *,
@@ -682,11 +777,12 @@ def _filter_pointcloud(
     n_threads: int = 0,
     batch_size: int = _POINT_FILTER_QUERY_BATCH_SIZE,
     mp_config: MultiprocConfig | None = None,
-) -> PointCloudLike:
+) -> Any:
     """
     Filter point values using nearby points, in memory or with Dask/multiprocessing.
 
-    :param source_pointcloud: Point cloud or dataframe accessor to filter (its active data column or elevations).
+    :param source_pointcloud: Point cloud or dataframe accessor to filter (its active data attribute or elevations).
+        An X/Y/value array tuple returns filtered values, with one row per point and an optional column per variable.
     :param method: Built-in reducer name or a Reducer instance.
     :param radius: Maximum X/Y neighbor distance in CRS units. Required for Dask and multiprocessing execution.
     :param k: Optional maximum number of nearest neighbors inside radius. Omit to use every point inside radius.
@@ -699,6 +795,7 @@ def _filter_pointcloud(
         neighborhoods are dense.
     :param mp_config: Worker count, row partition size and output file for multiprocessing execution.
     :returns: Point cloud with unchanged rows, X/Y coordinates and attributes and filtered active values.
+        For an array tuple, returns filtered values with the same shape as the input values.
     """
 
     # 1/ Resolve the filter options and check inputs
@@ -725,10 +822,33 @@ def _filter_pointcloud(
         raise ValueError("Argument ``batch_size`` must be a positive integer.")
 
     # To use Dask and MP, a radius needs to be set!
-    if (source_pointcloud._is_dask or mp_config is not None) and neighborhood.radius is None:
+    if isinstance(source_pointcloud, tuple):
+        is_dask = any(is_dask_array(array) for array in source_pointcloud)
+    else:
+        is_dask = source_pointcloud._is_dask
+    if (is_dask or mp_config is not None) and neighborhood.radius is None:
         raise ValueError("Dask and multiprocessing point filtering require a finite ``radius``.")
-    if source_pointcloud._is_dask and mp_config is not None:
+    if is_dask and mp_config is not None:
         raise ValueError("Cannot use Multiprocessing and Dask simultaneously. Remove ``mp_config`` or use eager data.")
+
+    if isinstance(source_pointcloud, tuple) or source_pointcloud._is_xr:
+        arrays = source_pointcloud if isinstance(source_pointcloud, tuple) else source_pointcloud.to_xyz()
+        resolved_threads = max(1, (os.cpu_count() or 2) - 1) if n_threads == 0 else int(n_threads)
+        filtered = _filter_array_pointcloud(
+            arrays,
+            reducer,
+            neighborhood,
+            mp_config,
+            is_dask=is_dask,
+            include_self=bool(include_self),
+            nodata_handling=nodata_handling,
+            min_points=int(min_points),
+            n_threads=1 if is_dask else resolved_threads,
+            batch_size=int(batch_size),
+        )
+        if isinstance(source_pointcloud, tuple):
+            return filtered
+        return source_pointcloud.copy(new_array=filtered)
 
     # 2/ Dispatch to Dask/MP/in-memory
 
@@ -748,7 +868,7 @@ def _filter_pointcloud(
         # As filtering keeps the same point coords as input, the saved point count and bounds are still valid
         from geoutils.pointcloud.dataframe import _get_dataframe_attrs, _set_dataframe_attrs
 
-        source_attrs = _get_dataframe_attrs(source_pointcloud.ds)
+        source_attrs = _get_dataframe_attrs(source_pointcloud._dataset)
         output_attrs = _get_dataframe_attrs(output).copy()
         output_attrs.update(
             point_count=source_attrs.get("point_count"),
@@ -773,7 +893,7 @@ def _filter_pointcloud(
 
     # Otherwise, in memory
     # IDs are for include_self=False to distinguish points at the same coordinates
-    dataframe = source_pointcloud.ds
+    dataframe = source_pointcloud._dataset
     id_column = None
     identified = dataframe
     if not include_self:
@@ -786,7 +906,7 @@ def _filter_pointcloud(
     filtered = _filter_point_dataframe(
         identified,
         identified,
-        source_pointcloud.data_column,
+        source_pointcloud.data_name,
         reducer,
         neighborhood,
         id_column=id_column,

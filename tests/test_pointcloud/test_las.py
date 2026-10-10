@@ -6,13 +6,17 @@ import os
 import tempfile
 from dataclasses import replace
 from importlib.util import find_spec
+from pathlib import Path
+from typing import Literal
 
 import geopandas as gpd
 import numpy as np
 import pytest
+import xarray as xr
 
 import geoutils as gu
 import geoutils.pointcloud.las as las_module
+from geoutils._misc import import_optional
 from geoutils.multiproc import MultiprocConfig
 from geoutils.pointcloud.las import (
     _iter_laspy_spatial_chunks,
@@ -74,7 +78,7 @@ class TestLasPyIO:
         """Load metadata, point-index slices and coordinate-filtered chunks."""
 
         # Write one source used by each increasingly selective reader
-        pc = gu.PointCloud(self.gdf, data_column="z")
+        pc = gu.PointCloud(self.gdf, data_name="z")
         with tempfile.TemporaryDirectory() as temp_dir:
             source = self._write_source(pc, temp_dir)
 
@@ -108,7 +112,7 @@ class TestLasPyIO:
         """Checks that crop() does not read LAS points until they are needed."""
 
         # Write six points on a regular grid with known coordinates and values
-        pointcloud = gu.PointCloud(self.gdf, data_column="z")
+        pointcloud = gu.PointCloud(self.gdf, data_name="z")
         with tempfile.TemporaryDirectory() as temp_dir:
             source = self._write_source(pointcloud, temp_dir)
             unloaded = gu.PointCloud(source)
@@ -127,7 +131,7 @@ class TestLasPyIO:
     def test_load_laspy_bounds__copc_errors_are_not_hidden(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Propagate indexed-reader failures when the LAS header identifies a COPC file."""
 
-        pc = gu.PointCloud(self.gdf, data_column="z")
+        pc = gu.PointCloud(self.gdf, data_name="z")
         with tempfile.TemporaryDirectory() as temp_dir:
             source = self._write_source(pc, temp_dir)
             metadata = replace(_load_laspy_metadata(source), is_copc=True)
@@ -144,7 +148,7 @@ class TestLasPyIO:
         """Split LAS points into X/Y blocks without edge duplicates."""
 
         # Divide the source extent into neighboring horizontal blocks
-        pc = gu.PointCloud(self.gdf, data_column="z")
+        pc = gu.PointCloud(self.gdf, data_name="z")
         with tempfile.TemporaryDirectory() as temp_dir:
             source = self._write_source(pc, temp_dir)
 
@@ -169,7 +173,7 @@ class TestLasPyIO:
         """Write LAS points into X/Y block files."""
 
         # Reuse the two neighboring blocks from the iterator test
-        pc = gu.PointCloud(self.gdf, data_column="z")
+        pc = gu.PointCloud(self.gdf, data_name="z")
         with tempfile.TemporaryDirectory() as temp_dir:
             source = self._write_source(pc, temp_dir)
             blocks = _spatial_bounds_grid(bounds=(0.0, 0.0, 2.0, 1.0), block_size=(1.0, 1.0))
@@ -196,7 +200,7 @@ class TestLasPyIO:
         """Write in-memory point clouds by chunks."""
 
         # Compare both chunk schedulers against the same in-memory source
-        pc = gu.PointCloud(self.gdf, data_column="z")
+        pc = gu.PointCloud(self.gdf, data_name="z")
         with tempfile.TemporaryDirectory() as temp_dir:
             # The Pandas path writes row chunks sequentially
             chunked = os.path.join(temp_dir, "chunked.las")
@@ -220,19 +224,20 @@ class TestLasPyIO:
             )
             self._assert_roundtrip(pc, multiproc)
 
-    def test_to_las_chunked_dask(self) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_to_las_chunked_dask(self, as_type: Literal["dataarray", "geodataframe"]) -> None:
         """Write a Dask-backed LAS point cloud partition by partition."""
 
         # Skip cleanly when lazy GeoDataFrames are unavailable
         dgpd = pytest.importorskip("dask_geopandas")
 
         # Write and reopen a source as several lazy LAS partitions
-        pc = gu.PointCloud(self.gdf, data_column="z")
+        pc = gu.PointCloud(self.gdf, data_name="z")
         with tempfile.TemporaryDirectory() as temp_dir:
             source = self._write_source(pc, temp_dir, filename="dask-source.las")
 
-            ds = gu.open_pointcloud(source, columns="all", chunks=2)
-            assert isinstance(ds, dgpd.GeoDataFrame)
+            ds = gu.open_pointcloud(source, columns="all", chunks=2, as_type=as_type)
+            assert isinstance(ds, xr.DataArray if as_type == "dataarray" else dgpd.GeoDataFrame)
             assert not ds.pc.is_loaded
 
             # The writer computes one partition at a time into the final LAS stream
@@ -246,3 +251,51 @@ class TestLasPyIO:
             # Validate the resulting file through an independent eager reader
             self._assert_roundtrip(pc, output)
             assert not ds.pc.is_loaded
+
+    @pytest.mark.parametrize("suffix", ["las", "laz"])
+    def test_to_las__roundtrip(self, tmp_path: Path, suffix: str) -> None:
+        """Checks direct array LAS/LAZ opening/writing from the `pc` DataArray accessor in a round trip."""
+
+        import_optional("laspy")
+
+        # Create a point cloud DataArray with "classification" and "id" variables with different types to check they
+        # remain separate from floating values/coords
+        points = gu.DataArrayPointCloudAccessor.from_xyz(
+            np.arange(11.0),
+            np.arange(11.0) + 1,
+            np.arange(11.0),
+            32633,
+            data_name="Z",
+            auxiliary={"classification": np.arange(11, dtype=np.uint8), "id": np.arange(11, dtype=np.uint64) + 2**63},
+        )
+        filename = tmp_path / f"points.{suffix}"
+
+        # We write in chunks, then check we get exactly the same values when reading again
+        points.pc.to_las(str(filename), chunks=4, scales=(0.001, 0.001, 0.001))
+        result = gu.open_pointcloud(str(filename), columns=["classification", "id"])
+        np.testing.assert_array_equal(result.pc.to_array(), points.pc.to_array())
+        np.testing.assert_array_equal(result.coords["classification"], points.coords["classification"])
+        np.testing.assert_array_equal(result.coords["id"], points.coords["id"])
+        assert result.pc.crs == points.pc.crs
+        assert result.coords["id"].dtype == np.uint64
+
+    def test_to_las__active_values(self, tmp_path: Path) -> None:
+        """Checks that selecting intensity as active values preserves the native LAS elevation dimension."""
+        laspy = import_optional("laspy")
+
+        # We create a DataArray where elevation differs from selected intensity values
+        points = gu.DataArrayPointCloudAccessor.from_xyz(
+            [0.0, 1.0],
+            [2.0, 3.0],
+            np.array([5, 6], dtype=np.uint16),
+            32633,
+            data_name="intensity",
+            auxiliary={"Z": [10.0, 20.0]},
+        )
+        filename = tmp_path / "intensity.las"
+
+        # Check that the LAS writer stores each native dimension according to its meaning
+        points.pc.to_las(str(filename))
+        result = laspy.read(filename)
+        np.testing.assert_array_equal(result.z, [10, 20])
+        np.testing.assert_array_equal(result.intensity, [5, 6])

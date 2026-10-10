@@ -390,14 +390,14 @@ class TestMultiproc:
         assert output_raster.raster_equal(_custom_func(raster, addition=5, factor=0.5))
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])
-    @pytest.mark.parametrize("tile_size", [10, 20])
+    @pytest.mark.parametrize("tile_size", [64, 100])
     @pytest.mark.parametrize("return_block_info", [False, True])
     def test_map_blocks(
         self, example: str, tile_size: int, cluster: None | AbstractCluster, return_block_info: bool
     ) -> None:
-        """
-        Test the multiprocessing map function with a simple operation returning not a raster.
-        """
+        """Checks that map_blocks() statistics match the full raster without loading its source."""
+
+        # Open single-band and multiband files with multiple tiles and shorter edge tiles
         raster = Raster(example)
         config = MultiprocConfig(tile_size, cluster=cluster)
 

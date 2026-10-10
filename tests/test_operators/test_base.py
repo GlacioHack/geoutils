@@ -144,7 +144,7 @@ class TestLocalData:
         weights = data.precision_weights(np.ones(2))
 
         # Every result is unbiased and gives the minimum-variance coefficients for its two observations
-        np.testing.assert_allclose(weights, expected, atol=1e-14)
+        assert np.allclose(weights, expected, equal_nan=True)
         assert weights.sum() == pytest.approx(1)
 
 

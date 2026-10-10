@@ -30,7 +30,7 @@ import pandas as pd
 import rasterio as rio
 
 from geoutils._config import config
-from geoutils._dispatch import _check_match_points, is_dask_geodataframe
+from geoutils._dispatch import _check_match_points, _get_pointcloud_interface, is_dask_geodataframe
 from geoutils._misc import import_optional
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.multiproc import MultiprocConfig
@@ -724,12 +724,12 @@ def _dask_resample_points(
 # 1.3/ DASK POINT CLOUD TARGETS
 
 
-def _empty_pointcloud_meta(data_column: str, crs: Any, dtype: DTypeLike) -> gpd.GeoDataFrame:
+def _empty_pointcloud_meta(data_name: str, crs: Any, dtype: DTypeLike) -> gpd.GeoDataFrame:
     """Build an empty GeoDataFrame for Dask point-cloud outputs."""
 
     # Dask uses this empty object to infer columns, geometry and data types
     return gpd.GeoDataFrame(
-        data={data_column: pd.Series(dtype=dtype)},
+        data={data_name: pd.Series(dtype=dtype)},
         geometry=gpd.GeoSeries([], crs=crs),
         crs=crs,
     )
@@ -754,7 +754,7 @@ def _resampling_point_output(source_raster: RasterBase, x: NDArrayNum, y: NDArra
     )
     dataframe = dask_dataframe.from_delayed([partition], meta=meta)
     output = dask_geopandas.from_dask_dataframe(dataframe, geometry="geometry")
-    return _build_pointcloud_output(output, data_column="z", as_dataframe=True)
+    return _build_pointcloud_output(output, data_name="z", as_dataframe=True)
 
 
 def _resample_points_partition(
@@ -762,7 +762,7 @@ def _resample_points_partition(
     source_raster: RasterBase,
     interp_options: dict[str, Any],
     extra_kwargs: dict[str, Any],
-    data_column: str,
+    data_name: str,
     out_crs: Any,
 ) -> gpd.GeoDataFrame:
     """Resample one point partition and return values with the same geometry and index."""
@@ -774,7 +774,7 @@ def _resample_points_partition(
         else _interp_output_dtype(source_raster.dtype, validity_only=extra_kwargs.get("_validity_only", False))
     )
     if len(part) == 0:
-        return _empty_pointcloud_meta(data_column=data_column, crs=out_crs, dtype=out_dtype)
+        return _empty_pointcloud_meta(data_name=data_name, crs=out_crs, dtype=out_dtype)
 
     # Convert partition geometries to the coordinate arrays used by raster interpolation
     x = np.atleast_1d(np.asarray(part.geometry.x.values))
@@ -812,7 +812,7 @@ def _resample_points_partition(
 
     # Retain the original geometry and index while adding interpolated values
     return gpd.GeoDataFrame(
-        data={data_column: np.asarray(z)},
+        data={data_name: np.asarray(z)},
         geometry=part.geometry,
         crs=out_crs,
         index=part.index,
@@ -846,13 +846,13 @@ def _resample_points_dask_pointcloud(
     # Reproject lazily so every partition reaches the raster in the same CRS
     out_crs = source_raster.crs
     points_in_crs = points if points.crs == out_crs else points.to_crs(out_crs)
-    data_column = "z"
+    data_name = "z"
     out_dtype = (
         np.float64
         if isinstance(method, Reducer)
         else _interp_output_dtype(source_raster.dtype, validity_only=extra_kwargs.get("_validity_only", False))
     )
-    meta = _empty_pointcloud_meta(data_column=data_column, crs=out_crs, dtype=out_dtype)
+    meta = _empty_pointcloud_meta(data_name=data_name, crs=out_crs, dtype=out_dtype)
 
     # Package stable interpolation options once for each partition task
     interp_options = {
@@ -870,7 +870,7 @@ def _resample_points_dask_pointcloud(
         source_raster,
         interp_options,
         extra_kwargs,
-        data_column,
+        data_name,
         out_crs,
         meta=meta,
     )
@@ -878,14 +878,71 @@ def _resample_points_dask_pointcloud(
     if as_array:
         # Read lengths from input points so array sizing does not execute the interpolation tasks
         lengths = tuple(points.map_partitions(len).compute())
-        values = out[data_column].to_dask_array(lengths=lengths)
+        values = out[data_name].to_dask_array(lengths=lengths)
         return da.ma.masked_invalid(values) if extra_kwargs.get("masked", False) else values
 
     # Import after package initialization because the point cloud package also imports interpolation
     from geoutils.pointcloud.dataframe import _build_pointcloud_output
 
     # Set point output metadata without computing the interpolation tasks
-    return _build_pointcloud_output(out, data_column=data_column, as_dataframe=True)
+    return _build_pointcloud_output(out, data_name=data_name, as_dataframe=True)
+
+
+###############################################
+# 1.3.1/ EAGER OR DASK ARRAY POINT TARGETS
+###############################################
+
+
+def _resample_array_point_partition(source: Any, x: Any, y: Any, options: dict[str, Any]) -> Any:
+    """Resample raster values at one raw point block without constructing geometry objects."""
+
+    # A block outside the raster yields NaN without warning about the complete point input
+    values = _resample_at_points(source, (x, y), as_array=True, _warn_outside=False, **options)
+
+    # Nested raster work runs within this task so a single distributed worker cannot wait for itself
+    return values.compute(scheduler="synchronous") if hasattr(values, "compute") else values
+
+
+def _resample_array_points(source: Any, points: Any, as_array: bool, options: dict[str, Any]) -> Any:
+    """Project array coordinates and resample their rows eagerly or in lazy point blocks."""
+    if options.get("input_latlon"):
+        raise ValueError("Argument 'input_latlon' is only supported for tuple point inputs.")
+    if options.get("return_interpolator"):
+        raise ValueError("Array point resampling requires explicit output values rather than an interpolator.")
+    if options.get("mp_config") is not None:
+        raise ValueError("Array point inputs use Dask chunks rather than multiprocessing resampling.")
+    projected = points._dataset if points.crs == source.crs else points.reproject(crs=source.crs)
+    x, y, _ = projected.pc.to_xyz()
+
+    # Known point lengths allow block outputs without running their interpolation tasks
+    if points._is_dask:
+        dask = import_optional("dask")
+        import dask.array as da
+
+        chunked = next(
+            value for value in (points._dataset, *points._dataset.coords.values()) if value.chunks is not None
+        )
+        lengths = chunked.chunks[0]
+        axes = [da.asarray(axis).rechunk((lengths,)).to_delayed().ravel() for axis in (x, y)]
+        dtype = (
+            np.float64
+            if isinstance(options["method"], Reducer)
+            else _interp_output_dtype(source.dtype, validity_only=options.get("_validity_only", False))
+        )
+        blocks = [
+            da.from_delayed(
+                dask.delayed(_resample_array_point_partition)(source, x_block, y_block, options),
+                shape=(length,),
+                dtype=dtype,
+            )
+            for x_block, y_block, length in zip(*axes, lengths)
+        ]
+        values = da.concatenate(blocks)
+    else:
+        values = _resample_at_points(source, (x, y), as_array=True, **options)
+    if as_array:
+        return values
+    return projected.pc.copy(new_array=values)
 
 
 # 1.4/ MULTIPROCESSING RASTER CHUNKS
@@ -1189,6 +1246,7 @@ def _prepare_resampling_points(
     input_latlon: bool,
     boundless: bool,
     options: dict[str, Any],
+    warn_outside: bool,
 ) -> tuple[tuple[NDArrayNum, NDArrayNum] | None, NDArrayBool, bool]:
     """Normalize target coordinates and select points with enough source cells for resampling."""
 
@@ -1251,9 +1309,8 @@ def _prepare_resampling_points(
                 ind_outofbounds |= (np.floor(j) + lower[1] < 0) | (np.floor(j) + upper[1] >= shape[1])
 
         # Warn before returning missing values for an entirely outside interpolation request
-        if np.count_nonzero(~ind_outofbounds) == 0:
-            if isinstance(operator, Interpolator):
-                warnings.warn("All provided points were outside of raster bounds, returning only NaNs.")
+        if warn_outside and not np.any(~ind_outofbounds) and isinstance(operator, Interpolator):
+            warnings.warn("All provided points were outside of raster bounds, returning only NaNs.")
         return (x, y), ~ind_outofbounds, input_scalar
     return None, np.empty(0, dtype=bool), input_scalar
 
@@ -1346,6 +1403,7 @@ def _resample_at_points(
     window: int | None = None,
     window_shape: Literal["square", "circular"] | None = None,
     masked: bool = False,
+    _warn_outside: bool = True,
     **kwargs: Any,
 ) -> Any:
     """
@@ -1358,6 +1416,7 @@ def _resample_at_points(
 
     :param _validity_only: Sample availability using float32 one for finite cells and NaN for missing cells.
         Conversion happens within each loaded band or worker tile, without loading a complete validity raster.
+    :param _warn_outside: Warn when every point is outside the raster. Disable for individual lazy point partitions.
     """
 
     # Validate band selection before resolving method and neighborhood options
@@ -1401,6 +1460,31 @@ def _resample_at_points(
             "only with in-memory array."
         )
 
+    point_interface = _get_pointcloud_interface(points)
+    if getattr(point_interface, "_is_xr", False):
+        return _resample_array_points(
+            source_raster,
+            point_interface,
+            as_array,
+            {
+                "method": options["method"],
+                "band": band,
+                "input_latlon": input_latlon,
+                "nodata_handling": nodata_handling,
+                "shift_area_or_point": options["shift_area_or_point"],
+                "force_scipy_function": force_scipy_function,
+                "return_interpolator": return_interpolator,
+                "coverage": coverage,
+                "window": window,
+                "window_shape": window_shape,
+                "boundless": boundless,
+                "masked": masked,
+                "mp_config": mp_config,
+                "_validity_only": _validity_only,
+                **kwargs,
+            },
+        )
+
     # Dask point partitions prepare their own coordinates inside each task
     if is_dask_geodataframe(points):
         if mp_backend:
@@ -1429,7 +1513,12 @@ def _resample_at_points(
 
     # Normalize coordinates and select targets within the complete raster
     coordinates, inside, input_scalar = _prepare_resampling_points(
-        source_raster, points, input_latlon=input_latlon, boundless=boundless, options=options
+        source_raster,
+        points,
+        input_latlon=input_latlon,
+        boundless=boundless,
+        options=options,
+        warn_outside=_warn_outside,
     )
     selected_points = None
     if coordinates is not None:

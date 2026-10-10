@@ -16,23 +16,23 @@ kernelspec:
 
 In GeoUtils, georeferenced rasters are exposed through two interfaces:
 
-- The Xarray {class}`rst <geoutils.RasterAccessor>` accessor for a {class}`xarray.DataArray`,
+- The Xarray {class}`rst <geoutils.DataArrayRasterAccessor>` accessor for a {class}`xarray.DataArray`,
 - The {class}`~geoutils.Raster`.
 
 We recommend using **only one object type or the other**. While their behaviour is almost entirely similar, there are some differences that are summarized directly below.
 
-## Accessor {class}`rst <geoutils.RasterAccessor>` versus {class}`~geoutils.Raster`
+## Accessor {class}`rst <geoutils.DataArrayRasterAccessor>` versus {class}`~geoutils.Raster`
 
 The main differences are the following:
 
-1. A {class}`~geoutils.Raster` relies on NumPy's {class}`~numpy.ma.MaskedArray` to **manipulate integer-type arrays while respecting {attr}`~geoutils.Raster.nodata`** values, while through Xarray the {class}`rst <geoutils.RasterAccessor>` accessor only supports floating-type {class}`~numpy.ndarray` to propagate NaNs. We thus **enforce conversion of {class}`~xarray.DataArray` to floating-type on file opening**.
+1. A {class}`~geoutils.Raster` relies on NumPy's {class}`~numpy.ma.MaskedArray` to **manipulate integer-type arrays while respecting {attr}`~geoutils.Raster.nodata`** values, while through Xarray the {class}`rst <geoutils.DataArrayRasterAccessor>` accessor only supports floating-type {class}`~numpy.ndarray` to propagate NaNs. We thus **enforce conversion of {class}`~xarray.DataArray` to floating-type on file opening**.
 
 2. A {class}`~geoutils.Raster` has **control over data-structure operations** (e.g. {func}`+<operator.add>`, {func}`-<operator.sub>`, or NumPy interfacing), allowing to raise errors where appropriate
 (e.g., if two rasters have same shape but different {attr}`~geoutils.Raster.crs`). For a {class}`~xarray.DataArray`, these operations **rely on user's rigour** but errors should be scarce as {attr}`~geoutils.Raster.shape` is checked during Xarray casting.
 
 3. A {class}`~geoutils.Raster` can have **ambiguous casting behaviour** for subclasses (e.g., a {class}`~xdem.DEM`) making maintenance difficult, while accessors' **data-structure-centered mechanism enables clearer interfacing**.
 
-4. A {class}`~geoutils.Raster` currently only supports **Multiprocessing** as scalable backend which is not lazy, while the {class}`rst <geoutils.RasterAccessor>` accessor supports **Dask**, allowing lazy graph building.
+4. A {class}`~geoutils.Raster` currently only supports **Multiprocessing** as scalable backend which is not lazy, while the {class}`rst <geoutils.DataArrayRasterAccessor>` accessor supports **Dask**, allowing lazy graph building.
 
 ```{important}
 To avoid accidentally propagating raw nodata values through operations, **{meth}`~geoutils.open_raster` forces conversion of the {class}`~xarray.DataArray` to floating-type to use NaNs**.
@@ -45,7 +45,7 @@ While this increases memory usage, it can be mitigated by using **Dask**. See th
 
 A **raster** has **four main attributes**:
 
-1. a data array {attr}`~geoutils.Raster.data`, as a {class}`numpy.ma.MaskedArray` ({class}`~geoutils.Raster`) or {class}`numpy.ndarray` ({class}`rst <geoutils.RasterAccessor>` accessor) of either {class}`~numpy.integer` or {class}`~numpy.floating` {class}`~numpy.dtype` (forced to {class}`~numpy.floating` for {class}`rst <geoutils.RasterAccessor>` accessor),
+1. a data array {attr}`~geoutils.Raster.data`, as a {class}`numpy.ma.MaskedArray` ({class}`~geoutils.Raster`) or {class}`numpy.ndarray` ({class}`rst <geoutils.DataArrayRasterAccessor>` accessor) of either {class}`~numpy.integer` or {class}`~numpy.floating` {class}`~numpy.dtype` (forced to {class}`~numpy.floating` for {class}`rst <geoutils.DataArrayRasterAccessor>` accessor),
 2. a geotransform {attr}`~geoutils.Raster.transform`, as a [{class}`affine.Affine`](https://rasterio.readthedocs.io/en/stable/topics/migrating-to-v1.html#affine-affine-vs-gdal-style-geotransforms) object,
 3. a coordinate reference system {attr}`~geoutils.Raster.crs`, as a {class}`pyproj.crs.CRS` object, and
 4. a nodata value {attr}`~geoutils.Raster.nodata`, as a {class}`float` or {class}`int`.

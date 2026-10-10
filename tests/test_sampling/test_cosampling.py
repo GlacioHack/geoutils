@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
 from importlib.util import find_spec
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -19,6 +19,37 @@ from shapely.geometry import box
 import geoutils as gu
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
+
+
+@pytest.fixture
+def pointcloud_file(tmp_path: Any) -> Any:
+    """Write point fixtures as GeoParquet row groups with their original labels and attribute dtypes."""
+
+    pytest.importorskip("pyarrow")
+    filenames = []
+
+    def write_points(frame: gpd.GeoDataFrame, partitions: int) -> tuple[str, int, str | None]:
+        """Save one point fixture and return its filename, row chunk size and active value column."""
+
+        # Preserve explicit elevation selection, otherwise infer the common point value columns
+        frame = frame.copy()
+        column = frame.pc.data_name
+        if "data_name" not in frame.attrs and column is None:
+            column = next((name for name in ("height", "z", "intensity") if name in frame), None)
+        if column is None and not frame.geometry.has_z.all():
+            frame["z"] = np.zeros(len(frame))
+            column = "z"
+
+        # A final shorter row group checks that file readers preserve every row
+        chunks = max(1, int(np.ceil(len(frame) / partitions)))
+        filename = tmp_path / f"points-{len(filenames)}.parquet"
+        filenames.append(filename)
+        frame.to_parquet(
+            filename, index=True, geometry_encoding="geoarrow", schema_version="1.1.0", row_group_size=chunks
+        )
+        return str(filename), chunks, column
+
+    return write_points
 
 
 def _raster(data: NDArrayNum, *, x_origin: float = 0) -> gu.Raster:
@@ -65,8 +96,8 @@ class TestCosample:
         first, second = (raster, points) if caller == "raster" else (points, raster)
         source = first
         if accessor:
-            source = first.to_xarray().rst if caller == "raster" else first.ds.pc
-            second = points.ds if caller == "raster" else raster.to_xarray()
+            source = first.to_xarray().rst if caller == "raster" else first.gdf.pc
+            second = points.gdf if caller == "raster" else raster.to_xarray()
         target_grid = raster.to_xarray() if accessor else raster
         target = {"at": target_grid} if explicit_at else {"raster_point_mode": "grid_points"}
         result = source.cosample(
@@ -111,8 +142,8 @@ class TestCosample:
         if method == "nearest":
             expected = 10 * np.rint(target_rows) + 2 * np.rint(target_columns)
         raster_column = "self" if caller == "raster" else "other"
-        np.testing.assert_allclose(result.ds[raster_column], expected)
-        assert result.ds.geometry.equals(points.ds.geometry)
+        np.testing.assert_allclose(result.gdf[raster_column], expected)
+        assert result.gdf.geometry.equals(points.gdf.geometry)
 
     def test_cosample__single_point_auxiliary_on_raster(self) -> None:
         """Checks edge case of a single point auxiliary input."""
@@ -163,8 +194,8 @@ class TestCosample:
         second = gu.PointCloud.from_xyz(x + 0.1, y, 2 * values.ravel(), crs=raster.crs)
 
         # Grid each point set onto the same support and return every input with the caller's container type
-        source = first.ds.pc if accessor else first
-        other = second.ds if accessor else second
+        source = first.gdf.pc if accessor else first
+        other = second.gdf if accessor else second
         support = raster.to_xarray() if accessor else raster
         result = source.cosample(other, at=support, grid_method="nearest")
 
@@ -188,10 +219,10 @@ class TestCosample:
         propagated = raster.cosample(points, resample_kwargs={"nodata_handling": "propagate"})
 
         # Check that only the strict setting drops the point beside the missing pixel
-        assert list(ignored.ds.index) == [0, 1]
-        assert list(propagated.ds.index) == [1]
-        np.testing.assert_allclose(ignored.ds["self"], 1)
-        np.testing.assert_allclose(propagated.ds["self"], 1)
+        assert list(ignored.gdf.index) == [0, 1]
+        assert list(propagated.gdf.index) == [1]
+        np.testing.assert_allclose(ignored.gdf["self"], 1)
+        np.testing.assert_allclose(propagated.gdf["self"], 1)
 
 
 class TestRasterCosampleSupport:
@@ -299,7 +330,7 @@ class TestRasterCosampleSupport:
         # Select a few pixels from a grid with only one row or one column
         values = np.arange(np.prod(shape), dtype=float).reshape(shape)
         raster = _raster(values)
-        source = gu.RasterAccessor.from_array(values, raster.transform, raster.crs).rst if accessor else raster
+        source = gu.DataArrayRasterAccessor.from_array(values, raster.transform, raster.crs).rst if accessor else raster
         mask = values % 2 == 0
         result = source.cosample(source, mask=mask)
 
@@ -329,23 +360,23 @@ class TestPointCosampleSupport:
         rows, columns = np.array([0, 1, 3, 4]), np.array([1, 2, 4, 5])
         x, y = raster.ij2xy(rows, columns)
         points = gu.PointCloud.from_xyz(x, y, np.array([4.0, 5.0, 6.0, np.nan]), crs=raster.crs)
-        points.ds.index = ["a", "b", "c", "d"]
-        source_column, source_bounds = points.data_column, points.bounds
+        points.gdf.index = ["a", "b", "c", "d"]
+        source_column, source_bounds = points.data_name, points.bounds
 
         # Use the point locations as common support through either spatial object or accessor
         source, other = (raster, points) if caller == "raster" else (points, raster)
         if accessor:
-            source = source.to_xarray().rst if caller == "raster" else source.ds.pc
-            other = points.ds if caller == "raster" else raster.to_xarray()
+            source = source.to_xarray().rst if caller == "raster" else source.gdf.pc
+            other = points.gdf if caller == "raster" else raster.to_xarray()
         result = source.cosample(other, resample_method="nearest")
         assert isinstance(result, gpd.GeoDataFrame if accessor else gu.PointCloud)
-        output = result if accessor else result.ds
+        output = result if accessor else result.gdf
         output_points = result.pc if accessor else result
 
         # Check the original point labels, geometry, and two named value columns
         assert np.array_equal(output.index, ["a", "c"])
-        assert output.geometry.equals(points.ds.geometry.iloc[[0, 2]])
-        assert output_points.data_column == "self"
+        assert output.geometry.equals(points.gdf.geometry.iloc[[0, 2]])
+        assert output_points.data_name == "self"
         raster_values = values[rows[[0, 2]], columns[[0, 2]]]
         expected = (raster_values, [4.0, 6.0]) if caller == "raster" else ([4.0, 6.0], raster_values)
         assert np.array_equal(output["self"], expected[0])
@@ -353,9 +384,9 @@ class TestPointCosampleSupport:
 
         # Check that point count and bounds describe the selected points while the original metadata stays unchanged
         assert output_points.point_count == 2
-        assert np.array_equal(output_points.bounds, points.ds.iloc[[0, 2]].total_bounds)
+        assert np.array_equal(output_points.bounds, points.gdf.iloc[[0, 2]].total_bounds)
         assert points.point_count == 4
-        assert points.data_column == source_column
+        assert points.data_name == source_column
         assert points.bounds == source_bounds
 
     @pytest.mark.parametrize("at", [None, "self", "other", "explicit", "raw_self", "raw_other"])
@@ -367,8 +398,8 @@ class TestPointCosampleSupport:
         positions = np.arange(8, dtype=float)
         first = gu.PointCloud.from_xyz(positions, positions**2, positions, crs=32633, use_z=True)
         second = gu.PointCloud.from_xyz(positions, positions**2, 2 * positions, crs=32633, use_z=True)
-        first.ds.index = ["a", "b", "a", "c", "d", "e", "f", "g"]
-        second.ds.index = np.arange(8) + 10
+        first.gdf.index = ["a", "b", "a", "c", "d", "e", "f", "g"]
+        second.gdf.index = np.arange(8) + 10
         auxiliary = 3 * positions
         auxiliary[3] = np.nan
 
@@ -387,10 +418,10 @@ class TestPointCosampleSupport:
         expected = np.array([0, 1, 2, 4, 5, 6, 7])
 
         # Check the chosen labels, 3D geometry, values, and column order
-        assert result.ds.geometry.equals(support.ds.geometry.iloc[expected])
-        assert list(result.ds.columns) == ["self", "other", "weight", "geometry"]
-        assert np.array_equal(result.ds["other"], 2 * result.ds["self"])
-        assert np.array_equal(result.ds["weight"], 3 * result.ds["self"])
+        assert result.gdf.geometry.equals(support.gdf.geometry.iloc[expected])
+        assert list(result.gdf.columns) == ["self", "other", "weight", "geometry"]
+        assert np.array_equal(result.gdf["other"], 2 * result.gdf["self"])
+        assert np.array_equal(result.gdf["weight"], 3 * result.gdf["self"])
 
     @pytest.mark.parametrize("accessor", [False, True])
     @pytest.mark.parametrize("common_support", ["raster", "points"])
@@ -404,12 +435,12 @@ class TestPointCosampleSupport:
         x, y = raster.ij2xy(rows.ravel(), columns.ravel())
         points = gu.PointCloud.from_xyz(x, y, values.ravel(), crs=raster.crs)
         weights = 3 * values.ravel() + 100
-        points.ds["weight"] = weights
-        original_column = points.data_column
+        points.gdf["weight"] = weights
+        original_column = points.data_name
 
         # Select the auxiliary column without changing the active values of either primary input
-        source = points.ds.pc if accessor else points
-        other = points.ds if accessor else points
+        source = points.gdf.pc if accessor else points
+        other = points.gdf if accessor else points
         support = raster.to_xarray() if accessor else raster
         selected_at = support if common_support == "raster" else "self"
         result = source.cosample(other, auxiliary={"chosen": (other, "weight")}, at=selected_at, grid_method="nearest")
@@ -419,11 +450,11 @@ class TestPointCosampleSupport:
             output = result.values if accessor else result.data.filled(np.nan)
             assert np.array_equal(output, np.stack((values, values, weights.reshape(values.shape))))
         else:
-            output = result if accessor else result.ds
+            output = result if accessor else result.gdf
             assert np.array_equal(output["chosen"], weights)
             assert np.array_equal(output["self"], values.ravel())
-            assert output.geometry.equals(points.ds.geometry)
-        assert points.data_column == original_column
+            assert output.geometry.equals(points.gdf.geometry)
+        assert points.data_name == original_column
         assert np.array_equal(points.data, values.ravel())
 
     def test_cosample__plain_auxiliaries_at_reprojected_points(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -451,8 +482,8 @@ class TestPointCosampleSupport:
         # Check all original values at the projected coordinates after comparing their source point cloud once
         assert len(comparisons) == 1
         expected = np.column_stack((values, 2 * values, 3 * values, values + 100))
-        assert np.array_equal(result.ds[["self", "other", "scaled", "offset"]], expected)
-        assert result.ds.geometry.equals(support.ds.geometry)
+        assert np.array_equal(result.gdf[["self", "other", "scaled", "offset"]], expected)
+        assert result.gdf.geometry.equals(support.gdf.geometry)
         assert points.crs.to_epsg() == 4326
 
     @pytest.mark.parametrize("mask_type,mask_mode", [("vector", "inside"), ("vector", "outside"), ("raster", "inside")])
@@ -500,7 +531,7 @@ class TestPointCosampleSupport:
         else:
             expected = np.array([0, 1])
         expected_mean = np.asarray(points.data)[expected].mean()
-        assert np.array_equal(sampled.ds.index, expected)
+        assert np.array_equal(sampled.gdf.index, expected)
         assert np.array_equal(np.flatnonzero(masks[0].data), expected)
         assert summary == pytest.approx({"mean": expected_mean, "validinliercount": len(expected)})
         np.testing.assert_allclose(grouped["height"], [[len(expected), expected_mean]])
@@ -521,8 +552,8 @@ class TestPointCosampleSupport:
         result = points.cosample(points, auxiliary={"aux": auxiliary}, auxiliary_at="self", mask=mask)
 
         # Check that only the first and last points remain in their original order
-        assert np.array_equal(result.ds.index, [0, 4])
-        assert np.array_equal(result.ds["aux"], [0, 4])
+        assert np.array_equal(result.gdf.index, [0, 4])
+        assert np.array_equal(result.gdf["aux"], [0, 4])
 
     @pytest.mark.parametrize("singleton_band", [False, True])
     def test_cosample__raster_auxiliary_interpolation_options(self, singleton_band: bool) -> None:
@@ -556,8 +587,8 @@ class TestPointCosampleSupport:
         # Check the exact finite positions returned by interpolation for two-dimensional and one-band inputs
         assert 0 < kept.size < positions.size
         assert -99999 in expected[kept]
-        assert np.array_equal(result.ds.index, kept)
-        assert np.array_equal(result.ds["offset"], expected[kept])
+        assert np.array_equal(result.gdf.index, kept)
+        assert np.array_equal(result.gdf["offset"], expected[kept])
 
     @pytest.mark.parametrize("accessor", [False, True])
     def test_cosample__selected_band_validity(self, accessor: bool) -> None:
@@ -573,9 +604,9 @@ class TestPointCosampleSupport:
 
         # Request only the second band through a Raster and an Xarray accessor
         source = raster.to_xarray().rst if accessor else raster
-        other = points.ds if accessor else points
+        other = points.gdf if accessor else points
         result = source.cosample(other, band=2, resample_method="nearest")
-        output = result if accessor else result.ds
+        output = result if accessor else result.gdf
 
         # Check that a point over nodata in only the unused first band remains
         assert np.array_equal(output.index, [0, 1])
@@ -588,19 +619,19 @@ class TestPointCosampleSupport:
         # Use duplicate row labels so sampling must follow row positions
         positions = np.arange(20, dtype=float)
         points = gu.PointCloud.from_xyz(positions, positions, positions, crs=32633)
-        points.ds.index = np.tile(["z", "a"], 10)
-        original = points.ds.copy(deep=True)
+        points.gdf.index = np.tile(["z", "a"], 10)
+        original = points.gdf.copy(deep=True)
         result = points.cosample(points, subsample=5, random_state=42)
         repeated = points.cosample(points, subsample=5, random_state=42)
 
         # Check repeatable selection in the original point order
-        assert len(result.ds) == 5
-        assert np.all(np.diff(result.ds["self"]) > 0)
-        assert_geodataframe_equal(result.ds, repeated.ds)
+        assert len(result.gdf) == 5
+        assert np.all(np.diff(result.gdf["self"]) > 0)
+        assert_geodataframe_equal(result.gdf, repeated.gdf)
 
         # Check that changing the returned PointCloud does not change either input
-        result.ds["self"] = -1
-        assert_geodataframe_equal(points.ds, original)
+        result.gdf["self"] = -1
+        assert_geodataframe_equal(points.gdf, original)
 
 
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
@@ -608,11 +639,13 @@ class TestCosampleChunked:
     """Test module for cosample() with Dask and Multiproc backends: loading behavior and exact equality with eager."""
 
     @pytest.mark.parametrize("auxiliary_type", ["numpy", "dask", "column"])
-    def test_cosample__dask_point_auxiliaries_on_raster(self, auxiliary_type: str) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_cosample__dask_point_auxiliaries_on_raster(
+        self, as_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, auxiliary_type: str
+    ) -> None:
         """Checks that lazy point gridding assigns array or column auxiliaries to the correct raster pixels."""
 
         import dask.array as da
-        import dask_geopandas as dgpd
 
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
@@ -624,12 +657,19 @@ class TestCosampleChunked:
         x, y = raster.ij2xy(rows.ravel(), columns.ravel())
         points = gu.PointCloud.from_xyz(x, y, values.ravel(), crs=raster.crs)
         auxiliary_values = 3 * values.ravel() + 7
-        points.ds["weight"] = auxiliary_values
-        points.ds.index = np.tile(["a", "b"], 6)
+        points.gdf["weight"] = auxiliary_values
+        points.gdf.index = np.tile(["a", "b"], 6)
 
         # Partition points independently from Dask arrays, or select the existing point column
-        lazy_points = dgpd.from_geopandas(points.ds, npartitions=3, sort=False)
-        lazy_points.pc.data_column = points.data_column
+        lazy_points_filename, lazy_points_chunks, lazy_points_column = pointcloud_file(points.gdf, 3)
+        lazy_points = gu.open_pointcloud(
+            lazy_points_filename,
+            data_name=lazy_points_column,
+            columns="all",
+            chunks=lazy_points_chunks,
+            as_type=as_type,
+        )
+
         target = raster.to_xarray().chunk({"y": 2, "x": 3})
         auxiliary: Any = auxiliary_values
         if auxiliary_type == "dask":
@@ -653,27 +693,32 @@ class TestCosampleChunked:
         # Check that neither input nor the result is computed until their values are requested
         assert target.chunks is not None and result.chunks is not None
         assert not lazy_points.pc.is_loaded
-        assert lazy_points.pc.data_column == points.data_column
+        assert lazy_points.pc.data_name == points.data_name
         assert np.array_equal(result.compute().values, expected.data.filled(np.nan), equal_nan=True)
         assert not lazy_points.pc.is_loaded
 
-    @pytest.mark.parametrize("chunks", [(7, 11), (32, 47), (256, 256)])
+    @pytest.mark.parametrize("chunks", [(7, 11), (12, 17), (256, 256)])
     @pytest.mark.parametrize("caller", ["raster", "points"])
-    def test_cosample__dask_gridding_chunks(self, chunks: tuple[int, int], caller: str, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_cosample__dask_gridding_chunks(
+        self, as_type: Literal["dataarray", "geodataframe"], chunks: tuple[int, int], caller: str, tmp_path: Path
+    ) -> None:
         """Checks that Dask point gridding returns the same seeded sample as eager gridding for each chunk size."""
 
         # Place one point at each grid pixel so the nearest-neighbor gridding is exact
-        values = np.arange(65 * 97, dtype=float).reshape(65, 97)
+        # The small grid covers nine tiles, four tiles and one tile, with shorter edge tiles
+        values = np.arange(17 * 23, dtype=float).reshape(17, 23)
         raster = _raster(values)
         points = raster.to_pointcloud()
         lazy_raster = raster.to_xarray().chunk({"y": chunks[0], "x": chunks[1]})
 
         # Write the points and reopen them as lazy partitions
+        # Four partitions include a shorter final partition of 88 points
         point_file = tmp_path / "observations.gpkg"
         points.to_file(point_file)
-        lazy_points = gu.open_pointcloud(str(point_file), data_column=points.data_column, chunks=1400)
+        lazy_points = gu.open_pointcloud(str(point_file), data_name=points.data_name, chunks=101, as_type=as_type)
 
-        # Grid lazy point data with two partition sizes and both public calling objects
+        # Grid lazy point data with three tile sizes and both public calling objects
         source, other = (lazy_raster.rst, lazy_points) if caller == "raster" else (lazy_points.pc, lazy_raster)
         result = source.cosample(
             other,
@@ -688,8 +733,10 @@ class TestCosampleChunked:
 
         # Check that all runs stay lazy and select the same pixels and values as the eager call
         assert result.data.chunks is not None
+        assert not lazy_raster.rst.is_loaded
         assert not lazy_points.pc.is_loaded
         assert np.array_equal(result.compute().values, expected.data.filled(np.nan), equal_nan=True)
+        assert not lazy_raster.rst.is_loaded
         assert not lazy_points.pc.is_loaded
 
     @pytest.mark.parametrize("reproject", [False, True])
@@ -700,7 +747,7 @@ class TestCosampleChunked:
         values = np.arange(30, dtype=float).reshape(5, 6)
         raster = _raster(values + 100)
         points = _raster(values + 10).to_pointcloud()
-        points.ds["weight"] = 3 * values.ravel() + 7
+        points.gdf["weight"] = 3 * values.ravel() + 7
         if reproject:
             points = points.reproject(crs=4326)
         expected = raster.cosample(
@@ -712,7 +759,7 @@ class TestCosampleChunked:
         )
         point_file = tmp_path / "observations.gpkg"
         points.to_file(point_file)
-        unloaded = gu.PointCloud(point_file, data_column=points.data_column)
+        unloaded = gu.PointCloud(point_file, data_name=points.data_name)
         assert not unloaded.is_loaded
 
         # Read both point columns into raster tiles without copying or loading the point source in the parent
@@ -728,7 +775,7 @@ class TestCosampleChunked:
 
         # Check that the original active column is unchanged, loading behaviour and that the result matches eager
         assert not unloaded.is_loaded
-        assert unloaded.data_column == points.data_column
+        assert unloaded.data_name == points.data_name
         assert not result.is_loaded
         assert outfile.exists()
         assert np.array_equal(result.data.filled(np.nan), expected.data.filled(np.nan), equal_nan=True)
@@ -743,7 +790,7 @@ class TestCosampleChunked:
         support = points.reproject(crs=32632)
         point_file = tmp_path / "geographic.gpkg"
         points.to_file(point_file)
-        unloaded = gu.PointCloud(point_file, data_column=points.data_column)
+        unloaded = gu.PointCloud(point_file, data_name=points.data_name)
 
         # Pass rectangular chunks and a raster output path to check point output leaves both options unchanged
         config = MultiprocConfig(chunks=(2, 3), outfile=str(tmp_path / "unused-output.tif"))
@@ -767,7 +814,7 @@ class TestCosampleChunked:
 
         # Point matching requires identical ordered X/Y values, no source load or config change is needed
         assert result.georeferenced_coords_equal(support)
-        assert np.array_equal(result.ds[["self", "other", "offset"]], expected.ds[["self", "other", "offset"]])
+        assert np.array_equal(result.gdf[["self", "other", "offset"]], expected.gdf[["self", "other", "offset"]])
         assert not unloaded.is_loaded
         assert config.chunks == (2, 3)
         assert config.driver is None
@@ -854,12 +901,12 @@ class TestCosampleChunked:
         if lazy:
             import dask.array as da
 
-            source = gu.RasterAccessor.from_array(
+            source = gu.DataArrayRasterAccessor.from_array(
                 da.from_array(data.astype(float).filled(np.nan), chunks=(2, 3)), first.transform, first.crs
             ).rst
             if raster_mask:
                 # Convert the raster mask to Xarray with its masked pixel excluded and its values still boolean
-                selected_mask = gu.RasterAccessor.from_array(
+                selected_mask = gu.DataArrayRasterAccessor.from_array(
                     selected_mask.data.filled(False), selected_mask.transform, selected_mask.crs
                 )
         result = source.cosample(source, auxiliary={"aux": auxiliary}, auxiliary_at="self", mask=selected_mask)
@@ -883,8 +930,8 @@ class TestCosampleChunked:
 
         array = np.arange(63, dtype=float).reshape(7, 9)
         transform = from_origin(0, 7, 1, 1)
-        first = gu.RasterAccessor.from_array(da.from_array(array, chunks=(2, 4)), transform, 32633)
-        second = gu.RasterAccessor.from_array(da.from_array(2 * array, chunks=(4, 3)), transform, 32633)
+        first = gu.DataArrayRasterAccessor.from_array(da.from_array(array, chunks=(2, 4)), transform, 32633)
+        second = gu.DataArrayRasterAccessor.from_array(da.from_array(2 * array, chunks=(4, 3)), transform, 32633)
 
         # Repeat the same seeded sample after changing one chunk layout
         result = first.rst.cosample(second, subsample=subsample, random_state=42, strategy="topk")
@@ -956,7 +1003,7 @@ class TestCosampleChunked:
             lazy_auxiliary = auxiliary.to_xarray().chunk({"y": rows, "x": columns})
             lazy_mask = mask
             if mask_type == "raster":
-                lazy_mask = gu.RasterAccessor.from_array(mask.data, mask.transform, mask.crs)
+                lazy_mask = gu.DataArrayRasterAccessor.from_array(mask.data, mask.transform, mask.crs)
             lazy = lazy_first.rst.cosample(
                 lazy_second,
                 auxiliary={"scaled": (lazy_auxiliary, 2), "raw": raw_auxiliary},
@@ -1005,7 +1052,10 @@ class TestCosampleChunked:
         assert tuple(result.tags["long_name"]) == ("self", "other", "scaled", "raw")
 
     @pytest.mark.parametrize("lazy", [False, True])
-    def test_cosample__no_replacement_after_interpolation(self, lazy: bool) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_cosample__no_replacement_after_interpolation(
+        self, as_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, lazy: bool
+    ) -> None:
         """Checks that points rejected during interpolation are not replaced in the sample."""
 
         # Place points around one raster nodata pixel, including neighbors rejected by a one-cell nodata spread
@@ -1013,7 +1063,7 @@ class TestCosampleChunked:
         raster.data[5, 5] = np.ma.masked
         rows, columns = np.meshgrid(np.arange(3, 8), np.arange(3, 8), indexing="ij")
         x, y = raster.ij2xy(rows.ravel(), columns.ravel())
-        points = gu.PointCloud.from_xyz(x, y, np.arange(x.size, dtype=float), crs=raster.crs).ds
+        points = gu.PointCloud.from_xyz(x, y, np.arange(x.size, dtype=float), crs=raster.crs).gdf
         options = {"subsample": 23, "random_state": 42}
 
         # Select almost every initially valid point so final interpolation removes some selected nodata neighbors
@@ -1034,19 +1084,22 @@ class TestCosampleChunked:
             source: Any = points
             other: Any = raster.to_xarray()
             if lazy:
-                import dask_geopandas as dgpd
-
                 from geoutils.pointcloud.pd_accessor import (
                     _register_dask_pointcloud_accessor,
                 )
 
                 _register_dask_pointcloud_accessor()
-                source = dgpd.from_geopandas(points, npartitions=3, sort=False)
+                source_filename, source_chunks, source_column = pointcloud_file(points, 3)
+                source = gu.open_pointcloud(
+                    source_filename, data_name=source_column, columns="all", chunks=source_chunks, as_type=as_type
+                )
                 other = raster.to_xarray().chunk({"y": 6, "x": 6})
             result = source.pc.cosample(other, resample_method="slinear", **options)
             if lazy:
                 assert not source.pc.is_loaded
             output = result.compute() if lazy else result
+            if as_type == "dataarray" and lazy:
+                output = output.pc.to_geoutils().gdf
         finally:
             gu.config["interpolation_nodata_handling"] = default_handling
 
@@ -1074,7 +1127,7 @@ class TestCosampleChunked:
         positions = np.arange(24)
         x, y = raster.ij2xy(1.2 + positions % 8, 1.3 + positions % 11)
         points = gu.PointCloud.from_xyz(x, y, positions.astype(float), crs=raster.crs)
-        points.ds.index = np.repeat(np.arange(12), 2)
+        points.gdf.index = np.repeat(np.arange(12), 2)
         auxiliary = 3 * positions.astype(float)
         auxiliary[3] = np.nan
 
@@ -1107,12 +1160,19 @@ class TestCosampleChunked:
         # 3/ Check that both rasters stay unloaded and the output preserves values, row order, and duplicate labels
         assert not unloaded.is_loaded
         assert not unloaded_mask.is_loaded
-        assert len(result.ds) == 7
-        assert_geodataframe_equal(result.ds, expected.ds)
+        assert len(result.gdf) == 7
+        assert_geodataframe_equal(result.gdf, expected.gdf)
 
     @pytest.mark.parametrize("subsample", [1, 8, 0.3])
     @pytest.mark.parametrize("mask_type", ["array", "raster", "vector"])
-    def test_cosample__dask_point_partitions(self, subsample: int | float, mask_type: str) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_cosample__dask_point_partitions(
+        self,
+        as_type: Literal["dataarray", "geodataframe"],
+        pointcloud_file: Any,
+        subsample: int | float,
+        mask_type: str,
+    ) -> None:
         """Checks that values, labels and 3D geometry match eager across Dask point partitions."""
 
         import dask.array as da
@@ -1151,13 +1211,27 @@ class TestCosampleChunked:
         }
         eager_mask = mask
         if mask_type == "raster":
-            eager_mask = gu.RasterAccessor.from_array(mask.data, mask.transform, mask.crs)
+            eager_mask = gu.DataArrayRasterAccessor.from_array(mask.data, mask.transform, mask.crs)
         expected = first.pc.cosample(
             second, auxiliary={"grid": raster.to_xarray(), "scaled": auxiliary}, mask=eager_mask, **options
         )
         for partitions in (2, 5):
-            lazy_first = dgpd.from_geopandas(first, npartitions=partitions, sort=False)
-            lazy_second = dgpd.from_geopandas(second, npartitions=partitions + 1, sort=False)
+            lazy_first_filename, lazy_first_chunks, lazy_first_column = pointcloud_file(first, partitions)
+            lazy_first = gu.open_pointcloud(
+                lazy_first_filename,
+                data_name=lazy_first_column,
+                columns="all",
+                chunks=lazy_first_chunks,
+                as_type=as_type,
+            )
+            lazy_second_filename, lazy_second_chunks, lazy_second_column = pointcloud_file(second, partitions + 1)
+            lazy_second = gu.open_pointcloud(
+                lazy_second_filename,
+                data_name=lazy_second_column,
+                columns="all",
+                chunks=lazy_second_chunks,
+                as_type=as_type,
+            )
             lazy_raster = raster.to_xarray().chunk({"y": partitions + 1, "x": 4})
             lazy_auxiliary = da.from_array(auxiliary, chunks=7)
             # Give an array mask independent Dask chunks, or apply the spatial mask to each Dask point partition
@@ -1174,11 +1248,13 @@ class TestCosampleChunked:
             )
 
             # 3/ Check that the output remains partitioned and its metadata is unchanged before comparing values
-            assert isinstance(result, dgpd.GeoDataFrame)
+            assert isinstance(result, xr.DataArray if as_type == "dataarray" else dgpd.GeoDataFrame)
             assert not result.pc.is_loaded
-            assert result.pc.data_column == "self"
+            assert result.pc.data_name == "self"
             assert not lazy_first.pc.is_loaded
             output = result.compute()
+            if as_type == "dataarray":
+                output = output.pc.to_geoutils().gdf
             assert list(output.columns) == ["self", "other", "grid", "scaled", "geometry"]
             assert np.array_equal(output.index.to_numpy(), expected.index.to_numpy())
             assert np.array_equal(output.geometry.to_numpy(), expected.geometry.to_numpy())
@@ -1187,8 +1263,13 @@ class TestCosampleChunked:
             assert output.crs == expected.crs
 
     @pytest.mark.parametrize("subsample", [1, 8])
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
     def test_cosample__dask_points_defer_value_interpolation(
-        self, subsample: int, monkeypatch: pytest.MonkeyPatch
+        self,
+        as_type: Literal["dataarray", "geodataframe"],
+        pointcloud_file: Any,
+        subsample: int,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Checks that Dask reads raster validity first and waits to interpolate the selected values."""
 
@@ -1203,11 +1284,18 @@ class TestCosampleChunked:
         raster = _raster(np.arange(120, dtype=float).reshape(10, 12))
         raster.data[3, 4] = np.ma.masked
         x, y = raster.ij2xy(1 + positions.astype(int) % 7, 1 + positions.astype(int) % 9)
-        points = gu.PointCloud.from_xyz(x, y, positions, crs=raster.crs).ds
+        points = gu.PointCloud.from_xyz(x, y, positions, crs=raster.crs).gdf
         points.index = np.tile(["b", "a", "b"], 8)
         options: dict[str, Any] = {"resample_method": "nearest", "subsample": subsample, "random_state": 42}
         expected = points.pc.cosample(raster.to_xarray(), **options)
-        lazy_points = dgpd.from_geopandas(points, npartitions=3, sort=False)
+        lazy_points_filename, lazy_points_chunks, lazy_points_column = pointcloud_file(points, 3)
+        lazy_points = gu.open_pointcloud(
+            lazy_points_filename,
+            data_name=lazy_points_column,
+            columns="all",
+            chunks=lazy_points_chunks,
+            as_type=as_type,
+        )
         lazy_raster = raster.to_xarray().chunk({"y": 4, "x": 5})
 
         # 2/ Check that building the Dask result reads raster validity without interpolating raster values
@@ -1224,15 +1312,18 @@ class TestCosampleChunked:
 
         monkeypatch.setattr(resampling, "_interp_points_base", track_interpolation)
         result = lazy_points.pc.cosample(lazy_raster, **options)
-        assert isinstance(result, dgpd.GeoDataFrame)
+        assert isinstance(result, xr.DataArray if as_type == "dataarray" else dgpd.GeoDataFrame)
         assert not result.pc.is_loaded
-        assert result.pc.data_column == "self"
-        assert result.pc.bounds is None
-        assert lazy_points.pc.data_column == points.pc.data_column
+        assert result.pc.data_name == "self"
+        if as_type == "geodataframe":
+            assert result.pc.bounds is None
+        assert lazy_points.pc.data_name == points.pc.data_name
         assert calls and all(calls)
 
         # 3/ Compute values only on request, preserving the eager labels, coordinates and selected values
         output = result.compute()
+        if as_type == "dataarray":
+            output = output.pc.to_geoutils().gdf
         assert any(not validity_only for validity_only in calls)
         assert np.array_equal(output.index.to_numpy(), expected.index.to_numpy())
         assert np.array_equal(output.geometry.to_numpy(), expected.geometry.to_numpy())
@@ -1244,10 +1335,11 @@ class TestCosampleChunked:
 
     @pytest.mark.parametrize("lazy_input", ["raster", "points"])
     @pytest.mark.parametrize("caller", ["raster", "points"])
-    def test_cosample__mixed_eager_and_dask_inputs(self, lazy_input: str, caller: str) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_cosample__mixed_eager_and_dask_inputs(
+        self, as_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, lazy_input: str, caller: str
+    ) -> None:
         """Checks that eager and Dask raster and point inputs can be used together."""
-
-        import dask_geopandas as dgpd
 
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
@@ -1257,7 +1349,7 @@ class TestCosampleChunked:
         rows, columns = np.array([1, 2, 3]), np.array([1, 2, 3])
         x, y = raster.ij2xy(rows, columns)
         values = np.array([10.0, 20.0, 30.0])
-        points = gu.PointCloud.from_xyz(x, y, values, crs=raster.crs).ds
+        points = gu.PointCloud.from_xyz(x, y, values, crs=raster.crs).gdf
 
         # Use accessor-compatible raster and point inputs while making only one of them Dask-backed
         raster_input = raster.to_xarray()
@@ -1265,7 +1357,14 @@ class TestCosampleChunked:
         if lazy_input == "raster":
             raster_input = raster_input.chunk({"y": 2, "x": 3})
         else:
-            point_input = dgpd.from_geopandas(points, npartitions=2, sort=False)
+            point_input_filename, point_input_chunks, point_input_column = pointcloud_file(points, 2)
+            point_input = gu.open_pointcloud(
+                point_input_filename,
+                data_name=point_input_column,
+                columns="all",
+                chunks=point_input_chunks,
+                as_type=as_type,
+            )
         source, other = (raster_input.rst, point_input) if caller == "raster" else (point_input.pc, raster_input)
         result = source.cosample(other, resample_method="nearest")
 
@@ -1282,6 +1381,8 @@ class TestCosampleChunked:
         else:
             assert not point_input.pc.is_loaded and not result.pc.is_loaded
         output = result.compute() if lazy_input == "points" else result
+        if as_type == "dataarray" and lazy_input == "points":
+            output = output.pc.to_geoutils().gdf
         assert_geodataframe_equal(output, expected)
         raster_column, point_column = ("self", "other") if caller == "raster" else ("other", "self")
         assert np.array_equal(output[raster_column], raster.data[rows, columns])
@@ -1412,8 +1513,8 @@ class TestCosampleErrors:
         points = raster.to_pointcloud()
         source = raster if caller == "raster" else points
         if accessor:
-            source = raster.to_xarray().rst if caller == "raster" else points.ds.pc
-        other = points.ds if accessor else points
+            source = raster.to_xarray().rst if caller == "raster" else points.gdf.pc
+        other = points.gdf if accessor else points
         incompatible: Any = raster if input_type == "raster" else points
 
         # Use boolean values for masks so only their container family is invalid
@@ -1424,9 +1525,11 @@ class TestCosampleErrors:
                 incompatible = points.copy(new_array=np.ones(points.point_count, dtype=bool))
         if not accessor:
             if input_type == "raster":
-                incompatible = gu.RasterAccessor.from_array(incompatible.data, incompatible.transform, incompatible.crs)
+                incompatible = gu.DataArrayRasterAccessor.from_array(
+                    incompatible.data, incompatible.transform, incompatible.crs
+                )
             else:
-                incompatible = incompatible.ds
+                incompatible = incompatible.gdf
 
         # Put the incompatible input in one argument while all other inputs use the caller's container type
         options: dict[str, Any] = {}
@@ -1451,7 +1554,7 @@ class TestCosampleErrors:
         # Use point support in a different CRS so processing the raster would require reprojection
         raster = _raster(np.arange(30, dtype=float).reshape(5, 6))
         points = raster.to_pointcloud().reproject(crs=4326)
-        x, y = points.ds.geometry.x.to_numpy(), points.ds.geometry.y.to_numpy()
+        x, y = points.gdf.geometry.x.to_numpy(), points.gdf.geometry.y.to_numpy()
         values = np.arange(points.point_count, dtype=float)
         if mismatch == "shifted":
             x = x + 0.1
@@ -1501,7 +1604,7 @@ class TestCosampleErrors:
         "option,argument",
         [
             ("grid_kwargs", "mp_config"),
-            ("grid_kwargs", "data_column"),
+            ("grid_kwargs", "data_name"),
             ("resample_kwargs", "mp_config"),
             ("resample_kwargs", "_validity_only"),
         ],
@@ -1542,7 +1645,7 @@ class TestCosampleErrors:
         with pytest.raises(ValueError, match="no finite data common"):
             raster.cosample(raster, mask=np.zeros(raster.shape, dtype=bool))
         with pytest.raises(ValueError, match="no finite data common"):
-            points.cosample(points, mask=np.zeros(len(points.ds), dtype=bool))
+            points.cosample(points, mask=np.zeros(len(points.gdf), dtype=bool))
 
     def test_cosample__error_grid_crs_alignment(self) -> None:
         """Checks that gridding rejects points in another CRS while alignment is disabled."""

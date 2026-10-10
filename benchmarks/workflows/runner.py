@@ -353,7 +353,6 @@ class BenchmarkRunner:
             self.backend,
             output_file,
             self.config,
-            self.client,
         )
         return read_raster_center(self._last_output_file)
 

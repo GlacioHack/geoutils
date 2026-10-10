@@ -7,104 +7,26 @@ from typing import Any
 
 import geopandas as gpd
 import numpy as np
-import pandas as pd
 import pytest
 import rasterio as rio
 import xarray as xr
 from packaging.version import Version
-from pandas.testing import assert_frame_equal
 from pyproj import CRS
 from pyproj.crs import CompoundCRS
 
 from geoutils import (
     ErrorComponent,
     ErrorStructure,
-    PointCloud,
     Raster,
     Variogram,
-    Vector,
     examples,
     open_raster,
 )
 from geoutils.operators.reducer import Mean
 from geoutils.raster import MultiprocConfig
 from geoutils.raster.base import RasterBase
-from geoutils.raster.xr_accessor import RasterAccessor
-
-
-def assert_output_equal(output1: Any, output2: Any, use_allclose: bool = False, strict_masked: bool = True) -> None:
-    """Return equality of different output types."""
-
-    # For point clouds, accepting accessor-backed GeoDataFrames
-    if isinstance(output1, PointCloud) or isinstance(output2, PointCloud):
-        gdf1 = output1.ds if isinstance(output1, PointCloud) else output1
-        gdf2 = output2.ds if isinstance(output2, PointCloud) else output2
-        assert isinstance(gdf1, gpd.GeoDataFrame)
-        assert isinstance(gdf2, gpd.GeoDataFrame)
-        gpd.testing.assert_geodataframe_equal(
-            gdf1.reset_index(drop=True), gdf2.reset_index(drop=True), check_dtype=False
-        )
-        data_column1 = output1.data_column if isinstance(output1, PointCloud) else output1.pc.data_column
-        data_column2 = output2.data_column if isinstance(output2, PointCloud) else output2.pc.data_column
-        assert data_column1 == data_column2
-
-    # For vectors, accepting accessor-backed GeoDataFrames
-    elif isinstance(output1, (Vector, gpd.GeoDataFrame)) and isinstance(output2, (Vector, gpd.GeoDataFrame)):
-        vector1 = output1 if isinstance(output1, Vector) else Vector(output1)
-        vector2 = output2 if isinstance(output2, Vector) else Vector(output2)
-        assert vector1.vector_equal(vector2)
-
-    # For two raster: Xarray or Raster objects
-    elif isinstance(output1, (Raster, xr.DataArray)):
-        if use_allclose:
-            assert output1.raster_allclose(output2, warn_failure_reason=True, strict_masked=strict_masked)
-        else:
-            assert output1.raster_equal(output2, warn_failure_reason=True, strict_masked=strict_masked)
-
-    # For arrays
-    elif isinstance(output1, np.ndarray):
-        if np.ma.isMaskedArray(output1):
-            output1 = output1.filled(np.nan)
-        if np.ma.isMaskedArray(output2):
-            output2 = output2.filled(np.nan)
-        if use_allclose:
-            assert np.allclose(output1, output2, equal_nan=True)
-        else:
-            assert np.array_equal(output1, output2, equal_nan=True)
-
-    # For tuple of arrays
-    elif isinstance(output1, tuple) and isinstance(output1[0], np.ndarray):
-        assert np.array_equal(np.array(output1), np.array(output2), equal_nan=True)
-
-    # For a dictionary of numeric values
-    elif isinstance(output1, dict):
-        df1 = pd.DataFrame(index=[0], data=output1)
-        df2 = pd.DataFrame(index=[0], data=output2)
-        assert_frame_equal(df1, df2, check_dtype=False)
-
-    # For tabular statistics
-    elif isinstance(output1, pd.DataFrame):
-        assert_frame_equal(output1, output2)
-
-    # For fitted error structures
-    elif isinstance(output1, ErrorStructure):
-        assert isinstance(output2, ErrorStructure)
-        assert output1.components == output2.components
-        assert output1.empirical_variogram == output2.empirical_variogram
-
-    # For lightweight variogram records
-    elif isinstance(output1, Variogram):
-        assert isinstance(output2, Variogram)
-        assert np.allclose(output1.lags, output2.lags)
-        assert np.allclose(output1.semivariance, output2.semivariance, equal_nan=True)
-        assert np.array_equal(output1.counts, output2.counts)
-        assert output1.model == output2.model
-    # For labelled pair samples
-    elif isinstance(output1, xr.Dataset):
-        assert output1.identical(output2)
-    # For any other object type
-    else:
-        assert output1 == output2
+from geoutils.raster.xr_accessor import DataArrayRasterAccessor
+from tests.accessor_helpers import assert_output_equal
 
 
 def should_be_loaded(method: str, args: dict[str, Any], noload: list[str], noload_allowed_args: dict[str, Any]) -> bool:
@@ -212,7 +134,7 @@ class TestClassVsAccessorConsistency:
         # Create matching class and accessor rasters with different X/Y pixel sizes
         transform = rio.transform.from_origin(10, 20, 2, 3)
         raster = Raster.from_array(np.ones((2, 3)), transform=transform, crs=32610)
-        array = RasterAccessor.from_array(np.ones((2, 3)), transform=transform, crs=32610)
+        array = DataArrayRasterAccessor.from_array(np.ones((2, 3)), transform=transform, crs=32610)
         expected_bbox = rio.coords.BoundingBox(left=10, bottom=14, right=16, top=20)
         expected_interface = {
             "type": "Polygon",
@@ -248,7 +170,7 @@ class TestClassVsAccessorConsistency:
         # 2/ Check that Raster and the Xarray accessor report the same readable name
         for crs, expected_name in crs_cases:
             raster = Raster.from_array(np.ones((2, 2)), transform=transform, crs=crs)
-            ds = RasterAccessor.from_array(np.ones((2, 2)), transform=transform, crs=crs)
+            ds = DataArrayRasterAccessor.from_array(np.ones((2, 2)), transform=transform, crs=crs)
             expected_line = f"Coordinate system:    {[expected_name]}"
 
             assert expected_line in raster.info(verbose=False).split("\n")
@@ -262,7 +184,7 @@ class TestClassVsAccessorConsistency:
         compound_crs = CompoundCRS("Horizontal and vertical test CRS", [horizontal_crs, CRS.from_epsg(5773)])
         transform = rio.transform.from_origin(0, 2, 1, 1)
         horizontal = Raster.from_array(np.ones((2, 2)), transform=transform, crs=horizontal_crs)
-        compound = RasterAccessor.from_array(np.ones((2, 2)), transform=transform, crs=compound_crs)
+        compound = DataArrayRasterAccessor.from_array(np.ones((2, 2)), transform=transform, crs=compound_crs)
 
         # 2/ Check that the vertical difference warns but does not change horizontal grid equality
         with pytest.warns(UserWarning, match="same 2D CRS but a different vertical CRS"):
@@ -279,7 +201,7 @@ class TestClassVsAccessorConsistency:
 
         # 3/ Check that missing CRS metadata compares safely
         without_crs = Raster.from_array(np.ones((2, 2)), transform=transform, crs=None)
-        other_without_crs = RasterAccessor.from_array(np.ones((2, 2)), transform=transform, crs=None)
+        other_without_crs = DataArrayRasterAccessor.from_array(np.ones((2, 2)), transform=transform, crs=None)
 
         assert without_crs.georeferenced_grid_equal(other_without_crs)
         assert not horizontal.georeferenced_grid_equal(without_crs)
@@ -435,7 +357,7 @@ class TestClassVsAccessorConsistency:
                 nodata=-99999,
                 area_or_point=raster.area_or_point,
             )
-            ds = RasterAccessor.from_array(
+            ds = DataArrayRasterAccessor.from_array(
                 integer_data.filled(-99999),
                 transform=raster.transform,
                 crs=raster.crs,
@@ -573,7 +495,7 @@ class TestClassVsAccessorConsistency:
 
         # Accessor only uses this internally, but we expose it as a class method anyway
         output_raster = getattr(Raster, method)(**kwargs)
-        output_ds = getattr(RasterAccessor, method)(**kwargs)
+        output_ds = getattr(DataArrayRasterAccessor, method)(**kwargs)
 
         assert_output_equal(output_raster, output_ds)
 

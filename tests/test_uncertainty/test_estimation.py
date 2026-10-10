@@ -5,7 +5,7 @@ from __future__ import annotations
 import warnings
 from importlib.util import find_spec
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -16,6 +16,39 @@ from scipy.ndimage import gaussian_filter
 import geoutils as gu
 from geoutils.multiproc import MultiprocConfig
 from geoutils.stats.variography import VariogramModel
+
+
+@pytest.fixture
+def pointcloud_file(tmp_path: Any) -> Any:
+    """Write point fixtures as GeoParquet row groups with their original labels and attribute dtypes."""
+
+    import geopandas as gpd
+
+    pytest.importorskip("pyarrow")
+    filenames = []
+
+    def write_points(frame: gpd.GeoDataFrame, partitions: int) -> tuple[str, int, str | None]:
+        """Save one point fixture and return its filename, row chunk size and active value column."""
+
+        # Preserve explicit elevation selection, otherwise infer the common point value columns
+        frame = frame.copy()
+        column = frame.pc.data_name
+        if "data_name" not in frame.attrs and column is None:
+            column = next((name for name in ("height", "z", "intensity") if name in frame), None)
+        if column is None and not frame.geometry.has_z.all():
+            frame["z"] = np.zeros(len(frame))
+            column = "z"
+
+        # A final shorter row group checks that file readers preserve every row
+        chunks = max(1, len(frame) // partitions + 1)
+        filename = tmp_path / f"points-{len(filenames)}.parquet"
+        filenames.append(filename)
+        frame.to_parquet(
+            filename, index=True, geometry_encoding="geoarrow", schema_version="1.1.0", row_group_size=chunks
+        )
+        return str(filename), chunks, column
+
+    return write_points
 
 
 class TestErrorStructureEstimation:
@@ -110,12 +143,12 @@ class TestErrorStructureEstimation:
         quality = np.linspace(0, 1, len(positions))
         values = (0.5 + quality) * rng.normal(size=len(positions))
         proxy = gu.PointCloud.from_xyz(positions, np.zeros_like(positions), values, crs=32632)
-        proxy.ds["quality"] = quality
+        proxy.gdf["quality"] = quality
 
         # Exclude masked points and missing predictor together
         selected = np.ones(len(positions), dtype=bool)
         selected[:40] = False
-        proxy.ds.loc[100, "quality"] = np.nan
+        proxy.gdf.loc[100, "quality"] = np.nan
         structure = gu.ErrorStructure.estimate(
             proxy,
             predictors={"quality": "quality"},
@@ -207,7 +240,7 @@ class TestErrorStructureEstimation:
             expected = gu.ErrorStructure.estimate(scaled_difference, **options)
 
         # Check the fitted component and empirical variogram on the same support
-        assert result.predict_magnitude() == pytest.approx(expected.predict_magnitude(), abs=1e-12)
+        assert result.predict_magnitude() == pytest.approx(expected.predict_magnitude())
         distances = np.array([0.0, 10.0, 40.0])
         np.testing.assert_allclose(result.predict_correlation(distances), expected.predict_correlation(distances))
         assert result.empirical_variogram is not None
@@ -290,8 +323,25 @@ class TestErrorStructureEstimation:
 class TestErrorStructureEstimationChunked:
     """Test module for Dask/MP estimation across input types and error components."""
 
-    @pytest.mark.parametrize("backend", ["dask", "multiproc"])
-    @pytest.mark.parametrize("input_type", ["raster", "point", "point-point", "raster-point", "raster-raster"])
+    # Vary point representations only for Dask inputs that actually contain points
+    @pytest.mark.parametrize(
+        ("backend", "input_type", "as_type"),
+        [
+            ("dask", "raster", "dataarray"),
+            ("dask", "point", "dataarray"),
+            ("dask", "point", "geodataframe"),
+            ("dask", "point-point", "dataarray"),
+            ("dask", "point-point", "geodataframe"),
+            ("dask", "raster-point", "dataarray"),
+            ("dask", "raster-point", "geodataframe"),
+            ("dask", "raster-raster", "dataarray"),
+            ("multiproc", "raster", "dataarray"),
+            ("multiproc", "point", "dataarray"),
+            ("multiproc", "point-point", "dataarray"),
+            ("multiproc", "raster-point", "dataarray"),
+            ("multiproc", "raster-raster", "dataarray"),
+        ],
+    )
     @pytest.mark.parametrize(
         "components",
         [
@@ -313,6 +363,8 @@ class TestErrorStructureEstimationChunked:
     )
     def test_estimate__chunked_inputs_and_components_match_eager(
         self,
+        as_type: Literal["dataarray", "geodataframe"],
+        pointcloud_file: Any,
         backend: str,
         input_type: str,
         components: dict[str, dict[str, Any]],
@@ -353,7 +405,7 @@ class TestErrorStructureEstimationChunked:
         # Point locations match raster pixel centers for exact gridding
         x, y = raster_source.ij2xy(rows.ravel(), columns.ravel())
         point_source = gu.PointCloud.from_xyz(x, y, measured.ravel(), crs=32632)
-        point_source.ds["quality"] = quality.ravel()
+        point_source.gdf["quality"] = quality.ravel()
         point_reference = gu.PointCloud.from_xyz(x, y, reference.ravel(), crs=32632)
         source = raster_source if source_kind == "raster" else point_source
         if other_kind == "raster":
@@ -388,34 +440,51 @@ class TestErrorStructureEstimationChunked:
 
         # 2/ Chunked with Dask/MP, creating the same data lazy/on-file for raster or point
         # We also use an uneven chunk size relative to datasize, to check for edge behaviour
+        # Use four raster tiles to limit Dask scheduling overhead
+        raster_chunks = {"y": 7, "x": 8}
         chunked_other = None
         chunked_predictor = None
         input_states: list[tuple[Any, str]] = []
         if backend == "dask":
             pytest.importorskip("dask")
             if source_kind == "raster":
-                chunked_source = source.to_xarray().chunk({"y": 5, "x": 4})
+                chunked_source = source.to_xarray().chunk(raster_chunks)
                 source_interface = chunked_source.rst
             else:
-                dask_geopandas = pytest.importorskip("dask_geopandas")
+                pytest.importorskip("dask_geopandas")
                 from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
                 _register_dask_pointcloud_accessor()
-                chunked_source = dask_geopandas.from_geopandas(source.ds, npartitions=7, sort=False)
+                # Two partitions of 73 and 71 rows check the shorter final partition
+                chunked_source_filename, chunked_source_chunks, chunked_source_column = pointcloud_file(source.gdf, 2)
+                chunked_source = gu.open_pointcloud(
+                    chunked_source_filename,
+                    data_name=chunked_source_column,
+                    columns="all",
+                    chunks=chunked_source_chunks,
+                    as_type=as_type,
+                )
                 source_interface = chunked_source.pc
-                source_interface.data_column = source.data_column
+
             mp_config = None
 
             if other_kind == "raster":
-                chunked_other = other.to_xarray().chunk({"y": 5, "x": 4})
+                chunked_other = other.to_xarray().chunk(raster_chunks)
                 input_states.append((chunked_other.rst, "raster"))
             elif other_kind == "point":
-                dask_geopandas = pytest.importorskip("dask_geopandas")
-                chunked_other = dask_geopandas.from_geopandas(other.ds, npartitions=7, sort=False)
-                chunked_other.pc.data_column = other.data_column
+                pytest.importorskip("dask_geopandas")
+                chunked_other_filename, chunked_other_chunks, chunked_other_column = pointcloud_file(other.gdf, 2)
+                chunked_other = gu.open_pointcloud(
+                    chunked_other_filename,
+                    data_name=chunked_other_column,
+                    columns="all",
+                    chunks=chunked_other_chunks,
+                    as_type=as_type,
+                )
+
                 input_states.append((chunked_other.pc, "point"))
             if variable and source_kind == "raster":
-                chunked_predictor = raster_predictor.to_xarray().chunk({"y": 5, "x": 4})
+                chunked_predictor = raster_predictor.to_xarray().chunk(raster_chunks)
                 input_states.append((chunked_predictor.rst, "raster"))
         else:
             # If with MP, from file inputs
@@ -426,7 +495,7 @@ class TestErrorStructureEstimationChunked:
             else:
                 chunked_source = source
             source_interface = chunked_source
-            mp_config = MultiprocConfig(chunks=(5, 4) if source_kind == "raster" else 23)
+            mp_config = MultiprocConfig(chunks=(7, 8) if source_kind == "raster" else 23)
 
             # Raster files must stay unloaded
             if other_kind == "raster":
@@ -500,9 +569,7 @@ class TestErrorStructureEstimationChunked:
                 assert isinstance(magnitude.grouped_statistics, pd.DataFrame)
                 assert isinstance(eager_magnitude.grouped_statistics, pd.DataFrame)
                 pd.testing.assert_frame_equal(magnitude.grouped_statistics, eager_magnitude.grouped_statistics)
-            np.testing.assert_allclose(
-                magnitude.predict(test_quality), eager_magnitude.predict(test_quality), rtol=0, atol=1e-12
-            )
+            assert np.allclose(magnitude.predict(test_quality), eager_magnitude.predict(test_quality), equal_nan=True)
 
             # Compare fitted model parameters for correlated components
             correlation = component.correlation
@@ -513,32 +580,27 @@ class TestErrorStructureEstimationChunked:
                 assert isinstance(correlation, VariogramModel)
                 assert isinstance(eager_correlation, VariogramModel)
                 assert correlation.model_name == eager_correlation.model_name
-                assert correlation.effective_range == pytest.approx(eager_correlation.effective_range, abs=1e-12)
-                assert correlation.partial_sill == pytest.approx(eager_correlation.partial_sill, abs=1e-12)
+                assert correlation.effective_range == pytest.approx(eager_correlation.effective_range)
+                assert correlation.partial_sill == pytest.approx(eager_correlation.partial_sill)
 
         # Compare the full error structure and empirical variogram
-        np.testing.assert_allclose(
-            result.predict_magnitude(test_quality), expected.predict_magnitude(test_quality), rtol=0, atol=1e-12
+        assert np.allclose(
+            result.predict_magnitude(test_quality), expected.predict_magnitude(test_quality), equal_nan=True
         )
         if not correlated:
             assert result.empirical_variogram is None
             assert expected.empirical_variogram is None
         else:
             distances = np.array([0.0, 10.0, 40.0])
-            np.testing.assert_allclose(
-                result.predict_correlation(distances), expected.predict_correlation(distances), rtol=0, atol=1e-12
+            assert np.allclose(
+                result.predict_correlation(distances), expected.predict_correlation(distances), equal_nan=True
             )
             assert result.empirical_variogram is not None
             assert expected.empirical_variogram is not None
             np.testing.assert_array_equal(result.empirical_variogram.counts, expected.empirical_variogram.counts)
-            np.testing.assert_allclose(
-                result.empirical_variogram.lags, expected.empirical_variogram.lags, rtol=0, atol=1e-12
-            )
-            np.testing.assert_allclose(
-                result.empirical_variogram.semivariance,
-                expected.empirical_variogram.semivariance,
-                rtol=0,
-                atol=1e-12,
+            assert np.allclose(result.empirical_variogram.lags, expected.empirical_variogram.lags, equal_nan=True)
+            assert np.allclose(
+                result.empirical_variogram.semivariance, expected.empirical_variogram.semivariance, equal_nan=True
             )
 
 

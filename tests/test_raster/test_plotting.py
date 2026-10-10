@@ -193,11 +193,11 @@ class TestPlot:
         plt.close()
 
     def test_plot__accessor(self) -> None:
-        """Checks that RasterAccessor exposes the shared plotting implementation."""
+        """Checks that DataArrayRasterAccessor exposes the shared plotting implementation."""
 
         # Build a DataArray raster and plot a reduced grid through .rst
         values = np.arange(100, dtype=np.float32).reshape(10, 10)
-        data_array = gu.RasterAccessor.from_array(values, Affine(1, 0, 0, 0, -1, 10), 32632)
+        data_array = gu.DataArrayRasterAccessor.from_array(values, Affine(1, 0, 0, 0, -1, 10), 32632)
         data_array.rst.plot(max_pixels=25, add_cbar=False)
 
         assert plt.gca().get_images()[0].get_array().shape == (5, 5)
@@ -208,7 +208,7 @@ class TestPlot:
 
         # Select an offset window so both the values and georeferenced bounds differ from the opened array
         values = np.arange(100, dtype=np.float32).reshape(10, 10)
-        data_array = gu.RasterAccessor.from_array(values, Affine(2, 0, 100, 0, -2, 220), 32632)
+        data_array = gu.DataArrayRasterAccessor.from_array(values, Affine(2, 0, 100, 0, -2, 220), 32632)
         subset = data_array.isel(x=slice(2, 8), y=slice(1, 7))
 
         # Plot the complete current window rather than using metadata from the original array

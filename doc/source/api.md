@@ -10,7 +10,7 @@ For more details and examples, refer to the relevant chapters in the main part o
 
 
 <!--
-Hidden toctree so Raster and RasterAccessor pages are generated and discoverable via cross-references, without duplicating the main API
+Hidden toctree so Raster and DataArrayRasterAccessor pages are generated and discoverable via cross-references, without duplicating the main API
 method summary. This needs to be listed before any other raster API.
 -->
 ```{toctree}
@@ -18,7 +18,7 @@ method summary. This needs to be listed before any other raster API.
 :hidden:
 
 Raster <api_raster>
-RasterAccessor <api_rst>
+DataArrayRasterAccessor <api_rst>
 ```
 
 (raster-api)=
@@ -26,16 +26,27 @@ RasterAccessor <api_rst>
 
 GeoUtils exposes the raster API through two mirrored interfaces:
 - {class}`~geoutils.Raster`, an interface operating directly on a GeoUtils object,
-- A {class}`rst <geoutils.RasterAccessor>` accessor extending {class}`xarray.DataArray` objects as rasters.
+- A {class}`rst <geoutils.DataArrayRasterAccessor>` accessor extending {class}`xarray.DataArray` objects as rasters.
 
 
 Both expose the **same methods and attributes**.
 
 Only **file opening** and **scalable execution** differ between the two interfaces:
 - **File opening:** {class}`~geoutils.Raster` objects are opened by instantiating the class, whereas {meth}`~geoutils.open_raster` is used for an {class}`xarray.DataArray` object,
-- **Scalable execution:** the {class}`rst <geoutils.RasterAccessor>` accessor supports **Dask**, while the {class}`~geoutils.Raster` supports **Multiprocessing** instead.
+- **Scalable execution:** the {class}`rst <geoutils.DataArrayRasterAccessor>` accessor supports **Dask**, while the {class}`~geoutils.Raster` supports **Multiprocessing** instead.
 
 ### Opening a raster file
+
+Raster variables in a Dataset use {class}`~geoutils.DatasetRasterAccessor` through Dataset.rst.
+See the [Dataset guide](xarray_datasets.md) for variable selection, mixed raster/point data and coordinate checks.
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+    :template: dataset_accessor.rst
+
+    DatasetRasterAccessor
+```
 
 Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantiate for a {class}`~geoutils.Raster`.
 
@@ -156,11 +167,11 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
     :template: raster_method.rst
 
     ~raster.base.RasterBase.copy
-    ~raster.base.RasterBase.astype
-    ~raster.base.RasterBase.set_mask
+    ~raster.raster.Raster.astype
+    ~raster.raster.Raster.set_mask
     ~raster.base.RasterBase.set_nodata
     ~raster.base.RasterBase.to_nanarray
-    ~raster.base.RasterBase.get_mask
+    ~raster.raster.Raster.get_mask
     ~raster.base.RasterBase.subsample
 ```
 
@@ -172,11 +183,11 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
     :template: raster_method.rst
 
     ~raster.base.RasterBase.load
-    ~raster.base.RasterBase.to_file
+    ~raster.raster.Raster.to_file
     ~raster.base.RasterBase.to_pointcloud
     ~raster.base.RasterBase.from_pointcloud_regular
-    ~raster.base.RasterBase.to_rio_dataset
-    ~raster.base.RasterBase.to_xarray
+    ~raster.raster.Raster.to_rio_dataset
+    ~raster.raster.Raster.to_xarray
 ```
 
 ### Georeferencing utilities
@@ -251,7 +262,7 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
 .. autosummary::
     :toctree: gen_modules/
 
-    Vector.ds
+    Vector.gdf
     Vector.crs
     Vector.bbox
     Vector.name
@@ -411,7 +422,7 @@ This first category of attributes and methods return a geometric output converte
 This second category of attributes and methods return a non-geometric output with same length as the number of features. They are thus appended in the
 dataframe of the current {class}`~geoutils.Vector` by default, using as column name the name of the operation (e.g., "area", "contains" or "intersects").
 
-Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they return a {class}`pandas.Series` as in GeoPandas.
+Otherwise, calling the method from {attr}`Vector.gdf<geoutils.Vector.gdf>`, they return a {class}`pandas.Series` as in GeoPandas.
 
 **Attributes:**
 
@@ -472,7 +483,7 @@ Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they r
 
 ```{important}
 The behaviour of methods below is not modified in {class}`~geoutils.Vector`, as they deal with outputs of different types.
-To ensure those are up-to-date with GeoPandas, alternatively call those from {attr}`Vector.ds<geoutils.Vector.ds>`.
+To ensure those are up-to-date with GeoPandas, alternatively call those from {attr}`Vector.gdf<geoutils.Vector.gdf>`.
 ```
 
 ```{eval-rst}
@@ -521,6 +532,30 @@ documentation](https://shapely.readthedocs.io/en/stable/properties.html).
       :add-heading:
 ```
 
+Point methods are available on the dedicated PointCloud, GeoDataFrame.pc, and DataArray.pc.
+The {ref}`point array and partitioned I/O guide <point-arrays-with-xarray>` describes their storage
+and execution options.
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    GeoPandasPointCloudAccessor
+    open_pointcloud
+
+.. autosummary::
+    :toctree: gen_modules/
+    :template: dataarray_accessor.rst
+
+    DataArrayPointCloudAccessor
+
+.. autosummary::
+    :toctree: gen_modules/
+    :template: dataset_accessor.rst
+
+    DatasetPointCloudAccessor
+```
+
 ### Opening a file
 
 ```{eval-rst}
@@ -537,8 +572,8 @@ documentation](https://shapely.readthedocs.io/en/stable/properties.html).
 .. autosummary::
     :toctree: gen_modules/
 
-    PointCloud.ds
-    PointCloud.data_column
+    PointCloud.gdf
+    PointCloud.data_name
     PointCloud.data
     PointCloud.crs
     PointCloud.bbox
@@ -566,6 +601,8 @@ documentation](https://shapely.readthedocs.io/en/stable/properties.html).
     PointCloud.to_xyz
     PointCloud.to_array
     PointCloud.to_tuples
+    PointCloud.to_xarray
+    PointCloud.to_parquet
 
 ```
 

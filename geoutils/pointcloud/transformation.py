@@ -100,10 +100,10 @@ def _cast_multiproc_output(source: PointCloudBase, output: PointCloud) -> PointC
     # Accessor results are dataframes, so read every stored attribute before discarding the file-backed wrapper
     output.load(columns="all")
     return _build_pointcloud_output(
-        output.ds,
-        data_column=output.data_column,
+        output._dataset,
+        data_name=output.data_name,
         as_dataframe=True,
-        attrs=_get_dataframe_attrs(source.ds),
+        attrs=_get_dataframe_attrs(source._dataset),
     )
 
 
@@ -124,7 +124,7 @@ def _reproject_pointcloud_eager(
 
     projected = _reproject(source, ref=ref, crs=crs)
     if inplace:
-        source.ds = projected
+        source._dataset = projected
         return None
     return source._override_gdf_output(projected)
 
@@ -219,7 +219,7 @@ def _reproject_las_header(
     elevation_column = "Z" if "Z" in dataframe.columns else None
     return _build_laspy_header(
         dataframe,
-        data_column=elevation_column,
+        data_name=elevation_column,
         version=None if source_header is None else source_header.version,
         point_format=None if source_header is None else source_header.point_format,
         offsets=tuple(offsets),
@@ -257,7 +257,7 @@ def _reproject_pointcloud_multiproc(
     output_filename, driver = _resolve_pointcloud_output(
         mp_config.outfile,
         mp_config.driver,
-        supported_drivers=("GPKG", "LAS", "LAZ"),
+        supported_drivers=("GPKG", "LAS", "LAZ", "PARQUET"),
         operation_name="point cloud reprojection",
     )
 
@@ -267,12 +267,15 @@ def _reproject_pointcloud_multiproc(
         if getattr(source, "_downsample", 1) != 1:
             raise ValueError("Load a downsampled point cloud before using multiprocessing clip() to preserve its rows.")
         if source_filename is None or (
-            not _is_laspy_supported(source_filename) and pyogrio.read_info(source_filename)["driver"] != "GPKG"
+            not _is_laspy_supported(source_filename)
+            and source_filename.suffix.lower() != ".parquet"
+            and not source_filename.is_dir()
+            and pyogrio.read_info(source_filename)["driver"] != "GPKG"
         ):
             raise ValueError("Unloaded point cloud reprojection supports LAS, LAZ and GPKG sources.")
         dataframe = None
     else:
-        dataframe = _as_geodataframe(source.ds, crs=source.crs)
+        dataframe = _as_geodataframe(source._dataset, crs=source.crs)
         if driver == "GPKG":
             _check_gpkg_attributes(dataframe)
     columns = list(source._nongeo_columns)
@@ -296,7 +299,7 @@ def _reproject_pointcloud_multiproc(
                     count,
                     target_crs,
                     temporary_directory / f"projected_{index}.pkl",
-                    driver != "GPKG",
+                    driver in ("LAS", "LAZ"),
                 )
             )
         projected_parts = mp_config.cluster.gather(futures)
@@ -306,7 +309,7 @@ def _reproject_pointcloud_multiproc(
         # Prepare one shared LAS coordinate encoding; GeoPackage needs no format-specific metadata
         las_header = None
         elevation_column = None
-        if driver != "GPKG":
+        if driver in ("LAS", "LAZ"):
             projected = pd.read_pickle(projected_parts[0][0])
             bounds = [bounds for _, bounds in projected_parts if bounds is not None]
             las_header = _reproject_las_header(projected, bounds, target_crs, source_filename)
@@ -320,7 +323,7 @@ def _reproject_pointcloud_multiproc(
                 output_filename,
                 [filename for filename, _ in projected_parts],
                 driver=driver,
-                data_column=source.data_column,
+                data_name=source.data_name,
                 geometry_type="Point Z" if source._has_z else "Point",
                 las_header=las_header,
                 las_elevation_column=elevation_column,
@@ -439,7 +442,7 @@ def _clip_pointcloud_multiproc(
     output_filename, driver = _resolve_pointcloud_output(
         mp_config.outfile,
         mp_config.driver,
-        supported_drivers=("GPKG", "LAS", "LAZ"),
+        supported_drivers=("GPKG", "LAS", "LAZ", "PARQUET"),
         operation_name="point cloud clipping",
     )
 
@@ -451,12 +454,15 @@ def _clip_pointcloud_multiproc(
     source_filename = pathlib.Path(source.name) if not source._is_pd and source.name is not None else None
     if not source.is_loaded:
         if source_filename is None or (
-            not _is_laspy_supported(source_filename) and pyogrio.read_info(source_filename)["driver"] != "GPKG"
+            not _is_laspy_supported(source_filename)
+            and source_filename.suffix.lower() != ".parquet"
+            and not source_filename.is_dir()
+            and pyogrio.read_info(source_filename)["driver"] != "GPKG"
         ):
             raise ValueError("Unloaded point cloud clipping supports LAS, LAZ and GPKG sources.")
         dataframe = None
     else:
-        dataframe = _as_geodataframe(source.ds, crs=source.crs)
+        dataframe = _as_geodataframe(source._dataset, crs=source.crs)
         if driver == "GPKG":
             _check_gpkg_attributes(dataframe)
     columns = list(source._nongeo_columns)
@@ -493,7 +499,7 @@ def _clip_pointcloud_multiproc(
                     keep_geom_type,
                     sort,
                     temporary_directory / f"clipped_{index}.pkl",
-                    driver != "GPKG",
+                    driver in ("LAS", "LAZ"),
                 )
             )
         clipped_parts = mp_config.cluster.gather(futures)
@@ -504,7 +510,7 @@ def _clip_pointcloud_multiproc(
         las_header = None
         elevation_column = None
         partition_filenames = [filename for filename, _ in clipped_parts]
-        if driver != "GPKG":
+        if driver in ("LAS", "LAZ"):
             first = pd.read_pickle(partition_filenames[0])
             elevation_column = "Z" if "Z" in first.columns else None
             if dataframe is None and source_filename is not None and _is_laspy_supported(source_filename):
@@ -519,7 +525,7 @@ def _clip_pointcloud_multiproc(
                 output_filename,
                 partition_filenames,
                 driver=driver,
-                data_column=source.data_column,
+                data_name=source.data_name,
                 geometry_type="Point Z" if source._has_z else "Point",
                 las_header=las_header,
                 las_elevation_column=elevation_column,

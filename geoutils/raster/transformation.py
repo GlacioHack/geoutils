@@ -330,6 +330,8 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
 
     # Fill with nodata values on mask
     if reproj_kwargs["src_nodata"] is not None:
+        # Xarray dimensions can be read-only, so we copy the source array
+        src_arr = src_arr.copy()
         src_arr[src_mask] = reproj_kwargs["src_nodata"]
 
     # Check if multiband
@@ -1707,7 +1709,7 @@ def _multiproc_clip(
     tiling = ChunkedGeoGrid(grid=grid, chunks=chunks)
     block_ids = tiling.get_block_locations()
     block_geogrids = tiling.get_blocks_as_geogrids()
-    burn = _normalize_burn_values(clipping_vector.ds.geometry.values, in_value=1)
+    burn = _normalize_burn_values(clipping_vector._dataset.geometry.values, in_value=1)
     block_burns = _partition_burn_by_geogrids(burn, block_geogrids)
 
     # Send each worker its source window and the much smaller matching geometry subset

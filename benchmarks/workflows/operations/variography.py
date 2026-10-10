@@ -79,7 +79,7 @@ def prepare_pair_raster(
         import dask.array as da
 
         array = da.from_array(values, chunks=chunks)
-        return gu.RasterAccessor.from_array(array, transform, 32633, nodata=-99999).rst
+        return gu.DataArrayRasterAccessor.from_array(array, transform, 32633, nodata=-99999).rst
     return gu.Raster.from_array(values, transform, 32633, nodata=-99999)
 
 

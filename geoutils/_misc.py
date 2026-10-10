@@ -25,11 +25,51 @@ import functools
 import logging
 import warnings
 from contextlib import contextmanager
-from typing import Any, Callable
+from typing import Any, Callable, TypeVar, cast
 
+import numpy as np
 from packaging.version import Version
 
+from geoutils._typing import Number
 from geoutils._version import __version__
+
+FunctionType = TypeVar("FunctionType", bound=Callable[..., Any])
+
+
+def _deprecate_keyword(old_name: str, new_name: str) -> Callable[[FunctionType], FunctionType]:
+    """Accept an old keyword with a warning while preserving the new function's signature and docstring."""
+
+    def decorator(function: FunctionType) -> FunctionType:
+        """Wrap a function so its old keyword forwards to the new keyword."""
+
+        @functools.wraps(function)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            """Translate the deprecated keyword before calling the function."""
+
+            if old_name in kwargs:
+                if new_name in kwargs:
+                    raise TypeError(f"Use only '{new_name}'; '{old_name}' and '{new_name}' were both passed.")
+                warnings.warn(
+                    f"Argument '{old_name}' is deprecated; use '{new_name}' instead.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                kwargs[new_name] = kwargs.pop(old_name)
+            return function(*args, **kwargs)
+
+        return cast(FunctionType, wrapper)
+
+    return decorator
+
+
+def _validate_downsample(downsample: Number) -> float:
+    """Validate a finite downsampling factor of at least one for raster and point cloud readers."""
+
+    if isinstance(downsample, (bool, np.bool_)) or not isinstance(downsample, (int, float, np.integer, np.floating)):
+        raise TypeError("downsample must be of type int or float.")
+    if not np.isfinite(downsample) or downsample < 1:
+        raise ValueError("downsample must be >=1 and finite.")
+    return float(downsample)
 
 
 @contextmanager

@@ -18,7 +18,7 @@ Below, a summary of the {class}`~geoutils.Vector` object and its methods.
 
 ## Object definition and attributes
 
-A {class}`~geoutils.Vector` contains **a single main attribute**: a {class}`~geopandas.GeoDataFrame` as {attr}`~geoutils.Vector.ds`.
+A {class}`~geoutils.Vector` contains **a single main attribute**: a {class}`~geopandas.GeoDataFrame` as {attr}`~geoutils.Vector.gdf`.
 
 All other attributes are derivatives of the {class}`~geopandas.GeoDataFrame`.
 
@@ -26,7 +26,7 @@ In short, {class}`~geoutils.Vector` is a "convenience" composition class built o
 {class}`geoutils.Vector`, facilitate the interface with {class}`~geoutils.Raster`, and allow the addition of more complex vector functionalities.
 
 **All geometric functionalities of {class}`~geopandas.GeoDataFrame`'s methods are available directly from a {class}`~geoutils.Vector`**, as if working
-directly on the {class}`~geopandas.GeoDataFrame`. Dataframe functionalities from Pandas can be called from its {attr}`~geoutils.Vector.ds`.
+directly on the {class}`~geopandas.GeoDataFrame`. Dataframe functionalities from Pandas can be called from its {attr}`~geoutils.Vector.gdf`.
 
 ```{caution}
 The {attr}`~geoutils.Vector.bbox` attribute of a {class}`~geoutils.Vector` corresponds to the {attr}`~geopandas.GeoDataFrame.total_bounds` attribute of a
@@ -182,7 +182,7 @@ vect_clip = vect.clip(bbox)
 Rasterizing a {class}`~geoutils.Vector` to a {class}`~geoutils.Raster` is done through the {func}`~geoutils.Vector.rasterize` function, which converts vector
 geometries into gridded values.
 
-By default, the value of index of the {class}`~geoutils.Vector`'s {attr}`~geoutils.Vector.ds` is burned on a raster grid for each respective geometry.
+By default, the value of index of the {class}`~geoutils.Vector`'s {attr}`~geoutils.Vector.gdf` is burned on a raster grid for each respective geometry.
 
 ```{note}
 If an `out_value` of `0` (default) and `in_value` value of `1` are passed (i.e., boolean output), {func}`~geoutils.Vector.rasterize` will automatically cast

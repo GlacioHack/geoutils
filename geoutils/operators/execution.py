@@ -344,7 +344,7 @@ def _resample_at_points(
 def _grid_from_points(
     pc: gpd.GeoDataFrame,
     grid_coords: tuple[NDArrayNum, NDArrayNum],
-    data_column_name: str | None,
+    data_name: str | None,
     operator: Interpolator | Reducer,
     *,
     res_x: float,
@@ -368,7 +368,7 @@ def _grid_from_points(
     local_inputs, output_indexes = _prepare_point_neighbours_data(
         pc,
         grid_coords,
-        data_column_name,
+        data_name,
         operator,
         res_x=res_x,
         res_y=res_y,

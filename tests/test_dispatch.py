@@ -415,7 +415,7 @@ class TestDispatchLevelOne:
     vect2 = gu.Vector(gpd.GeoDataFrame({"geometry": [Polygon([(0, 0), (2, 0), (2, 2), (0, 2)])]}, crs="EPSG:4326"))
     # Xarray DataArray and Vector geodataframe
     rast_xr = rast.to_xarray()
-    vect_gdf = vect.ds
+    vect_gdf = vect.gdf
 
     @pytest.mark.parametrize(
         "bbox_input, expected",
@@ -502,8 +502,8 @@ class TestDispatchLevelOne:
 
         # For vector-like input
         if isinstance(points_input, gu.Vector):
-            assert pts[0].shape[0] == len(points_input.ds)  # type: ignore
-            assert pts[1].shape[0] == len(points_input.ds)  # type: ignore
+            assert pts[0].shape[0] == len(points_input.gdf)  # type: ignore
+            assert pts[1].shape[0] == len(points_input.gdf)  # type: ignore
 
     @pytest.mark.parametrize(
         "points_input, match_text",

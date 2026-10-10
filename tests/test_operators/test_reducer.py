@@ -287,7 +287,7 @@ class TestPointReducerAccuracy:
             geometry=gpd.points_from_xy([0.0, 1.0, 2.0], [0.0] * 3),
             crs=32632,
         )
-        points = gu.PointCloud(frame, data_column="height")
+        points = gu.PointCloud(frame, data_name="height")
 
         # Apply nodata rules and minimum point count
         omitted = points.filter(method="mean", radius=3.0, nodata_propagation="ignore")
@@ -314,7 +314,7 @@ class TestPointReducerAccuracy:
         result, _ = _grid_pointcloud(
             pc,
             grid_coords=grid_coords,
-            data_column_name="z",
+            data_name="z",
             resampling=resampling,
             dist_nodata_pixel=1.1,
         )
@@ -352,7 +352,7 @@ class TestPointReducerAccuracy:
             pc,
             grid_coords=grid_coords,
             grid_res=(1.0, 1.0),
-            data_column_name="z",
+            data_name="z",
             resampling=resampling,
             dist_nodata_pixel=1.1,
         )
@@ -378,7 +378,7 @@ class TestPointReducerAccuracy:
             pc,
             grid_coords=(np.arange(3, dtype=float), np.arange(3, dtype=float)),
             grid_res=(1.0, 1.0),
-            data_column_name="z",
+            data_name="z",
             resampling=resampling,
             dist_nodata_pixel=0.1,
         )
@@ -397,7 +397,7 @@ class TestPointReducerAccuracy:
             pc,
             grid_coords=(np.array([0.0, 1.0, 2.0]), np.array([0.0])),
             grid_res=(1.0, 1.0),
-            data_column_name="z",
+            data_name="z",
             resampling="mean",
             dist_nodata_pixel=1.1,
             min_points=2,
@@ -417,7 +417,7 @@ class TestPointReducerAccuracy:
             pc,
             grid_coords=grid_coords,
             grid_res=(1.0, 1.0),
-            data_column_name="z",
+            data_name="z",
             resampling="mean",
             dist_nodata_pixel=1.1,
         )
@@ -425,7 +425,7 @@ class TestPointReducerAccuracy:
             pc,
             grid_coords=grid_coords,
             grid_res=(1.0, 1.0),
-            data_column_name="z",
+            data_name="z",
             resampling="mean",
             dist_nodata_pixel=1.1,
             nodata_handling="propagate",
@@ -505,7 +505,7 @@ class TestRasterReducerAccuracy:
         )
 
         # Convolution changes summation order; polygon intersections can also differ by roundoff
-        np.testing.assert_allclose(result, expected, rtol=1e-11, atol=1e-11, equal_nan=True)
+        assert np.allclose(result, expected, equal_nan=True)
         assert operator.default_neighborhood is neighborhood
 
     def test_resample_at_points__asymmetric_window(self) -> None:
@@ -639,7 +639,7 @@ class TestPointReducerEngines:
         scipy_result, _ = _grid_pointcloud(
             pc,
             grid_coords=grid_coords,
-            data_column_name="z",
+            data_name="z",
             resampling=resampling,
             dist_nodata_pixel=2,
             engine="scipy",
@@ -649,7 +649,7 @@ class TestPointReducerEngines:
         numba_result, _ = _grid_pointcloud(
             pc,
             grid_coords=grid_coords,
-            data_column_name="z",
+            data_name="z",
             resampling=resampling,
             dist_nodata_pixel=2,
             engine="numba",
@@ -671,7 +671,7 @@ class TestPointReducerEngines:
                 pc,
                 grid_coords=(np.arange(3, dtype=float), np.array([0.0])),
                 grid_res=(1.0, 1.0),
-                data_column_name="z",
+                data_name="z",
                 resampling=resampling,
                 dist_nodata_pixel=1,
                 engine=engine,
@@ -710,7 +710,7 @@ class TestPointReducerEngines:
         # Both engines must select the same observations, including at exact point locations
         expected = points.grid(**options, engine="scipy")
         result = points.grid(**options, engine="numba")
-        np.testing.assert_allclose(result.to_nanarray(), expected.to_nanarray(), rtol=1e-14, atol=1e-14)
+        assert np.allclose(result.to_nanarray(), expected.to_nanarray(), equal_nan=True)
 
 
 class TestPointReducerReferences:
@@ -739,7 +739,7 @@ class TestPointReducerReferences:
             geometry=gpd.points_from_xy(coordinates, np.zeros(5)),
             crs=32632,
         )
-        filtered = gu.PointCloud(frame, data_column="height").filter(method="median", radius=1.1, include_self=False)
+        filtered = gu.PointCloud(frame, data_name="height").filter(method="median", radius=1.1, include_self=False)
 
         # Check exact agreement for same neighborhood medians
         np.testing.assert_array_equal(filtered.data, pipeline.arrays[0]["SmoothedZ"])
@@ -778,7 +778,7 @@ class TestPointReducerReferences:
             points,
             grid_coords=(x_coords, y_coords),
             grid_res=(1.0, 1.0),
-            data_column_name="z",
+            data_name="z",
             resampling=geoutils_method,
             dist_nodata_pixel=1.1,
             nodata_handling="ignore",
@@ -966,7 +966,7 @@ class TestRasterReducerReferences:
         expected = source.reproject(reference, resampling=gdal_resampling)
         actual = source.reproject(reference, resampling=operator, coverage="fractional")
         assert expected is not None and actual is not None
-        np.testing.assert_allclose(actual.to_nanarray(), expected.to_nanarray(), rtol=1e-12, atol=1e-12)
+        assert np.allclose(actual.to_nanarray(), expected.to_nanarray(), equal_nan=True)
 
         # The first weighted mean demonstrates that boundary cells are not treated as equal or center-only inputs
         if isinstance(operator, Mean):
@@ -1001,16 +1001,14 @@ class TestRasterReducerReferences:
         expected = source.reproject(reference, resampling=gdal_resampling)
         actual = source.reproject(reference, resampling=operator, coverage="fractional")
         assert expected is not None and actual is not None
-        np.testing.assert_allclose(actual.to_nanarray(), expected.to_nanarray(), rtol=1e-12, atol=1e-12)
+        assert np.allclose(actual.to_nanarray(), expected.to_nanarray(), equal_nan=True)
 
     @pytest.mark.parametrize(
-        ("overlap_backend", "rtol", "atol"),
+        "overlap_backend",
         [
-            ("shapely", 1e-12, 1e-12),
+            "shapely",
             pytest.param(
                 "exactextract",
-                5e-8,
-                2e-5,
                 marks=pytest.mark.skipif(find_spec("exactextract") is None, reason="Requires exactextract"),
             ),
         ],
@@ -1018,8 +1016,6 @@ class TestRasterReducerReferences:
     def test_reproject__rotated_fractional_sum_matches_gdal(
         self,
         overlap_backend: str,
-        rtol: float,
-        atol: float,
     ) -> None:
         """Checks that each exact-overlap backend matches GDAL sum resampling for rotated footprints."""
 
@@ -1047,7 +1043,8 @@ class TestRasterReducerReferences:
         expected = source.reproject(reference, resampling=rio.enums.Resampling.sum)
         actual = source.reproject(reference, resampling=Sum(), overlap_backend=overlap_backend, coverage="fractional")
         assert expected is not None and actual is not None
-        np.testing.assert_allclose(actual.to_nanarray(), expected.to_nanarray(), rtol=rtol, atol=atol)
+        tolerances = {"rtol": 5e-8, "atol": 2e-5} if overlap_backend == "exactextract" else {}
+        assert np.allclose(actual.to_nanarray(), expected.to_nanarray(), equal_nan=True, **tolerances)
 
     @pytest.mark.skipif(find_spec("exactextract") is None, reason="Requires exactextract")
     @pytest.mark.parametrize("operator", _EXACTEXTRACT_REDUCER_CASES)
@@ -1081,7 +1078,7 @@ class TestRasterReducerReferences:
         expected = source.reproject(reference, resampling=operator, overlap_backend="shapely", coverage="fractional")
         actual = source.reproject(reference, resampling=operator, overlap_backend="exactextract", coverage="fractional")
         assert expected is not None and actual is not None
-        np.testing.assert_allclose(actual.to_nanarray(), expected.to_nanarray(), rtol=5e-7, atol=5e-7)
+        assert np.allclose(actual.to_nanarray(), expected.to_nanarray(), equal_nan=True)
 
 
 class TestReducerUncertainty:
@@ -1235,9 +1232,7 @@ class TestReducerUncertainty:
             n_samples=2,
             random_state=4,
         )
-        np.testing.assert_allclose(
-            summary.mean.to_nanarray().reshape(-1), result.to_nanarray().reshape(-1), rtol=1e-14, atol=1e-14
-        )
+        assert np.allclose(summary.mean.to_nanarray().reshape(-1), result.to_nanarray().reshape(-1), equal_nan=True)
         np.testing.assert_array_equal(summary.variance.to_nanarray().reshape(-1), np.zeros(4))
 
     def test_reproject__fractional_mean_uncertainty(self) -> None:

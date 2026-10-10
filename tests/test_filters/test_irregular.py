@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
 import pytest
+import xarray as xr
 from geopandas.testing import assert_geodataframe_equal
 
 import geoutils as gu
@@ -38,7 +39,7 @@ class TestPointCloudFilter:
             geometry=gpd.points_from_xy(x_coordinates, np.zeros(4)),
             crs=32632,
         )
-        points = gu.PointCloud(frame, data_column="height")
+        points = gu.PointCloud(frame, data_name="height")
 
         # We applied varied methods: named median, custom reducers, one with self exclusion
         filtered = points.filter(method="median", radius=1.1)
@@ -64,7 +65,7 @@ class TestPointCloudFilter:
         np.testing.assert_allclose(lower_quartile.data, expected_quartile)
         expected_attributes = frame.drop(columns="height")
         for result in (filtered, leave_one_out, lower_quartile):
-            assert_geodataframe_equal(result.ds.drop(columns="height"), expected_attributes)
+            assert_geodataframe_equal(result.gdf.drop(columns="height"), expected_attributes)
 
     def test_filter__nearest_limit(self) -> None:
         """Checks that k selects the requested number of nearest observations when no radius is given."""
@@ -75,7 +76,7 @@ class TestPointCloudFilter:
             geometry=gpd.points_from_xy([0.0, 1.0, 4.0], [0.0] * 3),
             crs=32632,
         )
-        points = gu.PointCloud(frame, data_column="height")
+        points = gu.PointCloud(frame, data_name="height")
 
         # Select only 2 nearest
         filtered = points.filter(method="mean", radius=None, k=2)
@@ -129,7 +130,7 @@ class TestPointCloudFilter:
             geometry=gpd.points_from_xy([0.0, 0.0], [0.0, 0.0]),
             crs=32632,
         )
-        points = gu.PointCloud(frame, data_column="height")
+        points = gu.PointCloud(frame, data_name="height")
 
         # Check mean is both is indeed used
         filtered = points.filter(method="mean", radius=0, k=2)
@@ -144,7 +145,7 @@ class TestPointCloudFilter:
             geometry=gpd.points_from_xy([0.0, 1.0, 2.0], [5.0] * 3, z=[0.0, 100.0, 2.0]),
             crs=32632,
         )
-        points = gu.PointCloud(frame, data_column=None)
+        points = gu.PointCloud(frame, data_name=None)
 
         # We apply neighborhood median to elevations
         filtered = points.filter(method="median", radius=1.1)
@@ -165,14 +166,14 @@ class TestPointCloudFilter:
             geometry=gpd.points_from_xy([0.0, 1.0], [0.0, 0.0]),
             crs=32632,
         )
-        points = gu.PointCloud(frame, data_column="height")
+        points = gu.PointCloud(frame, data_name="height")
 
         # We exclude self during filter
         filtered = points.filter(method="mean", radius=1.1, include_self=False)
 
         # We check it still worked
         np.testing.assert_array_equal(filtered.data, heights[::-1])
-        assert_geodataframe_equal(filtered.ds.drop(columns="height"), frame.drop(columns="height"))
+        assert_geodataframe_equal(filtered.gdf.drop(columns="height"), frame.drop(columns="height"))
 
 
 class TestPointCloudFilterChunked:
@@ -188,7 +189,10 @@ class TestPointCloudFilterChunked:
         crs=32632,
     )
 
-    def test_filter__chunked_backends_equal(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_filter__chunked_backends_equal(
+        self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path
+    ) -> None:
         """
         Checks that filtering with Dask/MP stays lazy and matches eager results.
         """
@@ -200,13 +204,13 @@ class TestPointCloudFilterChunked:
         source_filename = tmp_path / "filter_source.gpkg"
         output_filename = tmp_path / "filter_output.gpkg"
         self.points.to_file(source_filename, index=False)
-        expected = gu.PointCloud(self.points, data_column="height").filter(
+        expected = gu.PointCloud(self.points, data_name="height").filter(
             method="median", radius=1.1, include_self=False
         )
 
         # Read in partitions
-        lazy = gu.open_pointcloud(str(source_filename), data_column="height", chunks=2)
-        source = gu.PointCloud(source_filename, data_column="height")
+        lazy = gu.open_pointcloud(str(source_filename), data_name="height", chunks=2, as_type=as_type)
+        source = gu.PointCloud(source_filename, data_name="height")
 
         # Dask: build filter graph and record executed tasks
         tasks = []
@@ -224,26 +228,29 @@ class TestPointCloudFilterChunked:
 
         # We check zero executed tasks, lazy inputs/outputs and point metadata
         assert tasks == []
-        assert isinstance(dask_filtered, dgpd.GeoDataFrame)
+        assert isinstance(dask_filtered, xr.DataArray if as_type == "dataarray" else dgpd.GeoDataFrame)
         assert not lazy.pc.is_loaded and not dask_filtered.pc.is_loaded
-        assert dask_filtered.pc.data_column == "height"
+        assert dask_filtered.pc.data_name == "height"
         assert dask_filtered.pc.point_count == len(self.points)
 
         # Check unloaded inputs/outputs and metadata, then compare rows with eager filtering
         assert not source.is_loaded and not mp_filtered.is_loaded
         assert mp_filtered.point_count == len(self.points)
-        assert mp_filtered.data_column == "height"
+        assert mp_filtered.data_name == "height"
 
         # Finally, compare exactly equal outputs
-        expected_rows = expected.ds.reset_index(drop=True)
-        dask_rows = dask_filtered.compute().reset_index(drop=True)
-        mp_rows = mp_filtered.ds.reset_index(drop=True)
+        expected_rows = expected.gdf.reset_index(drop=True)
+        dask_rows = (
+            dask_filtered.compute().pc.to_geoutils().gdf if as_type == "dataarray" else dask_filtered.compute()
+        ).reset_index(drop=True)
+        mp_rows = mp_filtered.gdf.reset_index(drop=True)
         assert_geodataframe_equal(dask_rows, expected_rows, check_dtype=False)
         assert_geodataframe_equal(mp_rows, expected_rows, check_dtype=False)
         assert not lazy.pc.is_loaded and not dask_filtered.pc.is_loaded
         assert not source.is_loaded
 
-    def test_filter__dask_z_geometry(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_filter__dask_z_geometry(self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path) -> None:
         """Checks that Dask filtering updates geometry Z across partitions and matches eager values."""
 
         dgpd = pytest.importorskip("dask_geopandas")
@@ -258,23 +265,23 @@ class TestPointCloudFilterChunked:
         )
         source_filename = tmp_path / "filter_source_3d.gpkg"
         frame.to_file(source_filename, index=False)
-        lazy = gu.open_pointcloud(str(source_filename), data_column=None, chunks=2)
+        lazy = gu.open_pointcloud(str(source_filename), data_name=None, chunks=2, as_type=as_type)
 
         # We filter the same for eager/lazy
-        expected = gu.PointCloud(frame, data_column=None).filter(method="mean", radius=1.1)
+        expected = gu.PointCloud(frame, data_name=None).filter(method="mean", radius=1.1)
         filtered = lazy.pc.filter(method="mean", radius=1.1)
 
         # We check the output stays lazy with Z as data
-        assert isinstance(filtered, dgpd.GeoDataFrame)
+        assert isinstance(filtered, xr.DataArray if as_type == "dataarray" else dgpd.GeoDataFrame)
         assert not lazy.pc.is_loaded and not filtered.pc.is_loaded
-        assert filtered.pc.data_column is None
+        assert filtered.pc.data_name == ("z" if as_type == "dataarray" else None)
         assert filtered.pc.point_count == len(frame)
 
         # And check each Z mean and original point attributes after computing
         expected_heights = np.array([np.mean(heights[np.abs(x_coordinates - x) <= 1.1]) for x in x_coordinates])
-        computed = filtered.compute().reset_index(drop=True)
+        computed = filtered.compute().pc.to_geoutils().gdf.reset_index(drop=True)
         np.testing.assert_allclose(computed.geometry.z, expected_heights)
-        assert_geodataframe_equal(computed, expected.ds.reset_index(drop=True), check_dtype=False)
+        assert_geodataframe_equal(computed, expected.gdf.reset_index(drop=True), check_dtype=False)
         assert not lazy.pc.is_loaded and not filtered.pc.is_loaded
 
 

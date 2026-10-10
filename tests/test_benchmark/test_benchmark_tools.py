@@ -9,10 +9,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal
 
+import geopandas as gpd
 import numpy as np
 import pytest
 import rasterio as rio
 
+import geoutils as gu
 from benchmarks.asv_suite import benchmarks as generated_benchmarks
 from benchmarks.asv_suite.render_results import (
     COMPARISON_REPORT_DIRECTORY,
@@ -46,6 +48,7 @@ from benchmarks.comparisons.pdal import (
 )
 from benchmarks.workflows.config import RuntimeConfig
 from benchmarks.workflows.core import Case
+from benchmarks.workflows.io import materialize_raster_output
 from benchmarks.workflows.operations import (
     BENCHMARK_BY_CLASS,
     BENCHMARK_BY_ID,
@@ -60,6 +63,7 @@ from benchmarks.workflows.operations import (
     format_api_label,
 )
 from benchmarks.workflows.runner import BenchmarkRunner
+from geoutils._misc import import_optional
 
 
 class TestComparisonReport:
@@ -100,7 +104,7 @@ class TestComparisonReport:
         digest = hashlib.sha256("\n".join(class_names).encode()).hexdigest()
 
         # A changed name would split ASV history even when the underlying operation remained the same
-        assert digest == "59a8c569f0e73984bb091916084cd31adad590aa3b77ffce3801ad154239e320"
+        assert digest == "198e9302e6fa8b814dbd8003021cd6b64779378ab61fe2cdb1e55afbbdea8751"
 
     def test_operation_discovery__deterministic_modules(self) -> None:
         """Checks that operation discovery returns the same modules in their stable report order."""
@@ -225,6 +229,7 @@ class TestBenchmarkScenarios:
     @pytest.mark.parametrize(
         ("class_name", "expected_label"),
         (
+            ("write_dask", ".to_file()"),
             ("reproject_nearest_rasterio_inmem__rastersize", ".reproject(resampling='nearest')"),
             ("polygonize_rasterio_labelstitch_dask__rastersize", ".polygonize(strategy='label_stitch')"),
             (
@@ -295,6 +300,114 @@ class TestBenchmarkRunner:
         assert result.value == config.raster_value
         assert values[values.shape[0] // 2, values.shape[1] // 2] == config.raster_value
         assert not np.isfinite(values[0, 0]) or values[0, 0] == nodata
+
+
+@pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
+class TestBenchmarkOutputsChunked:
+    """Test module for complete raster and point files written by Dask benchmark workflows."""
+
+    @pytest.mark.parametrize("dtype", ["float32", "bool"])
+    def test_to_file__raster_chunks(self, dtype: str, tmp_path: Path) -> None:
+        """Checks that Dask benchmark files match eager raster writes without loading the original arrays."""
+
+        pytest.importorskip("distributed")
+        import dask.array as da
+
+        # Uneven edge chunks reveal missing windows; two workers share the destination file
+        config = RuntimeConfig(shape=(35, 49), chunks=(16, 32), n_workers=2, directory=str(tmp_path))
+        values = np.arange(np.prod(config.shape)).reshape(config.shape).astype(dtype)
+        nodata = None if dtype == "bool" else -99999
+        if dtype == "bool":
+            values = np.indices(config.shape).sum(axis=0) % 2 == 0
+        else:
+            values[0, 0] = nodata
+
+        # Binary fractions give both writers exactly representable pixel sizes
+        transform = rio.transform.from_origin(7, 46, 0.25, 0.25)
+        chunks = da.from_array(values, chunks=config.chunks)
+        lazy = gu.DataArrayRasterAccessor.from_array(chunks, transform, 4326, nodata=nodata)
+        eager_values = values.astype("uint8") if dtype == "bool" else np.ma.masked_equal(values, nodata)
+        eager = gu.Raster.from_array(eager_values, transform, 4326, nodata=nodata)
+
+        # Write both results through the shared benchmark path; GeoTIFF represents boolean masks as bytes
+        assert not lazy.rst.is_loaded and eager.is_loaded
+        operation = OPERATION_BY_NAME["write"]
+        with BenchmarkRunner(operation, Case(execution="dask", options={"operation": "write"}), config) as runner:
+            runner._compute_raster(lazy)
+            actual_file = runner._last_output_file
+            expected_file = materialize_raster_output(eager, "inmem", str(tmp_path / "expected.tif"), config)
+
+        # Compare every saved pixel and its grid, including the shorter final row and column chunks
+        assert actual_file is not None
+        with rio.open(actual_file) as actual, rio.open(expected_file) as expected:
+            np.testing.assert_array_equal(actual.read(), expected.read())
+            assert actual.transform == expected.transform
+            assert actual.crs == expected.crs
+            assert actual.nodata == expected.nodata
+            assert actual.block_shapes == expected.block_shapes
+            assert actual.compression is None
+        assert not lazy.rst.is_loaded
+        assert lazy.chunks == chunks.chunks
+
+    @pytest.mark.parametrize("operation_name", ["subsample", "to_pointcloud"])
+    @pytest.mark.parametrize("driver", ["GPKG", "LAS", "LAZ"])
+    def test_to_file__point_outputs(self, operation_name: str, driver: str, tmp_path: Path) -> None:
+        """Checks that Dask point benchmarks save every expected point and match eager file output."""
+
+        pytest.importorskip("distributed")
+        if driver in ("LAS", "LAZ"):
+            laspy = import_optional("laspy")
+
+        # A shorter final raster chunk exposes dropped rows in complete conversion and fixed-size sampling
+        config = RuntimeConfig(shape=(35, 49), chunks=(16, 32), directory=str(tmp_path))
+        case = Case(
+            execution="dask",
+            output_driver=driver,
+            variant="xarray" if driver in ("LAS", "LAZ") else None,
+            options={"operation": operation_name, "subsample_size": 37},
+        )
+        operation = OPERATION_BY_NAME[operation_name]
+        with BenchmarkRunner(operation, case, config) as runner:
+            source = runner.make_raster()
+            assert not source.rst.is_loaded
+            eager_source = source.compute()
+            options = dict(operation.option_builder(case, runner.config))
+            if case.variant == "xarray":
+                options["backend"] = "xarray"
+            eager_points = getattr(eager_source.rst, operation_name)(**options)
+
+            # Run the benchmark and save the same public call on eager inputs for comparison
+            assert eager_points.pc.is_loaded
+            result = runner.run(profile=False)
+            expected_file = str(tmp_path / f"expected.{driver.lower()}")
+            eager_points.pc.to_file(expected_file)
+            assert not source.rst.is_loaded
+
+        # Compare complete coordinates and values, including LAS integer encoding and LAZ compression
+        assert result.output_file is not None
+        assert Path(result.output_file).suffix == f".{driver.lower()}"
+        assert result.value == config.raster_value
+        expected_count = 37 if operation_name == "subsample" else int(np.prod(config.shape))
+        if driver == "GPKG":
+            actual = gpd.read_file(result.output_file)
+            expected = gpd.read_file(expected_file)
+            assert len(actual) == expected_count
+            assert actual.crs == expected.crs
+
+            # GeoDataFrame partitions write in chunk order, so compare the same points sorted by Y/X
+            actual_points = np.column_stack((actual.geometry.x, actual.geometry.y, actual["b1"]))
+            expected_points = np.column_stack((expected.geometry.x, expected.geometry.y, expected["b1"]))
+            actual_order = np.lexsort((actual_points[:, 0], actual_points[:, 1]))
+            expected_order = np.lexsort((expected_points[:, 0], expected_points[:, 1]))
+            np.testing.assert_array_equal(actual_points[actual_order], expected_points[expected_order])
+        else:
+            actual_las = laspy.read(result.output_file)
+            expected_las = laspy.read(expected_file)
+            assert actual_las.header.point_count == expected_count
+            for dimension in ("X", "Y", "Z"):
+                np.testing.assert_array_equal(actual_las[dimension], expected_las[dimension])
+            np.testing.assert_array_equal(actual_las.header.scales, expected_las.header.scales)
+            np.testing.assert_array_equal(actual_las.header.offsets, expected_las.header.offsets)
 
 
 def test_grouped_reference__matches_geoutils() -> None:

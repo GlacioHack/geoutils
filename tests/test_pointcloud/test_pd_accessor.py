@@ -10,6 +10,7 @@ from typing import Literal
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import pytest
 import xarray as xr
 from geopandas.testing import assert_geodataframe_equal
@@ -64,12 +65,12 @@ class TestPointCloudAccessor:
         header = laspy.LasHeader(point_format=6, version="1.4")
         header.add_crs(CRS.from_epsg(32633))
         laspy.LasData(header).write(path)
-        expected = gu.open_pointcloud(str(path), columns=columns)
+        expected = gu.open_pointcloud(str(path), columns=columns, as_type="geodataframe")
 
         # Build a lazy collection and inspect metadata without executing a partition
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(args[0])):
-            source = gu.open_pointcloud(str(path), columns=columns, chunks=3)
+            source = gu.open_pointcloud(str(path), columns=columns, chunks=3, as_type="geodataframe")
             assert isinstance(source, dgpd.GeoDataFrame)
             assert source.pc.point_count == 0
             assert source.pc.crs == expected.crs
@@ -89,8 +90,8 @@ class TestPointCloudAccessor:
         # (with chunk size not multiple of downsampling factor to check potential edge effects)
         filename = tmp_path / "points.gpkg"
         _point_grid().to_file(filename, index=False)
-        eager = gu.open_pointcloud(str(filename), data_column="value", downsample=4)
-        lazy = gu.open_pointcloud(str(filename), data_column="value", chunks=17, downsample=4)
+        eager = gu.open_pointcloud(str(filename), data_name="value", downsample=4, as_type="geodataframe")
+        lazy = gu.open_pointcloud(str(filename), data_name="value", chunks=17, downsample=4, as_type="geodataframe")
 
         # Check source is lazy, and result is exactly the same with eager
         assert lazy.pc._is_dask
@@ -107,7 +108,7 @@ class TestPointCloudAccessor:
         ds = self.gdf.copy()
 
         # Compare the lightweight accessor view with the underlying dataframe
-        assert ds.pc.data_column == "z"
+        assert ds.pc.data_name == "z"
         assert ds.pc.point_count == len(ds)
         assert np.array_equal(ds.pc.data.values, ds["z"].values)
         assert isinstance(ds.pc.to_geoutils(), gu.PointCloud)
@@ -125,28 +126,28 @@ class TestPointCloudAccessor:
         """Construct an accessor-backed GeoDataFrame directly from X/Y/Z arrays."""
 
         # Use the same coordinates and values as the shared expected point cloud
-        ds = gu.PointCloudAccessor.from_xyz(
+        ds = gu.GeoPandasPointCloudAccessor.from_xyz(
             x=self.arr_points[:, 0],
             y=self.arr_points[:, 1],
             z=self.arr_points[:, 2],
             crs=4326,
-            data_column="z",
+            data_name="z",
         )
 
         # Accessor construction should match construction through PointCloud
         assert isinstance(ds, gpd.GeoDataFrame)
-        assert ds.pc.to_geoutils().pointcloud_equal(gu.PointCloud(self.gdf, data_column="z"))
+        assert ds.pc.to_geoutils().pointcloud_equal(gu.PointCloud(self.gdf, data_name="z"))
 
     def test_cross_type_outputs_are_accessors(self) -> None:
         """Return an Xarray accessor when gridding changes the geospatial data type."""
 
         # Build four points covering a small regular raster grid
-        ds = gu.PointCloudAccessor.from_xyz(
+        ds = gu.GeoPandasPointCloudAccessor.from_xyz(
             x=np.array([0, 1, 0, 1]),
             y=np.array([0, 0, 1, 1]),
             z=np.array([1, 2, 3, 4]),
             crs=3857,
-            data_column="z",
+            data_name="z",
         )
 
         # The accessor API returns an Xarray object instead of a Raster wrapper
@@ -167,10 +168,10 @@ class TestPointCloudAccessor:
         self.gdf.to_file(temp_file)
 
         # The eager path should reproduce the original point cloud
-        ds = gu.open_pointcloud(temp_file, data_column="z")
+        ds = gu.open_pointcloud(temp_file, data_name="z", as_type="geodataframe")
 
         assert isinstance(ds, gpd.GeoDataFrame)
-        assert ds.pc.to_geoutils().pointcloud_equal(gu.PointCloud(self.gdf, data_column="z"))
+        assert ds.pc.to_geoutils().pointcloud_equal(gu.PointCloud(self.gdf, data_name="z"))
 
     def test_open_pointcloud__dask(self) -> None:
         """Keep point-cloud opening lazy when chunks request Dask-GeoPandas."""
@@ -184,7 +185,7 @@ class TestPointCloudAccessor:
         self.gdf.to_file(temp_file)
 
         # Opening with chunks should expose metadata without reading every partition
-        ds = gu.open_pointcloud(temp_file, data_column="z", chunks=5)
+        ds = gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_type="geodataframe")
 
         assert isinstance(ds, dgpd.GeoDataFrame)
         assert not ds.pc.is_loaded
@@ -219,7 +220,7 @@ class TestPointCloudAccessor:
         temp_file = os.path.join(temp_dir.name, "test.gpkg")
         self.gdf.to_file(temp_file)
 
-        ds = gu.open_pointcloud(temp_file, data_column="z", chunks=5)
+        ds = gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_type="geodataframe")
         reprojected = ds.pc.reproject(crs=3857)
 
         # Only the final comparison should compute the Dask collection
@@ -248,7 +249,7 @@ class TestPointCloudAccessor:
         temp_dir = tempfile.TemporaryDirectory()
         temp_file = os.path.join(temp_dir.name, "test.gpkg")
         self.gdf.to_file(temp_file)
-        ds = gu.open_pointcloud(temp_file, data_column="z", chunks=5)
+        ds = gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_type="geodataframe")
         expected = getattr(self.gdf.pc, method)(**kwargs)
         source_count, source_bounds = ds.pc.point_count, ds.pc.bounds
 
@@ -257,7 +258,7 @@ class TestPointCloudAccessor:
         with Callback(pretask=lambda *args: tasks.append(args[0])):
             output = getattr(ds.pc, method)(**kwargs)
             assert output.pc.crs == expected.crs
-            assert output.pc.data_column == "z"
+            assert output.pc.data_name == "z"
             if method == "copy":
                 # Changing only values does not move points, so copies can reuse counts and bounds
                 assert output.pc.bounds == source_bounds
@@ -296,14 +297,14 @@ class TestPointCloudAccessor:
         temp_file = os.path.join(temp_dir.name, "test.gpkg")
         self.gdf.to_file(temp_file)
 
-        ds = gu.open_pointcloud(temp_file, data_column="z", chunks=5).pc.reproject(crs=3857)
+        ds = gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_type="geodataframe").pc.reproject(crs=3857)
         assert not ds.pc.is_loaded
         output_file = os.path.join(temp_dir.name, "output.gpkg")
         ds.pc.to_file(output_file)
 
         # Reopen through PointCloud to validate geometry, CRS and data values
         assert os.path.exists(output_file)
-        assert gu.PointCloud(output_file, data_column="z").pointcloud_equal(gu.PointCloud(self.gdf.to_crs(3857), "z"))
+        assert gu.PointCloud(output_file, data_name="z").pointcloud_equal(gu.PointCloud(self.gdf.to_crs(3857), "z"))
         assert not ds.pc.is_loaded
 
     def test_to_file__dask_geopandas_parquet(self) -> None:
@@ -317,7 +318,7 @@ class TestPointCloudAccessor:
         temp_file = os.path.join(temp_dir.name, "test.gpkg")
         self.gdf.to_file(temp_file)
 
-        ds = gu.open_pointcloud(temp_file, data_column="z", chunks=5)
+        ds = gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_type="geodataframe")
         assert not ds.pc.is_loaded
         output_file = os.path.join(temp_dir.name, "output.parquet")
         ds.pc.to_file(output_file)
@@ -350,7 +351,7 @@ class TestPointCloudAccessor:
         # Replace the module-level optional importer used by ``open_pointcloud``
         monkeypatch.setattr(vector_pd_accessor, "import_optional", _missing_dask_geopandas)
         with pytest.raises(ImportError, match="Optional dependency 'dask-geopandas' required.*"):
-            gu.open_pointcloud(temp_file, data_column="z", chunks=5)
+            gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_type="geodataframe")
 
     @pytest.mark.skipif(find_spec("laspy") is None, reason="Only runs if laspy is installed.")
     def test_open_pointcloud_las__dask(self) -> None:
@@ -359,7 +360,7 @@ class TestPointCloudAccessor:
         dgpd = pytest.importorskip("dask_geopandas")
 
         # Compare lazy metadata with the same source interpreted by PointCloud
-        ds = gu.open_pointcloud(self.fn_las, chunks=100)
+        ds = gu.open_pointcloud(self.fn_las, chunks=100, as_type="geodataframe")
         pc = gu.PointCloud(self.fn_las)
 
         assert isinstance(ds, dgpd.GeoDataFrame)
@@ -376,7 +377,7 @@ class TestPointCloudAccessor:
         dgpd = pytest.importorskip("dask_geopandas")
 
         # Load an eager reference independently of the lazy LAS partitions
-        ds = gu.open_pointcloud(self.fn_las, chunks=100)
+        ds = gu.open_pointcloud(self.fn_las, chunks=100, as_type="geodataframe")
         pc = gu.PointCloud(self.fn_las)
         pc.load()
 
@@ -385,7 +386,7 @@ class TestPointCloudAccessor:
 
         assert isinstance(reprojected, dgpd.GeoDataFrame)
         assert not reprojected.pc.is_loaded
-        assert_geodataframe_equal(reprojected.compute(), pc.ds.to_crs(3857))
+        assert_geodataframe_equal(reprojected.compute(), pc.gdf.to_crs(3857))
         assert not ds.pc.is_loaded
         assert not reprojected.pc.is_loaded
 
@@ -404,6 +405,59 @@ class TestPointCloudAccessor:
 
         # Chunk scheduling must not change point order, values or metadata
         assert pc_chunked.pointcloud_equal(pc)
+
+    @pytest.mark.parametrize("storage", ["python", "pyarrow"])
+    def test_to_xarray__string_attributes(self, storage: str) -> None:
+        """Checks that Dask string attributes are converted lazily during to_xarray()."""
+
+        dgpd = pytest.importorskip("dask_geopandas")
+        if storage == "pyarrow":
+            pytest.importorskip("pyarrow")
+        import dask
+        from dask.callbacks import Callback
+
+        from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
+
+        # We create string attributes with a missing label (and other columns that must not change)
+        values = np.array([1, 2, 3], dtype=np.float32)
+        identifiers = np.arange(3, dtype=np.uint64) + 2**63
+        labels = pd.Series(["west", None, "east"], dtype=pd.StringDtype(storage=storage))
+        frame = gu.GeoPandasPointCloudAccessor.from_xyz([0, 1, 2], [3, 4, 5], values, crs=32633, data_name="height")
+        frame["label"] = labels
+        frame["id"] = identifiers
+        expected = frame.pc.to_xarray()
+
+        # We split rows into chunks
+        _register_dask_pointcloud_accessor()
+        with dask.config.set({"dataframe.convert-string": False}):
+            source = dgpd.from_geopandas(frame, chunksize=2)
+        source.pc.set_data_name("height")
+        graph = source.expr
+        assert source.label.dtype == labels.dtype
+        assert not source.pc.is_loaded
+
+        # Convert to_xarray() with partition lengths lazily
+        tasks = []
+        with Callback(pretask=lambda *args: tasks.append(args[0])):
+            result = source.pc.to_xarray(partition_lengths=(2, 1))
+        assert tasks == []
+        assert not result.pc.is_loaded
+        assert result.chunks == ((2, 1),)
+        assert result.label.chunks == result.chunks
+        assert result.label.dtype == np.dtype(object)
+        assert result.dtype == values.dtype and result.id.dtype == identifiers.dtype
+
+        # Compare labels with Pandas (because Xarray cannot compare pd.NA within object coordinates)
+        computed = result.compute()
+        pd.testing.assert_series_equal(
+            pd.Series(computed.label.values), pd.Series(expected.label.values), check_exact=True
+        )
+
+        # Check equality of values and coords
+        xr.testing.assert_identical(computed.drop_vars("label"), expected.drop_vars(["point", "label"]))
+        assert source.expr is graph
+        assert source.label.dtype == labels.dtype
+        assert not source.pc.is_loaded and not result.pc.is_loaded
 
 
 class TestPointCloudElevationMetadata:
@@ -426,12 +480,12 @@ class TestPointCloudElevationMetadata:
 
         # Build a Dask GeoDataFrame directly, including empty and single-point collections
         coordinates = np.arange(point_count, dtype=float)
-        frame = gu.PointCloudAccessor.from_xyz(
+        frame = gu.GeoPandasPointCloudAccessor.from_xyz(
             500000 + coordinates * 20,
             8600000 + coordinates * 20,
             coordinates,
             crs="EPSG:32633+5703",
-            data_column="height",
+            data_name="height",
         )
         frame["intensity"] = coordinates + 100
         _register_dask_pointcloud_accessor()
@@ -443,7 +497,7 @@ class TestPointCloudElevationMetadata:
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(args[0])):
             assert source.pc.crs == frame.crs
-            source.pc.set_data_column("height")
+            source.pc.set_data_name("height")
             assert source.pc.crs == frame.crs
 
         # Check that metadata reads keep the original CRS and source graph without loading any partitions
@@ -456,7 +510,9 @@ class TestPointCloudElevationMetadata:
         """Checks that point cloud reprojection changes only the result CRS and keeps the source metadata."""
 
         # A small projected point cloud makes both the reference coordinates and metadata deterministic
-        frame = gu.PointCloudAccessor.from_xyz([500000.0, 500020.0], [8600000.0, 8600020.0], [10.0, 20.0], crs=32633)
+        frame = gu.GeoPandasPointCloudAccessor.from_xyz(
+            [500000.0, 500020.0], [8600000.0, 8600020.0], [10.0, 20.0], crs=32633
+        )
         source = frame
         if lazy:
             dgpd = pytest.importorskip("dask_geopandas")
@@ -478,22 +534,22 @@ class TestPointCloudElevationMetadata:
         if lazy:
             assert not source.pc.is_loaded and not result.pc.is_loaded
 
-    def test_data_column__explicit_geometry_elevations(self) -> None:
+    def test_data_name__explicit_geometry_elevations(self) -> None:
         """Checks that 3D points can switch between geometry heights and a named data column."""
 
         # Keep elevations in 3D geometry and a distinct auxiliary column that must not become the main data
-        frame = gu.PointCloudAccessor.from_xyz([1.0, 2.0], [3.0, 4.0], [10.0, 20.0], crs=32633, use_z=True)
+        frame = gu.GeoPandasPointCloudAccessor.from_xyz([1.0, 2.0], [3.0, 4.0], [10.0, 20.0], crs=32633, use_z=True)
         frame["intensity"] = np.array([2, 4], dtype=np.uint16)
-        assert frame.pc.data_column is None
+        assert frame.pc.data_name is None
         np.testing.assert_array_equal(frame.pc.data, [10.0, 20.0])
 
         # Select intensity through another accessor; the shared dataframe keeps the new choice without changing Z
-        other = gu.PointCloudAccessor(frame)
-        other.set_data_column("intensity")
-        assert frame.pc.data_column == "intensity"
+        other = gu.GeoPandasPointCloudAccessor(frame)
+        other.set_data_name("intensity")
+        assert frame.pc.data_name == "intensity"
         np.testing.assert_array_equal(frame.geometry.z, [10.0, 20.0])
 
         # Switch back to geometry height and check that a copied accessor sees the same active values
-        other.set_data_column(None)
-        assert frame.pc.data_column is None
+        other.set_data_name(None)
+        assert frame.pc.data_name is None
         np.testing.assert_array_equal(frame.pc.copy().pc.data, [10.0, 20.0])

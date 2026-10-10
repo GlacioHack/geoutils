@@ -153,7 +153,7 @@ def _grid_resolution(
 def _grid_pointcloud(
     pc: gpd.GeoDataFrame,
     grid_coords: tuple[NDArrayNum, NDArrayNum],
-    data_column_name: str | None = None,
+    data_name: str | None = None,
     resampling: GriddingMethod = "linear",
     dist_nodata_pixel: float = 1.0,
     nodata_handling: NodataChoice | None = None,
@@ -168,7 +168,7 @@ def _grid_pointcloud(
 
     :param pc: Point cloud.
     :param grid_coords: Regular raster grid coordinates in X and Y (i.e. equally spaced, independently for each axis).
-    :param data_column_name: Name of data column for point cloud (if 2D point geometries are used).
+    :param data_name: Name of data attribute for point cloud (if 2D point geometries are used).
     :param resampling: Interpolator, Reducer, or an existing interpolation/statistic name. ``average``, ``min`` and
         ``max`` are aliases for ``mean``, ``minimum`` and ``maximum``.
     :param dist_nodata_pixel: Maximum point distance or circular neighborhood radius, expressed in output pixels.
@@ -225,7 +225,7 @@ def _grid_pointcloud(
     res_x, res_y = _grid_resolution(grid_coords=grid_coords, grid_res=grid_res)
     points, values, source_points, source_valid = _prepare_point_gridding_data(
         pc=pc,
-        data_column_name=data_column_name,
+        data_name=data_name,
     )
     invalid_points = source_points[~source_valid]
 
@@ -235,7 +235,7 @@ def _grid_pointcloud(
         aligned_dem = _grid_from_points(
             pc,
             grid_coords=grid_coords,
-            data_column_name=data_column_name,
+            data_name=data_name,
             operator=operator,
             res_x=res_x,
             res_y=res_y,
@@ -353,7 +353,7 @@ def _source_support_pixels(
 def _grid_pointcloud_on_geogrid(
     pc: gpd.GeoDataFrame,
     geogrid: GeoGrid,
-    data_column_name: str | None,
+    data_name: str | None,
     gridding_func: GridPointCloudCallable = _grid_pointcloud,
     **kwargs: Any,
 ) -> NDArrayNum:
@@ -370,7 +370,7 @@ def _grid_pointcloud_on_geogrid(
     array, _ = gridding_func(
         pc,
         grid_coords=grid_coords,
-        data_column_name=data_column_name,
+        data_name=data_name,
         **gridding_kwargs,
     )
     return array
@@ -379,7 +379,7 @@ def _grid_pointcloud_on_geogrid(
 def _load_pointcloud_for_geogrid(
     source_pointcloud: Any,
     geogrid: GeoGrid,
-    data_column_name: str | None,
+    data_name: str | None,
     gridding_options: dict[str, Any],
 ) -> gpd.GeoDataFrame:
     """Load the source points needed for one output grid and its surrounding support."""
@@ -393,14 +393,14 @@ def _load_pointcloud_for_geogrid(
     return _load_pointcloud_bounds(
         source_pointcloud=source_pointcloud,
         bounds=_support_bounds(geogrid=geogrid, dist_nodata_pixel=source_support),
-        data_column_name=data_column_name,
+        data_name=data_name,
     )
 
 
 def _grid_pointcloud_block_from_source(
     source_pointcloud: Any,
     geogrid: GeoGrid,
-    data_column_name: str | None,
+    data_name: str | None,
     gridding_func: GridPointCloudCallable = _grid_pointcloud,
     **kwargs: Any,
 ) -> NDArrayNum:
@@ -409,13 +409,13 @@ def _grid_pointcloud_block_from_source(
     pc = _load_pointcloud_for_geogrid(
         source_pointcloud=source_pointcloud,
         geogrid=geogrid,
-        data_column_name=data_column_name,
+        data_name=data_name,
         gridding_options=kwargs,
     )
     return _grid_pointcloud_on_geogrid(
         pc=pc,
         geogrid=geogrid,
-        data_column_name=data_column_name,
+        data_name=data_name,
         gridding_func=gridding_func,
         **kwargs,
     )
@@ -424,7 +424,7 @@ def _grid_pointcloud_block_from_source(
 def _grid_pointcloud_block_from_dask_parts(
     parts: list[gpd.GeoDataFrame],
     geogrid: GeoGrid,
-    data_column_name: str | None,
+    data_name: str | None,
     crs: Any,
     gridding_func: GridPointCloudCallable = _grid_pointcloud,
     **kwargs: Any,
@@ -436,7 +436,7 @@ def _grid_pointcloud_block_from_dask_parts(
     return _grid_pointcloud_on_geogrid(
         pc=pc,
         geogrid=geogrid,
-        data_column_name=data_column_name,
+        data_name=data_name,
         gridding_func=gridding_func,
         **kwargs,
     )
@@ -446,7 +446,7 @@ def _grid_pointcloud_multiproc_block(
     source_pointcloud: Any,
     geogrid: GeoGrid,
     dst_tile: tuple[int, int, int, int],
-    data_column_name: str | None,
+    data_name: str | None,
     gridding_func: GridPointCloudCallable = _grid_pointcloud,
     **kwargs: Any,
 ) -> tuple[NDArrayNum, tuple[int, int, int, int]]:
@@ -455,7 +455,7 @@ def _grid_pointcloud_multiproc_block(
     array = _grid_pointcloud_block_from_source(
         source_pointcloud=source_pointcloud,
         geogrid=geogrid,
-        data_column_name=data_column_name,
+        data_name=data_name,
         gridding_func=gridding_func,
         **kwargs,
     )
@@ -474,7 +474,7 @@ def _dask_grid_pointcloud(
     source_pointcloud: Any,
     dst_geotiling: ChunkedGeoGrid,
     dst_block_geogrids: list[GeoGrid],
-    data_column_name: str | None,
+    data_name: str | None,
     gridding_func: GridPointCloudCallable = _grid_pointcloud,
     **kwargs: Any,
 ) -> Any:
@@ -514,7 +514,7 @@ def _dask_grid_pointcloud(
                 tile = delayed(_grid_pointcloud_block_from_dask_parts)(
                     list(filtered.to_delayed()),
                     geogrid,
-                    data_column_name,
+                    data_name,
                     source_crs,
                     gridding_func,
                     **kwargs,
@@ -524,7 +524,7 @@ def _dask_grid_pointcloud(
                 tile = delayed(_grid_pointcloud_block_from_source)(
                     source_pointcloud,
                     geogrid,
-                    data_column_name,
+                    data_name,
                     gridding_func,
                     **kwargs,
                 )
@@ -541,7 +541,7 @@ def _multiproc_grid_pointcloud(
     source_pointcloud: Any,
     dst_geotiling: ChunkedGeoGrid,
     dst_block_geogrids: list[GeoGrid],
-    data_column_name: str | None,
+    data_name: str | None,
     mp_config: MultiprocConfig,
     file_metadata: dict[str, Any],
     gridding_func: GridPointCloudCallable = _grid_pointcloud,
@@ -560,7 +560,7 @@ def _multiproc_grid_pointcloud(
                 source_pointcloud,
                 geogrid,
                 dst_tile,
-                data_column_name,
+                data_name,
                 gridding_func,
                 **kwargs,
             )
@@ -589,7 +589,7 @@ def _grid_pointcloud_to_raster(
     dist_nodata_pixel: float = 1.0,
     nodata: int | float = -9999,
     *,
-    data_column: str | None = None,
+    data_name: str | None = None,
     nodata_handling: NodataChoice | None = None,
     distance_power: float = 2.0,
     min_points: int = 1,
@@ -604,16 +604,16 @@ def _grid_pointcloud_to_raster(
     Grid a point cloud to a raster with eager, Dask, or Multiprocessing backends.
 
     A Dask reference selects lazy output even when the point source is eager. Its spatial chunks are reused unless
-    chunksizes is supplied, following the same reference-grid behavior as rasterization. An explicit data_column
+    chunksizes is supplied, following the same reference-grid behavior as rasterization. An explicit data_name
     selects values without copying the source or changing its active column.
     """
 
     # Resolve the value column from metadata so file-backed sources stay available for bounded worker reads
-    if data_column is not None and (
-        not isinstance(data_column, str) or data_column not in get_geo_attr(source_pointcloud, "columns")
+    if data_name is not None and (
+        not isinstance(data_name, str) or data_name not in get_geo_attr(source_pointcloud, "columns")
     ):
-        raise ValueError("Argument ``data_column`` must name an existing point column.")
-    data_column_name = get_geo_attr(source_pointcloud, "data_column") if data_column is None else data_column
+        raise ValueError("Argument ``data_name`` must name an existing point column.")
+    data_name = get_geo_attr(source_pointcloud, "data_name") if data_name is None else data_name
 
     # Follow a lazy output reference without converting an eager point cloud to a Dask dataframe
     ref_chunks = get_geo_attr(ref, "_chunks") if ref is not None and has_geo_attr(ref, "_chunks") else None
@@ -677,14 +677,14 @@ def _grid_pointcloud_to_raster(
         )
 
     from geoutils.raster import Raster
-    from geoutils.raster.xr_accessor import RasterAccessor
+    from geoutils.raster.xr_accessor import DataArrayRasterAccessor
 
     # The eager path grids the complete source into an in-memory Raster
     if not dask and mp_config is None:
         array = _grid_pointcloud_block_from_source(
             source_pointcloud=source_pointcloud,
             geogrid=dst_geogrid,
-            data_column_name=data_column_name,
+            data_name=data_name,
             gridding_func=gridding_func,
             **kwargs,
         )
@@ -709,11 +709,11 @@ def _grid_pointcloud_to_raster(
             source_pointcloud=source_pointcloud,
             dst_geotiling=dst_geotiling,
             dst_block_geogrids=dst_block_geogrids,
-            data_column_name=data_column_name,
+            data_name=data_name,
             gridding_func=gridding_func,
             **kwargs,
         )
-        return RasterAccessor.from_array(data=data, transform=out_transform, crs=out_crs, nodata=nodata)
+        return DataArrayRasterAccessor.from_array(data=data, transform=out_transform, crs=out_crs, nodata=nodata)
 
     # The remaining backend writes worker results directly to the configured file
     assert mp_config is not None
@@ -730,7 +730,7 @@ def _grid_pointcloud_to_raster(
         source_pointcloud=source_pointcloud,
         dst_geotiling=dst_geotiling,
         dst_block_geogrids=dst_block_geogrids,
-        data_column_name=data_column_name,
+        data_name=data_name,
         mp_config=mp_config,
         file_metadata=file_metadata,
         gridding_func=gridding_func,

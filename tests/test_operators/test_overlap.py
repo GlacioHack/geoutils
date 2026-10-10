@@ -103,7 +103,7 @@ class TestGridIntersectionFractions:
         # Check single fully covered cell
         np.testing.assert_array_equal(selected_rows, [1])
         np.testing.assert_array_equal(selected_columns, [1])
-        np.testing.assert_allclose(fractions, [1.0], atol=1e-14)
+        assert np.allclose(fractions, [1.0], equal_nan=True)
 
     def test_grid_intersection_fractions__unaligned_corners(self) -> None:
         """Checks that unaligned quadrilateral corners fall back to the same exact Shapely intersections."""
@@ -157,10 +157,7 @@ class TestGridIntersectionFractions:
             expected_order = np.argsort(expected_ids)
             actual_order = np.argsort(actual_ids)
             np.testing.assert_array_equal(actual_ids[actual_order], expected_ids[expected_order])
-            tolerance = 5e-8 if backend == "exactextract" else 1e-10
-            np.testing.assert_allclose(
-                actual_fractions[actual_order], expected_fractions[expected_order], rtol=0, atol=tolerance
-            )
+            assert np.allclose(actual_fractions[actual_order], expected_fractions[expected_order])
 
     @pytest.mark.skipif(find_spec("numba") is not None, reason="Only runs if numba is missing.")
     def test_grid_intersection_fractions__error_missing_numba(self) -> None:

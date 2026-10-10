@@ -84,7 +84,7 @@ def _coordinates_at_support(
         return np.column_stack((np.asarray(x).reshape(-1), np.asarray(y).reshape(-1)))
 
     pointcloud = cast("PointCloudBase", support)
-    dataframe = pointcloud.ds
+    dataframe = pointcloud._dataset
     if is_dask_dataframe(dataframe):
         raise ValueError("Statistics uncertainty propagation currently requires eager point coordinates.")
     return np.column_stack((dataframe.geometry.x.to_numpy(), dataframe.geometry.y.to_numpy()))
@@ -174,7 +174,7 @@ def _select_values_and_mask_at_support(
         # Use the active point column by default, or geometry heights when no column is selected
         if values is None:
             pointcloud = cast("PointCloudBase", source)
-            value_specs = {pointcloud.data_column or "z": pointcloud.data_column}
+            value_specs = {pointcloud.data_name or "z": pointcloud.data_name}
         else:
             columns = [values] if isinstance(values, str) else values
             if not isinstance(columns, Iterable):
@@ -223,7 +223,7 @@ def _select_values_and_mask_at_support(
         else:
             # Let the sampling helpers align, rasterize or interpolate spatial inputs as required
             if support_dataframe is None and not _is_raster(support):
-                support_dataframe = cast("PointCloudBase", support).ds
+                support_dataframe = cast("PointCloudBase", support)._dataset
             selected_values[name] = _values_at_support(
                 value_source,
                 selector,
@@ -264,7 +264,7 @@ def _select_values_and_mask_at_support(
         elif not _is_raster(support) and not _is_raster(mask) and not _is_pointcloud(mask):
             return selected_values, _normalize_mask_array(mask, (cast("PointCloudBase", support).point_count,)), support
     if mask is not None and support_dataframe is None and not _is_raster(support) and _is_pointcloud(mask):
-        support_dataframe = cast("PointCloudBase", support).ds
+        support_dataframe = cast("PointCloudBase", support)._dataset
     support_mask = _mask_at_support(
         mask,
         support,

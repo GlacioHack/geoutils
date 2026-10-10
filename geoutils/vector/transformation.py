@@ -75,17 +75,19 @@ def _crop(source_vector: Any, bbox: Any, mode: Literal["intersects", "within"]) 
     # Convert references and coordinate sequences to one box in the source CRS
     xmin, ymin, xmax, ymax = (float(value) for value in _check_match_bbox(source_vector, bbox))
     bounds = (xmin, ymin, xmax, ymax)
-    if is_dask_dataframe(source_vector.ds):
+    if is_dask_dataframe(source_vector._dataset):
         # Spatial partitions can discard unrelated partitions before reading their rows
-        if getattr(source_vector.ds, "spatial_partitions", None) is not None:
-            cropped = source_vector.ds.cx[xmin:xmax, ymin:ymax]  # type: ignore[misc]
+        if getattr(source_vector._dataset, "spatial_partitions", None) is not None:
+            cropped = source_vector._dataset.cx[xmin:xmax, ymin:ymax]  # type: ignore[misc]
             if mode == "within":
                 cropped = cropped[cropped.geometry.within(box(*bounds))]
             return cropped
 
         # Otherwise apply the same eager selection independently inside each partition
-        return source_vector.ds.map_partitions(_crop_geodataframe, bounds, mode, meta=source_vector.ds._meta)
-    return _crop_geodataframe(source_vector.ds, bounds=bounds, mode=mode)
+        return source_vector._dataset.map_partitions(
+            _crop_geodataframe, bounds, mode, meta=source_vector._dataset._meta
+        )
+    return _crop_geodataframe(source_vector._dataset, bounds=bounds, mode=mode)
 
 
 def _crop_read_bbox(
@@ -141,15 +143,15 @@ def _clip(source_vector: Any, mask: Any, keep_geom_type: bool, sort: bool) -> An
     geometry = _clip_geometry(mask, target_crs=target_crs)
 
     # Build one clipping task per partition without computing any source rows
-    if is_dask_dataframe(source_vector.ds):
-        return source_vector.ds.map_partitions(
+    if is_dask_dataframe(source_vector._dataset):
+        return source_vector._dataset.map_partitions(
             _clip_geodataframe,
             geometry,
             keep_geom_type,
             sort,
-            meta=source_vector.ds._meta,
+            meta=source_vector._dataset._meta,
         )
-    return _clip_geodataframe(source_vector.ds, geometry=geometry, keep_geom_type=keep_geom_type, sort=sort)
+    return _clip_geodataframe(source_vector._dataset, geometry=geometry, keep_geom_type=keep_geom_type, sort=sort)
 
 
 def _vector_partition_size(mp_config: MultiprocConfig) -> int:
@@ -277,7 +279,7 @@ def _clip_vector_multiproc(
     # Plan raw file ranges from metadata, preserving any deferred crop filters inside each worker
     source_filename = pathlib.Path(source_vector.name) if not source_vector.is_loaded and source_vector.name else None
     if source_filename is None:
-        dataframe = source_vector.ds
+        dataframe = source_vector._dataset
         feature_count = len(dataframe)
     else:
         dataframe = None
@@ -324,6 +326,6 @@ def _reproject(
     """Reproject a vector. See Vector.reproject() for more details."""
 
     target_crs = _get_reproject_crs(ref=ref, crs=crs)
-    new_ds = source_vector.ds.to_crs(crs=target_crs)
+    new_ds = source_vector._dataset.to_crs(crs=target_crs)
 
     return new_ds

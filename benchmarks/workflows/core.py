@@ -174,7 +174,8 @@ def _common_config(configs: tuple[RuntimeConfig, ...], name: str) -> Any | None:
 
 @dataclass(frozen=True)
 class Comparison:
-    """Choose which benchmark results appear as separate lines in one report plot.
+    """
+    Choose which benchmark results appear as separate lines in one report plot.
 
     ``cases`` selects the results, and ``by`` names the :class:`Case` field used to label each line.
     """
@@ -272,7 +273,7 @@ class Comparison:
         for case in cases:
             label = IMPLEMENTATION_LABELS.get(case.implementation)
             if self.by == "output_driver" and case.implementation == "geoutils":
-                label = f"GeoUtils {case.output_driver}"
+                label = case.labels.get("output_driver", f"GeoUtils {case.output_driver}")
             elif label is None:
                 label = case.labels.get(self.by, _display_value(getattr(case, self.by)))
             elif self.by == "output_driver":

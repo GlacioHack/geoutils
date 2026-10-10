@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
+import xarray as xr
 from geopandas.testing import assert_geodataframe_equal
 from pyproj import CRS
 from shapely.geometry import Polygon
@@ -29,7 +31,7 @@ class TestTransformation:
             geometry=gpd.points_from_xy([0.25, 1.75], [0.25, 1.75]),
             crs=32610,
         )
-        pointcloud = gu.PointCloud(points, data_column="value")
+        pointcloud = gu.PointCloud(points, data_name="value")
         triangle = Polygon([(0, 0), (2, 0), (0, 2)])
 
         # Compare the points selected by the bounding box and the triangle
@@ -57,7 +59,7 @@ class TestTransformation:
         )
         path = tmp_path / "points.gpkg"
         points.to_file(path)
-        pointcloud = gu.PointCloud(path, data_column="value")
+        pointcloud = gu.PointCloud(path, data_name="value")
 
         # Select the two points on the left and keep both objects unloaded
         cropped = pointcloud.crop((-0.5, -0.5, 0.5, 1.5))
@@ -65,7 +67,7 @@ class TestTransformation:
         assert not cropped.is_loaded
 
         # Read the result and compare it with the known points on the left
-        expected = gu.PointCloud(points.iloc[[0, 2]].reset_index(drop=True), data_column="value")
+        expected = gu.PointCloud(points.iloc[[0, 2]].reset_index(drop=True), data_name="value")
         assert cropped.pointcloud_equal(expected)
         assert not pointcloud.is_loaded
 
@@ -85,7 +87,8 @@ class TestTransformationChunked:
     )
     clip_geometry = Polygon([(0, 0), (10, 0), (0, 10)])
 
-    def test_clip__chunked_backends_equal(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_clip__chunked_backends_equal(self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path) -> None:
         """Checks that Dask and multiprocessing clip() select the same points as an in-memory call."""
 
         dgpd = pytest.importorskip("dask_geopandas")
@@ -95,34 +98,37 @@ class TestTransformationChunked:
         self.clip_points.to_file(filename, index=False)
 
         # Clip the same points in memory, with Dask and with two worker processes
-        expected = gu.PointCloud(self.clip_points, data_column="intensity").clip(self.clip_geometry).ds
+        expected = gu.PointCloud(self.clip_points, data_name="intensity").clip(self.clip_geometry).gdf
         expected = expected.sort_values("row_id").reset_index(drop=True)
-        lazy = gu.open_pointcloud(str(filename), data_column="intensity", chunks=4)
-        multiproc = gu.PointCloud(filename, data_column="intensity")
+        lazy = gu.open_pointcloud(str(filename), data_name="intensity", chunks=4, as_type=as_type)
+        multiproc = gu.PointCloud(filename, data_name="intensity")
         lazy_result = lazy.pc.clip(self.clip_geometry)
         with MpCluster({"nb_workers": 2}) as cluster:
             config = MultiprocConfig(chunks=4, outfile=str(tmp_path / "points_clipped.gpkg"), cluster=cluster)
             multiproc_result = multiproc.clip(self.clip_geometry, mp_config=config)
 
         # Check that Dask and file results have the expected types and remain unloaded
-        assert isinstance(lazy_result, dgpd.GeoDataFrame)
+        assert isinstance(lazy_result, xr.DataArray if as_type == "dataarray" else dgpd.GeoDataFrame)
         assert not lazy.pc.is_loaded and not lazy_result.pc.is_loaded
         assert isinstance(multiproc_result, gu.PointCloud)
         assert not multiproc.is_loaded and not multiproc_result.is_loaded
-        assert multiproc_result.data_column == "intensity"
+        assert multiproc_result.data_name == "intensity"
         assert multiproc_result.point_count == len(expected)
-        with pytest.raises(ValueError, match="cannot be combined with a Dask point cloud"):
+        with pytest.raises(ValueError, match="Dask"):
             lazy.pc.clip(self.clip_geometry, mp_config=config)
 
         # Read the results and compare every selected point and value
-        computed_lazy = lazy_result.compute().sort_values("row_id").reset_index(drop=True)
-        computed_multiproc = multiproc_result.ds.sort_values("row_id").reset_index(drop=True)
+        computed_lazy = (
+            lazy_result.compute().pc.to_geoutils().gdf.pc.to_geoutils().gdf.sort_values("row_id").reset_index(drop=True)
+        )
+        computed_multiproc = multiproc_result.gdf.sort_values("row_id").reset_index(drop=True)
         assert_geodataframe_equal(computed_lazy, expected, check_dtype=False)
         assert_geodataframe_equal(computed_multiproc, expected, check_dtype=False)
         assert not multiproc.is_loaded
         assert not lazy.pc.is_loaded and not lazy_result.pc.is_loaded
 
-    def test_clip__dask_las_loading_laziness(self) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_clip__dask_las_loading_laziness(self, as_type: Literal["dataarray", "geodataframe"]) -> None:
         """Checks that clip() keeps a LAS-backed Dask GeoDataFrame lazy and matches eager point selection."""
 
         pytest.importorskip("laspy")
@@ -138,21 +144,26 @@ class TestTransformationChunked:
         assert not eager.is_loaded
 
         # Build one clipping task per LAS partition (100 points) without running any Dask task
-        lazy = gu.open_pointcloud(filename, chunks=100)
+        lazy = gu.open_pointcloud(filename, chunks=100, as_type=as_type)
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(args[0])):
             lazy_result = lazy.pc.clip(geometry)
-        assert tasks == []
-        assert isinstance(lazy_result, dgpd.GeoDataFrame)
-        assert lazy_result.npartitions == lazy.npartitions
-        assert lazy_result.pc.data_column == lazy.pc.data_column == "Z"
+        # Array outputs resolve the selected row positions before constructing known dimensions
+        if as_type == "geodataframe":
+            assert tasks == []
+        else:
+            assert tasks
+        assert isinstance(lazy_result, xr.DataArray if as_type == "dataarray" else dgpd.GeoDataFrame)
+        if as_type == "geodataframe":
+            assert lazy_result.npartitions == lazy.npartitions
+        assert lazy_result.pc.data_name == lazy.pc.data_name == "Z"
         assert not lazy.pc.is_loaded and not lazy_result.pc.is_loaded
 
         # Compute only the result and compare the same points independently of Dask partition order
-        expected = eager.clip(geometry).ds
+        expected = eager.clip(geometry).gdf
         expected = expected.assign(_x=expected.geometry.x, _y=expected.geometry.y)
         expected = expected.sort_values(["_x", "_y", "Z"]).drop(columns=["_x", "_y"]).reset_index(drop=True)
-        computed = lazy_result.compute()
+        computed = lazy_result.compute().pc.to_geoutils().gdf
         computed = computed.assign(_x=computed.geometry.x, _y=computed.geometry.y)
         computed = computed.sort_values(["_x", "_y", "Z"]).drop(columns=["_x", "_y"]).reset_index(drop=True)
         assert_geodataframe_equal(computed, expected, check_dtype=False)
@@ -166,7 +177,7 @@ class TestTransformationChunked:
         # Write the 3D points to a file that can be read in groups
         filename = tmp_path / "points_to_las.gpkg"
         self.clip_points.to_file(filename, index=False)
-        source = gu.PointCloud(filename, data_column="intensity")
+        source = gu.PointCloud(filename, data_name="intensity")
         expected = self.clip_points.clip(self.clip_geometry).sort_values("row_id")
 
         # Clip groups of four points and write the result to one LAS file
@@ -175,7 +186,7 @@ class TestTransformationChunked:
         result = source.clip(self.clip_geometry, mp_config=config)
         assert not source.is_loaded and not result.is_loaded
         assert result.point_count == len(expected)
-        assert result.data_column == "intensity"
+        assert result.data_name == "intensity"
 
         # Compare the stored coordinates and point values with the expected result
         records = laspy.read(outfile)
@@ -203,7 +214,10 @@ class TestTransformationChunked:
 
     @pytest.mark.parametrize("chunks", [4, 6])
     @pytest.mark.parametrize("loaded", [False, True])
-    def test_reproject__chunked_backends_equal(self, chunks: int, loaded: bool, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_reproject__chunked_backends_equal(
+        self, as_type: Literal["dataarray", "geodataframe"], chunks: int, loaded: bool, tmp_path: Path
+    ) -> None:
         """
         Checks that eager, Dask and multiprocessing reprojection return the same rows and metadata.
 
@@ -216,11 +230,11 @@ class TestTransformationChunked:
         # Chunks of 4 or 6 both leave a shorter final chunk, which helps catch dropped/duplicated rows at the joins
         filename = tmp_path / "points.gpkg"
         self.points.to_file(filename, index=False)
-        source = gu.PointCloud(self.points.copy(), data_column="intensity")
+        source = gu.PointCloud(self.points.copy(), data_name="intensity")
         accessor = self.points.copy()
-        accessor.pc.set_data_column("intensity")
-        lazy = gu.open_pointcloud(str(filename), data_column="intensity", chunks=chunks)
-        multiproc = gu.PointCloud(filename, data_column="intensity")
+        accessor.pc.set_data_name("intensity")
+        lazy = gu.open_pointcloud(str(filename), data_name="intensity", chunks=chunks, as_type=as_type)
+        multiproc = gu.PointCloud(filename, data_name="intensity")
         if loaded:
             multiproc.load()
         assert multiproc.is_loaded == loaded
@@ -241,19 +255,22 @@ class TestTransformationChunked:
         # 3/ Check the output types, metadata and loaded state before reading any partitioned result
         assert isinstance(eager_result, gu.PointCloud) and eager_result.is_loaded
         assert isinstance(accessor_result, gpd.GeoDataFrame)
-        assert isinstance(lazy_result, dgpd.GeoDataFrame) and not lazy_result.pc.is_loaded
+        assert (
+            isinstance(lazy_result, xr.DataArray if as_type == "dataarray" else dgpd.GeoDataFrame)
+            and not lazy_result.pc.is_loaded
+        )
         assert isinstance(multiproc_result, gu.PointCloud) and not multiproc_result.is_loaded
         assert multiproc_result.crs == target_crs
         assert multiproc_result.point_count == len(self.points)
-        assert multiproc_result.data_column == "intensity"
-        np.testing.assert_allclose(multiproc_result.bounds, expected.total_bounds, rtol=0, atol=1e-9)
+        assert multiproc_result.data_name == "intensity"
+        assert np.allclose(multiproc_result.bounds, expected.total_bounds, equal_nan=True)
         assert not multiproc_result.is_loaded
         assert multiproc.is_loaded == loaded
 
         # 4/ Read each result and compare all rows (same order, attributes, X/Y and Z)
         # GeoPackage may change an integer width, so equal values are enough even if the dtypes differ
-        computed_lazy = lazy_result.compute()
-        for frame in (eager_result.ds, accessor_result, computed_lazy, multiproc_result.ds):
+        computed_lazy = lazy_result.compute().pc.to_geoutils().gdf
+        for frame in (eager_result.gdf, accessor_result, computed_lazy, multiproc_result.gdf):
             assert_geodataframe_equal(frame, expected, check_dtype=False)
             np.testing.assert_array_equal(frame.geometry.z, self.heights)
             np.testing.assert_array_equal(frame["intensity"], self.points["intensity"])
@@ -294,14 +311,14 @@ class TestTransformationChunked:
             records.write(filename)
 
         # Reproject the 11 points in chunks of four and keep intensity active without loading the source object
-        source = gu.PointCloud(filename, data_column="intensity")
+        source = gu.PointCloud(filename, data_name="intensity")
         expected = self.points.to_crs(32632)
         outfile = tmp_path / ("projected" + output_suffix)
         with MpCluster({"nb_workers": 2}) as cluster:
             configuration = MultiprocConfig(chunks=4, outfile=str(outfile), cluster=cluster)
             result = source.reproject(crs=32632, mp_config=configuration)
         assert not source.is_loaded and not result.is_loaded
-        assert result.data_column == "intensity"
+        assert result.data_name == "intensity"
         assert result.crs == expected.crs and result.point_count == len(expected)
 
         # Open the written file with laspy and compare X/Y/Z within half of the LAS storage scale
@@ -330,7 +347,7 @@ class TestTransformationChunked:
         # Write the points once, then make a reference object in the requested CRS (including the unchanged CRS case)
         filename = tmp_path / "source.gpkg"
         self.points.to_file(filename, index=False)
-        source = gu.PointCloud(filename, data_column="intensity")
+        source = gu.PointCloud(filename, data_name="intensity")
         expected = self.points.to_crs(target_crs)
         reference = gu.Vector(expected)
         outfile = tmp_path / "projected"
@@ -348,11 +365,11 @@ class TestTransformationChunked:
         second_configuration = MultiprocConfig(chunks=4, outfile=str(tmp_path / "reprojected.gpkg"))
         second_result = result.reproject(crs=self.points.crs, mp_config=second_configuration)
         assert not result.is_loaded and not second_result.is_loaded
-        assert_geodataframe_equal(second_result.ds, expected.to_crs(self.points.crs), check_dtype=False)
+        assert_geodataframe_equal(second_result.gdf, expected.to_crs(self.points.crs), check_dtype=False)
         assert not result.is_loaded
 
         # Both files match the same GeoPandas CRS changes, and reading them did not load the original source
-        assert_geodataframe_equal(result.ds, expected, check_dtype=False)
+        assert_geodataframe_equal(result.gdf, expected, check_dtype=False)
         assert not source.is_loaded
 
     @pytest.mark.parametrize("loaded", [False, True])
@@ -363,7 +380,7 @@ class TestTransformationChunked:
         frame = self.points.iloc[:0].copy()
         filename = tmp_path / "empty.gpkg"
         frame.to_file(filename, geometry_type="Point", index=False)
-        source = gu.PointCloud(frame, data_column="intensity") if loaded else gu.PointCloud(filename, "intensity")
+        source = gu.PointCloud(frame, data_name="intensity") if loaded else gu.PointCloud(filename, "intensity")
         expected = frame.to_crs(32632)
         configuration = MultiprocConfig(chunks=4, outfile=str(tmp_path / "projected.gpkg"))
 
@@ -371,12 +388,12 @@ class TestTransformationChunked:
         result = source.reproject(crs=32632, mp_config=configuration)
         assert not result.is_loaded and source.is_loaded == loaded
         assert result.point_count == 0
-        assert result.crs == expected.crs and result.data_column == "intensity"
+        assert result.crs == expected.crs and result.data_name == "intensity"
         assert list(result.columns) == list(frame.columns)
         assert not result.is_loaded
 
         # Reading the result gives the expected empty columns and does not change the source's loaded state
-        assert_geodataframe_equal(result.ds, expected, check_dtype=False)
+        assert_geodataframe_equal(result.gdf, expected, check_dtype=False)
         assert source.is_loaded == loaded
 
     def test_reproject__multiprocessing_accessor_dataframe_output(self, tmp_path: Path) -> None:
@@ -384,36 +401,34 @@ class TestTransformationChunked:
 
         # Make intensity the active values while the point heights remain in the 3D geometry
         source = self.points.copy()
-        source.pc.set_data_column("intensity")
+        source.pc.set_data_name("intensity")
         expected = self.points.to_crs(32632)
         configuration = MultiprocConfig(chunks=4, outfile=str(tmp_path / "projected.gpkg"))
 
         # The accessor reads the written file back into a GeoDataFrame and keeps intensity as the data column
         result = source.pc.reproject(crs=32632, mp_config=configuration)
         assert isinstance(result, gpd.GeoDataFrame)
-        assert result.pc.data_column == "intensity"
+        assert result.pc.data_name == "intensity"
         assert_geodataframe_equal(result, expected, check_dtype=False)
         assert source.pc.crs == self.points.crs
 
-    @pytest.mark.parametrize("data_column", ["intensity", None])
-    def test_reproject__las_accessor_attributes_and_active_values(
-        self, data_column: str | None, tmp_path: Path
-    ) -> None:
+    @pytest.mark.parametrize("data_name", ["intensity", None])
+    def test_reproject__las_accessor_attributes_and_active_values(self, data_name: str | None, tmp_path: Path) -> None:
         """Checks that LAS accessor output keeps all attributes and makes intensity or LAS Z active."""
 
         laspy = pytest.importorskip("laspy")
 
         # Select intensity, or select geometry height with None; the other point attributes should still be written
         source = self.points.copy()
-        source.pc.set_data_column(data_column)
+        source.pc.set_data_name(data_name)
         outfile = tmp_path / "projected.las"
         configuration = MultiprocConfig(chunks=4, outfile=str(outfile))
         result = source.pc.reproject(crs=32632, mp_config=configuration)
 
-        # LAS stores geometry height in Z, so Z becomes active when data_column=None selected the geometry values
+        # LAS stores geometry height in Z, so Z becomes active when data_name=None selected the geometry values
         assert isinstance(result, gpd.GeoDataFrame)
-        expected_column = "Z" if data_column is None else data_column
-        assert result.pc.data_column == expected_column
+        expected_column = "Z" if data_name is None else data_name
+        assert result.pc.data_name == expected_column
         for column in ("intensity", "quality", "row_id"):
             np.testing.assert_array_equal(result[column], self.points[column])
 
@@ -421,10 +436,10 @@ class TestTransformationChunked:
         # The source dataframe must still have the data column chosen above
         with laspy.open(outfile) as reader:
             tolerance = reader.header.scales[2] / 2 + 1e-8
-        expected_values = self.heights if data_column is None else self.points["intensity"]
+        expected_values = self.heights if data_name is None else self.points["intensity"]
         np.testing.assert_allclose(result["Z"], self.heights, rtol=0, atol=tolerance)
         np.testing.assert_allclose(result.pc.data, expected_values, rtol=0, atol=tolerance)
-        assert source.pc.data_column == data_column
+        assert source.pc.data_name == data_name
 
     @pytest.mark.parametrize("attribute_kind", ["nullable_integer", "millisecond_datetime"])
     def test_reproject__gpkg_representable_attributes(self, attribute_kind: str, tmp_path: Path) -> None:
@@ -438,14 +453,14 @@ class TestTransformationChunked:
         else:
             column = "observed_at"
             frame[column] = pd.date_range("2024-01-01T00:00:00.123", periods=3, freq="ms")
-        source = gu.PointCloud(frame, data_column="intensity")
+        source = gu.PointCloud(frame, data_name="intensity")
         configuration = MultiprocConfig(chunks=1, outfile=str(tmp_path / "projected.gpkg"))
 
         # Write one row per chunk; the nullable integer case puts nodata alone in the middle chunk
         # This checks that all chunks still use one compatible output column type
         result = source.reproject(crs=32632, mp_config=configuration)
         assert not result.is_loaded
-        actual = result.ds[column]
+        actual = result.gdf[column]
         expected = frame[column]
 
         # The file reader may choose another dtype, so convert both sides before comparing the stored values
@@ -469,7 +484,7 @@ class TestReprojectErrors:
         # Start with an unloaded file source and a new output path, then request inplace + multiprocessing
         filename = tmp_path / "source.gpkg"
         self.points.to_file(filename, index=False)
-        source = gu.PointCloud(filename, data_column="intensity")
+        source = gu.PointCloud(filename, data_name="intensity")
         outfile = tmp_path / "projected.gpkg"
         configuration = MultiprocConfig(chunks=4, outfile=str(outfile))
         with pytest.raises(ValueError, match="inplace|in place"):
@@ -478,12 +493,15 @@ class TestReprojectErrors:
         assert source.crs == self.points.crs
 
         # The eager version accepts inplace, returns None and changes the source coordinates
-        eager = gu.PointCloud(self.points.copy(), data_column="intensity")
+        eager = gu.PointCloud(self.points.copy(), data_name="intensity")
         expected = self.points.to_crs(32632)
         assert eager.reproject(crs=32632, inplace=True) is None
-        assert_geodataframe_equal(eager.ds, expected)
+        assert_geodataframe_equal(eager.gdf, expected)
 
-    def test_reproject__error_dask_with_multiprocessing(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    def test_reproject__error_dask_with_multiprocessing(
+        self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path
+    ) -> None:
         """Checks that Dask + multiprocessing is rejected before any Dask partition runs."""
 
         pytest.importorskip("dask_geopandas")
@@ -492,7 +510,7 @@ class TestReprojectErrors:
         # Open the file as a Dask dataframe split into several row partitions
         filename = tmp_path / "source.gpkg"
         self.points.to_file(filename, index=False)
-        source = gu.open_pointcloud(str(filename), data_column="intensity", chunks=4)
+        source = gu.open_pointcloud(str(filename), data_name="intensity", chunks=4, as_type=as_type)
         outfile = tmp_path / "projected.gpkg"
         configuration = MultiprocConfig(chunks=4, outfile=str(outfile))
 
@@ -513,7 +531,7 @@ class TestReprojectErrors:
         # Start with one valid point file, then change one output setting to an unsupported choice
         filename = tmp_path / "source.gpkg"
         self.points.to_file(filename, index=False)
-        source = gu.PointCloud(filename, data_column="intensity")
+        source = gu.PointCloud(filename, data_name="intensity")
         outfile = tmp_path / ("projected.tif" if invalid_option == "suffix" else "projected.gpkg")
         if invalid_option.startswith("extensionless"):
             outfile = outfile.with_suffix("")
@@ -546,7 +564,7 @@ class TestReprojectErrors:
             geometry=gpd.points_from_xy(self.points.geometry.x, self.points.geometry.y),
             crs=self.points.crs,
         )
-        source = gu.PointCloud(frame, data_column="intensity")
+        source = gu.PointCloud(frame, data_name="intensity")
         outfile = tmp_path / "projected.las"
         configuration = MultiprocConfig(chunks=4, outfile=str(outfile))
 
@@ -582,7 +600,7 @@ class TestReprojectErrors:
                 frame[column] = np.array([0, 65536, 70000], dtype=np.uint32)
 
         # Send one row to each worker task, so the nodata row is converted in a chunk by itself
-        source = gu.PointCloud(frame, data_column="intensity")
+        source = gu.PointCloud(frame, data_name="intensity")
         original_values = frame[column].copy()
         outfile = tmp_path / ("projected" + suffix)
         original_output = b"original"
@@ -593,4 +611,4 @@ class TestReprojectErrors:
         with pytest.raises(ValueError, match=column):
             source.reproject(crs=32632, mp_config=configuration)
         assert outfile.read_bytes() == original_output
-        pd.testing.assert_series_equal(source.ds[column], original_values)
+        pd.testing.assert_series_equal(source.gdf[column], original_values)

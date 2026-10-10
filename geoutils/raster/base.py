@@ -48,7 +48,7 @@ from rasterio.enums import Resampling
 from geoutils import profiler
 from geoutils._config import config
 from geoutils._dispatch import _check_match_grid, is_dask_dataframe
-from geoutils._misc import deprecate
+from geoutils._misc import _deprecate_keyword, deprecate
 from geoutils._typing import (
     ArrayLike,
     DTypeLike,
@@ -98,7 +98,7 @@ from geoutils.sampling.subsampling import _subsample, _subsample_raster
 from geoutils.stats.stats import stats as _stats
 from geoutils.stats.stats import variogram as _variogram
 
-# Input/output is a RasterType (= Raster or RasterAccessor subclass)
+# Input/output is a RasterType (= Raster or DataArrayRasterAccessor subclass)
 RasterType = TypeVar("RasterType", bound="RasterBase")
 # For inputs, we also accept a xr.DataArray
 RasterLike = Union["RasterBase", xr.DataArray]
@@ -114,16 +114,6 @@ if TYPE_CHECKING:
     from geoutils.uncertainty import ErrorStructure
     from geoutils.vector.base import VectorLike
     from geoutils.vector.vector import Vector, VectorType
-
-
-def _validate_downsample(downsample: Number) -> float:
-    """Validate and normalize a raster opening downsampling factor."""
-
-    if isinstance(downsample, (bool, np.bool_)) or not isinstance(downsample, (int, float, np.integer, np.floating)):
-        raise TypeError("downsample must be of type int or float.")
-    if not np.isfinite(downsample) or downsample < 1:
-        raise ValueError("downsample must be >=1 and finite.")
-    return float(downsample)
 
 
 class RasterBase(ABC):
@@ -174,7 +164,7 @@ class RasterBase(ABC):
         """Return an accessor-backed vector when this raster is accessor-backed."""
 
         if self._is_xr:
-            return vector.ds
+            return vector._dataset
         return vector
 
     def _cast_raster_output(self, raster: Any) -> Any:
@@ -183,11 +173,11 @@ class RasterBase(ABC):
         if not self._is_xr or hasattr(raster, "rst"):
             return raster
 
-        from geoutils.raster.xr_accessor import RasterAccessor, open_raster
+        from geoutils.raster.xr_accessor import DataArrayRasterAccessor, open_raster
 
         if raster.name is not None and not raster.is_loaded:
             return open_raster(raster.name, is_mask=raster.is_mask)
-        return RasterAccessor.from_array(
+        return DataArrayRasterAccessor.from_array(
             data=raster.data,
             transform=raster.transform,
             crs=raster.crs,
@@ -203,8 +193,8 @@ class RasterBase(ABC):
             return pointcloud
 
         if self._is_xr:
-            ds = pointcloud.ds
-            ds.attrs["data_column"] = pointcloud.data_column
+            ds = pointcloud._dataset
+            ds.attrs["data_name"] = pointcloud.data_name
             return ds
         return pointcloud
 
@@ -1307,7 +1297,7 @@ class RasterBase(ABC):
         # For universal CRS (UTM or UPS)
         if local_crs_type == "universal":
             footprint = self.get_footprint_projected(out_crs=self.crs)
-            footprint_ds = getattr(footprint, "ds", footprint)
+            footprint_ds = getattr(footprint, "_dataset", footprint)
             return _get_utm_ups_crs(footprint_ds, method=method)
         # For a custom CRS
         else:
@@ -2061,8 +2051,7 @@ class RasterBase(ABC):
         """
          Interpolate raster values at a set of points.
 
-         Returns a point cloud with data column the interpolated values at the point coordinates, or optionally just
-         the array of interpolated rvalues.
+         Returns a point cloud containing the interpolated values at the point coordinates, or optionally an array.
 
          Uses scipy.ndimage.map_coordinates if the Raster is on an equal grid using "nearest" or "linear" (for speed),
          otherwise uses scipy.interpn on a regular grid.
@@ -2087,8 +2076,7 @@ class RasterBase(ABC):
         :param band: Band to use (from 1 to self.count).
         :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster
             CRS.
-        :param as_array: Whether to return a point cloud with data column the interpolated values (default) or an
-            array of interpolated values.
+        :param as_array: Whether to return an array of interpolated values instead of a point cloud.
         :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
             coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
             Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
@@ -2477,7 +2465,7 @@ class RasterBase(ABC):
     @overload
     def to_pointcloud(
         self,
-        data_column_name: str = "b1",
+        data_name: str = "b1",
         data_band: int = 1,
         auxiliary_data_bands: Iterable[int] | None = None,
         auxiliary_column_names: Iterable[str] | None = None,
@@ -2489,12 +2477,31 @@ class RasterBase(ABC):
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
         mp_config: MultiprocConfig | None = None,
         force_output_to_memory: bool = False,
+        backend: Literal["xarray"],
+    ) -> xr.DataArray: ...
+
+    @overload
+    def to_pointcloud(
+        self,
+        data_name: str = "b1",
+        data_band: int = 1,
+        auxiliary_data_bands: Iterable[int] | None = None,
+        auxiliary_column_names: Iterable[str] | None = None,
+        subsample: float | int = 1,
+        skip_nodata: bool = True,
+        *,
+        as_array: Literal[False] = False,
+        random_state: int | np.random.Generator | None = None,
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        mp_config: MultiprocConfig | None = None,
+        force_output_to_memory: bool = False,
+        backend: Literal["geopandas"] = "geopandas",
     ) -> PointCloud: ...
 
     @overload
     def to_pointcloud(
         self,
-        data_column_name: str = "b1",
+        data_name: str = "b1",
         data_band: int = 1,
         auxiliary_data_bands: Iterable[int] | None = None,
         auxiliary_column_names: Iterable[str] | None = None,
@@ -2506,12 +2513,13 @@ class RasterBase(ABC):
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
         mp_config: MultiprocConfig | None = None,
         force_output_to_memory: bool = False,
+        backend: Literal["geopandas", "xarray"] = "geopandas",
     ) -> NDArrayNum: ...
 
     @overload
     def to_pointcloud(
         self,
-        data_column_name: str = "b1",
+        data_name: str = "b1",
         data_band: int = 1,
         auxiliary_data_bands: Iterable[int] | None = None,
         auxiliary_column_names: Iterable[str] | None = None,
@@ -2523,11 +2531,13 @@ class RasterBase(ABC):
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
         mp_config: MultiprocConfig | None = None,
         force_output_to_memory: bool = False,
-    ) -> NDArrayNum | PointCloud: ...
+        backend: Literal["geopandas", "xarray"] = "geopandas",
+    ) -> NDArrayNum | PointCloud | xr.DataArray: ...
 
+    @_deprecate_keyword("data_column_name", "data_name")
     def to_pointcloud(
         self,
-        data_column_name: str = "b1",
+        data_name: str = "b1",
         data_band: int = 1,
         auxiliary_data_bands: Iterable[int] | None = None,
         auxiliary_column_names: Iterable[str] | None = None,
@@ -2538,6 +2548,7 @@ class RasterBase(ABC):
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
         mp_config: MultiprocConfig | None = None,
         force_output_to_memory: bool = False,
+        backend: Literal["geopandas", "xarray"] = "geopandas",
     ) -> Any:
         """
         Convert raster cells to a point cloud, optionally selecting a random subsample.
@@ -2545,11 +2556,11 @@ class RasterBase(ABC):
         Cell selection and output construction use the same implementation as subsample(). With the default
         ``subsample=1``, every eligible cell is returned, while this method keeps conversion arguments first.
 
-        :param data_column_name: Name to use for point cloud data column, defaults to "bX" where X is the data band
+        :param data_name: Name to use for point cloud data attribute, defaults to "bX" where X is the data band
             number.
-        :param data_band: (Only for multi-band rasters) Band to use for data column, defaults to first. Band counting
+        :param data_band: (Only for multi-band rasters) Band to use for data attribute, defaults to first. Band counting
             starts at 1.
-        :param auxiliary_data_bands: (Only for multi-band rasters) Other bands to save as auxiliary data columns,
+        :param auxiliary_data_bands: (Only for multi-band rasters) Other bands to save as auxiliary data attributes,
             defaulting to every band other than ``data_band``. Pass an empty iterable to keep only the main band.
         :param auxiliary_column_names: (Only for multi-band rasters) Names to use for auxiliary data bands, only if
             auxiliary data bands is not none, defaults to "b1", "b2", etc.
@@ -2566,28 +2577,34 @@ class RasterBase(ABC):
 
         :raises ValueError: If the sample count or fraction is poorly formatted.
 
+        :param backend: Geometry-backed GeoPandas points or Xarray points with numeric coordinates.
         :returns: A point cloud, or array of the shape (N, 2 + count) where N is the sample count.
         """
 
+        if backend not in ("geopandas", "xarray"):
+            raise ValueError("Point cloud backend must be 'geopandas' or 'xarray'.")
+        if backend == "xarray" and mp_config is not None:
+            raise ValueError("Xarray point output uses Dask chunks rather than mp_config.")
         output = _raster_to_pointcloud(
             source_raster=self,
-            data_column_name=data_column_name,
+            data_name=data_name,
             data_band=data_band,
             auxiliary_data_bands=auxiliary_data_bands,
             auxiliary_column_names=auxiliary_column_names,
             subsample=subsample,
             skip_nodata=skip_nodata,
-            as_array=as_array,
+            as_array="xarray" if backend == "xarray" and not as_array else as_array,
             random_state=random_state,
             force_pixel_offset=force_pixel_offset,
             mp_config=mp_config,
             force_output_to_memory=force_output_to_memory,
         )
-        if as_array:
+        if as_array or backend == "xarray":
             return output
         return self._cast_pointcloud_output(output)
 
     @classmethod
+    @_deprecate_keyword("data_column_name", "data_name")
     def from_pointcloud_regular(
         cls: type[RasterType],
         pointcloud: PointCloudLike,
@@ -2595,7 +2612,7 @@ class RasterBase(ABC):
         transform: rio.transform.Affine = None,
         shape: tuple[int, int] = None,
         nodata: int | float | None = None,
-        data_column_name: str = "b1",
+        data_name: str = "b1",
         area_or_point: Literal["Area", "Point"] = "Point",
     ) -> RasterType:
         """
@@ -2610,7 +2627,7 @@ class RasterBase(ABC):
         :param transform: Geotransform of the raster.
         :param shape: Shape of the raster.
         :param nodata: Nodata value of the raster.
-        :param data_column_name: Name to use for point cloud data column, defaults to "bX" where X is the data band
+        :param data_name: Name to use for point cloud data attribute, defaults to "bX" where X is the data band
             number.
         :param area_or_point: Whether to set the pixel interpretation of the raster to "Area" or "Point".
         """
@@ -2621,19 +2638,20 @@ class RasterBase(ABC):
             transform=transform,
             shape=shape,
             nodata=nodata,
-            data_column_name=data_column_name,
+            data_name=data_name,
             area_or_point=area_or_point,
         )
 
         return cls.from_array(data=arr, transform=transform, crs=crs, nodata=nodata, area_or_point=area_or_point)
 
+    @_deprecate_keyword("data_column_name", "data_name")
     @profiler.profile("geoutils.raster.base.polygonize", memprof=True)
     def polygonize(
         self,
         target_values: Number | tuple[Number, Number] | list[Number] | NDArrayNum | Literal["all"] = "all",
         connectivity: Literal[4, 8] = 4,
         band: int = 1,
-        data_column_name: str = "id",
+        data_name: str = "id",
         strategy: Literal["label_union", "label_stitch", "geometry_stitch"] = "label_stitch",
         mp_config: MultiprocConfig | None = None,
     ) -> Vector:
@@ -2642,7 +2660,7 @@ class RasterBase(ABC):
 
         :param target_values: Value or range of values of the raster from which to
           create geometries (defaults to "all", for which all unique pixel values of the raster are used).
-        :param data_column_name: Data column name to be associated with target values in the output vector
+        :param data_name: Data attribute name to be associated with target values in the output vector
             (defaults to "id").
         :param strategy: Strategy used to reconcile polygons across chunk boundaries. Defaults to ``"label_stitch"``
             and has no effect for eager execution.
@@ -2655,7 +2673,7 @@ class RasterBase(ABC):
             target_values=target_values,
             connectivity=connectivity,
             band=band,
-            data_column_name=data_column_name,
+            data_name=data_name,
             strategy=strategy,
             mp_config=mp_config,
         )
@@ -2715,6 +2733,25 @@ class RasterBase(ABC):
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
         force_output_to_memory: bool = False,
         mp_config: MultiprocConfig | None = None,
+        backend: Literal["xarray"],
+    ) -> xr.DataArray: ...
+
+    @overload
+    def subsample(
+        self,
+        subsample: int | float,
+        *,
+        bands: int | Iterable[int] | Mapping[str, int] | None = None,
+        mask: RasterLike | VectorLike | ArrayLike | None = None,
+        skip_nodata: bool = True,
+        random_state: int | np.random.Generator | None = None,
+        as_array: Literal[False] = False,
+        return_indices: Literal[False] = False,
+        strategy: Literal["sequential", "topk"] = "topk",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_output_to_memory: bool = False,
+        mp_config: MultiprocConfig | None = None,
+        backend: Literal["geopandas"] = "geopandas",
     ) -> PointCloud: ...
 
     @overload
@@ -2732,6 +2769,7 @@ class RasterBase(ABC):
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
         force_output_to_memory: bool = False,
         mp_config: MultiprocConfig | None = None,
+        backend: Literal["geopandas", "xarray"] = "geopandas",
     ) -> NDArrayNum: ...
 
     @overload
@@ -2749,6 +2787,7 @@ class RasterBase(ABC):
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
         force_output_to_memory: bool = False,
         mp_config: MultiprocConfig | None = None,
+        backend: Literal["geopandas", "xarray"] = "geopandas",
     ) -> tuple[NDArrayNum, ...]: ...
 
     @overload
@@ -2766,7 +2805,8 @@ class RasterBase(ABC):
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
         force_output_to_memory: bool = False,
         mp_config: MultiprocConfig | None = None,
-    ) -> NDArrayNum | tuple[NDArrayNum, ...] | PointCloud: ...
+        backend: Literal["geopandas", "xarray"] = "geopandas",
+    ) -> NDArrayNum | tuple[NDArrayNum, ...] | PointCloud | xr.DataArray: ...
 
     @profiler.profile("geoutils.raster.base.subsample", memprof=True)
     def subsample(
@@ -2783,6 +2823,7 @@ class RasterBase(ABC):
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
         force_output_to_memory: bool = False,
         mp_config: MultiprocConfig | None = None,
+        backend: Literal["geopandas", "xarray"] = "geopandas",
     ) -> Any:
         """
         Randomly sample raster cells without replacement.
@@ -2811,9 +2852,14 @@ class RasterBase(ABC):
         :param mp_config: Worker, tile, and output settings for multiprocessing. Point output uses GeoPackage, LAS or
             LAZ; LAS/LAZ stores the first selected band as elevation. Large array output uses NumPy format.
 
+        :param backend: Geometry-backed GeoPandas points or Xarray points with numeric coordinates.
         :returns: Point output with one row per sampled cell, one-dimensional sampled values, or row/column positions.
         """
 
+        if backend not in ("geopandas", "xarray"):
+            raise ValueError("Point cloud backend must be 'geopandas' or 'xarray'.")
+        if backend == "xarray" and mp_config is not None and not as_array:
+            raise ValueError("Xarray point output uses Dask chunks rather than mp_config.")
         if as_array:
             if bands is None:
                 array_band = 1
@@ -2864,19 +2910,19 @@ class RasterBase(ABC):
         output = _subsample_raster(
             source_raster=self,
             subsample=subsample,
-            data_column_name=column_names[0],
+            data_name=column_names[0],
             data_band=selected_bands[0],
             auxiliary_data_bands=selected_bands[1:],
             auxiliary_column_names=column_names[1:],
             skip_nodata=skip_nodata,
-            as_array=False,
+            as_array="xarray" if backend == "xarray" else False,
             random_state=random_state,
             force_pixel_offset=force_pixel_offset,
             mp_config=mp_config,
             force_output_to_memory=force_output_to_memory,
-            rename_default_data_column=False,
+            rename_default_data_name=False,
         )
-        return self._cast_pointcloud_output(output)
+        return output if backend == "xarray" else self._cast_pointcloud_output(output)
 
     def estimate_error_structure(
         self,
@@ -2988,7 +3034,7 @@ class RasterBase(ABC):
         :returns: Raster or point cloud on the selected support; Xarray DataArray or eager/lazy GeoDataFrame for
             accessor calls. Bands or columns contain "self", "other", then auxiliaries in mapping order. Raster
             band names are stored in ``tags["long_name"]`` (Xarray ``attrs["long_name"]``). Point outputs use
-            "self" as their active data column and preserve the support index and order.
+            "self" as their active data attribute and preserve the support index and order.
         """
 
         from geoutils.sampling.cosampling import _cosample

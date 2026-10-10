@@ -838,12 +838,20 @@ class _GroupMasks(Mapping[Hashable, Any]):
             )
 
             pointcloud = cast("PointCloudBase", self._support)
+            if pointcloud._is_xr:
+                output = pointcloud.copy(new_array=mask)
+                if pointcloud._dataset.attrs.get("geometry_z"):
+                    # Boolean membership replaces values while the original elevations remain geometric
+                    output = output.rename("group_mask")
+                    output.attrs["geometry_z"] = False
+                    output = output.assign_coords(_geometry_z=(output.dims[0], pointcloud.data))
+                return output
             if not pointcloud._is_pd and not pointcloud.is_loaded:
                 # Read attributes for the requested mask without loading the caller's file-backed point object
                 pointcloud = copy.copy(pointcloud)
                 pointcloud.load(columns="all")
-            dataframe = pointcloud.ds
-            column = pointcloud.data_column
+            dataframe = pointcloud._dataset
+            column = pointcloud.data_name
             if column is None:
                 # Add a boolean column when the point values were stored in geometry Z coordinates
                 column = "group_mask"
@@ -855,7 +863,7 @@ class _GroupMasks(Mapping[Hashable, Any]):
             output = _assign_point_values(dataframe, {column: mask})
             return _build_pointcloud_output(
                 output,
-                data_column=column,
+                data_name=column,
                 as_dataframe=pointcloud._ACCESSOR_OUTPUT,
                 attrs=_get_dataframe_attrs(dataframe),
                 preserve_locations=True,
@@ -1548,7 +1556,7 @@ def _vector_group_values(
         if values is not None:
             return _PreparedGrouper(values, definition, encoded=encoded)
     if support_dataframe is None and _is_pointcloud(support):
-        support_dataframe = cast("PointCloudBase", support).ds
+        support_dataframe = cast("PointCloudBase", support)._dataset
     values = _sample_vector_values(dataframe, feature_values, support, support_dataframe, mp_config=mp_config)
     if selector is None:
         values = np.isfinite(values)
@@ -1649,17 +1657,17 @@ def _select_groupers_at_support(
 
         # Read point coordinates only when placing values actually requires them
         if support_dataframe is None and _is_pointcloud(support):
-            support_dataframe = cast("PointCloudBase", support).ds
+            support_dataframe = cast("PointCloudBase", support)._dataset
 
         # Preserve point cloud category labels and order before converting the column to an array
         metadata_values = group_source
         pointcloud = _get_pointcloud_interface(group_source)
         if pointcloud is not None:
-            column = pointcloud.data_column if group_selector is None else group_selector
+            column = pointcloud.data_name if group_selector is None else group_selector
             if column is not None:
-                if not isinstance(column, str) or column not in pointcloud.ds.columns:
+                if not isinstance(column, str) or column not in pointcloud.columns:
                     raise ValueError(f"Point column {column!r} selected for {name!r} does not exist.")
-                metadata_values = pointcloud.ds[column]
+                metadata_values = pointcloud._get_column_values(column)
         definition = definitions.get(name) or _resolve_group_definition(name, values=metadata_values)
 
         if (
@@ -1671,7 +1679,7 @@ def _select_groupers_at_support(
             with ExitStack() as temporary_files:
                 intermediate = temporary_files.enter_context(mp_config.temporary()) if mp_config is not None else None
                 aligned = _aligned_pointcloud(pointcloud, support, name, align, mp_config=intermediate)
-                groupers_at_support[name] = _prepare_grouper(aligned.ds[column], definition)
+                groupers_at_support[name] = _prepare_grouper(aligned._dataset[column], definition)
             continue
 
         # Always use nearest neighbor for categorical raster labels, otherwise interpolation from the user

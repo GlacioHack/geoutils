@@ -155,24 +155,42 @@ def _plot_pointcloud(
     display, display_bbox, match_reference_extent = _prepare_display_pointcloud(
         source, ax0, max_points, random_state, ref
     )
-    dataframe = display.ds.compute() if is_dask_dataframe(display.ds) else display.ds
 
     if column is None:
-        column = source.data_column
+        column = source.data_name
 
     # We plot after GeoPandas sets the map aspect so geographic colorbars remain next to the data axes
-    cax = _plot_geodataframe(
-        dataframe=dataframe,
-        ax=ax0,
-        column=column,
-        cmap=cmap,
-        vmin=vmin,
-        vmax=vmax,
-        alpha=alpha,
-        cbar_title=cbar_title,
-        add_cbar=add_cbar,
-        **kwargs,
-    )
+    if source._is_xr:
+        # Plot coordinate arrays directly (only the selected sample is computed)
+        points = display._dataset.compute().pc
+        x, y, _ = points.to_xyz()
+        colors = np.asarray(points._get_column_values(column))
+        kwargs["s"] = kwargs.pop("markersize", kwargs.get("s", 20))
+        artist = ax0.scatter(x, y, c=colors, cmap=cmap, vmin=vmin, vmax=vmax, alpha=alpha, **kwargs)
+        if points.crs is not None and points.crs.is_geographic:
+            ax0.set_aspect(1 / np.cos(np.deg2rad((display_bbox.bottom + display_bbox.top) / 2)))
+        else:
+            ax0.set_aspect("equal")
+        cax = None
+        if add_cbar:
+            colorbar = ax0.figure.colorbar(artist, ax=ax0, pad=0.02)
+            if cbar_title is not None:
+                colorbar.set_label(cbar_title)
+            cax = colorbar.ax
+    else:
+        dataframe = display._dataset.compute() if is_dask_dataframe(display._dataset) else display._dataset
+        cax = _plot_geodataframe(
+            dataframe=dataframe,
+            ax=ax0,
+            column=column,
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            alpha=alpha,
+            cbar_title=cbar_title,
+            add_cbar=add_cbar,
+            **kwargs,
+        )
 
     # Use the source bounding box by default (for downsampled points), or use the complete
     # reference extent when one was passed as input

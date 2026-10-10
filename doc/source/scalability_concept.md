@@ -35,7 +35,7 @@ Naturally, all **metadata operations** (e.g., accessing {attr}`~geoutils.Raster.
 Typical examples include {meth}`~geoutils.Raster.crop`, {meth}`~geoutils.Raster.copy`, and {meth}`~geoutils.Raster.translate`,
 which behave similarly as Xarray's {meth}`~xarray.DataArray.sel`, {meth}`~xarray.DataArray.copy`, or {meth}`~xarray.DataArray.assign_coords`.
 
-When using the Xarray {class}`rst <geoutils.RasterAccessor>` accessor, this behavior follows the **native Xarray deferred I/O model**. The {class}`~geoutils.Raster` class implements the
+When using the Xarray {class}`rst <geoutils.DataArrayRasterAccessor>` accessor, this behavior follows the **native Xarray deferred I/O model**. The {class}`~geoutils.Raster` class implements the
 same behavior so that both APIs have consistent semantics.
 
 An important aspect of **deferred I/O** is that it works with both **in-memory** (NumPy) and **scalable backends** (Dask), allowing
@@ -78,7 +78,7 @@ This enables **out-of-core execution**, allowing datasets larger than available 
 
 In GeoUtils, chunked execution is implemented through two backends:
 
-- **Dask**, used through the Xarray {class}`rst <geoutils.RasterAccessor>` accessor,
+- **Dask**, used through the Xarray {class}`rst <geoutils.DataArrayRasterAccessor>` accessor,
 - **Multiprocessing**, used through the {class}`~geoutils.Raster` object.
 
 Both backends read and process raster chunks sequentially, keeping peak memory usage proportional to the chunk size rather than the full dataset size.
@@ -105,7 +105,7 @@ print(f"Is output raster loaded after filtering? {rast_filt.is_loaded}")
 
 Lazy execution refers to **deferring computation until results are explicitly requested**.
 
-In GeoUtils, lazy execution is available through the Xarray {class}`rst <geoutils.RasterAccessor>` accessor with **Dask arrays**.
+In GeoUtils, lazy execution is available through the Xarray {class}`rst <geoutils.DataArrayRasterAccessor>` accessor with **Dask arrays**.
 
 Operations build a **Dask computation graph** instead of executing immediately. The computation is triggered only when required, for example when calling
 `compute()` or when writing results to disk. It is particularly useful when **chaining multiple raster operations**, because intermediate results do not need to be materialized or

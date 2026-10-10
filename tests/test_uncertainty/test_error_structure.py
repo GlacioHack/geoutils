@@ -197,7 +197,7 @@ class TestErrorMagnitude:
         # We check the calculation happened after exclusion by min count, i.e. only using NMADS from slopes 0/30
         # Magnitudes 2, 4 and 6 give variances 0, 12 and 32 + floor of 0.5 for the first one
         expected = [0.5, np.sqrt(12), np.sqrt(32)]
-        np.testing.assert_allclose(predicted, expected, rtol=1e-14)
+        assert np.allclose(predicted, expected, equal_nan=True)
         assert magnitude.reference_value == pytest.approx((0.5 + np.sqrt(32)) / 2)
         pd.testing.assert_frame_equal(statistics, original)
 

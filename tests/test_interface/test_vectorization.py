@@ -233,8 +233,8 @@ def assert_vectors_equal(
         assert v1.crs == v2.crs
 
     # Have the same length
-    g1 = v1.ds.copy()
-    g2 = v2.ds.copy()
+    g1 = v1.gdf.copy()
+    g2 = v2.gdf.copy()
     assert len(g1) == len(g2)
 
     # Have zero symmetric difference area after taking the union of all geometries
@@ -315,7 +315,7 @@ class TestPolygonize:
             strategy="label_stitch",
             value_column="raster_value",
             id_column="component_id",
-            data_column_name="id",
+            data_name="id",
             halo=0,
             float_tol=0.001,
         )
@@ -326,7 +326,7 @@ class TestPolygonize:
         assert mask.dtype == np.dtype("uint8")
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
-    def test_polygonize__area_data_column(self, example: str) -> None:
+    def test_polygonize__area_data_name(self, example: str) -> None:
         """Test that polygonize preserves area for a selected constant value and respects schema/crs."""
         img = gu.Raster(example)
 
@@ -337,14 +337,14 @@ class TestPolygonize:
         polygonized = img.polygonize(target_values=value)
 
         # Get vector area, and check they are equal
-        assert polygonized.ds.area.sum() == pytest.approx(pixel_area)
+        assert polygonized.gdf.area.sum() == pytest.approx(pixel_area)
         assert isinstance(polygonized, gu.Vector)
         assert polygonized.crs == img.crs
 
         # Default id column and custom column
-        assert "id" in polygonized.ds.columns
-        polygonized2 = img.polygonize(target_values=value, data_column_name="myname")
-        assert "myname" in polygonized2.ds.columns
+        assert "id" in polygonized.gdf.columns
+        polygonized2 = img.polygonize(target_values=value, data_name="myname")
+        assert "myname" in polygonized2.gdf.columns
 
         # Same geometry/value content; id column naming differs
         assert_vectors_equal(polygonized, polygonized2)
@@ -361,9 +361,9 @@ class TestPolygonize:
         # We check that 0 is ignored or not, depending on its nodata masking
         # Each pixel has area of 1, so polygon area equals pixel count (7 when 0 is ignored, otherwise 9)
         result = raster.polygonize(target_values="all")
-        assert result.ds.geometry.area.sum() == expected_area
+        assert result.gdf.geometry.area.sum() == expected_area
         expected_values = {1, 2} if nodata == 0 else {0, 1, 2}
-        assert set(result.ds["raster_value"]) == expected_values
+        assert set(result.gdf["raster_value"]) == expected_values
 
     @pytest.mark.parametrize("dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64"])
     def test_polygonize__dtype_support(self, dtype: str) -> None:
@@ -435,8 +435,8 @@ class TestPolygonize:
 
         # Expect 8-connectivity merges diagonals: 1 feature
         # While 4-connectivity does not: 2 features
-        assert len(base8.ds) == 1
-        assert len(base4.ds) == 2
+        assert len(base8.gdf) == 1
+        assert len(base4.gdf) == 2
 
         # 2/ Dask and Multiprocessing
         ds = open_raster(path, chunks={"band": 1, "x": 2, "y": 2})
