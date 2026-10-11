@@ -151,7 +151,7 @@ GCP/RPC reprojection requires a Rasterio resampling method, such as `"bilinear"`
 onto the output grid, while GDAL transformer options control how GCPs/RPCs map pixel positions to ground coordinates
 (see [Rasterio's documentation](https://rasterio.readthedocs.io/en/stable/topics/reproject.html#reprojecting-with-other-georeferencing-metadata)).
 
-We give the ASTER DEM GCPs at its four corners. The `GCP_TPS` option uses thin plate splines to map pixels smoothly through the 
+We give the ASTER DEM GCPs at its four corners. The `GCP_TPS` option uses thin plate splines to map pixels smoothly through the
 control points.
 
 ```{code-cell} ipython3

@@ -1614,7 +1614,7 @@ class TestTransformationChunked:
     def test_reproject__empty_multiband_chunks(
         self, raster_gcp_rpc: gu.Raster, tmp_path: Path, backend: str, georeferencing: str
     ) -> None:
-        """ Checks that empty chunks keep the right number of bands during reprojection. """
+        """Checks that empty chunks keep the right number of bands during reprojection."""
 
         # We use several bands and request a reprojected extent larger than source to create empty output chunks
         filename = tmp_path / "integer_image.tif"
