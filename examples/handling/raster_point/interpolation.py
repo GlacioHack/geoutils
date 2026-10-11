@@ -2,7 +2,7 @@
 Interpolate raster at points
 ============================
 
-This example demonstrates the 2D interpolation of raster values to points using :meth:`~geoutils.raster.base.RasterBase.interp_points`.
+This example demonstrates the 2D interpolation of raster values to points using :meth:`~geoutils.raster.base.RasterBase.interp_at_points`.
 """
 
 # %%
@@ -27,7 +27,7 @@ rng = np.random.default_rng(42)
 x_coords = rng.uniform(rast.rst.bbox.left + 50, rast.rst.bbox.right - 50, 50)
 y_coords = rng.uniform(rast.rst.bbox.bottom + 50, rast.rst.bbox.top - 50, 50)
 
-pc = rast.rst.interp_points(points=(x_coords, y_coords))
+pc = rast.rst.interp_at_points(points=(x_coords, y_coords))
 
 # %%
 # We plot the resulting point cloud
@@ -47,7 +47,7 @@ rast.rst.area_or_point = "Point"
 # %%
 # We can interpolate again by shifting according to our interpretation, and changing the resampling algorithm (default to "linear").
 
-pc_shifted = rast.rst.interp_points(points=(x_coords, y_coords), shift_area_or_point=True, method="quintic")
+pc_shifted = rast.rst.interp_at_points(points=(x_coords, y_coords), shift_area_or_point=True, method="quintic")
 np.nanmean(pc.pc.data - pc_shifted.pc.data)
 
 # %%

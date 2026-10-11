@@ -12,7 +12,7 @@ This example demonstrates the gridding of a point cloud into a raster using :met
 import geoutils as gu
 
 filename_pc = gu.examples.get_path("coromandel_lidar")
-pc = gu.open_pointcloud(filename_pc, data_column="Z")
+pc = gu.open_pointcloud(filename_pc, data_name="Z", as_type="geodataframe")
 
 # Plot the point cloud
 pc.pc.plot(cmap="terrain", cbar_title="Elevation (m)")

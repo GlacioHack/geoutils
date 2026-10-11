@@ -18,7 +18,7 @@ GeoUtils implements logics from Python's [multiprocessing library](https://docs.
 to process raster, vector and point cloud data in chunks without loading the entire dataset into memory when working with **GeoUtils objects**
 ({class}`~geoutils.Raster`, {class}`~geoutils.Vector` and {class}`~geoutils.PointCloud`),
 
-When using the {class}`rst <geoutils.RasterAccessor>`, {class}`vct <geoutils.VectorAccessor>` and {class}`pc <geoutils.PointCloudAccessor>` **accessors**, use Dask instead.
+When using the {class}`rst <geoutils.DataArrayRasterAccessor>`, {class}`vct <geoutils.VectorAccessor>` and {class}`pc <geoutils.GeoPandasPointCloudAccessor>` **accessors**, use Dask instead.
 
 See {ref}`scalability-usage` for the main Dask and Multiprocessing workflows, {ref}`scalability-concept` for the
 execution model, and {ref}`scalability-support` for the operations supported by each backend.
@@ -90,7 +90,7 @@ os.remove(parallel_config.outfile)
 
 ### Point cloud example
 
-{meth}`~PointCloudBase.reproject` uses the same `mp_config` argument. For point cloud operations, `chunks` is an
+{meth}`~geoutils.pointcloud.base.GeometryPointCloudBase.reproject` uses the same `mp_config` argument. For point cloud operations, `chunks` is an
 integer number of points per task rather than raster dimensions, and the output can be GeoPackage, LAS or LAZ.
 
 ```python

@@ -3,7 +3,7 @@ From/to Rasterio
 ================
 
 This example demonstrates importing and exporting a :class:`rasterio.io.DatasetReader` or :class:`rasterio.io.MemoryFile` from and to an
-:class:`xarray.DataArray` with the :class:`rst <geoutils.RasterAccessor>` accessor.
+:class:`xarray.DataArray` with the :class:`rst <geoutils.DataArrayRasterAccessor>` accessor.
 """
 
 import rasterio as rio

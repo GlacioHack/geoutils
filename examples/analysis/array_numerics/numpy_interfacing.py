@@ -2,7 +2,7 @@
 NumPy interfacing
 =================
 
-This example demonstrates NumPy interfacing with rasters on :class:`xarray.DataArray` objects with the :class:`rst <geoutils.RasterAccessor>` accessor. See :ref:`core-array-funcs` for more details.
+This example demonstrates NumPy interfacing with rasters on :class:`xarray.DataArray` objects with the :class:`rst <geoutils.DataArrayRasterAccessor>` accessor. See :ref:`core-array-funcs` for more details.
 """
 
 # %%

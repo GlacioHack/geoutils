@@ -39,6 +39,14 @@ from shapely.geometry.polygon import Polygon
 from geoutils._typing import NDArrayNum, Number
 
 
+def _affine_matmul(transform: rio.transform.Affine, other: rio.transform.Affine | tuple[Any, Any]) -> Any:
+    """Compose affine transforms or map coordinates with either supported Affine syntax."""
+
+    if hasattr(transform, "__matmul__"):
+        return transform @ other
+    return transform * other
+
+
 def latlon_to_utm(lat: Number, lon: Number) -> str:
     """
     Get UTM zone for a given latitude and longitude coordinates.

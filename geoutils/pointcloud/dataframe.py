@@ -49,10 +49,16 @@ def _get_dataframe_attrs(ds: Any) -> dict[str, Any]:
     # Dask does not carry Pandas ``attrs`` reliably through graph operations
     if is_dask_dataframe(ds):
         try:
-            return object.__getattribute__(ds, "_geoutils_attrs")
+            attrs = object.__getattribute__(ds, "_geoutils_attrs")
         except AttributeError:
-            return {}
-    return getattr(ds, "attrs", {})
+            attrs = {}
+    else:
+        attrs = getattr(ds, "attrs", {})
+
+    # Read metadata written before data_name without changing the original mapping
+    if "data_name" not in attrs and "data_column" in attrs:
+        return {**attrs, "data_name": attrs["data_column"]}
+    return attrs
 
 
 def _set_dataframe_attrs(ds: Any, attrs: dict[str, Any]) -> None:
@@ -69,7 +75,7 @@ def _set_dataframe_attrs(ds: Any, attrs: dict[str, Any]) -> None:
 def _build_pointcloud_output(
     dataframe: DataFrameType,
     *,
-    data_column: str | None,
+    data_name: str | None,
     as_dataframe: Literal[True],
     attrs: Mapping[str, Any] | None = None,
     preserve_locations: bool = False,
@@ -80,7 +86,7 @@ def _build_pointcloud_output(
 def _build_pointcloud_output(
     dataframe: Any,
     *,
-    data_column: str | None,
+    data_name: str | None,
     as_dataframe: bool,
     attrs: Mapping[str, Any] | None = None,
     preserve_locations: bool = False,
@@ -90,7 +96,7 @@ def _build_pointcloud_output(
 def _build_pointcloud_output(
     dataframe: Any,
     *,
-    data_column: str | None,
+    data_name: str | None,
     as_dataframe: bool,
     attrs: Mapping[str, Any] | None = None,
     preserve_locations: bool = False,
@@ -124,9 +130,10 @@ def _build_pointcloud_output(
     if not is_dask_dataframe(dataframe):
         point_count = len(dataframe)
     bounds = metadata.get("bounds") if preserve_locations else None
+    geometry_type = metadata.get("geometry_type", "Point") if preserve_locations else "Point"
     metadata.update(
-        data_column=data_column,
-        geometry_type="Point",
+        data_name=data_name,
+        geometry_type=geometry_type,
         crs=dataframe.crs,
         point_count=point_count,
         bounds=bounds,
@@ -139,7 +146,7 @@ def _build_pointcloud_output(
 
     from geoutils.pointcloud.pointcloud import PointCloud
 
-    return PointCloud(dataframe, data_column=data_column)
+    return PointCloud(dataframe, data_name=data_name)
 
 
 ############################################
@@ -203,9 +210,9 @@ def _point_array_partitions(
             columns.append(dataframe.index.to_series().astype(array.dtype))
             continue
 
-        # Give each value partition the exact index of its corresponding point partition
+        # Split values by point partition length; assignment uses row positions
         aligned = array.rechunk((lengths,))
-        columns.append(dd.from_dask_array(aligned, index=dataframe.index))
+        columns.append(dd.from_dask_array(aligned))
     return columns
 
 

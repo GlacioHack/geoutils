@@ -5,7 +5,7 @@ This page helps users familiar with **GDAL/OGR** migrate their operations to the
 
 Regarding function names, GeoUtils exposes **an API almost entirely consistent with the recently overhauled GDAL CLI**.
 
-Note that GeoUtils is **object-oriented** (methods run on {class}`~geoutils.Raster`, {class}`~geoutils.Vector`, {class}`~geoutils.PointCloud`, or on {class}`~xarray.DataArray` and {class}`~geopandas.GeoDataFrame` through {class}`rst <geoutils.RasterAccessor>`, {class}`vct <geoutils.VectorAccessor>` and {class}`pc <geoutils.PointCloudAccessor>` accessors), while GDAL/OGR utilities are typically **file-oriented** (read from disk, write to disk).
+Note that GeoUtils is **object-oriented** (methods run on {class}`~geoutils.Raster`, {class}`~geoutils.Vector`, {class}`~geoutils.PointCloud`, or on {class}`~xarray.DataArray` and {class}`~geopandas.GeoDataFrame` through {class}`rst <geoutils.DataArrayRasterAccessor>`, {class}`vct <geoutils.VectorAccessor>` and {class}`pc <geoutils.GeoPandasPointCloudAccessor>` accessors), while GDAL/OGR utilities are typically **file-oriented** (read from disk, write to disk).
 
 We also provide a conversion table for operations specific to DEMs (e.g. slope, aspect, roughness indexes) that are supported through our sister-package [xDEM](https://xdem.readthedocs.io/en/stable/).
 
@@ -124,7 +124,7 @@ The **`⟶`** symbol denotes methods interfacing from one specific object type t
 * - Interpolate at coordinates
   - `gdallocationinfo`
   - `gdal raster pixel-info`
-  - {meth}`~RasterBase.to_pointcloud`/{meth}`~RasterBase.interp_points`
+  - {meth}`~RasterBase.to_pointcloud`/{meth}`~RasterBase.interp_at_points`
 
 * - <span class="gu-table-section">Raster ⟶ Vector</span>
   -

@@ -28,7 +28,9 @@ from geoutils.raster.tiling import *  # noqa
 from geoutils.raster.transformation import *  # noqa
 
 from geoutils.raster.raster import Raster, RasterType, handled_array_funcs  # noqa isort:skip
-from geoutils.raster.xr_accessor import RasterAccessor, open_raster  # noqa isort:skip
+from geoutils.raster.xr_accessor import open_raster  # noqa isort:skip
+from geoutils.raster.xr_accessor import DataArrayRasterAccessor  # noqa isort:skip
+from geoutils.raster.xr_accessor import DatasetRasterAccessor  # noqa isort:skip
 
 
-__all__ = ["Raster", "RasterAccessor", "RasterType", "open_raster"]
+__all__ = ["Raster", "DataArrayRasterAccessor", "DatasetRasterAccessor", "RasterType", "open_raster"]

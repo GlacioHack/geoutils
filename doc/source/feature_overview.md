@@ -19,7 +19,7 @@ GeoUtils exposes a **consistent API across raster, vector and point cloud object
 
 At its core, GeoUtils provides two interchangeable ways to work with geospatial data, exposing **identical APIs**:
 
-- **Accessors** that extend existing data structures ({class}`rst <geoutils.RasterAccessor>` for **rasters** with **Xarray**, {class}`pc <geoutils.PointCloudAccessor>` and {class}`vct <geoutils.VectorAccessor>` for **point clouds** and **vectors** with **GeoPandas**),
+- **Accessors** that extend existing data structures ({class}`rst <geoutils.DataArrayRasterAccessor>` for **rasters** with **Xarray**, {class}`pc <geoutils.GeoPandasPointCloudAccessor>` and {class}`vct <geoutils.VectorAccessor>` for **point clouds** and **vectors** with **GeoPandas**),
 - **GeoUtils objects** {class}`~geoutils.Raster`, {class}`~geoutils.PointCloud`, {class}`~geoutils.Vector`.
 
 All **raster** and **point cloud** operations support **scalable execution** using [Dask](https://www.dask.org/) or Multiprocessing, allowing large datasets to be processed **chunk-by-chunk without loading the full array into memory**. Some **vector operations** also support scalable execution, although vector inputs are often less limiting.
@@ -151,20 +151,30 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
   -
   -
 
-* - {meth}`interp_points() <RasterBase.interp_points>`
+* - {meth}`interp_at_points() <RasterBase.interp_at_points>`
   - Interpolate raster at point locations. Fast regular-grid logic with added NaN propagation.
   - ✅
   - SciPy
 
-* - {meth}`reduce_points() <RasterBase.reduce_points>`
+* - {meth}`reduce_at_points() <RasterBase.reduce_at_points>`
   - Aggregate raster values around points.
-  - ❌
+  - ✅
   - NumPy
 
 * - {meth}`grid() <PointCloudBase.grid>`
   - Grid irregular points onto a raster grid. Multiple approaches with added NaN propagation.
   - ✅
   - SciPy
+
+* - {meth}`~geoutils.Raster.krige()` / {meth}`~geoutils.PointCloud.krige()`
+  - Interpolate from a fitted variogram using nearby observations within a fixed distance.
+  - ✅
+  - GSTools / GPyTorch
+
+* - {meth}`~geoutils.Raster.random_field()` / {meth}`~geoutils.PointCloud.random_field()`
+  - Generate a spatially correlated random field from an error structure.
+  - ✅ (raster)
+  - GSTools / GPyTorch
 
 * - {meth}`from_pointcloud_regular() <RasterBase.from_pointcloud_regular>`
   - Direct conversion when points lie on a regular grid.
@@ -175,6 +185,16 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
   - Conversion to point cloud.
   - ✅
   - NumPy
+
+* - <span class="gu-table-section">Point ⟶ Point</span>
+  -
+  -
+  -
+
+* - {meth}`~geoutils.PointCloud.filter()`
+  - Filter values using nearby points without changing their rows, coordinates, or other attributes.
+  - ✅
+  - SciPy / NumPy
 ```
 
 ## Metadata properties and operations
@@ -248,6 +268,6 @@ These rely only on metadata and therefore **do not load or modify underlying dat
 * - <span class="gu-table-section">Point</span>
   -
 
-* - {attr}`~PointCloudBase.point_count`
+* - {attr}`~geoutils.pointcloud.base.GeometryPointCloudBase.point_count`
   - Number of points in the point cloud.
 ```

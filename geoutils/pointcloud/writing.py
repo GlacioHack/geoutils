@@ -30,6 +30,7 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pyogrio
+import xarray as xr
 
 from geoutils.pointcloud.las import (
     _build_laspy_header_from_partitions,
@@ -40,10 +41,28 @@ if TYPE_CHECKING:
     from geoutils.pointcloud.pointcloud import PointCloud
 
 
-PointCloudDriver = Literal["GPKG", "LAS", "LAZ"]
-_POINTCLOUD_FORMATS: dict[str, PointCloudDriver] = {".gpkg": "GPKG", ".las": "LAS", ".laz": "LAZ"}
+PointCloudDriver = Literal["GPKG", "LAS", "LAZ", "PARQUET"]
+_POINTCLOUD_FORMATS: dict[str, PointCloudDriver] = {
+    ".gpkg": "GPKG",
+    ".las": "LAS",
+    ".laz": "LAZ",
+    ".parquet": "PARQUET",
+}
 _GPKG_DIRECT_WRITE_ROWS = 524_288
 _GPKG_WRITE_BATCH_ROWS = 524_288
+
+
+def _array_partitions(points: xr.DataArray, chunks: int | None) -> Any:
+    """Yield eager row partitions, computing values and attributes together within each partition."""
+
+    # Use the requested row count or the largest existing chunk to bound each write
+    if chunks is not None and (isinstance(chunks, bool) or not isinstance(chunks, int) or chunks <= 0):
+        raise ValueError("Argument 'chunks' must be a strictly positive integer.")
+    size = chunks or (max(points.chunks[0]) if points.chunks else 524_288)
+
+    # Yield an empty partition too, so writers can save the schema of a zero-row result
+    for start in range(0, max(points.size, 1), size):
+        yield points.isel({points.dims[0]: slice(start, start + size)}).compute()
 
 
 def _stage_pointcloud_partition(dataframe: gpd.GeoDataFrame, filename: str | pathlib.Path) -> pathlib.Path:
@@ -131,7 +150,7 @@ def _write_pointcloud_partitions(
     partition_filenames: Iterable[str | pathlib.Path],
     *,
     driver: PointCloudDriver,
-    data_column: str | None,
+    data_name: str | None,
     geometry_type: Literal["Point", "Point Z"],
     las_header: Any | None = None,
     las_elevation_column: str | None = None,
@@ -229,6 +248,12 @@ def _write_pointcloud_partitions(
                     append=output_created,
                     layer_options=layer_options,
                 )
+        elif driver == "PARQUET":
+            from geoutils.pointcloud.parquet import _write_parquet_row_groups
+
+            # Read each staged dataframe only when the shared writer is ready for its next row group
+            frames = (pd.read_pickle(filename) for filename in chain((first_filename,), partitions))
+            _write_parquet_row_groups(frames, temporary_output, data_name=data_name)
         else:
             saved_partitions = [first_filename, *partitions]
             if las_header is None:
@@ -240,11 +265,11 @@ def _write_pointcloud_partitions(
             _write_laspy_saved_partitions(
                 filename=temporary_output,
                 partition_filenames=saved_partitions,
-                data_column=las_elevation_column,
+                data_name=las_elevation_column,
                 header=las_header,
                 check_attributes=True,
             )
 
         os.replace(temporary_output, output_filename)
 
-    return PointCloud(output_filename, data_column=data_column)
+    return PointCloud(output_filename, data_name=data_name)

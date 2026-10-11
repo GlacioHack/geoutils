@@ -55,8 +55,8 @@ and API reference describe which items are now available.
 
 **Releases of 0.2, 0.3, 0.4, etc**, for the following planned (ongoing) additions:
 - The **addition of a point cloud `PointCloud` data object**, inherited from the `Vector` object alongside many features at the interface of point and raster,
-- The **addition of a Xarray accessor {class}`rst <geoutils.RasterAccessor>`** mirroring the `Raster` object, to work natively with Xarray objects and add support on out-of-memory Dask operations for most of GeoUtils' features,
-- The **addition of a GeoPandas accessor {class}`pc <geoutils.PointCloudAccessor>`** mirroring the `PointCloud` object, to work natively with GeoPandas objects,
+- The **addition of a Xarray accessor {class}`rst <geoutils.DataArrayRasterAccessor>`** mirroring the `Raster` object, to work natively with Xarray objects and add support on out-of-memory Dask operations for most of GeoUtils' features,
+- The **addition of a GeoPandas accessor {class}`pc <geoutils.GeoPandasPointCloudAccessor>`** mirroring the `PointCloud` object, to work natively with GeoPandas objects,
 - The **addition of statistical features** including zonal statistics (e.g., statistics per vector geometry), grouped statistics (e.g., binning with other variables) and spatial statistics (variogram and kriging) through optional dependencies.
 - The **addition of filtering and gap-filling features** natively robust to nodata and working similarly for all type of geospatial objects.
 

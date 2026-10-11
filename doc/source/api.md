@@ -17,11 +17,11 @@ the main API method summaries. This needs to be listed before any other API.
 :maxdepth: 1
 :hidden:
 
-RasterAccessor <api_rst>
+DataArrayRasterAccessor <api_rst>
 Raster <api_raster>
 VectorAccessor <api_vct>
 Vector <api_vector>
-PointCloudAccessor <api_pc>
+GeoPandasPointCloudAccessor <api_pc>
 PointCloud <api_pointcloud>
 Inherited Vector methods <api_vector_inherited>
 ```
@@ -31,7 +31,7 @@ Inherited Vector methods <api_vector_inherited>
 
 GeoUtils exposes the raster API through two mirrored interfaces:
 
-- A {class}`rst <geoutils.RasterAccessor>` accessor extending {class}`xarray.DataArray` objects as rasters.
+- A {class}`rst <geoutils.DataArrayRasterAccessor>` accessor extending {class}`xarray.DataArray` objects as rasters.
 - {class}`~geoutils.Raster`, an interface operating directly on a GeoUtils object.
 
 
@@ -40,9 +40,19 @@ Both expose the **same methods and attributes**.
 Only **file opening** and **scalable execution** differ between the two interfaces:
 
 - **File opening:** {class}`~geoutils.Raster` objects are opened by instantiating the class, whereas {meth}`~geoutils.open_raster` is used for an {class}`xarray.DataArray` object,
-- **Scalable execution:** the {class}`rst <geoutils.RasterAccessor>` accessor supports **Dask**, while the {class}`~geoutils.Raster` supports **Multiprocessing** instead.
+- **Scalable execution:** the {class}`rst <geoutils.DataArrayRasterAccessor>` accessor supports **Dask**, while the {class}`~geoutils.Raster` supports **Multiprocessing** instead.
 
 ### Opening a raster file
+
+Raster variables in a Dataset use {class}`~geoutils.DatasetRasterAccessor` through Dataset.rst.
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+    :template: dataset_accessor.rst
+
+    DatasetRasterAccessor
+```
 
 Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantiate for a {class}`~geoutils.Raster`.
 
@@ -134,8 +144,11 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
     ~raster.base.RasterBase.clip
     ~raster.base.RasterBase.reproject
     ~raster.base.RasterBase.polygonize
-    ~raster.base.RasterBase.interp_points
-    ~raster.base.RasterBase.reduce_points
+    ~raster.base.RasterBase.interp_at_points
+    ~raster.base.RasterBase.resample_at_points
+    ~raster.base.RasterBase.reduce_at_points
+    ~raster.base.RasterBase.krige
+    ~raster.base.RasterBase.random_field
 ```
 
 ### Proximity
@@ -239,10 +252,10 @@ Writing and conversion methods depend on the concrete interface.
     :toctree: gen_modules/
 
     Raster.to_file
-    RasterAccessor.to_file
+    DataArrayRasterAccessor.to_file
     Raster.to_rio_dataset
     Raster.to_xarray
-    RasterAccessor.to_geoutils
+    DataArrayRasterAccessor.to_geoutils
 ```
 
 ### Georeferencing utilities
@@ -338,9 +351,13 @@ directly on the GeoDataFrame.
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
+
+    Vector.gdf
+
+.. autosummary::
+    :toctree: gen_modules/
     :template: vector_method.rst
 
-    ~vector.base.VectorBase.ds
     ~vector.base.VectorBase.crs
     ~vector.base.VectorBase.bbox
     ~vector.base.VectorBase.footprint
@@ -451,15 +468,32 @@ additional methods exposed by the {class}`~geoutils.Vector` wrapper and explains
 
 GeoUtils exposes the point cloud API through two mirrored interfaces:
 
-- A {class}`pc <geoutils.PointCloudAccessor>` accessor extending {class}`geopandas.GeoDataFrame` objects as point clouds.
+- A {class}`pc <geoutils.GeoPandasPointCloudAccessor>` accessor extending {class}`geopandas.GeoDataFrame` objects as point clouds.
 - {class}`~geoutils.PointCloud`, an interface operating directly on a GeoUtils object.
 
 Both expose the same GeoUtils-specific methods and attributes listed below. Native GeoPandas methods remain available
 directly on the GeoDataFrame.
 
 ```{eval-rst}
-.. minigallery:: geoutils.PointCloud geoutils.PointCloudAccessor
+.. minigallery:: geoutils.PointCloud geoutils.GeoPandasPointCloudAccessor
       :add-heading:
+```
+
+Point methods are available on the dedicated PointCloud, GeoDataFrame.pc, and DataArray.pc.
+See the {ref}`point cloud guide <point-cloud>` for their data and {ref}`scalability-usage` for execution options.
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+    :template: dataarray_accessor.rst
+
+    DataArrayPointCloudAccessor
+
+.. autosummary::
+    :toctree: gen_modules/
+    :template: dataset_accessor.rst
+
+    DatasetPointCloudAccessor
 ```
 
 ### Opening a file
@@ -477,7 +511,7 @@ directly on the GeoDataFrame.
     :toctree: gen_modules/
     :template: pointcloud_method.rst
 
-    ~pointcloud.base.PointCloudBase.info
+    ~pointcloud.base.GeometryPointCloudBase.info
 ```
 
 ### Main attributes
@@ -485,14 +519,18 @@ directly on the GeoDataFrame.
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
+
+    PointCloud.gdf
+
+.. autosummary::
+    :toctree: gen_modules/
     :template: pointcloud_method.rst
 
-    ~pointcloud.base.PointCloudBase.ds
-    ~pointcloud.base.PointCloudBase.data_column
+    ~pointcloud.base.PointCloudBase.data_name
     ~pointcloud.base.PointCloudBase.data
     ~pointcloud.base.PointCloudBase.crs
-    ~pointcloud.base.PointCloudBase.bbox
-    ~pointcloud.base.PointCloudBase.footprint
+    ~pointcloud.base.GeometryPointCloudBase.bbox
+    ~pointcloud.base.GeometryPointCloudBase.footprint
 ```
 
 ### Other attributes
@@ -502,7 +540,7 @@ directly on the GeoDataFrame.
     :toctree: gen_modules/
     :template: pointcloud_method.rst
 
-    ~pointcloud.base.PointCloudBase.point_count
+    ~pointcloud.base.GeometryPointCloudBase.point_count
 ```
 
 
@@ -517,9 +555,17 @@ directly on the GeoDataFrame.
     ~pointcloud.base.PointCloudBase.from_array
     ~pointcloud.base.PointCloudBase.from_tuples
     ~pointcloud.base.PointCloudBase.to_xyz
-    ~pointcloud.base.PointCloudBase.to_array
-    ~pointcloud.base.PointCloudBase.to_tuples
+    ~pointcloud.base.GeometryPointCloudBase.to_array
+    ~pointcloud.base.GeometryPointCloudBase.to_tuples
 
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloud.to_xarray
+    PointCloud.to_parquet
 ```
 
 ### Geospatial
@@ -529,10 +575,20 @@ directly on the GeoDataFrame.
     :toctree: gen_modules/
     :template: pointcloud_method.rst
 
-    ~pointcloud.base.PointCloudBase.crop
-    ~pointcloud.base.PointCloudBase.clip
-    ~pointcloud.base.PointCloudBase.reproject
-    ~pointcloud.base.PointCloudBase.translate
+    ~pointcloud.base.GeometryPointCloudBase.crop
+    ~pointcloud.base.GeometryPointCloudBase.clip
+    ~pointcloud.base.GeometryPointCloudBase.reproject
+    ~pointcloud.base.GeometryPointCloudBase.translate
+```
+
+### Filtering
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+    :template: pointcloud_method.rst
+
+    ~pointcloud.base.PointCloudBase.filter
 ```
 
 ### Interface with raster
@@ -543,6 +599,8 @@ directly on the GeoDataFrame.
     :template: pointcloud_method.rst
 
     ~pointcloud.base.PointCloudBase.grid
+    ~pointcloud.base.PointCloudBase.krige
+    ~pointcloud.base.PointCloudBase.random_field
 ```
 
 ### Plotting
@@ -552,7 +610,7 @@ directly on the GeoDataFrame.
     :toctree: gen_modules/
     :template: pointcloud_method.rst
 
-    ~pointcloud.base.PointCloudBase.plot
+    ~pointcloud.base.GeometryPointCloudBase.plot
 ```
 
 ### Data manipulation
@@ -601,7 +659,7 @@ See {ref}`sampling` for sampling values and locations from point clouds.
     :toctree: gen_modules/
     :template: pointcloud_method.rst
 
-    ~pointcloud.base.PointCloudBase.pointcloud_equal
+    ~pointcloud.base.GeometryPointCloudBase.pointcloud_equal
     ~pointcloud.base.PointCloudBase.georeferenced_coords_equal
 ```
 
@@ -699,6 +757,26 @@ use `"self"` as their active data column. See {ref}`sampling-cosample` for examp
 {meth}`~PointCloudBase.pairsample` return an {class}`xarray.Dataset`
 with dimensions `pair` and `endpoint`, containing values, source indexes, coordinates and distances. See
 {ref}`sampling-pairs` for its use and the available distance sampling schemes.
+
+## Numerical operators and uncertainty
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    operators.Interpolator
+    operators.Reducer
+    operators.LocalData
+    operators.LinearCoefficients
+    operators.PointNeighbours
+    operators.GridNeighbours
+    operators.interpolator.Kriging
+    ErrorMagnitude
+    ErrorComponent
+    ErrorStructure
+    PropagationSummary
+    uncertainty.random_field
+```
 
 ## Multiprocessing configuration
 

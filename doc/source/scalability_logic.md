@@ -18,7 +18,7 @@ Other operations are more complex and require {ref}`specific logic described fur
 - The {meth}`~RasterBase.reproject` function **maps the intersection of projected source grid chunks for each destination chunk** (with potentially different CRS, resolution and bounds), and defines default output chunksizes based on resolution change to avoid unexpected memory blowup,
 - The {meth}`~RasterBase.polygonize` function implements **three chunk-boundary reconciliation strategies** with different considerations for connected-component labeling and stitching of geometries,
 - The {meth}`~VectorBase.rasterize` function performs a geometry subsetting then directly **maps rasterized output blocks** only utilizing these subset geometries,
-- The {meth}`~RasterBase.interp_points` function performs a **fast regular-grid mapping of point locations in raster chunks**, expanding raster chunks by a few pixels depending on the resampling method, then performing ordered concatenation of outputs,
+- The {meth}`~RasterBase.interp_at_points` function performs a **fast regular-grid mapping of point locations in raster chunks**, expanding raster chunks by a few pixels depending on the resampling method, then performing ordered concatenation of outputs,
 - The {meth}`~PointCloudBase.grid` function **maps point partitions to independent output raster chunks**.
 - The {meth}`~RasterBase.subsample`, co-sampling, pair sampling and statistics count or select data per tile or partition before combining bounded results,
 
@@ -62,6 +62,8 @@ Conceptually, the methods differ in how cross-chunk regions are reconstructed:
 - **`label_union`** labels values in each chunk, then finds the **union of matching labels across chunk seams** before polygonization, avoiding vector comparisons and requiring only a final dissolve step,
 - **`label_stitch`** labels values as in **`label_union`**, then polygonizes each chunk independently and **stitches polygons afterward in vector space**, avoiding the need for a union–find structure,
 - **`geometry_stitch`** bypasses labeling entirely by performing **polygonization on halo-expanded chunks** (1-pixel overlap), then stitches polygons similarly as in **`label_stitch`** after clipping.
+
+GeoUtils uses **`label_stitch`** by default because it scales best in the {ref}`benchmarking-performance`.
 
 Connectivity assumptions influence how many neighboring chunks must be used in memory, which remains small and bounded:
 

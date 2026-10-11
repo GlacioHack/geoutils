@@ -28,7 +28,7 @@ Typical examples include {meth}`~RasterBase.crop`, {meth}`~RasterBase.copy`, and
 which behave similarly as Xarray's {meth}`~xarray.DataArray.sel`, {meth}`~xarray.DataArray.copy`, or {meth}`~xarray.DataArray.assign_coords`.
 File-backed vector and point cloud objects also defer spatial reads performed by {meth}`~VectorBase.crop`.
 
-When using the Xarray {class}`rst <geoutils.RasterAccessor>` accessor, this behavior follows the **native Xarray deferred I/O model**. The {class}`~geoutils.Raster` class implements the
+When using the Xarray {class}`rst <geoutils.DataArrayRasterAccessor>` accessor, this behavior follows the **native Xarray deferred I/O model**. The {class}`~geoutils.Raster` class implements the
 same behavior so that both APIs have consistent semantics.
 
 An important aspect of **deferred I/O** is that it works with both **in-memory** (NumPy) and **scalable backends** (Dask), allowing
@@ -71,7 +71,7 @@ Chunked and lazy execution are described in {ref}`scalability-concept`.
 GeoUtils integrates pythonic operators for shorter, more intuitive code, and to perform arithmetic and logical operations consistently.
 
 These operators work on {class}`Rasters<geoutils.Raster>` much as they would on {class}`ndarrays<numpy.ndarray>`, with some more details.
-For {class}`PointClouds<geoutils.PointCloud>`, they apply to the main {attr}`~PointCloudBase.data_column` in the same way.
+For {class}`PointClouds<geoutils.PointCloud>`, they apply to the main {attr}`~PointCloudBase.data_name` in the same way.
 
 ### Arithmetic of {class}`~geoutils.Raster` classes
 
@@ -182,7 +182,7 @@ NumPy possesses an [array interface](https://numpy.org/doc/stable/reference/arra
 that depend on {class}`ndarrays<numpy.ndarray>`.
 
 GeoUtils utilizes this interface to work with all {class}`Rasters<geoutils.Raster>` and their subclasses. It also
-applies the same functions to the main {attr}`~PointCloudBase.data_column` of {class}`PointClouds<geoutils.PointCloud>`.
+applies the same functions to the main {attr}`~PointCloudBase.data_name` of {class}`PointClouds<geoutils.PointCloud>`.
 
 ### Universal functions
 

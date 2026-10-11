@@ -6,3 +6,6 @@ ds.rst.{{ name }}{% if objtype == "method" %}(){% endif %} or Raster.{{ name }}{
 .. currentmodule:: geoutils
 
 .. auto{{ objtype }}:: {{ fullname }}
+{% if fullname.startswith("geoutils.raster.raster.Raster.") %}
+    :no-index:
+{% endif %}

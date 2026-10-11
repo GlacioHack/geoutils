@@ -28,7 +28,7 @@ import numpy as np
 import rasterio as rio
 from rasterio.crs import CRS
 
-from geoutils._dispatch import get_geo_attr, has_geo_attr
+from geoutils._dispatch import _get_pointcloud_interface, get_geo_attr, has_geo_attr
 from geoutils._typing import NDArrayNum
 from geoutils.raster.referencing import _default_nodata, _xy2ij
 from geoutils.sampling.subsampling import _subsample_raster
@@ -50,7 +50,7 @@ def _regular_pointcloud_to_raster(
     transform: rio.transform.Affine = None,
     shape: tuple[int, int] = None,
     nodata: int | float | None = None,
-    data_column_name: str | None = "b1",
+    data_name: str | None = "b1",
     area_or_point: Literal["Area", "Point"] = "Point",
 ) -> tuple[NDArrayNum, affine.Affine, CRS, int | float | None, Literal["Area", "Point"]]:
     """
@@ -58,13 +58,23 @@ def _regular_pointcloud_to_raster(
     """
 
     # Extract geodataframe and data column name depending on input
-    if has_geo_attr(pointcloud, "ds", accessors=("pc",)):
-        gdf_pc = get_geo_attr(pointcloud, "ds", accessors=("pc",))
-        pc_data_column_name = get_geo_attr(pointcloud, "data_column", accessors=("pc",))
-        if pc_data_column_name is not None:
-            data_column_name = pc_data_column_name
+    if has_geo_attr(pointcloud, "_dataset", accessors=("pc",)):
+        gdf_pc = get_geo_attr(pointcloud, "_dataset", accessors=("pc",))
+        pc_data_name = get_geo_attr(pointcloud, "data_name", accessors=("pc",))
+        if pc_data_name is not None:
+            data_name = pc_data_name
     else:
         gdf_pc = pointcloud
+
+    interface = _get_pointcloud_interface(pointcloud)
+    if getattr(interface, "_is_xr", False):
+        x, y, values = interface.to_xyz()
+        x, y, values = (np.asarray(value) for value in (x, y, values))
+        point_crs = interface.crs
+    else:
+        x, y = gdf_pc.geometry.x.values, gdf_pc.geometry.y.values
+        values = gdf_pc[data_name].values
+        point_crs = gdf_pc.crs
 
     # Get transform and shape from input
     if grid_coords is not None:
@@ -100,14 +110,14 @@ def _regular_pointcloud_to_raster(
         raise ValueError("Either grid coordinates or both geotransform and shape must be provided.")
 
     # Create raster from inputs, with placeholder data for now
-    dtype = gdf_pc[data_column_name].dtype
+    dtype = values.dtype
     out_nodata = nodata if nodata is not None else _default_nodata(dtype)
     arr = np.ones(out_shape, dtype=dtype)
 
     # Get indexes of point cloud coordinates in the raster, forcing no shift
     i, j = _xy2ij(
-        x=gdf_pc.geometry.x.values,
-        y=gdf_pc.geometry.y.values,
+        x=x,
+        y=y,
         shift_area_or_point=False,
         transform=out_transform,
         area_or_point=area_or_point,
@@ -124,12 +134,12 @@ def _regular_pointcloud_to_raster(
     # Set values
     mask = np.ones(np.shape(arr), dtype=bool)
     mask[i, j] = False
-    arr[i, j] = gdf_pc[data_column_name].values
+    arr[i, j] = values
 
     # Set output values
     raster_arr = np.ma.masked_array(data=arr, mask=mask)
 
-    return raster_arr, out_transform, gdf_pc.crs, out_nodata, area_or_point
+    return raster_arr, out_transform, point_crs, out_nodata, area_or_point
 
 
 ###################################
@@ -139,13 +149,13 @@ def _regular_pointcloud_to_raster(
 
 def _raster_to_pointcloud(
     source_raster: RasterType,
-    data_column_name: str = "b1",
+    data_name: str = "b1",
     data_band: int = 1,
     auxiliary_data_bands: Iterable[int] | None = None,
     auxiliary_column_names: Iterable[str] | None = None,
     subsample: float | int = 1,
     skip_nodata: bool = True,
-    as_array: bool = False,
+    as_array: bool | Literal["xarray"] = False,
     random_state: int | np.random.Generator | None = None,
     force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
     mp_config: MultiprocConfig | None = None,
@@ -160,7 +170,7 @@ def _raster_to_pointcloud(
 
     return _subsample_raster(
         source_raster=source_raster,
-        data_column_name=data_column_name,
+        data_name=data_name,
         data_band=data_band,
         auxiliary_data_bands=auxiliary_data_bands,
         auxiliary_column_names=auxiliary_column_names,

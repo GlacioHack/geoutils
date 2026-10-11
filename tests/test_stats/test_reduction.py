@@ -747,6 +747,20 @@ class TestReductionErrors:
         with pytest.raises(TypeError, match="names or callable"):
             _normalize_statistics(cast(Any, [object()]))
 
+    def test_stats__warn_unknown_global_statistic(self) -> None:
+        """Checks that an unknown global statistic warns and leaves known results available."""
+
+        # Three finite values have a mean of two, independent of the unknown request
+        values = np.array([1.0, 2.0, 3.0])
+
+        # Global statistics report an unknown name as undefined after warning
+        with pytest.warns(UserWarning, match="Statistic name made_up is not recognized"):
+            result = gu.stats.stats(values, ["mean", "made_up"])
+
+        # The recognized mean is still calculated
+        assert result["mean"] == pytest.approx(2)
+        assert np.isnan(result["made_up"])
+
     def test_resolve_strategy__error_invalid(self) -> None:
         """Checks that unknown strategies and incomplete-group calculations are rejected for chunked inputs."""
 

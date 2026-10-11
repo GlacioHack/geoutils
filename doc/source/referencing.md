@@ -37,7 +37,7 @@ load only their metadata by default**, allowing quick operations on georeferenci
 
 {meth}`ds.rst.info() or Raster.info() <RasterBase.info>`<br>
 {meth}`gdf.vct.info() or Vector.info() <VectorBase.info>`<br>
-{meth}`gdf.pc.info() or PointCloud.info() <PointCloudBase.info>`
+{meth}`gdf.pc.info() or PointCloud.info() <geoutils.pointcloud.base.GeometryPointCloudBase.info>`
 
 These methods summarize all the metadata of a geospatial data object, including its georeferencing.
 
@@ -95,7 +95,7 @@ can help define a 3D CRS.
 
 {attr}`ds.rst.bbox or Raster.bbox <RasterBase.bbox>`<br>
 {attr}`gdf.vct.bbox or Vector.bbox <VectorBase.bbox>`<br>
-{attr}`gdf.pc.bbox or PointCloud.bbox <PointCloudBase.bbox>`
+{attr}`gdf.pc.bbox or PointCloud.bbox <geoutils.pointcloud.base.GeometryPointCloudBase.bbox>`
 
 Bounding boxes define the spatial extent of geospatial data through the "left", "right", "bottom" and "top"
 coordinates. GeoUtils represents them with {class}`rasterio.coords.BoundingBox` objects.
@@ -121,7 +121,7 @@ To reproduce the behaviour of {attr}`geopandas.GeoSeries.bounds` (per-feature bo
 
 {attr}`ds.rst.footprint or Raster.footprint <RasterBase.footprint>`<br>
 {attr}`gdf.vct.footprint or Vector.footprint <VectorBase.footprint>`<br>
-{attr}`gdf.pc.footprint or PointCloud.footprint <PointCloudBase.footprint>`
+{attr}`gdf.pc.footprint or PointCloud.footprint <geoutils.pointcloud.base.GeometryPointCloudBase.footprint>`
 
 As reprojections between CRSs deform shapes, including extents, a vectorized footprint provides more reliable
 intersections than a bounding box. It contains a single polygon whose edges are densified when projected into another

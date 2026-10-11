@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 import pyproj
 import rasterio as rio
+import xarray as xr
 from shapely.geometry import box
 from shapely.geometry.base import BaseGeometry
 
@@ -87,6 +88,25 @@ def is_dask_geodataframe(obj: Any) -> bool:
 #################################################################################
 
 
+def _get_registered_accessor(obj: Any, name: str) -> Any:
+    """Choose point or raster accessors from Xarray dimensions before attempting their initialization."""
+    if isinstance(obj, xr.DataArray):
+        from geoutils.pointcloud.referencing import _point_coordinates
+
+        try:
+            _point_coordinates(obj)
+            point_layout = obj.ndim == 1
+        except (AttributeError, ValueError):
+            point_layout = False
+        if (name == "pc" and not point_layout) or (name == "rst" and point_layout):
+            return None
+    accessor = getattr(obj, name, None)
+    if isinstance(obj, xr.Dataset) and name in ("rst", "pc") and accessor is not None:
+        if not accessor.variables:
+            return None
+    return accessor
+
+
 def get_geo_interface(obj: Any, attr_name: str, accessors: Sequence[str] = ("rst", "vct", "pc")) -> Any:
     """
     Return the object or accessor providing a requested geospatial operation, or None if absent.
@@ -98,7 +118,7 @@ def get_geo_interface(obj: Any, attr_name: str, accessors: Sequence[str] = ("rst
     if hasattr(obj, attr_name):
         return obj
     for accessor_name in accessors:
-        accessor = getattr(obj, accessor_name, None)
+        accessor = _get_registered_accessor(obj, accessor_name)
         if accessor is not None and hasattr(accessor, attr_name):
             return accessor
     return None
@@ -113,7 +133,7 @@ def get_geo_attr(obj: Any, attr_name: str, accessors: Sequence[str] = ("rst", "v
 
     # Try accessors (rst, vct, pc)
     for accessor_name in accessors:
-        accessor = getattr(obj, accessor_name, None)
+        accessor = _get_registered_accessor(obj, accessor_name)
         if accessor is not None and hasattr(accessor, attr_name):
             return getattr(accessor, attr_name)
 
@@ -132,7 +152,7 @@ def has_geo_attr(obj: Any, attr_name: str, accessors: Sequence[str] = ("rst", "v
 
     # Check accessors (rst, vct, pc)
     for accessor_name in accessors:
-        accessor = getattr(obj, accessor_name, None)
+        accessor = _get_registered_accessor(obj, accessor_name)
         if accessor is not None and hasattr(accessor, attr_name):
             return True
 
@@ -146,6 +166,9 @@ def has_geo_attr(obj: Any, attr_name: str, accessors: Sequence[str] = ("rst", "v
 def _get_raster_interface(obj: Any) -> Any:
     """Return the object or rst accessor providing raster coordinate conversion, or None if absent."""
 
+    # Point DataArrays share Xarray's type with rasters, but their one-dimensional coordinates describe rows
+    if getattr(obj, "ndim", None) == 1 and _get_pointcloud_interface(obj) is not None:
+        return None
     return get_geo_interface(obj, "ij2xy", accessors=("rst",))
 
 
@@ -384,13 +407,20 @@ def _check_match_points(
     src: RasterBase | Vector,
     points: tuple[NDArrayNum, NDArrayNum] | tuple[Number, Number] | PointCloudLike,
 ) -> tuple[tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum], bool]:
-    """Function for checking and normalizing input of match feature for points consistently.
+    """
+    Function for checking and normalizing input of match feature for points consistently.
 
     :param src: Source object (raster, vector, point cloud).
     :param points: Points object (tuple of arrays/numbers, or point cloud).
 
     :return: Tuple of point coordinates (X and Y), Boolean to know if inputs were scalar.
     """
+
+    interface = _get_pointcloud_interface(points)
+    if getattr(interface, "_is_xr", False):
+        x, y, _ = interface.to_xyz()
+        coordinates = reproject_points((np.asarray(x), np.asarray(y)), in_crs=interface.crs, out_crs=src.crs)
+        return coordinates, False
 
     # If points implements "bounds" and "crs"
     if has_geo_attr(points, "geometry") and has_geo_attr(points, "crs"):
@@ -508,26 +538,26 @@ def _check_match_bbox(
     return xmin, ymin, xmax, ymax
 
 
-def _clip_geometry(mask: Any, target_crs: rio.crs.CRS | pyproj.CRS | None) -> BaseGeometry:
-    """Return an input clipping geometry normalized and in the target CRS."""
+def _clip_geodataframe(mask: Any, target_crs: rio.crs.CRS | pyproj.CRS | None) -> gpd.GeoDataFrame:
+    """Return clipping geometries as a concrete GeoDataFrame in the target CRS."""
 
+    # Wrap simple geometry inputs without combining their individual parts
     if isinstance(mask, BaseGeometry):
-        return mask
+        return gpd.GeoDataFrame(geometry=[mask], crs=target_crs)
 
-    # Extent as a clipping geometry
     if isinstance(mask, Sequence) and not isinstance(mask, (str, bytes)):
         xmin, ymin, xmax, ymax = _check_bounds(mask)
-        return box(xmin, ymin, xmax, ymax)
+        return gpd.GeoDataFrame(geometry=[box(xmin, ymin, xmax, ymax)], crs=target_crs)
 
-    # Direct geometries
+    # Extract tabular geometries without dissolving features that chunks can select independently
     if isinstance(mask, gpd.GeoSeries):
         dataframe = gpd.GeoDataFrame(geometry=mask)
     elif isinstance(mask, gpd.GeoDataFrame):
-        dataframe = mask
+        dataframe = gpd.GeoDataFrame(geometry=mask.geometry, crs=mask.crs)
     else:
-        interface = get_geo_interface(mask, "ds", accessors=("vct", "pc"))
+        interface = get_geo_interface(mask, "_dataset", accessors=("vct", "pc"))
         if interface is not None:
-            dataframe = interface.ds
+            dataframe = interface._dataset
         else:
             # Footprint as a mask
             raster_interface = get_geo_interface(mask, "footprint", accessors=("rst",))
@@ -536,9 +566,9 @@ def _clip_geometry(mask: Any, target_crs: rio.crs.CRS | pyproj.CRS | None) -> Ba
                     "Clipping geometry must be a vector, point cloud, raster, Shapely geometry, "
                     "GeoPandas object or bounding box."
                 )
-            return _clip_geometry(raster_interface.footprint, target_crs=target_crs)
+            return _clip_geodataframe(raster_interface.footprint, target_crs=target_crs)
 
-    # Combine mask once so every eager or lazy source block receives the same geometry
+    # Materialize optional Dask inputs once before checking or changing their CRS
     if is_dask_dataframe(dataframe):
         dataframe = dataframe.compute()
     if (
@@ -547,7 +577,16 @@ def _clip_geometry(mask: Any, target_crs: rio.crs.CRS | pyproj.CRS | None) -> Ba
         and pyproj.CRS.from_user_input(dataframe.crs) != pyproj.CRS.from_user_input(target_crs)
     ):
         dataframe = dataframe.to_crs(target_crs)
-    return dataframe.geometry.union_all()
+    elif dataframe.crs is None and target_crs is not None:
+        dataframe = dataframe.set_crs(target_crs)
+    return gpd.GeoDataFrame(geometry=dataframe.geometry, crs=dataframe.crs)
+
+
+def _clip_geometry(mask: Any, target_crs: rio.crs.CRS | pyproj.CRS | None) -> BaseGeometry:
+    """Return one clipping geometry normalized and in the target CRS."""
+
+    # Vector clipping needs one mask, while raster clipping can keep features separate for spatial partitioning
+    return _clip_geodataframe(mask, target_crs=target_crs).geometry.union_all()
 
 
 def _get_reproject_crs(
@@ -632,6 +671,13 @@ def _grid_from_src(
         bounds = _check_bounds(bounds)
     else:
         bounds = None
+
+    # Build a complete destination grid without reading point or vector bounds
+    if bounds is not None and not hasattr(src, "res"):
+        if res is not None:
+            return _grid_from_bounds_res(bounds, res)
+        elif shape is not None:
+            return _grid_from_bounds_shape(bounds, shape)
 
     # Prefer bbox for GeoUtils objects while accepting bounds from third-party objects
     src_bbox_attr = "bbox" if has_geo_attr(src, "bbox") else "bounds"

@@ -197,7 +197,7 @@ lower, upper = np.nanpercentile(elevation_values, [2, 98])
 normalized_elevation = np.clip((elevation_values - lower) / (upper - lower), 0, 1)
 terrain_rgb_values = plt.get_cmap("terrain")(normalized_elevation)[..., :3]
 terrain_rgb_values[~valid_elevation] = np.nan
-terrain_rgb = gu.RasterAccessor.from_array(
+terrain_rgb = gu.DataArrayRasterAccessor.from_array(
     np.moveaxis(terrain_rgb_values, -1, 0),
     transform=ds.rst.transform,
     crs=ds.rst.crs,
@@ -303,7 +303,7 @@ The same grouping applies to point measurements:
 
 ```{code-cell} ipython3
 # Summarize a sample of point elevations within each glacier
-points = ds.rst.to_pointcloud(data_column_name="elevation", subsample=2000, random_state=42)
+points = ds.rst.to_pointcloud(data_name="elevation", subsample=2000, random_state=42)
 points.pc.stats(("mean", "std"), by={"glacier": (glaciers, "RGIId")}).head()
 ```
 

@@ -19,7 +19,11 @@ from shapely.ops import unary_union
 import geoutils as gu
 from geoutils import examples, open_raster
 from geoutils._typing import NDArrayNum
-from geoutils.interface.vectorization import _build_selection_mask, _PolygonizePrepared
+from geoutils.interface.vectorization import (
+    _build_selection_mask,
+    _polygonal_only,
+    _PolygonizePrepared,
+)
 from geoutils.multiproc.mparray import MultiprocConfig
 
 # Helpers for different types of vector equality
@@ -229,8 +233,8 @@ def assert_vectors_equal(
         assert v1.crs == v2.crs
 
     # Have the same length
-    g1 = v1.ds.copy()
-    g2 = v2.ds.copy()
+    g1 = v1.gdf.copy()
+    g2 = v2.gdf.copy()
     assert len(g1) == len(g2)
 
     # Have zero symmetric difference area after taking the union of all geometries
@@ -311,7 +315,7 @@ class TestPolygonize:
             strategy="label_stitch",
             value_column="raster_value",
             id_column="component_id",
-            data_column_name="id",
+            data_name="id",
             halo=0,
             float_tol=0.001,
         )
@@ -322,7 +326,7 @@ class TestPolygonize:
         assert mask.dtype == np.dtype("uint8")
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
-    def test_polygonize__area_data_column(self, example: str) -> None:
+    def test_polygonize__area_data_name(self, example: str) -> None:
         """Test that polygonize preserves area for a selected constant value and respects schema/crs."""
         img = gu.Raster(example)
 
@@ -333,17 +337,33 @@ class TestPolygonize:
         polygonized = img.polygonize(target_values=value)
 
         # Get vector area, and check they are equal
-        assert polygonized.ds.area.sum() == pytest.approx(pixel_area)
+        assert polygonized.gdf.area.sum() == pytest.approx(pixel_area)
         assert isinstance(polygonized, gu.Vector)
         assert polygonized.crs == img.crs
 
         # Default id column and custom column
-        assert "id" in polygonized.ds.columns
-        polygonized2 = img.polygonize(target_values=value, data_column_name="myname")
-        assert "myname" in polygonized2.ds.columns
+        assert "id" in polygonized.gdf.columns
+        polygonized2 = img.polygonize(target_values=value, data_name="myname")
+        assert "myname" in polygonized2.gdf.columns
 
         # Same geometry/value content; id column naming differs
         assert_vectors_equal(polygonized, polygonized2)
+
+    @pytest.mark.parametrize("nodata, expected_area", [(0, 7), (None, 9)])
+    def test_polygonize__all_integer(self, nodata: int | None, expected_area: int) -> None:
+        """Checks that polygonization uses every integer except a declared nodata value."""
+
+        # Create values, including 0 that might be masked by nodata in the parametrized inputs
+        values = np.array([[0, 1, 1], [2, 0, 1], [2, 2, 2]], dtype=np.uint8)
+        raster_values = np.ma.array(values, mask=values == 0) if nodata == 0 else values
+        raster = gu.Raster.from_array(raster_values, rio.transform.from_origin(0, 3, 1, 1), 32631, nodata=nodata)
+
+        # We check that 0 is ignored or not, depending on its nodata masking
+        # Each pixel has area of 1, so polygon area equals pixel count (7 when 0 is ignored, otherwise 9)
+        result = raster.polygonize(target_values="all")
+        assert result.gdf.geometry.area.sum() == expected_area
+        expected_values = {1, 2} if nodata == 0 else {0, 1, 2}
+        assert set(result.gdf["raster_value"]) == expected_values
 
     @pytest.mark.parametrize("dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64"])
     def test_polygonize__dtype_support(self, dtype: str) -> None:
@@ -415,8 +435,8 @@ class TestPolygonize:
 
         # Expect 8-connectivity merges diagonals: 1 feature
         # While 4-connectivity does not: 2 features
-        assert len(base8.ds) == 1
-        assert len(base4.ds) == 2
+        assert len(base8.gdf) == 1
+        assert len(base4.gdf) == 2
 
         # 2/ Dask and Multiprocessing
         ds = open_raster(path, chunks={"band": 1, "x": 2, "y": 2})
@@ -531,3 +551,16 @@ class TestPolygonize:
         assert_vectors_equal(base, dask_vect, setwise=True)
         assert_vectors_equal(base, mp_vect, setwise=True)
         assert_vectors_equal(base, xr_base, setwise=True)
+
+    def test_polygonal_only__nested_collection(self) -> None:
+        """Checks that nested geometry collections contribute only their polygon parts to a chunk result."""
+
+        # Two polygons share a nested collection with a point, while an outer line has no area
+        polygons = shapely.MultiPolygon([shapely.box(0, 0, 1, 1), shapely.box(2, 0, 3, 1)])
+        nested = shapely.GeometryCollection([polygons, shapely.Point(4, 4)])
+        mixed = shapely.GeometryCollection([nested, shapely.LineString([(5, 5), (6, 6)])])
+
+        # The polygon cleanup used by chunked polygonize must return exactly the two original areas
+        result = _polygonal_only(mixed)
+        assert result is not None
+        assert result.equals(polygons)

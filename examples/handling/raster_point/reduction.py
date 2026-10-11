@@ -2,7 +2,7 @@
 Reduce raster around points
 ===========================
 
-This example demonstrates the reduction of windowed raster values around a point using :meth:`~geoutils.raster.base.RasterBase.reduce_points`.
+This example demonstrates the reduction of windowed raster values around a point using :meth:`~geoutils.raster.base.RasterBase.reduce_at_points`.
 """
 
 # %%
@@ -29,17 +29,17 @@ rng = np.random.default_rng(42)
 x_coords = rng.uniform(rast.rst.bbox.left + 50, rast.rst.bbox.right - 50, 50)
 y_coords = rng.uniform(rast.rst.bbox.bottom + 50, rast.rst.bbox.top - 50, 50)
 
-pc = rast.rst.reduce_points((x_coords, y_coords))
+pc = rast.rst.reduce_at_points((x_coords, y_coords))
 
 # %%
 # We plot the resulting point cloud
 pc.pc.plot(ax="new", cmap="terrain", cbar_title="Elevation (m)")
 
 # %%
-# By default, :meth:`~geoutils.raster.base.RasterBase.reduce_points` extracts the closest pixel value. But it can also be passed a window size and reductor function to
+# By default, :meth:`~geoutils.raster.base.RasterBase.reduce_at_points` extracts the closest pixel value. But it can also be passed a window size and reductor function to
 # extract an average value or other statistic based on neighbouring pixels.
 
-pc_reduced = rast.rst.reduce_points((x_coords, y_coords), window=5, reducer_function=np.nanmedian)
+pc_reduced = rast.rst.reduce_at_points((x_coords, y_coords), window=5, reducer_function=np.nanmedian)
 
 np.nanmean(pc.pc.data - pc_reduced.pc.data)
 
@@ -49,8 +49,8 @@ np.nanmean(pc.pc.data - pc_reduced.pc.data)
 
 # Replace by Vector function once done
 coords = rast.rst.coords(grid=True)
-x_closest = rast.rst.copy(new_array=coords[0]).rst.reduce_points((x_coords, y_coords), as_array=True).squeeze()
-y_closest = rast.rst.copy(new_array=coords[1]).rst.reduce_points((x_coords, y_coords), as_array=True).squeeze()
+x_closest = rast.rst.copy(new_array=coords[0]).rst.reduce_at_points((x_coords, y_coords), as_array=True).squeeze()
+y_closest = rast.rst.copy(new_array=coords[1]).rst.reduce_at_points((x_coords, y_coords), as_array=True).squeeze()
 from shapely.geometry import box
 
 geometry = [

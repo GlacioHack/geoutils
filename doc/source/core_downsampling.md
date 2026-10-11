@@ -40,7 +40,7 @@ raster_path = gu.examples.get_path("exploradores_aster_dem")
 point_path = gu.examples.get_path("coromandel_lidar")
 
 raster = gu.open_raster(raster_path, downsample=4)
-points = gu.open_pointcloud(point_path, data_column="Z", downsample=4)
+points = gu.open_pointcloud(point_path, data_name="Z", downsample=4)
 ```
 
 The factor has a meaning appropriate to each data type:

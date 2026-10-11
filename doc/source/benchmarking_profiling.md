@@ -69,7 +69,7 @@ Every decorated function called after this is recorded by the profiler.
 ### The profiled functions
 
 GeoUtils profiles the shared implementations of its core numerical operations, including `reproject`, `crop`,
-`polygonize`, `rasterize`, `grid`, `stats`, `subsample`, `filter`, `interp_points`, `sieve` and `fill_nodata`.
+`polygonize`, `rasterize`, `grid`, `stats`, `subsample`, `filter`, `interp_at_points`, `sieve` and `fill_nodata`.
 Object methods and Pandas or Xarray accessors therefore record the same underlying operation where supported, without
 also recording their lightweight wrappers. Memory is sampled at the interval configured by each decorator, which
 defaults to 0.005 seconds.

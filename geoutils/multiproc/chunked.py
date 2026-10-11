@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 import rasterio as rio
 
-from geoutils.projtools import _get_bounds_projected, _get_footprint_projected
+from geoutils.projtools import _affine_matmul, _get_bounds_projected, _get_footprint_projected
 
 # We define a GeoGrid and GeoTiling class (which composes GeoGrid) to consistently deal with georeferenced footprints
 # of chunked grids
@@ -208,12 +208,17 @@ class ChunkedGeoGrid:
 
         list_geogrids = []
         for bid in block_ids:
-            # We get the block size
             block_shape = (bid["ye"] - bid["ys"], bid["xe"] - bid["xs"])
-            # Build a temporary geogrid with the same transform as the full grid, but with the chunk shape
-            geogrid_tmp = GeoGrid(transform=self.grid.transform, crs=self.grid.crs, shape=block_shape)
-            # And shift it to the right location (X is positive in index direction, Y is negative)
-            geogrid_block = geogrid_tmp.translate(xoff=bid["xs"], yoff=-bid["ys"])
+            if self.grid.transform.b == 0 and self.grid.transform.d == 0:
+                # Preserve established north-up coordinates across eager and chunked calculations
+                geogrid_tmp = GeoGrid(transform=self.grid.transform, crs=self.grid.crs, shape=block_shape)
+                geogrid_block = geogrid_tmp.translate(xoff=bid["xs"], yoff=-bid["ys"])
+            else:
+                # Pixel offsets change both world coordinates when the raster has rotation or shear
+                block_transform = _affine_matmul(
+                    self.grid.transform, rio.transform.Affine.translation(bid["xs"], bid["ys"])
+                )
+                geogrid_block = GeoGrid(transform=block_transform, crs=self.grid.crs, shape=block_shape)
             list_geogrids.append(geogrid_block)
 
         return list_geogrids

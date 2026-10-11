@@ -133,12 +133,12 @@ y_points = rng.uniform(ds.rst.bbox.bottom - raster_height / 4, ds.rst.bbox.top +
 x_scaled = (x_points - ds.rst.bbox.left) / raster_width
 y_scaled = (y_points - ds.rst.bbox.bottom) / raster_height
 point_elevation = 1800 + 900 * y_scaled + 500 * np.sin(2 * np.pi * x_scaled) + rng.normal(0, 100, 2000)
-random_points = gu.PointCloudAccessor.from_xyz(
+random_points = gu.GeoPandasPointCloudAccessor.from_xyz(
     x_points,
     y_points,
     point_elevation,
     crs=ds.rst.crs,
-    data_column="elevation",
+    data_name="elevation",
 )
 
 # Keep finite values shared by the raster and points inside the glacier outlines
@@ -214,7 +214,7 @@ use point locations by default. Their conversion direction can also be set expli
 
 | Mode | Output locations | Value calculation |
 | --- | --- | --- |
-| `"resample_raster"` | Point coordinates | Evaluate rasters with `resample_method`, passed to {meth}`interp_points() <RasterBase.interp_points>` |
+| `"resample_raster"` | Point coordinates | Evaluate rasters with `resample_method`, passed to {meth}`interp_at_points() <RasterBase.interp_at_points>` |
 | `"grid_points"` | Raster grid | Grid point values with `grid_method`, passed to {meth}`grid() <PointCloudBase.grid>` |
 
 Both interpolation and gridding default to `"linear"`. Pass method-specific options through `resample_kwargs` or

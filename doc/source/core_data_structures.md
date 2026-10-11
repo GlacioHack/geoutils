@@ -20,12 +20,12 @@ that expose the same GeoUtils methods.
 
 | Data type | Xarray or GeoPandas structure | GeoUtils accessor | GeoUtils object |
 |---|---|---|---|
-| Raster | {class}`xarray.DataArray` | {class}`rst <geoutils.RasterAccessor>` | {class}`~geoutils.Raster` |
+| Raster | {class}`xarray.DataArray` | {class}`rst <geoutils.DataArrayRasterAccessor>` | {class}`~geoutils.Raster` |
 | Vector | {class}`geopandas.GeoDataFrame` | {class}`vct <geoutils.VectorAccessor>` | {class}`~geoutils.Vector` |
-| Point cloud | {class}`geopandas.GeoDataFrame` | {class}`pc <geoutils.PointCloudAccessor>` | {class}`~geoutils.PointCloud` |
+| Point cloud | {class}`geopandas.GeoDataFrame` | {class}`pc <geoutils.GeoPandasPointCloudAccessor>` | {class}`~geoutils.PointCloud` |
 
 The accessors complement the methods already available from Xarray or GeoPandas. For example,
-{meth}`~RasterBase.reproject` is a GeoUtils operation available through {class}`rst <geoutils.RasterAccessor>`, while
+{meth}`~RasterBase.reproject` is a GeoUtils operation available through {class}`rst <geoutils.DataArrayRasterAccessor>`, while
 {meth}`xarray.DataArray.mean` remains an Xarray operation on the same raster data.
 
 ## GeoUtils objects
@@ -37,8 +37,8 @@ to combine the data and geospatial metadata handled by NumPy, Rasterio, GeoPanda
 | GeoUtils object | Main data | Main geospatial metadata |
 |---|---|---|
 | {class}`~geoutils.Raster` | {class}`numpy.ma.MaskedArray` in {attr}`~RasterBase.data` | {attr}`~RasterBase.transform`, {attr}`~RasterBase.crs`, and {attr}`~RasterBase.nodata` |
-| {class}`~geoutils.Vector` | {class}`geopandas.GeoDataFrame` in {attr}`~VectorBase.ds` | Geometry and {attr}`~VectorBase.crs` from the GeoDataFrame |
-| {class}`~geoutils.PointCloud` | Point GeoDataFrame in {attr}`~VectorBase.ds`, with a main {attr}`~PointCloudBase.data_column` | Point geometry and {attr}`~VectorBase.crs` from the GeoDataFrame |
+| {class}`~geoutils.Vector` | {class}`geopandas.GeoDataFrame` in {attr}`~geoutils.Vector.gdf` | Geometry and {attr}`~VectorBase.crs` from the GeoDataFrame |
+| {class}`~geoutils.PointCloud` | Point GeoDataFrame in {attr}`~geoutils.Vector.gdf`, with a main {attr}`~PointCloudBase.data_name` | Point geometry and {attr}`~VectorBase.crs` from the GeoDataFrame |
 
 Derived attributes such as {attr}`~RasterBase.bbox`, {attr}`~RasterBase.res`, or {attr}`~VectorBase.bbox` describe
 their georeferencing. File-backed objects can also keep the information needed to defer reading their data until an
@@ -50,8 +50,8 @@ their original GeoPandas or Pandas type.
 
 ## Choosing an interface
 
-We recommend the {class}`rst <geoutils.RasterAccessor>`, {class}`vct <geoutils.VectorAccessor>`, and
-{class}`pc <geoutils.PointCloudAccessor>` accessors for new workflows. They keep data in the Xarray and GeoPandas
+We recommend the {class}`rst <geoutils.DataArrayRasterAccessor>`, {class}`vct <geoutils.VectorAccessor>`, and
+{class}`pc <geoutils.GeoPandasPointCloudAccessor>` accessors for new workflows. They keep data in the Xarray and GeoPandas
 structures used across the scientific Python ecosystem. The dedicated GeoUtils objects remain available for existing
 workflows and provide the same GeoUtils-specific methods.
 

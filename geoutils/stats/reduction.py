@@ -37,6 +37,19 @@ from geoutils._dispatch import is_dask_array
 from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc.readers import _ValueReader
+from geoutils.operators.base import LocalData
+from geoutils.operators.reducer import (
+    Count,
+    Maximum,
+    Mean,
+    Median,
+    Minimum,
+    Quantile,
+    Reducer,
+    RootMeanSquare,
+    StandardDeviation,
+    Sum,
+)
 from geoutils.raster.array import get_mask_from_array
 from geoutils.stats.estimators import linear_error, nmad, rmse, sum_square
 
@@ -118,6 +131,90 @@ _STATS_LIST_MIN = [
 ]
 
 
+class _SumOfSquares(Reducer):
+    """Compute a sum of squared values with optional data and area or length weights."""
+
+    accepts_sample_weights = True
+    accepts_support_weights = True
+
+    def reduce(self, data: LocalData) -> float:
+        """Multiply squared values by the same combined weights as Sum(), then add them."""
+
+        weights = Sum().coefficients(data).weights
+        return float(np.dot(weights, np.square(data.values)))
+
+
+class _QuantileRange(Reducer):
+    """Compute the difference between two ordinary or coverage-weighted quantiles."""
+
+    def __init__(self, lower: float, upper: float, *, weighted: bool) -> None:
+        """Store the lower and upper probabilities and whether the quantiles use weights."""
+
+        self.lower = Quantile(lower, weighted=weighted)
+        self.upper = Quantile(upper, weighted=weighted)
+        self.accepts_sample_weights = weighted
+        self.accepts_support_weights = weighted
+
+    def reduce(self, data: LocalData) -> float:
+        """Return the upper quantile minus the lower quantile."""
+
+        return self.upper.reduce(data) - self.lower.reduce(data)
+
+
+class _NormalizedMedianAbsoluteDeviation(Reducer):
+    """Compute normalized median absolute deviation with optional coverage weights."""
+
+    def __init__(self, *, weighted: bool, factor: float = 1.4826) -> None:
+        """Store the median definition and conventional normal-distribution scale factor."""
+
+        self.median = Median(weighted=weighted)
+        self.factor = factor
+        self.accepts_sample_weights = weighted
+        self.accepts_support_weights = weighted
+
+    def reduce(self, data: LocalData) -> float:
+        """Return the scaled median of absolute deviations from the same weighted median."""
+
+        center = self.median.reduce(data)
+        deviations = replace(data, values=np.abs(data.values - center))
+        return self.factor * self.median.reduce(deviations)
+
+
+# Use the standard Reducers when they calculate the same result as an existing statistic
+_REDUCER_STATISTIC_ALIASES: dict[type[Reducer], str] = {
+    Mean: "mean",
+    Median: "median",
+    Maximum: "max",
+    Minimum: "min",
+    StandardDeviation: "std",
+    Sum: "sum",
+    Count: "validcount",
+    RootMeanSquare: "rmse",
+}
+
+
+def _reducer_from_statistic(alias: str, *, fractional: bool = False) -> Reducer | None:
+    """Return the Reducer that calculates a named internal statistic, when one exists."""
+
+    factories: dict[str, Callable[[], Reducer]] = {
+        "mean": Mean,
+        "median": lambda: Median(weighted=fractional),
+        "max": Maximum,
+        "min": Minimum,
+        "sum": Sum,
+        "sumofsquares": _SumOfSquares,
+        "std": StandardDeviation,
+        "rmse": RootMeanSquare,
+        "validcount": Count,
+        "90thpercentile": lambda: Quantile(0.9, weighted=fractional),
+        "iqr": lambda: _QuantileRange(0.25, 0.75, weighted=fractional),
+        "le90": lambda: _QuantileRange(0.05, 0.95, weighted=fractional),
+        "nmad": lambda: _NormalizedMedianAbsoluteDeviation(weighted=fractional),
+    }
+    factory = factories.get(alias)
+    return None if factory is None else factory()
+
+
 @dataclass(frozen=True)
 class _Statistics:
     """
@@ -128,7 +225,7 @@ class _Statistics:
     :param aliases: Matching internal statistic names (None for callables).
     """
 
-    requested: list[str | Callable[[Any], Any]]
+    requested: list[str | Callable[[Any], Any] | Reducer]
     names: list[str]
     aliases: list[str | None]
     grouped: bool = True
@@ -151,7 +248,7 @@ def _get_stat_common_alias(stat_name: str) -> str | None:
 
 
 def _normalize_statistics(
-    statistics: str | Callable[[Any], Any] | Iterable[str | Callable[[Any], Any]] | None,
+    statistics: str | Callable[[Any], Any] | Reducer | Iterable[str | Callable[[Any], Any] | Reducer] | None,
     *,
     grouped: bool = True,
     masked: bool = False,
@@ -170,12 +267,12 @@ def _normalize_statistics(
     # Keep the established default selection and add inlier counts only when a mask was used
     default_names = statistics is None or isinstance(statistics, str) and statistics == "all"
     if statistics is None:
-        requested: list[str | Callable[[Any], Any]] = list(_STATS_LIST_MIN)
+        requested: list[str | Callable[[Any], Any] | Reducer] = list(_STATS_LIST_MIN)
     elif isinstance(statistics, str) and statistics == "all":
         requested = list(_STATS_ALIAS_GEN)
         if masked and not grouped:
             requested += list(_STATS_ALIAS_MASK)
-    elif isinstance(statistics, str) or callable(statistics):
+    elif isinstance(statistics, (str, Reducer)) or callable(statistics):
         requested = [statistics]
     else:
         requested = list(statistics)
@@ -195,16 +292,25 @@ def _normalize_statistics(
     for statistic in requested:
         if isinstance(statistic, str):
             names.append(statistic)
+        elif isinstance(statistic, Reducer):
+            names.append(type(statistic).__name__)
         elif callable(statistic):
             function = statistic
             while isinstance(function, partial):
                 function = function.func
             names.append(getattr(function, "__name__", type(function).__name__))
         else:
-            raise TypeError("Argument ``statistics`` must contain names or callable functions.")
+            raise TypeError("Argument ``statistics`` must contain names or callable functions, including Reducers.")
     if default_names and not grouped:
         names = [_STATS_ALIAS_ALL[name] for name in names]
-    aliases = [_get_stat_common_alias(statistic) if isinstance(statistic, str) else None for statistic in requested]
+    aliases = [
+        _get_stat_common_alias(statistic)
+        if isinstance(statistic, str)
+        else _REDUCER_STATISTIC_ALIASES.get(type(statistic))
+        if isinstance(statistic, Reducer)
+        else None
+        for statistic in requested
+    ]
 
     # 3/ Check user names before calculation, raising warning for unknown ones and skipping them
     if len(set(names)) != len(names):
@@ -219,7 +325,9 @@ def _normalize_statistics(
         raise ValueError(f"Unknown statistic names: {unknown!r}.")
     for statistic in unknown:
         warnings.warn(f"Statistic name {statistic} is not recognized", category=UserWarning)
-    single = callable(statistics) or isinstance(statistics, str) and statistics != "all"
+    single = (
+        isinstance(statistics, Reducer) or callable(statistics) or isinstance(statistics, str) and statistics != "all"
+    )
     return _Statistics(requested=requested, names=names, aliases=aliases, grouped=grouped, single=single)
 
 
@@ -364,6 +472,11 @@ def _aggregate_eager(
         # Pass complete group values to statistics such as median and user functions
         for start, size in zip(starts, sizes):
             group = ordered if global_reduction else ordered[start : start + size]
+            if global_reduction:
+                source_ids = np.arange(group.size)
+            else:
+                assert isinstance(order, np.ndarray)
+                source_ids = np.asarray(order[start : start + size])
             count = int(np.count_nonzero(~get_mask_from_array(group)))
             if global_reduction:
                 computed, count = _reduce_complete_values_eager(group, aliases)
@@ -380,6 +493,11 @@ def _aggregate_eager(
                     result = int(size)
                 elif alias == "percentagevalidpoints":
                     result = 100 * count / size if size else np.nan
+                elif isinstance(statistic, Reducer) and alias is None:
+                    group_values = np.asanyarray(np.ma.getdata(group)).reshape(-1)
+                    valid = ~get_mask_from_array(group).reshape(-1)
+                    local = LocalData(values=group_values, valid=valid, source_ids=source_ids)
+                    result = statistic.evaluate(local) if count else np.nan
                 elif callable(statistic):
                     # Give user functions the complete group, with missing observations still present
                     callable_values = (
@@ -1076,7 +1194,7 @@ def _global_reduction_statistics(statistics: _Statistics) -> _Statistics:
     selected = [
         (statistic, name, alias)
         for statistic, name, alias in zip(statistics.requested, statistics.names, statistics.aliases)
-        if alias in _STATS_ALIAS_CALLABLE
+        if alias in _STATS_ALIAS_CALLABLE or isinstance(statistic, Reducer) and alias is None
     ]
     return replace(
         statistics,
@@ -1213,6 +1331,8 @@ def _format_global_stats(
                 result = 100 * final_count / valid_count if valid_count else np.nan
             elif alias == "percentagevalidinlierpoints" and selection_counts is not None:
                 result = 100 * final_count / selected_count if selected_count else 0
+            elif isinstance(statistic, Reducer):
+                result = table.loc[0, (value_index, name)]
             else:
                 result = np.nan
             if not callable(statistic) and isinstance(result, np.generic) and not np.ma.is_masked(result):

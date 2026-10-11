@@ -88,7 +88,7 @@ This first category of attributes and methods return a geometric output converte
 This second category of attributes and methods return a non-geometric output with same length as the number of features. They are thus appended in the
 dataframe of the current {class}`~geoutils.Vector` by default, using as column name the name of the operation (e.g., "area", "contains" or "intersects").
 
-Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they return a {class}`pandas.Series` as in GeoPandas.
+Otherwise, calling the method from {attr}`Vector.gdf<geoutils.Vector.gdf>`, they return a {class}`pandas.Series` as in GeoPandas.
 
 **Attributes:**
 
@@ -148,7 +148,7 @@ Otherwise, calling the method from {attr}`Vector.ds<geoutils.Vector.ds>`, they r
 
 ```{important}
 The behaviour of methods below is not modified in {class}`~geoutils.Vector`, as they deal with outputs of different types.
-To ensure those are up-to-date with GeoPandas, alternatively call those from {attr}`Vector.ds<geoutils.Vector.ds>`.
+To ensure those are up-to-date with GeoPandas, alternatively call those from {attr}`Vector.gdf<geoutils.Vector.gdf>`.
 ```
 
 ```{eval-rst}

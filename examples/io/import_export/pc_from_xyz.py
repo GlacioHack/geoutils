@@ -20,7 +20,7 @@ arr = rng.normal(size=(5, 3))
 crs = pyproj.CRS.from_epsg(4326)
 
 # Create a point cloud using three 1-d arrays
-pc = gu.PointCloudAccessor.from_xyz(x=arr[:, 0], y=arr[:, 1], z=arr[:, 2], crs=crs, data_column="z")
+pc = gu.GeoPandasPointCloudAccessor.from_xyz(x=arr[:, 0], y=arr[:, 1], z=arr[:, 2], crs=crs, data_name="z")
 pc
 
 # %%
@@ -29,7 +29,7 @@ pc.pc.info()
 
 # %%
 # Note that we can also use the N x 3 array directly, or also an iterable of 3-tuples
-pc = gu.PointCloudAccessor.from_array(arr, crs=crs, data_column="z")
+pc = gu.GeoPandasPointCloudAccessor.from_array(arr, crs=crs, data_name="z")
 
 # %%
 # The different functionalities of GeoUtils will use :attr:`~geoutils.pointcloud.base.PointCloudBase.data` as default as the main data column, including plotting.

@@ -36,7 +36,7 @@ This enables **out-of-core execution**, allowing datasets larger than available 
 
 In GeoUtils, chunked execution is implemented through two backends:
 
-- **Dask**, used through the Xarray {class}`rst <geoutils.RasterAccessor>` and GeoPandas {class}`vct <geoutils.VectorAccessor>` and {class}`pc <geoutils.PointCloudAccessor>` accessors,
+- **Dask**, used through the Xarray {class}`rst <geoutils.DataArrayRasterAccessor>` and GeoPandas {class}`vct <geoutils.VectorAccessor>` and {class}`pc <geoutils.GeoPandasPointCloudAccessor>` accessors,
 - **Multiprocessing**, used through supported methods of the {class}`~geoutils.Raster`, {class}`~geoutils.Vector` and {class}`~geoutils.PointCloud` objects.
 
 Both backends read and process chunks separately, keeping peak memory usage proportional to the chunk size rather than the full dataset size.
@@ -68,9 +68,9 @@ print(f"Is output raster loaded after filtering? {rast_filt.is_loaded}")
 
 Lazy execution refers to **deferring computation until results are explicitly requested**.
 
-In GeoUtils, lazy execution is available through the Xarray {class}`rst <geoutils.RasterAccessor>` accessor with
+In GeoUtils, lazy execution is available through the Xarray {class}`rst <geoutils.DataArrayRasterAccessor>` accessor with
 **Dask arrays**, and the GeoPandas {class}`vct <geoutils.VectorAccessor>` and
-{class}`pc <geoutils.PointCloudAccessor>` accessors with **Dask dataframes**.
+{class}`pc <geoutils.GeoPandasPointCloudAccessor>` accessors with **Dask dataframes**.
 
 Operations build a **Dask computation graph** instead of executing immediately. The computation is triggered only when required, for example when calling
 `compute()` directly or when writing results to disk. It is particularly useful when **chaining multiple operations**, because intermediate results do not need to be materialized or
@@ -94,7 +94,7 @@ import numpy as np
 rng = np.random.default_rng(seed=42)
 x = rng.uniform(ds.rst.bbox.left, ds.rst.bbox.right, size=30)
 y = rng.uniform(ds.rst.bbox.bottom, ds.rst.bbox.top, size=30)
-ds_interp = ds.rst.interp_points((x, y), as_array=True)
+ds_interp = ds.rst.interp_at_points((x, y), as_array=True)
 
 # Result is still lazy
 print("Result is still lazy after raster interpolation:\n")

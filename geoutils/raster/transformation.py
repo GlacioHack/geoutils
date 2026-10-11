@@ -26,11 +26,16 @@ import os
 import warnings
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
-from typing import TYPE_CHECKING, Any, Callable, Literal
+from copy import copy
+from dataclasses import replace
+from importlib.util import find_spec
+from typing import TYPE_CHECKING, Any, Callable, Literal, cast
 
 import affine
 import numpy as np
 import rasterio as rio
+import shapely
+from numpy.typing import NDArray
 from packaging.version import Version
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
@@ -38,10 +43,18 @@ from rasterio.vrt import WarpedVRT
 from shapely.geometry import box
 from shapely.strtree import STRtree
 
+from geoutils import projtools
 from geoutils._config import config
-from geoutils._dispatch import _check_match_bbox, _check_match_grid, _clip_geometry
+from geoutils._dispatch import _check_crs, _check_match_bbox, _check_match_grid, _clip_geodataframe
 from geoutils._misc import import_optional, silence_rasterio_message
 from geoutils._typing import DTypeLike, MArrayNum, NDArrayBool, NDArrayNum
+from geoutils.interface.rasterization import (
+    _normalize_burn_values,
+    _partition_burn_by_geogrids,
+    _rasterize_selected_on_geogrid,
+    _VectorBurnSpec,
+)
+from geoutils.interface.resampling import _interp_points_base
 from geoutils.multiproc.chunked import (
     ChunkedGeoGrid,
     GeoGrid,
@@ -51,11 +64,56 @@ from geoutils.multiproc.mparray import (
     MultiprocConfig,
     _split_chunk_size,
     _write_multiproc_result,
-    map_overlap,
+)
+from geoutils.operators.execution import _evaluate_operator_batch, _resample_at_points
+from geoutils.operators.interpolator import (
+    Interpolator,
+    Linear,
+    Nearest,
+    RasterConvolution,
+    _regular_interpolation_method,
+)
+from geoutils.operators.neighbours import (
+    GridCoverage,
+    GridNeighbours,
+    PointNeighbours,
+    _check_regular_grid_neighbours,
+    _configure_grid_neighbours,
+    _resolve_grid_neighbours_for_interpolator,
+)
+from geoutils.operators.nodata import (
+    NodataHandling,
+    NodataPropagation,
+    _validate_nodata_propagation,
+)
+from geoutils.operators.overlap import (
+    GridIntersection,
+    RasterOverlapBackend,
+    _corners_are_grid_aligned,
+    _exactextract_operation,
+    _gdal_rectangle_weights,
+    _grid_intersection_fractions_from_corners,
+    _grid_intersection_local_data,
+    _run_exactextract,
+)
+from geoutils.operators.reducer import (
+    Maximum,
+    Mean,
+    Median,
+    Minimum,
+    Mode,
+    Quantile,
+    Reducer,
+    RegularReductionMethod,
+    RootMeanSquare,
+    Sum,
+    _reduce_overlap_batch,
 )
 from geoutils.raster.referencing import (
     _default_nodata,
+    _ij2xy,
     _res,
+    _xy2ij,
 )
 
 if TYPE_CHECKING:
@@ -81,6 +139,11 @@ except ImportError:
         return decorator
 
 
+#####################################
+# 1/ DOWNSAMPLE AND OVERVIEW OPENING
+#####################################
+
+
 def _overview_level_for_downsample(source: rio.io.DatasetReader, downsample: float) -> int | None:
     """Return the closest suitable stored overview level for a downsampling factor."""
 
@@ -100,7 +163,7 @@ def _open_downsampled_raster(source: rio.io.DatasetReader, downsample: float) ->
     # Define the requested grid from the native raster rather than from the selected overview
     width = max(1, int(np.floor(source.width / downsample)))
     height = max(1, int(np.floor(source.height / downsample)))
-    transform = source.transform * affine.Affine.scale(downsample)
+    transform = projtools._affine_matmul(source.transform, affine.Affine.scale(downsample))
 
     # Keep the selected overview open while the virtual raster resamples it to the requested grid
     with ExitStack() as stack:
@@ -121,11 +184,9 @@ def _open_downsampled_raster(source: rio.io.DatasetReader, downsample: float) ->
         yield vrt
 
 
-##############
-# 1/ REPROJECT
-##############
-
-# SUBFUNCTIONS
+###############
+# REPROJECT
+###############
 
 
 def _resampling_method_from_str(method_str: str) -> rio.enums.Resampling:
@@ -217,8 +278,13 @@ def _is_reproj_needed(src_shape: tuple[int, int], reproj_kwargs: dict[str, Any])
     )
 
 
+# 2.1/ REPROJECT AN ARRAY WITH RASTERIO
+#######################################
+
+
 def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArrayNum:
-    """Rasterio reprojection wrapper.
+    """
+    Rasterio reprojection wrapper.
 
     :param src_arr: Source array for data.
     :param reproj_kwargs: Reprojection parameter dictionary.
@@ -264,6 +330,8 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
 
     # Fill with nodata values on mask
     if reproj_kwargs["src_nodata"] is not None:
+        # Xarray dimensions can be read-only, so we copy the source array
+        src_arr = src_arr.copy()
         src_arr[src_mask] = reproj_kwargs["src_nodata"]
 
     # Check if multiband
@@ -330,12 +398,385 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
     return dst_arr
 
 
-# CHUNKED LOGIC (for both Dask and Multiprocessing)
+# 2.2 REPROJECT AN ARRAY WITH INDEPENDENT METHODS
+#################################################
+
+
+def _destination_grid_in_source_crs(
+    dst_transform: rio.transform.Affine,
+    dst_shape: tuple[int, int],
+    dst_crs: rio.crs.CRS,
+    src_crs: rio.crs.CRS,
+    *,
+    include_corners: bool,
+) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum | None]:
+    """
+    Return destination centers and, when requested, pixel corners transformed back into the source CRS.
+
+    Resampling is done on the input regular grid for speed, after exact CRS transformation of the center/corner points.
+
+    The two center arrays have length (height * width), ordered by destination row then column.
+    Corners have shape (height * width, 4, 2), ordered upper left, upper right, lower right, lower left within
+    each cell, or are None when only centers are needed.
+    Reducers without a fixed neighborhood use these corners to locate the destination cell in the source grid.
+    """
+
+    # Use physical cell centers and boundaries, regardless of the raster's Area/Point interpretation
+    rows, cols = np.indices(dst_shape)
+    center_x, center_y = _ij2xy(
+        rows.reshape(-1),
+        cols.reshape(-1),
+        transform=dst_transform,
+        area_or_point=None,
+        shift_area_or_point=False,
+        force_offset="center",
+    )
+    centers = np.column_stack((center_x, center_y))
+
+    # PyProj transforms the above coordinates in X/Y order
+    if dst_crs != src_crs:
+        transformed_centers = projtools.reproject_points(
+            (centers[:, 0], centers[:, 1]), in_crs=dst_crs, out_crs=src_crs
+        )
+        centers = np.column_stack(transformed_centers)
+
+    # Interpolators and explicit reducer neighborhoods only need the destination centers
+    if not include_corners:
+        return centers[:, 0], centers[:, 1], None
+
+    # Group the four corners of each destination pixel so a Reducer can find all overlapping source cells
+    corner_columns = np.stack((cols, cols + 1, cols + 1, cols), axis=-1).reshape(-1)
+    corner_rows = np.stack((rows, rows, rows + 1, rows + 1), axis=-1).reshape(-1)
+    corner_x, corner_y = _ij2xy(
+        corner_rows,
+        corner_columns,
+        transform=dst_transform,
+        area_or_point=None,
+        shift_area_or_point=False,
+        force_offset="ul",
+    )
+    corners = np.column_stack((np.asarray(corner_x), np.asarray(corner_y))).reshape(-1, 4, 2)
+
+    # Transform the boundaries only for reductions over destination footprints
+    if dst_crs != src_crs:
+        transformed_corners = projtools.reproject_points(
+            (corners[..., 0].reshape(-1), corners[..., 1].reshape(-1)), in_crs=dst_crs, out_crs=src_crs
+        )
+        corners = np.column_stack(transformed_corners).reshape(-1, 4, 2)
+    return centers[:, 0], centers[:, 1], corners
+
+
+def _resolve_reprojection_operator(method: Any) -> Interpolator | Reducer:
+    """Resolve resampling names to operators that can use local observation errors."""
+
+    if isinstance(method, (Interpolator, Reducer)):
+        return method
+    name = method.name if isinstance(method, Resampling) else method
+
+    # Named reducers for observation errors
+    reducers: dict[RegularReductionMethod, type[Reducer]] = {
+        "average": Mean,
+        "sum": Sum,
+        "min": Minimum,
+        "max": Maximum,
+    }
+    operators: dict[str, type[Interpolator] | type[Reducer]] = {
+        "nearest": Nearest,
+        "bilinear": Linear,
+    }
+    operators.update(reducers.items())
+    if name not in operators:
+        raise ValueError(f"Observation errors for {name!r} require an explicit Interpolator or Reducer.")
+    return operators[name]()
+
+
+def _reproject_grid_operator(
+    array: NDArrayNum,
+    src_transform: rio.transform.Affine,
+    src_crs: rio.crs.CRS,
+    dst_transform: rio.transform.Affine,
+    dst_crs: rio.crs.CRS,
+    dst_shape: tuple[int, int],
+    operator: Interpolator | Reducer,
+    *,
+    source_nodata: int | float | None,
+    nodata_propagation: NodataPropagation,
+    overlap_backend: RasterOverlapBackend = "auto",
+    coverage: GridCoverage | None = None,
+    area_weighting: Literal["diagonal_bounds", "intersection"] = "diagonal_bounds",
+    source_index_offset: tuple[int, int] = (0, 0),
+    global_source_shape: tuple[int, int] | None = None,
+    source_band_offset: int = 0,
+) -> NDArrayNum:
+    """
+    Reproject from a regular raster using an Interpolator or Reducer for resampling.
+
+    An Interpolator receives source cells around each transformed destination center.
+    A Reducer without an explicit neighborhood uses the rectangular source window around a destination cell.
+    Coverage selects centers, all touched cells, or fractional overlap. By default, fractional statistics weight a
+    rectangle defined by two transformed diagonal corners, including source-edge weights beyond the raster boundary.
+    area_weighting="intersection" instead uses the clipped four-corner polygon. With GridNeighbours, a Reducer uses
+    a fixed window around the cell containing each transformed destination center.
+
+    The input can be single or multi-band (2D/3D array shape), and might be only a chunk
+    (Dask/MP chunked logic sends here).
+
+    Internal logic is:
+    - _destination_grid_in_source_crs() locates the destination centers and footprints in the source CRS (to use fast
+    regular grid interpolation or reduction).
+    - Interpolators sample those centers with _interp_points_base()
+    - Reducers with GridNeighbours sample those centers with _resample_at_points(). Other reducers use
+    _grid_intersection_fractions_from_corners() to select source cells once for all bands.
+
+    For fractional reductions, built-in methods can use _run_exactextract() or _reduce_overlap_batch() to evaluate many
+    cells together; custom reductions and uncertainty use _grid_intersection_local_data() to describe each result's
+    inputs.
+
+    Return the reprojected array with the input's band layout.
+    """
+
+    # 1/ Derive destination cells coordinates in the source CRS
+    source = np.asanyarray(array)
+    source_bands = source[None, ...] if source.ndim == 2 else source
+    global_shape = (
+        (source_bands.shape[-2], source_bands.shape[-1]) if global_source_shape is None else global_source_shape
+    )
+    use_footprints = isinstance(operator, Reducer) and operator.default_neighborhood is None
+    batch_reducer = operator.error_structure is None and (
+        type(operator) in (Mean, Sum, Minimum, Maximum, RootMeanSquare)
+        or (type(operator) is Mode and not operator.weighted)
+        or (
+            type(operator) in (Median, Quantile)
+            and not cast(Quantile, operator).weighted
+            and cast(Quantile, operator).method in ("linear", "inverted_cdf")
+        )
+    )
+    target_x, target_y, target_corners = _destination_grid_in_source_crs(
+        dst_transform,
+        dst_shape,
+        dst_crs=dst_crs,
+        src_crs=src_crs,
+        include_corners=use_footprints,
+    )
+    source_indices: tuple[NDArrayNum, NDArrayNum] | None = None
+    if isinstance(operator, Interpolator):
+        # Preserve subpixel precision, including when coordinates are large relative to the pixel size
+        source_rows, source_cols = _xy2ij(
+            target_x,
+            target_y,
+            transform=src_transform,
+            area_or_point=None,
+            op=np.float64,
+            shift_area_or_point=False,
+        )
+        # _xy2ij() measures from the upper-left corner; array values are located half a pixel inside each cell
+        source_indices = (source_rows - 0.5, source_cols - 0.5)
+
+    # Validate nodata handling and prepare outputs
+    propagation = _validate_nodata_propagation(nodata_propagation)
+    output_bands: list[NDArrayNum] = []
+    handling: NodataHandling | None = None
+
+    # 2/ Prepare source windows once for all bands when no explicit neighborhood is supplied
+
+    reducer_overlap: GridIntersection | None = None
+    reducer_polygons: NDArray[Any] | None = None
+    exactextract_operation: str | None = None
+    if use_footprints:
+        assert isinstance(operator, Reducer) and target_corners is not None
+        selected_coverage = "fractional" if coverage is None else coverage
+        if selected_coverage not in ("center", "all_touched", "fractional"):
+            raise ValueError("coverage must be 'center', 'all_touched' or 'fractional'.")
+        # Map projected corners to source pixel coordinates to bound the source window
+        inverse = ~src_transform
+        corner_columns = inverse.a * target_corners[..., 0] + inverse.b * target_corners[..., 1] + inverse.c
+        corner_rows = inverse.d * target_corners[..., 0] + inverse.e * target_corners[..., 1] + inverse.f
+        lower_columns, upper_columns = corner_columns.min(axis=1), corner_columns.max(axis=1)
+        lower_rows, upper_rows = corner_rows.min(axis=1), corner_rows.max(axis=1)
+        if selected_coverage == "fractional" and area_weighting == "diagonal_bounds" and type(operator) is not Sum:
+            # GDAL's average and order statistics weight a rectangle from two transformed diagonal corners
+            first_columns = np.minimum(corner_columns[:, 0], corner_columns[:, 2])
+            last_columns = np.maximum(corner_columns[:, 0], corner_columns[:, 2])
+            first_rows = np.minimum(corner_rows[:, 0], corner_rows[:, 2])
+            last_rows = np.maximum(corner_rows[:, 0], corner_rows[:, 2])
+            window_columns = np.stack((first_columns, last_columns, last_columns, first_columns), axis=1)
+            window_rows = np.stack((first_rows, first_rows, last_rows, last_rows), axis=1)
+        else:
+            window_columns = np.stack((lower_columns, upper_columns, upper_columns, lower_columns), axis=1)
+            window_rows = np.stack((lower_rows, lower_rows, upper_rows, upper_rows), axis=1)
+        window_x = src_transform.a * window_columns + src_transform.b * window_rows + src_transform.c
+        window_y = src_transform.d * window_columns + src_transform.e * window_rows + src_transform.f
+        window_corners = np.stack((window_x, window_y), axis=-1)
+        # Four-corner coverage and GDAL sum use the projected cell itself to measure source pixel areas
+        if selected_coverage == "fractional" and (area_weighting == "intersection" or type(operator) is Sum):
+            window_corners = target_corners
+        # Let ExactExtract calculate common statistics directly when its operation exactly matches the Reducer
+        source_shape = (int(source_bands.shape[-2]), int(source_bands.shape[-1]))
+        exactextract_operation = _exactextract_operation(operator)
+        exactextract_compatible = (
+            src_transform.b == 0 and src_transform.d == 0 and src_transform.a > 0 and src_transform.e < 0
+        )
+        # Uncertainty and nodata propagation need the individual covered cells, rather than a statistic alone
+        # Aligned grids have a cheaper intersection calculation, so they also use the explicit fractions below
+        direct_exactextract = (
+            operator.error_structure is None
+            and propagation != "propagate"
+            and overlap_backend in ("auto", "exactextract")
+            and (overlap_backend == "exactextract" or find_spec("numba") is None or np.prod(dst_shape) >= 100_000)
+            and exactextract_operation is not None
+            and exactextract_compatible
+            and find_spec("exactextract") is not None
+            and selected_coverage == "fractional"
+            and (area_weighting == "intersection" or type(operator) is Sum)
+            and not _corners_are_grid_aligned(window_corners, src_transform)
+        )
+        if direct_exactextract:
+            reducer_polygons = np.asarray(shapely.polygons(window_corners), dtype=object)
+        else:
+            # Calculate selected cells once because every band uses the same source and destination grids
+            reducer_overlap = _grid_intersection_fractions_from_corners(
+                window_corners,
+                src_transform,
+                source_shape,
+                backend=overlap_backend,
+            )
+            if selected_coverage == "fractional" and area_weighting == "diagonal_bounds" and type(operator) is not Sum:
+                reducer_overlap = _gdal_rectangle_weights(
+                    reducer_overlap,
+                    first_columns,
+                    last_columns,
+                    first_rows,
+                    last_rows,
+                    source_shape,
+                )
+            elif selected_coverage == "center":
+                # Keep source cells whose centers fall inside the rectangular source window
+                selected = []
+                for target_index in range(reducer_overlap.geometry_count):
+                    start, stop = reducer_overlap.offsets[target_index : target_index + 2]
+                    rows = reducer_overlap.rows[start:stop]
+                    columns = reducer_overlap.columns[start:stop]
+                    selected.append(
+                        (rows + 0.5 >= lower_rows[target_index])
+                        & (rows + 0.5 < upper_rows[target_index])
+                        & (columns + 0.5 >= lower_columns[target_index])
+                        & (columns + 0.5 < upper_columns[target_index])
+                    )
+                use = np.concatenate(selected) if selected else np.empty(0, dtype=bool)
+                counts = np.asarray([int(np.count_nonzero(mask)) for mask in selected], dtype=np.int64)
+                offsets = np.r_[0, np.cumsum(counts)]
+                reducer_overlap = GridIntersection(
+                    offsets,
+                    reducer_overlap.rows[use],
+                    reducer_overlap.columns[use],
+                    np.ones(int(offsets[-1])),
+                )
+            elif selected_coverage == "all_touched":
+                reducer_overlap = replace(reducer_overlap, fractions=np.ones_like(reducer_overlap.fractions))
+
+    # 3/ Calculate each band values
+
+    for band_index, source_band in enumerate(source_bands):
+        # Apply the requested source nodata value before running the GeoUtils calculation, as Rasterio does
+        if source_nodata is not None:
+            source_values = np.asanyarray(np.ma.getdata(source_band))
+            source_mask = np.ma.getmaskarray(source_band)
+            if np.isnan(source_nodata):
+                source_mask = source_mask | ~np.isfinite(source_values)
+            else:
+                source_mask = source_mask | (source_values == source_nodata)
+            source_band = np.ma.masked_array(source_values, mask=source_mask)
+        source_id_offset = (band_index + source_band_offset) * int(np.prod(global_shape))
+
+        if isinstance(operator, Interpolator):
+            # Interpolate the transformed destination centers with the same method as interp_at_points()
+            band_output = _interp_points_base(
+                source_band,
+                transform=src_transform,
+                points=(target_x, target_y),
+                area_or_point=None,
+                method=operator,
+                shift_area_or_point=False,
+                nodata_propagation=propagation,
+                array_indices=source_indices,
+                source_index_offset=source_index_offset,
+                source_shape=global_shape,
+                source_band=band_index + source_band_offset + 1,
+            )
+        else:
+            # Use the fixed source window or the window derived from each destination cell
+            handling = "ignore" if propagation == "nearest" else propagation
+            if isinstance(operator.default_neighborhood, GridNeighbours):
+                # Reuse point sampling so offsets, nodata rules and band IDs match resample_at_points()
+                neighborhood = operator.default_neighborhood
+                window_size = 2 * max(neighborhood.overlap) + 1
+                if neighborhood.coverage != "center" and neighborhood.window_shape is None:
+                    raise ValueError("Area coverage requires a square or circular GridNeighbours window.")
+                band_output = _resample_at_points(
+                    source_band,
+                    src_transform,
+                    (target_x, target_y),
+                    operator,
+                    area_or_point=None,
+                    shift_area_or_point=False,
+                    nodata_propagation=propagation,
+                    dist_nodata_spread=None,
+                    neighborhood=neighborhood,
+                    fractional_window=window_size if neighborhood.coverage != "center" else None,
+                    fractional_shape=neighborhood.window_shape,
+                    band=band_index + source_band_offset + 1,
+                    source_index_offset=source_index_offset,
+                    source_shape=global_shape,
+                )
+            elif reducer_polygons is not None:
+                # ExactExtract calculates common statistics without returning every overlap fraction to Python
+                assert exactextract_operation is not None
+                band_output = _run_exactextract(
+                    reducer_polygons,
+                    src_transform,
+                    source_band.shape,
+                    values=np.asanyarray(source_band),
+                    operation=exactextract_operation,
+                )
+            elif batch_reducer:
+                # Reduce built-in statistics in groups without constructing one LocalData per destination cell
+                assert reducer_overlap is not None
+                band_output = _reduce_overlap_batch(
+                    source_band,
+                    reducer_overlap,
+                    operator,
+                    nodata_propagation=handling,
+                )
+            else:
+                # Custom reducers and uncertainty need each destination cell's values, area fractions and source IDs
+                assert reducer_overlap is not None
+                targets = np.column_stack((target_x, target_y))
+                local_inputs = _grid_intersection_local_data(
+                    source_band,
+                    src_transform,
+                    reducer_overlap,
+                    source_id_offset=source_id_offset,
+                    source_index_offset=source_index_offset,
+                    source_shape=global_shape,
+                    source_nodata=source_nodata,
+                    targets=targets,
+                )
+                if selected_coverage != "fractional":
+                    local_inputs = [replace(local, support_weights=None) for local in local_inputs]
+                band_output = _evaluate_operator_batch(operator, local_inputs, nodata_propagation=handling)
+        output_bands.append(np.asarray(band_output).reshape(dst_shape))
+
+    # 4/ Restore the original band layout
+
+    output = output_bands[0] if source.ndim == 2 else np.stack(output_bands)
+    return output
+
+
+# 2.3/ CHUNKED LOGIC (for both Dask and Multiprocessing)
 
 # At the date of April 2024: not supported by Rioxarray
 # Part of the code was inspired by https://github.com/opendatacube/odc-geo/pull/88, modified to be concise,
 # stand-alone and rely only on Rasterio/Shapely/Pyproj
-# (Code now lives in multiproc/chunked)
 
 
 def _combined_blocks_shape_transform(
@@ -349,7 +790,12 @@ def _combined_blocks_shape_transform(
     combined_shape = (minmaxs["max_ye"] - minmaxs["min_ys"], minmaxs["max_xe"] - minmaxs["min_xs"])
 
     # Shift source transform with start indexes to get the one for combined block location
-    combined_transform = src_geogrid.translate(xoff=minmaxs["min_xs"], yoff=-minmaxs["min_ys"]).transform
+    if src_geogrid.transform.b == 0 and src_geogrid.transform.d == 0:
+        combined_transform = src_geogrid.translate(xoff=minmaxs["min_xs"], yoff=-minmaxs["min_ys"]).transform
+    else:
+        combined_transform = projtools._affine_matmul(
+            src_geogrid.transform, rio.transform.Affine.translation(minmaxs["min_xs"], minmaxs["min_ys"])
+        )
 
     # Compute relative block indexes that will be needed to reconstruct a square array in the delayed function,
     # by subtracting the minimum starting indices in X/Y
@@ -367,13 +813,14 @@ def _expand_source_block_indices(
     block_indices: list[int],
     src_block_ids: list[dict[str, Any]],
     src_numblocks: tuple[int, int],
+    margin: tuple[int, int],
 ) -> list[int]:
     """
-    Expand source blocks by one neighboring chunk in every direction.
+    Expand source blocks by a fixed number of neighboring chunks in each direction.
 
     Rasterio's reprojection can depend on pixels just outside the destination/source overlap, especially at chunk
-    boundaries and with non-nearest kernels. Passing a one-chunk source neighborhood keeps chunked reprojection aligned
-    with the full-array result without materializing the entire source raster.
+    boundaries and with non-nearest kernels. Methods using fixed GridNeighbours offsets read enough chunks to include
+    their exact row and column overlap without materializing the entire source raster.
     """
 
     ny, nx = src_numblocks
@@ -382,8 +829,8 @@ def _expand_source_block_indices(
 
     for index in block_indices:
         iy, ix = src_block_ids[index]["chunk-location"]
-        for dy in (-1, 0, 1):
-            for dx in (-1, 0, 1):
+        for dy in range(-margin[0], margin[0] + 1):
+            for dx in range(-margin[1], margin[1] + 1):
                 jy = int(iy) + dy
                 jx = int(ix) + dx
                 if 0 <= jy < ny and 0 <= jx < nx:
@@ -402,6 +849,7 @@ def _build_geotiling_and_meta(
     dst_crs: CRS,
     src_chunks: tuple[tuple[int, ...], tuple[int, ...]],
     dst_chunksizes: tuple[int, int],
+    source_pixel_overlap: tuple[int, int] = (0, 0),
 ) -> tuple[
     ChunkedGeoGrid,
     ChunkedGeoGrid,
@@ -482,8 +930,18 @@ def _build_geotiling_and_meta(
     # 3/ To reconstruct a square source array during chunked reprojection, we need to derive the combined shape and
     # transform of each tuples of source blocks
     src_block_ids = src_geotiling.get_block_locations()
+    # Rasterio reads one neighboring chunk; GridNeighbours offsets may require several small source chunks
+    chunk_margin = (
+        max(1, int(np.ceil(source_pixel_overlap[0] / min(src_chunks[0])))),
+        max(1, int(np.ceil(source_pixel_overlap[1] / min(src_chunks[1])))),
+    )
     dest2source = [
-        _expand_source_block_indices(sbid, src_block_ids=src_block_ids, src_numblocks=src_geotiling.num_chunks)
+        _expand_source_block_indices(
+            sbid,
+            src_block_ids=src_block_ids,
+            src_numblocks=src_geotiling.num_chunks,
+            margin=chunk_margin,
+        )
         for sbid in dest2source
     ]
     meta_params = [
@@ -503,6 +961,8 @@ def _build_geotiling_and_meta(
                 "dst_shape": dst_block_geogrids[i].shape,
                 "dst_transform": tuple(dst_block_geogrids[i].transform),
                 "dst_count": src_count,
+                "global_source_shape": src_shape,
+                "global_source_transform": src_transform,
             }
         )
 
@@ -510,13 +970,18 @@ def _build_geotiling_and_meta(
 
 
 def _reproject_per_block(
-    *src_arrs: tuple[NDArrayNum], block_ids: list[dict[str, int]], combined_meta: dict[str, Any], **kwargs: Any
+    *src_arrs: tuple[NDArrayNum],
+    block_ids: list[dict[str, int]],
+    combined_meta: dict[str, Any],
+    source_band_offset: int = 0,
+    **kwargs: Any,
 ) -> NDArrayNum:
     """
     Reprojection per destination block (also rebuilds a square array combined from intersecting source blocks).
     """
 
-    is_multiband = combined_meta["dst_count"] >= 2
+    # A single-band Xarray block still has a leading band dimension, so include it in the delayed array shape
+    is_multiband = src_arrs[0].ndim == 3 if src_arrs else combined_meta["dst_count"] >= 2
 
     # If no source chunk intersects, we return a chunk of destination nodata values
     if len(src_arrs) == 0:
@@ -539,12 +1004,52 @@ def _reproject_per_block(
     for arr, bid in zip(src_arrs, block_ids):
         comb_src_arr[..., bid["rys"] : bid["rye"], bid["rxs"] : bid["rxe"]] = arr
 
-    # Now, we can simply call Rasterio!
-    # We build the combined transform from tuple
+    # Build the combined transforms before choosing Rasterio or the GeoUtils Interpolator and Reducer path
     src_transform = rio.transform.Affine(*combined_meta["src_transform"])
     dst_transform = rio.transform.Affine(*combined_meta["dst_transform"])
 
-    # Reproject wrapper
+    if isinstance(kwargs["resampling"], (Interpolator, Reducer)):
+        operator = kwargs["resampling"]
+        propagation = _validate_nodata_propagation(kwargs.get("nodata_propagation", "nearest"))
+        # Error-model IDs refer to the full raster even when workers read a smaller source rectangle
+        source_row, source_col = _xy2ij(
+            src_transform.c,
+            src_transform.f,
+            transform=combined_meta["global_source_transform"],
+            area_or_point=None,
+            shift_area_or_point=False,
+            op=np.float64,
+        )
+        operator_result = _reproject_grid_operator(
+            comb_src_arr,
+            src_transform=src_transform,
+            src_crs=kwargs["src_crs"],
+            dst_transform=dst_transform,
+            dst_crs=kwargs["dst_crs"],
+            dst_shape=combined_meta["dst_shape"],
+            operator=operator,
+            source_nodata=kwargs.get("src_nodata"),
+            nodata_propagation=propagation,
+            overlap_backend=kwargs.get("overlap_backend", "auto"),
+            coverage=kwargs.get("coverage"),
+            area_weighting=kwargs.get("area_weighting", "diagonal_bounds"),
+            source_index_offset=(int(round(np.asarray(source_row).item())), int(round(np.asarray(source_col).item()))),
+            global_source_shape=combined_meta["global_source_shape"],
+            source_band_offset=source_band_offset,
+        )
+
+        # Use a mask for nodata results when an integer output array cannot represent NaN
+        output_dtype = np.dtype(kwargs.get("dtype", comb_src_arr.dtype))
+        invalid = ~np.isfinite(operator_result)
+        if np.any(invalid) and not np.issubdtype(output_dtype, np.floating):
+            fill_value = kwargs.get("dst_nodata")
+            if fill_value is None:
+                fill_value = _default_nodata(output_dtype)
+            values = np.where(invalid, fill_value, operator_result).astype(output_dtype)
+            return np.ma.masked_array(values, mask=invalid, fill_value=fill_value)
+        return np.asarray(operator_result, dtype=output_dtype)
+
+    # Call Rasterio for its built-in Resampling modes
     # Force the number of threads to 1 to avoid Dask/Rasterio conflicting on multi-threading
     kwargs.update(
         {
@@ -580,10 +1085,11 @@ def _dask_reproject(
     dst_transform: rio.transform.Affine,
     dst_shape: tuple[int, int],
     dst_crs: rio.crs.CRS,
-    resampling: rio.enums.Resampling,
+    resampling: rio.enums.Resampling | Interpolator | Reducer,
     src_nodata: int | float | None = None,
     dst_nodata: int | float | None = None,
     dst_chunksizes: tuple[int, int] | None = None,
+    source_pixel_overlap: tuple[int, int] = (0, 0),
     **kwargs: Any,
 ) -> da.Array:
     """
@@ -631,6 +1137,7 @@ def _dask_reproject(
             dst_crs=dst_crs,
             src_chunks=src_chunks,
             dst_chunksizes=dst_chunksizes,
+            source_pixel_overlap=source_pixel_overlap,
         )
     )
 
@@ -683,6 +1190,7 @@ def _dask_reproject(
                 *_src_chunks_for_group(bb),
                 block_ids=meta_params[i][1],
                 combined_meta=meta_params[i][0],
+                source_band_offset=0 if bb is None else sum(darr.chunks[0][:bb]),
                 **kwargs,
             )
             shape = shp2 if bb is None else (nb, *shp2)
@@ -746,7 +1254,8 @@ def _multiproc_reproject(
     dst_crs: rio.CRS,
     dst_nodata: int | float | None,
     dtype: DTypeLike,
-    resampling: Resampling,
+    resampling: Resampling | Interpolator | Reducer,
+    source_pixel_overlap: tuple[int, int] = (0, 0),
     **kwargs: Any,
 ) -> None:
     """
@@ -767,6 +1276,7 @@ def _multiproc_reproject(
             dst_crs=dst_crs,
             src_chunks=src_chunks,
             dst_chunksizes=_split_chunk_size(mp_config.chunks),
+            source_pixel_overlap=source_pixel_overlap,
         )
     )
 
@@ -823,13 +1333,19 @@ def _reproject(
     bounds: tuple[float, float, float, float] | rio.coords.BoundingBox | None = None,
     nodata: int | float | None = None,
     dtype: DTypeLike | None = None,
-    resampling: Resampling | str = None,
+    resampling: Resampling | str | Interpolator | Reducer = None,
     force_source_nodata: int | float | None = None,
     silent: bool = False,
     n_threads: int = 0,
     memory_limit: int = 64,
     mp_config: MultiprocConfig | None = None,
-) -> tuple[bool, NDArrayNum | NDArrayBool | None, affine.Affine | None, CRS | None, int | float | None]:
+    nodata_propagation: NodataPropagation | None = None,
+    overlap_backend: RasterOverlapBackend = "auto",
+    window: int | None = None,
+    window_shape: Literal["square", "circular"] | None = None,
+    coverage: GridCoverage | None = None,
+    area_weighting: Literal["diagonal_bounds", "intersection"] = "diagonal_bounds",
+) -> Any:
     """
     Reproject raster. See Raster.reproject() for details.
     """
@@ -839,6 +1355,7 @@ def _reproject(
         resampling = config["reprojection_method"]
 
     # 1/ Check and normalize match-grid inputs
+    _check_crs(source_raster.crs)
     dst_shape, dst_transform, dst_crs = _check_match_grid(
         src=source_raster, ref=ref, res=res, shape=grid_size, bounds=bounds, crs=crs, coords=None
     )
@@ -851,13 +1368,66 @@ def _reproject(
         force_source_nodata=force_source_nodata,
     )
 
-    # 3/ Store georeferencing parameters for reprojection
+    # 3/ Store georeferencing parameters and convert named methods to Rasterio's Resampling values
+    is_operator = isinstance(resampling, (Interpolator, Reducer))
+    if area_weighting not in ("diagonal_bounds", "intersection"):
+        raise ValueError("area_weighting must be 'diagonal_bounds' or 'intersection'.")
+    if area_weighting == "intersection" and not isinstance(resampling, Reducer):
+        raise ValueError("Intersection area weighting requires a Reducer.")
+    if is_operator:
+        if nodata_propagation is None:
+            nodata_propagation = "nearest" if isinstance(resampling, Interpolator) else "ignore"
+        if isinstance(resampling, Reducer) and nodata_propagation.lower() == "nearest":
+            raise ValueError("Nearest-source nodata propagation requires an Interpolator.")
+        propagation = _validate_nodata_propagation(nodata_propagation)
+    if isinstance(resampling, Interpolator) and (
+        window is not None or window_shape is not None or coverage is not None
+    ):
+        raise ValueError("Source window options require a Reducer.")
+    if isinstance(resampling, Interpolator) and not isinstance(resampling, RasterConvolution):
+        regular_method = _regular_interpolation_method(resampling)
+        if regular_method is not None:
+            _check_regular_grid_neighbours(resampling, regular_method, warn=True)
+        else:
+            neighbours = _resolve_grid_neighbours_for_interpolator(resampling, source_raster.transform)
+            if resampling.default_neighborhood is None:
+                raster_operator = copy(resampling)
+                raster_operator.default_neighborhood = neighbours
+                resampling = raster_operator
+    elif isinstance(resampling, Reducer):
+        if isinstance(resampling.default_neighborhood, PointNeighbours):
+            raise ValueError("PointNeighbours applies to point sources; use GridNeighbours for raster cells.")
+        if area_weighting == "intersection" and coverage not in (None, "fractional"):
+            raise ValueError("Intersection area weighting requires coverage='fractional'.")
+        if area_weighting == "intersection" and (
+            resampling.default_neighborhood is not None or window is not None or window_shape is not None
+        ):
+            raise ValueError("Intersection area weighting requires a Reducer without a fixed neighborhood.")
+        neighborhood = _configure_grid_neighbours(
+            resampling.default_neighborhood,
+            size=window,
+            shape=window_shape,
+            coverage=coverage,
+            default_size=3 if window_shape is not None else None,
+        )
+        if neighborhood is not None and neighborhood is not resampling.default_neighborhood:
+            configured = copy(resampling)
+            configured.default_neighborhood = neighborhood
+            resampling = configured
+    elif window is not None or window_shape is not None or coverage is not None:
+        raise ValueError("Source window options require a Reducer.")
+    if is_operator:
+        resolved_resampling = Resampling.nearest
+    else:
+        resolved_resampling = (
+            resampling if isinstance(resampling, Resampling) else _resampling_method_from_str(cast(str, resampling))
+        )
     reproj_kwargs = {
         "src_transform": source_raster.transform,
         "dst_transform": dst_transform,
         "src_crs": source_raster.crs,
         "dst_crs": dst_crs,
-        "resampling": resampling if isinstance(resampling, Resampling) else _resampling_method_from_str(resampling),
+        "resampling": resolved_resampling,
         "src_nodata": src_nodata,
         "dst_nodata": nodata,
         "dtype": dtype,
@@ -865,7 +1435,7 @@ def _reproject(
     }
 
     # 4/ Check if reprojection is needed, otherwise return source raster with warning
-    if _is_reproj_needed(src_shape=source_raster.shape, reproj_kwargs=reproj_kwargs):
+    if not is_operator and _is_reproj_needed(src_shape=source_raster.shape, reproj_kwargs=reproj_kwargs):
         if (nodata == src_nodata) or (nodata is None):
             if not silent:
                 warnings.warn("Output projection, bounds and grid size are identical -> returning self (not a copy!)")
@@ -892,6 +1462,53 @@ def _reproject(
             "from reproject(). To use Multiprocessing, open the file without chunks."
         )
 
+    # Apply an Interpolator or Reducer in GeoUtils because Rasterio only accepts its own Resampling values
+    if is_operator and not mp_backend and not dask_backend:
+        dst_arr = _reproject_grid_operator(
+            source_raster.data,
+            src_transform=source_raster.transform,
+            src_crs=source_raster.crs,
+            dst_transform=dst_transform,
+            dst_crs=dst_crs,
+            dst_shape=dst_shape,
+            operator=cast(Interpolator | Reducer, resampling),
+            source_nodata=src_nodata,
+            nodata_propagation=propagation,
+            overlap_backend=overlap_backend,
+            coverage=coverage,
+            area_weighting=area_weighting,
+        )
+        # Use a mask for missing results when the requested integer data type cannot represent NaN
+        output_dtype = np.dtype(dtype)
+        invalid = ~np.isfinite(dst_arr)
+        if np.any(invalid) and not np.issubdtype(output_dtype, np.floating):
+            fill_value = nodata if nodata is not None else _default_nodata(output_dtype)
+            cast_values = np.where(invalid, fill_value, dst_arr).astype(output_dtype)
+            dst_arr = np.ma.masked_array(cast_values, mask=invalid, fill_value=fill_value)
+        else:
+            dst_arr = np.asarray(dst_arr, dtype=output_dtype)
+        result = False, dst_arr, dst_transform, dst_crs, nodata
+        return result
+
+    # Chunked Interpolators and Reducers use the existing block mapping and read any extra cells required at the edges
+    if is_operator:
+        source_pixel_overlap = (0, 0)
+        operator = cast(Interpolator | Reducer, resampling)
+        if isinstance(operator.default_neighborhood, GridNeighbours):
+            source_pixel_overlap = operator.default_neighborhood.overlap
+        elif isinstance(operator, RasterConvolution):
+            source_pixel_overlap = (operator.radius, operator.radius)
+        reproj_kwargs.update(
+            {
+                "resampling": operator,
+                "nodata_propagation": propagation,
+                "overlap_backend": overlap_backend,
+                "coverage": coverage,
+                "area_weighting": area_weighting,
+                "source_pixel_overlap": source_pixel_overlap,
+            }
+        )
+
     # If using Multiprocessing backend, process and return None (files written on disk)
     if mp_config is not None:
         _multiproc_reproject(source_raster, mp_config=mp_config, **reproj_kwargs)  # type: ignore
@@ -905,11 +1522,12 @@ def _reproject(
     else:
         dst_arr = _rio_reproject(src_arr=source_raster.data, reproj_kwargs=reproj_kwargs)
 
-    return False, dst_arr, reproj_kwargs["dst_transform"], reproj_kwargs["dst_crs"], reproj_kwargs["dst_nodata"]
+    result = False, dst_arr, reproj_kwargs["dst_transform"], reproj_kwargs["dst_crs"], reproj_kwargs["dst_nodata"]
+    return result
 
 
 #########
-# 2/ CROP
+# 3/ CROP
 #########
 
 
@@ -925,26 +1543,26 @@ def _crop_window(
 
     assert distance_unit in ["georeferenced", "pixel"], "distance_unit must be 'georeferenced' or 'pixel'"
 
-    # If using georeferenced unit, use bbox directly
-    if distance_unit == "georeferenced":
-        xmin, ymin, xmax, ymax = bbox
-    # Else, convert to ij
-    else:
+    # Pixel bounds already identify the exact source window, including on a rotated grid
+    if distance_unit == "pixel":
         colmin, rowmin, colmax, rowmax = bbox
-        xmin, ymax = rio.transform.xy(source_raster.transform, rowmin, colmin, offset="ul")
-        xmax, ymin = rio.transform.xy(source_raster.transform, rowmax, colmax, offset="ul")
+        requested_window = rio.windows.Window(colmin, rowmin, colmax - colmin, rowmax - rowmin)
+        raster_window = rio.windows.Window(0, 0, source_raster.width, source_raster.height)
+        final_window = requested_window.intersection(raster_window).round_lengths().round_offsets()
+        new_transform = rio.windows.transform(final_window, source_raster.transform)
+        return final_window, new_transform
 
-    # Finding the intersection of requested bounds and original bounds, cropped to image shape
+    # Georeferenced bounds are converted to source pixel coordinates before clipping
+    xmin, ymin, xmax, ymax = bbox
     ref_win = rio.windows.from_bounds(xmin, ymin, xmax, ymax, transform=source_raster.transform)
     self_win = rio.windows.from_bounds(*source_raster.bbox, transform=source_raster.transform).crop(
         *source_raster.shape
     )
     final_window = ref_win.intersection(self_win).round_lengths().round_offsets()
 
-    # Update bounds and transform accordingly
-    new_xmin, new_ymin, new_xmax, new_ymax = rio.windows.bounds(final_window, transform=source_raster.transform)
-    tfm = rio.transform.from_origin(new_xmin, new_ymax, *source_raster.res)
-    return final_window, tfm
+    # Translate the full affine transform so rotation and shear survive the crop
+    new_transform = rio.windows.transform(final_window, source_raster.transform)
+    return final_window, new_transform
 
 
 def _crop(
@@ -1022,6 +1640,11 @@ def _crop(
     return crop_img, tfm
 
 
+#########
+# 4/ CLIP
+#########
+
+
 def _apply_clip_geometry(
     data: NDArrayNum | MArrayNum,
     inside: NDArrayBool,
@@ -1037,19 +1660,88 @@ def _apply_clip_geometry(
 
 
 def _multiproc_clip_block(
-    block: Raster,
-    clipping_vector: Vector,
+    source_raster: Raster,
+    block_id: dict[str, Any],
+    burn: _VectorBurnSpec,
     all_touched: bool,
     output_nodata: int | float | None,
-) -> Raster:
-    """Clip one raster block in an importable multiprocessing worker callback."""
+) -> tuple[Raster, tuple[int, int, int, int]]:
+    """Read and clip one raster block with its preselected geometries."""
 
-    # Create the mask on this block's exact grid through the shared vector-raster interface
-    inside = clipping_vector.create_mask(ref=block, all_touched=all_touched, as_array=True)
+    # Read only this block and rasterize the features selected by the parent spatial index
+    pixel_bounds = (block_id["xs"], block_id["ys"], block_id["xe"], block_id["ye"])
+    block = source_raster.icrop(bbox=pixel_bounds)
+    block_geogrid = GeoGrid(transform=block.transform, shape=block.shape, crs=block.crs)
+    inside = _rasterize_selected_on_geogrid(
+        block_geogrid,
+        burn,
+        out_value=0,
+        out_dtype=np.uint8,
+        all_touched=all_touched,
+    ).view(np.bool_)
+
+    # Apply the mask without changing the source grid, values or existing missing cells
     clipped = _apply_clip_geometry(block.data, inside=inside, nodata=output_nodata)
     output = block.copy(new_array=clipped)
     if output.nodata != output_nodata:
         output.set_nodata(output_nodata, update_array=False, update_mask=False)
+    if output.is_mask:
+        output.astype("uint8", inplace=True)
+        output.set_nodata(255)
+
+    # Return the unchanged destination positions for the shared output writer
+    destination = (block_id["ys"], block_id["ye"], block_id["xs"], block_id["xe"])
+    return output, destination
+
+
+def _multiproc_clip(
+    source_raster: Raster,
+    clipping_vector: Vector,
+    all_touched: bool,
+    output_nodata: int | float | None,
+    mp_config: MultiprocConfig,
+) -> Raster:
+    """Partition clipping geometries, process raster blocks, and write their completed output."""
+
+    # Build one spatial index in the parent and select only the geometries needed by each block
+    grid = GeoGrid(transform=source_raster.transform, shape=source_raster.shape, crs=source_raster.crs)
+    chunks = normalize_chunks(chunks=_split_chunk_size(mp_config.chunks), shape=source_raster.shape)
+    tiling = ChunkedGeoGrid(grid=grid, chunks=chunks)
+    block_ids = tiling.get_block_locations()
+    block_geogrids = tiling.get_blocks_as_geogrids()
+    burn = _normalize_burn_values(clipping_vector._dataset.geometry.values, in_value=1)
+    block_burns = _partition_burn_by_geogrids(burn, block_geogrids)
+
+    # Send each worker its source window and the much smaller matching geometry subset
+    tasks = [
+        mp_config.cluster.submit(
+            _multiproc_clip_block,
+            source_raster,
+            block_id,
+            block_burn,
+            all_touched,
+            output_nodata,
+        )
+        for block_id, block_burn in zip(block_ids, block_burns)
+    ]
+
+    # Write completed blocks with the same metadata and logical mask representation as the source
+    source_is_mask = source_raster.is_mask
+    file_metadata = {
+        "width": source_raster.width,
+        "height": source_raster.height,
+        "count": source_raster.count,
+        "crs": source_raster.crs,
+        "transform": source_raster.transform,
+        "dtype": np.dtype("uint8") if source_is_mask else source_raster.dtype,
+        "nodata": 255 if source_is_mask else output_nodata,
+    }
+    output = _write_multiproc_result(tasks, mp_config, file_metadata, tags=dict(source_raster.tags))
+    if output._is_bigtiff():
+        warnings.warn(
+            "Due to the size of the output raster, it has been saved with a BigTIFF format.",
+            category=UserWarning,
+        )
     return output
 
 
@@ -1062,8 +1754,9 @@ def _clip(
     """
     Clip raster cells outside a geometry using eager, Dask or multiprocessing execution.
 
-    _clip_geometry() normalizes the mask in the raster CRS. create_mask() then builds the matching eager or Dask
-    mask, while multiprocessing creates the same mask on each block through _multiproc_clip_block().
+    _clip_geodataframe() normalizes mask features in the raster CRS without dissolving them. create_mask() partitions
+    those features for eager or Dask masking, while _multiproc_clip() selects the matching features before dispatching
+    each raster block.
     """
 
     from geoutils.vector.vector import Vector
@@ -1074,12 +1767,9 @@ def _clip(
             "Cannot use Multiprocessing and Dask simultaneously. To use Dask, remove mp_config from clip()."
         )
 
-    # Normalize and reproject the clipping geometry once before dispatching block work
+    # Normalize and reproject clipping features once while keeping them separate for block selection
     target_crs = None if source_raster.crs is None else CRS.from_user_input(source_raster.crs)
-    geometry = _clip_geometry(mask, target_crs=target_crs)
-    clipping_vector = Vector(geometry)
-    if target_crs is not None:
-        clipping_vector.ds = clipping_vector.ds.set_crs(target_crs)
+    clipping_vector = Vector(_clip_geodataframe(mask, target_crs=target_crs))
 
     if mp_config is not None:
         if source_raster._is_xr:
@@ -1090,14 +1780,12 @@ def _clip(
         if output_nodata is None and not source_raster.is_mask:
             output_nodata = _default_nodata(source_raster.dtype)
             warnings.warn(f"No nodata value is defined; multiprocessing clip() will use the default {output_nodata}.")
-        return map_overlap(
-            _multiproc_clip_block,
-            source_raster,
-            mp_config,
+        return _multiproc_clip(
+            cast("Raster", source_raster),
             clipping_vector,
             all_touched,
             output_nodata,
-            depth=0,
+            mp_config,
         )
 
     # Match the source grid and let create_mask() choose eager or Dask execution from the reference
@@ -1112,7 +1800,7 @@ def _clip(
 
 
 ##############
-# 3/ TRANSLATE
+# 5/ TRANSLATE
 ##############
 
 

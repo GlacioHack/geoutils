@@ -2,7 +2,7 @@
 Open/save a raster
 ==================
 
-This example demonstrates opening a raster with :func:`~geoutils.open_raster` and saving it with the :class:`rst <geoutils.RasterAccessor>` accessor.
+This example demonstrates opening a raster with :func:`~geoutils.open_raster` and saving it with the :class:`rst <geoutils.DataArrayRasterAccessor>` accessor.
 """
 
 # %%
@@ -43,5 +43,5 @@ rast.rst.load()
 rast
 
 # %%
-# Finally, a raster is saved using :meth:`~geoutils.RasterAccessor.to_file`:
+# Finally, a raster is saved using :meth:`~geoutils.DataArrayRasterAccessor.to_file`:
 rast.rst.to_file("myraster.tif")

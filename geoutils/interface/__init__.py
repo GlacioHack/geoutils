@@ -16,9 +16,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Methods at the interface of objects: gridding, resampling at points, conversions, vectorization/rasterization."""
+
 from geoutils.interface.distance import *  # noqa
 from geoutils.interface.gridding import *  # noqa
-from geoutils.interface.interpolation import *  # noqa
 from geoutils.interface.raster_point import *  # noqa
 from geoutils.interface.rasterization import *  # noqa
+from geoutils.interface.resampling import *  # noqa
 from geoutils.interface.vectorization import *  # noqa

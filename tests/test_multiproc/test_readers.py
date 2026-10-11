@@ -162,3 +162,74 @@ class TestValueReaderChunked:
         assert reader.dtype == result.dtype
         assert reader.read_points(slice(2, 5)).shape[0] == 3
         assert not source.is_loaded
+
+    def test_value_reader__empty_raster_window(self, tmp_path: Path) -> None:
+        """Checks that an empty raster window returns the right shape and type without loading its source."""
+
+        # We write a small raster, open the raster object unloaded
+        values = np.arange(12, dtype=np.int16).reshape(3, 4)
+        filename = tmp_path / "values.tif"
+        gu.Raster.from_array(values, from_origin(0, 3, 1, 1), 32633).to_file(filename)
+        source = gu.Raster(filename)
+
+        # We read an empty row range
+        result = _ValueReader(source).read((slice(1, 1), slice(1, 3)))
+
+        # We check the reader returns an empty array without loading the raster into memory
+        assert result.shape == (0, 2)
+        assert result.dtype == values.dtype
+        assert not source.is_loaded
+
+
+class TestValueReaderErrors:
+    """Test module for errors in _ValueReader."""
+
+    @pytest.mark.parametrize("band", [0, 3, "first"])
+    def test_value_reader__error_invalid_raster_band(self, band: int | str, tmp_path: Path) -> None:
+        """Checks an error is raised when a raster reader selects a band outside the file."""
+
+        # We define a two band raster, that will accept 1, 2 as band inputs
+        values = np.stack([np.ones((2, 3), dtype=np.int16), np.full((2, 3), 2, dtype=np.int16)])
+        filename = tmp_path / "bands.tif"
+        gu.Raster.from_array(values, from_origin(0, 2, 1, 1), 32633).to_file(filename)
+        source = gu.Raster(filename)
+
+        # We should raise an error when using wrong bands integer (0, 3) or a string
+        with pytest.raises(ValueError, match="Raster bands must be integers"):
+            _ValueReader(source, selector=band)
+        assert not source.is_loaded
+
+    def test_value_reader__error_loaded_source(self, tmp_path: Path) -> None:
+        """Checks an error is raised because a worker reader needs an unloaded source."""
+
+        # We load a raster
+        filename = tmp_path / "values.tif"
+        gu.Raster.from_array(np.ones((2, 3)), from_origin(0, 2, 1, 1), 32633).to_file(filename)
+        source = gu.Raster(filename, load_data=True)
+
+        # And check we raise an error if not unloaded
+        with pytest.raises(ValueError, match="require an unloaded raster"):
+            _ValueReader(source)
+
+    @pytest.mark.parametrize(
+        "slices, error_type, message",
+        [
+            (slice(0, 1), TypeError, "one slice per input dimension"),
+            ((slice(0, 2, 2), slice(None)), ValueError, "contiguous increasing slices"),
+        ],
+    )
+    def test_value_reader__error_invalid_raster_slices(
+        self, slices: slice | tuple[slice, ...], error_type: type[Exception], message: str, tmp_path: Path
+    ) -> None:
+        """Checks an error is raised for a raster block with missing dimensions or skipped rows."""
+
+        # We create a single band raster (2D, not fit for point reading)
+        filename = tmp_path / "values.tif"
+        gu.Raster.from_array(np.ones((3, 4)), from_origin(0, 3, 1, 1), 32633).to_file(filename)
+        reader = _ValueReader(gu.Raster(filename))
+
+        # Fail on discontinuous slices, or trying to read points
+        with pytest.raises(error_type, match=message):
+            reader.block(slices)
+        with pytest.raises(TypeError, match="Point rows require a point cloud reader"):
+            reader.read_points(slice(0, 1))

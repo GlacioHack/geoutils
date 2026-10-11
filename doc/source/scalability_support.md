@@ -80,14 +80,14 @@ The **memory usage** column lists the number of input chunks loaded in memory fo
   - {bdg-success}`Chunked`
   - {bdg-success}`Chunked`
   - ~1
-* - {meth}`interp_points() <RasterBase.interp_points>`
+* - {meth}`interp_at_points() <RasterBase.interp_at_points>`
   - {bdg-success}`Chunked`
   - {bdg-secondary}`In-memory`
   - ~1 raster chunk and 1 point partition
-* - {meth}`reduce_points() <RasterBase.reduce_points>`
+* - {meth}`reduce_at_points() <RasterBase.reduce_at_points>`
+  - {bdg-success}`Chunked`
   - {bdg-secondary}`In-memory`
-  - {bdg-secondary}`In-memory`
-  - —
+  - ~1 raster chunk and 1 point partition
 * - {meth}`cosample() <RasterBase.cosample>`
   - {bdg-success}`Chunked`
   - {bdg-success}`Chunked`
@@ -127,19 +127,19 @@ The **memory usage** column lists the number of input chunks loaded in memory fo
   -
   -
 
-* - {meth}`crop() <PointCloudBase.crop>`
+* - {meth}`crop() <geoutils.pointcloud.base.GeometryPointCloudBase.crop>`
   - {bdg-primary}`Deferred I/O`
   - {bdg-primary}`Deferred I/O`
   - 0
-* - {meth}`clip() <PointCloudBase.clip>`
+* - {meth}`clip() <geoutils.pointcloud.base.GeometryPointCloudBase.clip>`
   - {bdg-success}`Chunked`
   - {bdg-success}`Chunked`
   - ~1
-* - {meth}`reproject() <PointCloudBase.reproject>`
+* - {meth}`reproject() <geoutils.pointcloud.base.GeometryPointCloudBase.reproject>`
   - {bdg-success}`Chunked`
   - {bdg-success}`Chunked`
   - ~1
-* - {meth}`translate() <PointCloudBase.translate>`
+* - {meth}`translate() <geoutils.pointcloud.base.GeometryPointCloudBase.translate>`
   - {bdg-secondary}`In-memory`
   - {bdg-secondary}`In-memory`
   - —
@@ -151,6 +151,10 @@ The **memory usage** column lists the number of input chunks loaded in memory fo
   - {bdg-success}`Chunked`
   - {bdg-success}`Chunked`
   - ~1–2
+* - {meth}`filter() <PointCloudBase.filter>`
+  - {bdg-success}`Chunked`
+  - {bdg-success}`Chunked`
+  - ~1 point partition and nearby points within the search radius
 
 * - <span class="gu-table-section">Point ⟶ Raster</span>
   -
@@ -227,7 +231,7 @@ The **memory usage** column lists the number of input chunks loaded in memory fo
   - {bdg-success}`Chunked`
   - {bdg-secondary}`In-memory`
   - ~1 + spatial index
-* - {meth}`plot() <PointCloudBase.plot>`
+* - {meth}`plot() <geoutils.pointcloud.base.GeometryPointCloudBase.plot>`
   - {bdg-success}`Chunked`
   - {bdg-secondary}`In-memory`
   - ~1

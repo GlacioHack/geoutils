@@ -160,7 +160,7 @@ def build_demo_blocks() -> tuple[ChunkedGeoGrid, list[GeoGrid], list[dict[str, i
             mask_h,
             transform=transform_h,
             crs=crs,
-            data_column_name="polygon_id",
+            data_name="polygon_id",
             value_column="raster_value",
             connectivity=CONNECTIVITY,
             float_tol=FLOAT_TOL,

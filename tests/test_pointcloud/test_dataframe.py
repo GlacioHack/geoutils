@@ -74,11 +74,15 @@ class TestPointDataframe:
         # Return the dataframe itself when requested, otherwise wrap in a PointCloud
         result = _build_pointcloud_output(
             frame,
-            data_column="height",
+            data_name="height",
             as_dataframe=as_dataframe,
             attrs=attrs,
         )
-        output_frame = result if as_dataframe else result.ds
+        if as_dataframe:
+            output_frame = result
+        else:
+            assert isinstance(result, PointCloud)
+            output_frame = result.gdf
 
         # The current rows give the point count, CRS and geometry type, and height is saved as the data column
         # Bounds are reset to None because this call does not say that the point locations stayed the same
@@ -87,7 +91,7 @@ class TestPointDataframe:
             "source": "fixture",
             "point_count": len(frame),
             "bounds": None,
-            "data_column": "height",
+            "data_name": "height",
             "geometry_type": "Point",
             "crs": frame.crs,
         }
@@ -104,7 +108,7 @@ class TestPointDataframe:
         # Tell the output builder that the X/Y coordinates stayed in the same order
         result = _build_pointcloud_output(
             frame,
-            data_column="height",
+            data_name="height",
             as_dataframe=True,
             attrs=attrs,
             preserve_locations=True,
@@ -212,7 +216,7 @@ class TestPointDataframeChunked:
         with Callback(pretask=lambda *args: tasks.append(args[0])):
             result = _build_pointcloud_output(
                 lazy,
-                data_column="height",
+                data_name="height",
                 as_dataframe=True,
                 attrs=attrs,
                 preserve_locations=preserve_locations,
@@ -227,7 +231,7 @@ class TestPointDataframeChunked:
             "source": "fixture",
             "point_count": len(frame) if preserve_locations else None,
             "bounds": source_bounds if preserve_locations else None,
-            "data_column": "height",
+            "data_name": "height",
             "geometry_type": "Point",
             "crs": frame.crs,
         }
@@ -243,13 +247,13 @@ class TestPointDataframeChunked:
         lazy = dgpd.from_geopandas(frame, npartitions=3, sort=False)
 
         # Build a PointCloud (store an eager GeoDataFrame, not Dask)
-        result = _build_pointcloud_output(lazy, data_column="height", as_dataframe=False)
+        result = _build_pointcloud_output(lazy, data_name="height", as_dataframe=False)
 
         # The PointCloud should have the same ordered rows, height column and point count
         assert isinstance(result, PointCloud)
-        assert_geodataframe_equal(result.ds, frame)
-        assert result.data_column == "height"
-        assert _get_dataframe_attrs(result.ds)["point_count"] == len(frame)
+        assert_geodataframe_equal(result.gdf, frame)
+        assert result.data_name == "height"
+        assert _get_dataframe_attrs(result.gdf)["point_count"] == len(frame)
 
     @pytest.mark.parametrize("partitions", [2, 5])
     @pytest.mark.parametrize("native_series", [False, True])

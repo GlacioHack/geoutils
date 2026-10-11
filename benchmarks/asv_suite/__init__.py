@@ -1,4 +1,4 @@
-"""Expose repeatable benchmarks and select the lightweight pull-request profile."""
+"""Benchmark setup for ASV."""
 
 from __future__ import annotations
 
@@ -6,12 +6,12 @@ import os
 
 
 def asv_pr_check_enabled() -> bool:
-    """Whether ASV should use the lightweight pull-request inputs."""
+    """Whether ASV should use the lightweight inputs (to reduce ``asv check`` time to ~10 min for CI quick PR test)."""
 
     return os.environ.get("GEOUTILS_ASV_PR_CHECK") == "1"
 
 
-def asv_parameter_values(full_values: list[int], pr_check_value: int) -> list[int]:
-    """Select one pull-request value or the complete measurement axis."""
+def asv_parameter_values(values: tuple[int | float, ...]) -> list[int | float]:
+    """Return every scheduled value, or only the smallest value during the pull-request check."""
 
-    return [pr_check_value] if asv_pr_check_enabled() else full_values
+    return [min(values)] if asv_pr_check_enabled() else list(values)

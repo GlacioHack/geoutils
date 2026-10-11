@@ -45,8 +45,8 @@ geospatial syntax and volatile passing of metadata that can lead to errors!
 In GeoUtils, **these higher-level operations are tested to ensure robustness and consistency**. 🙂
 ```
 
-The package functionalities can be called either from the {class}`rst <geoutils.RasterAccessor>`,
-{class}`vct <geoutils.VectorAccessor>` and {class}`pc <geoutils.PointCloudAccessor>` accessors or from the
+The package functionalities can be called either from the {class}`rst <geoutils.DataArrayRasterAccessor>`,
+{class}`vct <geoutils.VectorAccessor>` and {class}`pc <geoutils.GeoPandasPointCloudAccessor>` accessors or from the
 {class}`~geoutils.Raster`, {class}`~geoutils.Vector` and {class}`~geoutils.PointCloud` classes.
 Below, in a few lines, we load raster, vector and point data, crop them to a common extent, re-assign raster values
 around a buffer of the vector, sample values, calculate statistics, and finally plot and save the result!
@@ -81,7 +81,7 @@ filename_pc = gu.examples.get_path("coromandel_lidar")
 # Open native Xarray and GeoPandas objects; raster and point data stay lazy and chunked
 ds = gu.open_raster(filename_rast, chunks={"x": 512, "y": 512})
 gdf = gu.open_vector(filename_vect)
-points = gu.open_pointcloud(filename_pc, data_column="Z", chunks=5_000)
+points = gu.open_pointcloud(filename_pc, data_name="Z", chunks=5_000)
 
 # Crop raster to vector's extent by simply passing vector as "match-reference"
 ds = ds.rst.crop(gdf)
@@ -119,7 +119,7 @@ from geoutils.multiproc import MultiprocConfig
 # Open GeoUtils objects; raster and point data remain unloaded until required
 rast = gu.Raster(filename_rast)
 vect = gu.Vector(filename_vect)
-point_cloud = gu.PointCloud(filename_pc, data_column="Z")
+point_cloud = gu.PointCloud(filename_pc, data_name="Z")
 
 # Crop raster to vector's extent by simply passing vector as "match-reference"
 rast = rast.crop(vect)
@@ -170,6 +170,6 @@ To dive into more illustrated code, explore our gallery of examples that is comp
 See also the full concatenated list of examples below.
 
 ```{eval-rst}
-.. minigallery:: geoutils.RasterAccessor geoutils.VectorAccessor geoutils.PointCloudAccessor
+.. minigallery:: geoutils.DataArrayRasterAccessor geoutils.VectorAccessor geoutils.GeoPandasPointCloudAccessor
     :add-heading: Examples using rasters, vectors and point clouds
 ```

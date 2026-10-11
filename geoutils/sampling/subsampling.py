@@ -2445,13 +2445,13 @@ def _subsample_pointcloud_array(
     mask: RasterLike | PointCloudLike | VectorLike | ArrayLike | None = None,
 ) -> NDArrayNum | tuple[NDArrayNum, ...]:
     """
-    Subsample finite point cloud values, gathering only selected values from a lazy data column.
+    Subsample finite point cloud values, gathering only selected values from a lazy data attribute.
 
     _dask_subsample() treats point rows as a single-column grid and preserves NumPy's random-draw order.
     _mask_at_support() places the optional mask on these rows before either sampler counts eligible values.
     Eager columns use _subsample_numpy() directly. Both paths return computed results without changing the value dtype.
 
-    :param source_pointcloud: Point cloud or accessor whose selected data column supplies the sampled values.
+    :param source_pointcloud: Point cloud or accessor whose selected data attribute supplies the sampled values.
     :param subsample: Positive fraction of finite values at most one, or maximum number of values above one.
     :param return_indices: Return a one-element tuple of row-position indices instead of sampled values.
     :param random_state: Integer seed or NumPy Generator used for the random draw.
@@ -2596,16 +2596,18 @@ def _pointcloud_from_subsample_indices(
     """Build an eager or lazy point cloud containing the sampled source rows."""
 
     positions = np.asarray(indices, dtype=np.int64)
+    if source_pointcloud._is_xr:
+        return source_pointcloud._select_rows(positions)
     if not source_pointcloud._is_dask:
-        selected = source_pointcloud.ds.iloc[positions].copy()
+        selected = source_pointcloud._dataset.iloc[positions].copy()
         return source_pointcloud._cast_pointcloud_output(selected)
 
     # Split global row positions between the existing Dask dataframe partitions
     dask = import_optional("dask")
-    partition_lengths = np.asarray(source_pointcloud.ds.map_partitions(len).compute(), dtype=np.int64)
+    partition_lengths = np.asarray(source_pointcloud._dataset.map_partitions(len).compute(), dtype=np.int64)
     partition_starts = np.cumsum(np.concatenate(([0], partition_lengths[:-1])))
     selected_parts = []
-    for dataframe, start, length in zip(source_pointcloud.ds.to_delayed(), partition_starts, partition_lengths):
+    for dataframe, start, length in zip(source_pointcloud._dataset.to_delayed(), partition_starts, partition_lengths):
         sample_positions = np.flatnonzero((positions >= start) & (positions < start + length)).astype(np.int64)
         if len(sample_positions) == 0:
             continue
@@ -2618,7 +2620,7 @@ def _pointcloud_from_subsample_indices(
     from geoutils.vector.pd_accessor import _import_dask_geopandas
 
     # Restore random-draw or key order after rows from the same source partition have been selected together
-    meta = source_pointcloud.ds._meta.copy()
+    meta = source_pointcloud._dataset._meta.copy()
     meta["_geoutils_subsample_order"] = pd.Series(dtype=np.int64)
     dask_dataframe = _import_dask_dataframe()
     if selected_parts:
@@ -2628,7 +2630,7 @@ def _pointcloud_from_subsample_indices(
         selected = dask_dataframe.from_pandas(meta.drop(columns="_geoutils_subsample_order"), npartitions=1)
     selected = _import_dask_geopandas().from_dask_dataframe(
         selected,
-        geometry=source_pointcloud.ds._meta.geometry.name,
+        geometry=source_pointcloud._dataset._meta.geometry.name,
     )
     return source_pointcloud._cast_pointcloud_output(selected)
 
@@ -2647,16 +2649,9 @@ def _stage_point_subsample_partition(
 
     # Read only this source partition when the point cloud remains file-backed
     if isinstance(source, pathlib.Path):
-        from geoutils.pointcloud.las import _is_laspy_supported, _load_laspy_data_slice
+        from geoutils.pointcloud.loading import _read_point_file_rows
 
-        if _is_laspy_supported(source):
-            dataframe = _load_laspy_data_slice(source, columns=columns, start=start, count=count)
-        else:
-            import pyogrio
-
-            dataframe = pyogrio.read_dataframe(source, skip_features=start, max_features=max(1, count))
-            if count == 0:
-                dataframe = dataframe.iloc[:0]
+        dataframe = _read_point_file_rows(source, columns, start, count)
     else:
         dataframe = source
 
@@ -2695,7 +2690,7 @@ def _multiproc_subsample_pointcloud(
     output_filename, driver = _resolve_pointcloud_output(
         mp_config.outfile,
         mp_config.driver,
-        supported_drivers=("GPKG", "LAS", "LAZ"),
+        supported_drivers=("GPKG", "LAS", "LAZ", "PARQUET"),
         operation_name="point cloud subsampling",
     )
     output_filename.parent.mkdir(parents=True, exist_ok=True)
@@ -2705,14 +2700,18 @@ def _multiproc_subsample_pointcloud(
     if not source_pointcloud.is_loaded:
         if source_filename is None:
             raise ValueError("Unloaded point cloud subsampling requires a file-backed source.")
-        if not _is_laspy_supported(source_filename):
+        if (
+            not _is_laspy_supported(source_filename)
+            and source_filename.suffix.lower() != ".parquet"
+            and not source_filename.is_dir()
+        ):
             import pyogrio
 
             if pyogrio.read_info(source_filename)["driver"] != "GPKG":
                 raise ValueError("Unloaded point cloud subsampling supports LAS, LAZ and GPKG sources.")
         dataframe = None
     else:
-        dataframe = source_pointcloud.ds
+        dataframe = source_pointcloud._dataset
 
     # Select row positions through the array path, using a temporary NumPy file for a large sample
     with mp_config.temporary() as index_config, ExitStack() as memory_maps:
@@ -2757,8 +2756,8 @@ def _multiproc_subsample_pointcloud(
                         count,
                         local_positions,
                         temporary_directory / f"partition_{start}.pkl",
-                        driver != "GPKG",
-                        source_pointcloud.data_column,
+                        driver in ("LAS", "LAZ"),
+                        source_pointcloud.data_name,
                     )
                 )
 
@@ -2775,16 +2774,16 @@ def _multiproc_subsample_pointcloud(
                 output_filename,
                 partition_filenames,
                 driver=driver,
-                data_column=source_pointcloud.data_column if driver == "GPKG" else None,
+                data_name=source_pointcloud.data_name if driver in ("GPKG", "PARQUET") else None,
                 geometry_type="Point Z" if source_pointcloud._has_z else "Point",
-                las_elevation_column=source_pointcloud.data_column,
-                las_bounds=[bounds for _, bounds in partition_results] if driver != "GPKG" else None,
+                las_elevation_column=source_pointcloud.data_name,
+                las_bounds=[bounds for _, bounds in partition_results] if driver in ("LAS", "LAZ") else None,
             )
 
     # Accessors return an eager GeoDataFrame while PointCloud inputs keep the output file unloaded
     if source_pointcloud._is_pd:
         pointcloud.load(columns="all")
-        return source_pointcloud._cast_pointcloud_output(pointcloud.ds)
+        return source_pointcloud._cast_pointcloud_output(pointcloud._dataset)
     return pointcloud
 
 
@@ -2974,12 +2973,12 @@ def _subsample_raster_from_indices(
     source_raster: RasterType,
     bands: list[int],
     column_names: list[str],
-    data_column_name: str,
+    data_name: str,
     subsample: float | int,
     skip_nodata: bool,
     random_state: int | np.random.Generator | None,
     force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"],
-    as_array: bool,
+    as_array: bool | Literal["xarray"],
     read_config: MultiprocConfig | None,
     force_output_to_memory: bool = False,
 ) -> Any:
@@ -3046,6 +3045,21 @@ def _subsample_raster_from_indices(
         force_offset=force_pixel_offset,
     )
 
+    # Array point output stores each raster band separately from the floating coordinate arrays
+    if as_array == "xarray":
+        from geoutils.pointcloud.xr_accessor import DataArrayPointCloudAccessor
+
+        auxiliary = {name: pixel_data[index] for index, name in enumerate(column_names) if name != data_name}
+        main_index = column_names.index(data_name)
+        return DataArrayPointCloudAccessor.from_xyz(
+            x_coords,
+            y_coords,
+            pixel_data[main_index],
+            source_raster.crs,
+            data_name=data_name,
+            auxiliary=auxiliary,
+        )
+
     # 5/ Build output, lazy for Dask, otherwise eager
     if is_dask_array(pixel_data):
         import dask.array as da
@@ -3081,7 +3095,7 @@ def _subsample_raster_from_indices(
         dataframe = dask_geopandas.from_dask_dataframe(dataframe, geometry="geometry")
 
         # Finalize point metadata; the shared builder also adds ``.pc`` and ``.vct`` to this Dask frame
-        return _build_pointcloud_output(dataframe, data_column=data_column_name, as_dataframe=True)
+        return _build_pointcloud_output(dataframe, data_name=data_name, as_dataframe=True)
 
     # Build an eager array or PointCloud result
     if as_array:
@@ -3095,12 +3109,21 @@ def _subsample_raster_from_indices(
         geometry=gpd.points_from_xy(np.asarray(x_coords), np.asarray(y_coords)),
         crs=source_raster.crs,
     )
-    return PointCloud(dataframe, data_column=data_column_name)
+    return PointCloud(dataframe, data_name=data_name)
 
 
 ##########################
 # 3B/ CHUNKED HELPERS
 ##########################
+
+
+def _raster_point_coordinate_block(
+    indexes: Any, *, width: int, transform: affine.Affine, area_or_point: Literal["Area", "Point"] | None, offset: str
+) -> Any:
+    """Calculate X/Y for a flat row block with the same pixel convention as eager raster conversion."""
+    rows, columns = np.divmod(indexes, width)
+    coordinates = _ij2xy(rows, columns, transform, area_or_point, shift_area_or_point=False, force_offset=offset)
+    return np.stack(coordinates)
 
 
 def _raster_values_to_point_partition(
@@ -3115,7 +3138,7 @@ def _raster_values_to_point_partition(
     skip_nodata: bool,
     force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"],
     topk_selection: tuple[int, np.uint64] | None,
-    as_array: bool,
+    as_array: bool | Literal["xarray"],
 ) -> NDArrayNum | gpd.GeoDataFrame:
     """
     Convert the values and global indexes of cells selected in one chunk into point rows.
@@ -3164,6 +3187,14 @@ def _raster_values_to_point_partition(
         force_offset=force_pixel_offset,
     )
 
+    if as_array == "xarray":
+        return {
+            "x": x_coords,
+            "y": y_coords,
+            "_geoutils_row": selected_indices,
+            **{name: band_values[index] for index, name in enumerate(column_names)},
+        }
+
     # Return array rows for Dask or a point dataframe for Dask/multiprocessing
     if as_array:
         return np.column_stack((x_coords, y_coords, *band_values))
@@ -3183,12 +3214,12 @@ def _eager_subsample_raster(
     source_raster: RasterType,
     bands: list[int],
     column_names: list[str],
-    data_column_name: str,
+    data_name: str,
     subsample: float | int,
     skip_nodata: bool,
     random_state: int | np.random.Generator | None,
     force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"],
-    as_array: bool,
+    as_array: bool | Literal["xarray"],
 ) -> Any:
     """
     Build an eager point output, reading an unloaded partial raster in bounded tiles.
@@ -3211,7 +3242,7 @@ def _eager_subsample_raster(
         source_raster,
         bands,
         column_names,
-        data_column_name,
+        data_name,
         subsample,
         skip_nodata,
         random_state,
@@ -3238,7 +3269,7 @@ def _wrapper_subsample_raster_partition_dask(
     skip_nodata: bool,
     force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"],
     topk_selection: tuple[int, np.uint64] | None,
-    as_array: bool,
+    as_array: bool | Literal["xarray"],
 ) -> NDArrayNum | gpd.GeoDataFrame:
     """
     Convert one Dask raster chunk into one lazy part of the point result.
@@ -3274,7 +3305,7 @@ def _build_dask_pointcloud_partitions(
     column_names: list[str],
     column_dtype: DTypeLike,
     crs: CRS | None,
-    data_column_name: str,
+    data_name: str,
 ) -> Any:
     """
     Build one lazy point dataframe from the point rows produced for each Dask chunk.
@@ -3300,19 +3331,19 @@ def _build_dask_pointcloud_partitions(
         else dask_dataframe.from_pandas(empty_frame, npartitions=1)
     )
     dataframe = _import_dask_geopandas().from_dask_dataframe(dataframe, geometry="geometry")
-    return _build_pointcloud_output(dataframe, data_column=data_column_name, as_dataframe=True)
+    return _build_pointcloud_output(dataframe, data_name=data_name, as_dataframe=True)
 
 
 def _dask_subsample_raster(
     source_raster: RasterType,
     bands: list[int],
     column_names: list[str],
-    data_column_name: str,
+    data_name: str,
     subsample: float | int,
     skip_nodata: bool,
     random_state: int | np.random.Generator | None,
     force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"],
-    as_array: bool,
+    as_array: bool | Literal["xarray"],
     force_output_to_memory: bool,
 ) -> Any:
     """
@@ -3351,7 +3382,7 @@ def _dask_subsample_raster(
             source_raster,
             bands,
             column_names,
-            data_column_name,
+            data_name,
             subsample,
             skip_nodata,
             random_state,
@@ -3365,7 +3396,7 @@ def _dask_subsample_raster(
             return output
         from geoutils.pointcloud import PointCloud
 
-        return PointCloud(output, data_column=data_column_name)
+        return PointCloud(output, data_name=data_name)
 
     # Count eligible cells once so the automatic path follows the exact output size
     sample_size = int(np.prod(source_raster.shape))
@@ -3383,7 +3414,7 @@ def _dask_subsample_raster(
                 source_raster,
                 bands,
                 column_names,
-                data_column_name,
+                data_name,
                 subsample,
                 skip_nodata,
                 random_state,
@@ -3421,6 +3452,20 @@ def _dask_subsample_raster(
             skip_nodata=skip_nodata,
         )
         if subsample_meta.sample_size == 0:
+            if as_array == "xarray":
+                from geoutils.pointcloud.xr_accessor import DataArrayPointCloudAccessor
+
+                values = da.from_array(np.empty(0, dtype=source_raster.dtype), chunks=1)
+                coordinates = da.from_array(np.empty(0), chunks=1)
+                auxiliary = {name: values for name in column_names if name != data_name}
+                return DataArrayPointCloudAccessor.from_xyz(
+                    coordinates,
+                    coordinates,
+                    values,
+                    source_raster.crs,
+                    data_name=data_name,
+                    auxiliary=auxiliary,
+                )
             empty = np.empty((0, 2 + len(bands)), dtype=np.result_type(np.float64, source_raster.dtype))
             if as_array:
                 return da.from_array(empty, chunks=empty.shape)
@@ -3429,7 +3474,7 @@ def _dask_subsample_raster(
                 column_names,
                 source_raster.dtype,
                 source_raster.crs,
-                data_column_name,
+                data_name,
             )
         assert subsample_meta.cutoff is not None
         topk_selection = (subsample_meta.seed, subsample_meta.cutoff)
@@ -3456,6 +3501,63 @@ def _dask_subsample_raster(
         for block, tile in zip(band_blocks, tiles)
     ]
 
+    # Assemble array attributes independently so integer values never share a float coordinate dtype
+    if as_array == "xarray":
+        from geoutils.pointcloud.xr_accessor import DataArrayPointCloudAccessor
+
+        # Xarray requires known row lengths; collect chunk counts while leaving the output arrays lazy
+        row_indices = dask.compute(*[part["_geoutils_row"] for part in parts])
+        lengths = [len(rows) for rows in row_indices]
+        all_rows = np.concatenate(row_indices)
+        if subsample == 1 and skip_nodata and len(all_rows) == int(np.prod(source_raster.shape)):
+            # Complete valid rasters already have a known row order; flatten bands without an index shuffle
+            count = len(all_rows)
+            indexes = da.arange(count, chunks=max(1, max(lengths)))
+            coordinates = da.map_blocks(
+                _raster_point_coordinate_block,
+                indexes,
+                width=source_raster.shape[1],
+                transform=source_raster.transform,
+                area_or_point=source_raster.area_or_point,
+                offset=force_pixel_offset,
+                new_axis=0,
+                chunks=((2,), indexes.chunks[0]),
+                dtype=float,
+            )
+            x, y = coordinates[0], coordinates[1]
+            values = {name: da.ma.getdata(band_data[index].ravel()) for index, name in enumerate(column_names)}
+            return DataArrayPointCloudAccessor.from_xyz(
+                x,
+                y,
+                values.pop(data_name),
+                source_raster.crs,
+                data_name=data_name,
+                auxiliary=values,
+            )
+        if subsample == 1:
+            ordering = np.argsort(all_rows)
+        else:
+            assert topk_selection is not None
+            keys = _splitmix64(np.uint64(topk_selection[0]) ^ all_rows.astype(np.uint64))
+            ordering = np.argsort(keys)
+        point_arrays = {}
+        for name in ("x", "y", *column_names):
+            dtype = (
+                np.float64
+                if name in ("x", "y")
+                else (np.result_type(source_raster.dtype, np.float32) if not skip_nodata else source_raster.dtype)
+            )
+            blocks = [da.from_delayed(part[name], shape=(length,), dtype=dtype) for part, length in zip(parts, lengths)]
+            point_arrays[name] = da.concatenate(blocks)[ordering]
+        return DataArrayPointCloudAccessor.from_xyz(
+            point_arrays.pop("x"),
+            point_arrays.pop("y"),
+            point_arrays.pop(data_name),
+            source_raster.crs,
+            data_name=data_name,
+            auxiliary=point_arrays,
+        )
+
     # Assemble rows lazily
     if as_array:
         dtype = np.result_type(np.float64, source_raster.dtype)
@@ -3468,7 +3570,7 @@ def _dask_subsample_raster(
         column_names,
         column_dtype,
         source_raster.crs,
-        data_column_name,
+        data_name,
     )
 
 
@@ -3573,7 +3675,7 @@ def _multiproc_subsample_raster(
     source_raster: RasterType,
     bands: list[int],
     column_names: list[str],
-    data_column_name: str,
+    data_name: str,
     subsample: float | int,
     skip_nodata: bool,
     random_state: int | np.random.Generator | None,
@@ -3600,7 +3702,7 @@ def _multiproc_subsample_raster(
             source_raster,
             bands,
             column_names,
-            data_column_name,
+            data_name,
             subsample,
             skip_nodata,
             random_state,
@@ -3621,7 +3723,7 @@ def _multiproc_subsample_raster(
     output_filename, driver = _resolve_pointcloud_output(
         mp_config.outfile,
         mp_config.driver,
-        supported_drivers=("GPKG", "LAS", "LAZ"),
+        supported_drivers=("GPKG", "LAS", "LAZ", "PARQUET"),
         operation_name="raster subsampling",
     )
     output_filename.parent.mkdir(parents=True, exist_ok=True)
@@ -3668,7 +3770,7 @@ def _multiproc_subsample_raster(
                 worker_source,
                 bands,
                 column_names,
-                data_column_name,
+                data_name,
                 subsample,
                 skip_nodata,
                 random_state,
@@ -3676,14 +3778,14 @@ def _multiproc_subsample_raster(
                 as_array=False,
                 read_config=mp_config,
             )
-            partition_filename = _stage_pointcloud_partition(pointcloud.ds, temporary_directory / "partition.pkl")
+            partition_filename = _stage_pointcloud_partition(pointcloud._dataset, temporary_directory / "partition.pkl")
             partition_filenames: Iterable[pathlib.Path] = (partition_filename,)
             if driver == "GPKG":
                 las_bounds = None
             else:
                 from geoutils.pointcloud.las import _las_coordinate_bounds
 
-                las_bounds = [_las_coordinate_bounds(pointcloud.ds, data_column_name)]
+                las_bounds = [_las_coordinate_bounds(pointcloud._dataset, data_name)]
 
         # Split complete conversions by raster tile
         elif subsample == 1:
@@ -3740,8 +3842,8 @@ def _multiproc_subsample_raster(
                     mp_config.chunks,
                     temporary_directory / f"partition_{tile_id}.pkl",
                     topk_selection,
-                    driver != "GPKG",
-                    data_column_name,
+                    driver in ("LAS", "LAZ"),
+                    data_name,
                 )
                 for tile_id, selected, topk_selection in selected_parts
             )
@@ -3750,16 +3852,16 @@ def _multiproc_subsample_raster(
                 for _, result in _map_bounded(mp_config.cluster, _wrapper_subsample_raster_partition_mp, arguments)
             ]
             partition_filenames = [filename for filename, _ in partition_results]
-            las_bounds = [bounds for _, bounds in partition_results] if driver != "GPKG" else None
+            las_bounds = [bounds for _, bounds in partition_results] if driver in ("LAS", "LAZ") else None
 
         # Finally, we assemble the final file and return it as an unloaded PointCloud!
         return _write_pointcloud_partitions(
             output_filename,
             partition_filenames,
             driver=driver,
-            data_column=data_column_name if driver == "GPKG" else None,
+            data_name=data_name if driver in ("GPKG", "PARQUET") else None,
             geometry_type="Point",
-            las_elevation_column=data_column_name,
+            las_elevation_column=data_name,
             las_bounds=las_bounds,
         )
 
@@ -3772,17 +3874,17 @@ def _multiproc_subsample_raster(
 def _subsample_raster(
     source_raster: RasterType,
     subsample: float | int = 1,
-    data_column_name: str = "b1",
+    data_name: str = "b1",
     data_band: int = 1,
     auxiliary_data_bands: Iterable[int] | None = None,
     auxiliary_column_names: Iterable[str] | None = None,
     skip_nodata: bool = True,
-    as_array: bool = False,
+    as_array: bool | Literal["xarray"] = False,
     random_state: int | np.random.Generator | None = None,
     force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
     mp_config: MultiprocConfig | None = None,
     force_output_to_memory: bool = False,
-    rename_default_data_column: bool = True,
+    rename_default_data_name: bool = True,
 ) -> Any:
     """
     Subsample raster cells into point output with eager, Dask, or multiprocessing execution.
@@ -3812,7 +3914,7 @@ def _subsample_raster(
     # 1/ Input checks
 
     # Main data column checks
-    if not isinstance(data_column_name, str):
+    if not isinstance(data_name, str):
         raise ValueError("Data column name must be a string.")
     if not (isinstance(data_band, int) and data_band >= 1 and data_band <= source_raster.count):
         raise ValueError(
@@ -3820,8 +3922,8 @@ def _subsample_raster(
         )
 
     # Rename data column if a different band is selected but the name is still default
-    if rename_default_data_column and data_band != 1 and data_column_name == "b1":
-        data_column_name = "b" + str(data_band)
+    if rename_default_data_name and data_band != 1 and data_name == "b1":
+        data_name = "b" + str(data_band)
 
     # Auxiliary data columns checks
     if auxiliary_column_names is not None and auxiliary_data_bands is None:
@@ -3860,7 +3962,7 @@ def _subsample_raster(
 
     # Build the ordered band and column lists used by every execution backend
     all_bands = [data_band] + auxiliary_data_bands
-    all_column_names = [data_column_name] + auxiliary_column_names
+    all_column_names = [data_name] + auxiliary_column_names
 
     if len(set(all_column_names)) != len(all_column_names) or "geometry" in all_column_names:
         raise ValueError("Point cloud data column names must be unique and cannot be 'geometry'.")
@@ -3891,7 +3993,7 @@ def _subsample_raster(
             source_raster=source_raster,
             bands=all_bands,
             column_names=all_column_names,
-            data_column_name=data_column_name,
+            data_name=data_name,
             subsample=subsample,
             skip_nodata=skip_nodata,
             random_state=random_state,
@@ -3905,13 +4007,13 @@ def _subsample_raster(
             source_raster=source_raster,
             bands=all_bands,
             column_names=all_column_names,
-            data_column_name=data_column_name,
+            data_name=data_name,
             subsample=subsample,
             skip_nodata=skip_nodata,
             random_state=random_state,
             force_pixel_offset=force_pixel_offset,
             mp_config=mp_config,
-            as_array=as_array,
+            as_array=bool(as_array),
             force_output_to_memory=force_output_to_memory,
         )
 
@@ -3919,7 +4021,7 @@ def _subsample_raster(
         source_raster=source_raster,
         bands=all_bands,
         column_names=all_column_names,
-        data_column_name=data_column_name,
+        data_name=data_name,
         subsample=subsample,
         skip_nodata=skip_nodata,
         random_state=random_state,

@@ -18,6 +18,7 @@ from geopandas.testing import assert_geodataframe_equal, assert_geoseries_equal
 from pandas.testing import assert_series_equal
 from shapely.geometry.base import BaseGeometry
 from shapely.geometry.linestring import LineString
+from shapely.geometry.point import Point
 from shapely.geometry.polygon import Polygon
 
 import geoutils as gu
@@ -73,7 +74,7 @@ class TestVector:
         assert not vector.is_loaded
 
         # Accessing the full dataframe triggers loading and matches GeoPandas
-        assert_geodataframe_equal(vector.ds, eager)
+        assert_geodataframe_equal(vector.gdf, eager)
         assert vector.is_loaded
 
     def test_init__select_file_layer(self, tmp_path: pathlib.Path) -> None:
@@ -92,7 +93,7 @@ class TestVector:
         np.testing.assert_array_equal(vector.total_bounds, second.total_bounds)
 
         # Load the selected layer and compare it with the original frame
-        assert_geodataframe_equal(vector.ds, second)
+        assert_geodataframe_equal(vector.gdf, second)
 
     def test_copy(self) -> None:
 
@@ -103,8 +104,8 @@ class TestVector:
         assert vector2 is not vector
 
         # Modify vector2, and check vector is not affected
-        vector2.ds = vector2.ds.query("RGIId == 'RGI60-17.08409'")
-        assert vector2.ds.shape[0] < vector.ds.shape[0]
+        vector2.gdf = vector2.gdf.query("RGIId == 'RGI60-17.08409'")
+        assert vector2.gdf.shape[0] < vector.gdf.shape[0]
 
     def test_info(self) -> None:
 
@@ -144,10 +145,10 @@ class TestVector:
         assert bounds.left < bounds.right
         assert bounds.bottom < bounds.top
 
-        assert bounds.left == vector.ds.total_bounds[0]
-        assert bounds.bottom == vector.ds.total_bounds[1]
-        assert bounds.right == vector.ds.total_bounds[2]
-        assert bounds.top == vector.ds.total_bounds[3]
+        assert bounds.left == vector.gdf.total_bounds[0]
+        assert bounds.bottom == vector.gdf.total_bounds[1]
+        assert bounds.right == vector.gdf.total_bounds[2]
+        assert bounds.top == vector.gdf.total_bounds[3]
 
     def test_footprint(self) -> None:
 
@@ -199,10 +200,6 @@ class TestVector:
         else:
             plt.close()
         assert os.path.isfile(temp_file)
-
-
-class NeedToImplementWarning(FutureWarning):
-    """Warning to remember to implement new GeoPandas methods"""
 
 
 class TestGeoPandasMethods:
@@ -345,10 +342,6 @@ class TestGeoPandasMethods:
         main_properties + nongeo_methods + nongeo_properties + geo_methods + geo_properties + other + io_methods
     )
 
-    # Methods that are implemented but difficult to test, so we only check consistency of signature (name/args),
-    # but we skip the test with placeholder data
-    exceptions_skip_test = ["interpolate", "project", "shared_paths"]
-
     # Exceptions for GeoPandasBase functions not implemented (or deprecrated) in GeoSeries/GeoDataFrame
     exceptions_unimplemented = [
         "plot",  # Own implementation in Vector
@@ -399,9 +392,7 @@ class TestGeoPandasMethods:
         list_missing = [method for method in covered_methods if method not in self.all_declared]
 
         if len(list_missing) != 0:
-            warnings.warn(
-                f"New GeoPandas methods are not implemented in GeoUtils: {list_missing}", NeedToImplementWarning
-            )
+            pytest.xfail(f"GeoPandas methods not implemented in GeoUtils: {list_missing}")
 
     @pytest.mark.parametrize("method", nongeo_methods + geo_methods)
     def test_overridden_funcs_args(self, method: str) -> None:
@@ -421,21 +412,25 @@ class TestGeoPandasMethods:
         # Get a full argument inspection object for each class
         argspec_upstream = inspect.getfullargspec(getattr(upstream_class, method))
         argspec_geoutils = inspect.getfullargspec(getattr(gu.Vector, method))
+        differences = []
 
         # Check that all positional arguments are the same
         if argspec_upstream.args != argspec_geoutils.args:
-            warnings.warn("Argument of GeoPandas method not consistent in GeoUtils.", NeedToImplementWarning)
+            differences.append("positional arguments")
 
         # Check that the *args and **kwargs argument are declared consistently
         if argspec_upstream.varargs != argspec_geoutils.varargs:
-            warnings.warn("Argument of GeoPandas method not consistent in GeoUtils.", NeedToImplementWarning)
+            differences.append("*args")
 
         if argspec_upstream.varkw != argspec_geoutils.varkw:
-            warnings.warn("Argument of GeoPandas method not consistent in GeoUtils.", NeedToImplementWarning)
+            differences.append("**kwargs")
 
         # Check that default argument values are the same
         if argspec_upstream.defaults != argspec_geoutils.defaults:
-            warnings.warn("Default argument of GeoPandas method not consistent in GeoUtils.", NeedToImplementWarning)
+            differences.append("defaults")
+
+        if differences:
+            pytest.xfail(f"GeoUtils {method}() differs from GeoPandas in {', '.join(differences)}")
 
     @pytest.mark.parametrize("vector", [synthvec1, synthvec2, realvec1, realvec2])
     @pytest.mark.parametrize("method", nongeo_properties)
@@ -448,14 +443,14 @@ class TestGeoPandasMethods:
 
         # Get method for each class
         output_geoutils = getattr(vector, method)
-        output_geopandas = getattr(vector.ds, method)
+        output_geopandas = getattr(vector.gdf, method)
 
         # Assert equality
         assert_series_equal(output_geoutils, output_geopandas)
 
     @pytest.mark.parametrize("vector1", [synthvec1, realvec1])
     @pytest.mark.parametrize("vector2", [synthvec2, realvec2])
-    @pytest.mark.parametrize("method", nongeo_methods)
+    @pytest.mark.parametrize("method", [method for method in nongeo_methods if method != "project"])
     def test_nongeo_methods(self, vector1: gu.Vector, vector2: gu.Vector, method: str) -> None:
         """
         Check non-geometric methods are consistent with GeoPandas.
@@ -469,9 +464,7 @@ class TestGeoPandasMethods:
         # Get method for each class
 
         # Methods with no input
-        if method in self.exceptions_skip_test:
-            return
-        elif method in [
+        if method in [
             "is_valid_reason",
             "count_coordinates",
             "count_geometries",
@@ -482,19 +475,19 @@ class TestGeoPandasMethods:
             "hilbert_distance",
         ]:
             output_geoutils = getattr(vector1, method)()
-            output_geopandas = getattr(vector1.ds, method)()
+            output_geopandas = getattr(vector1.gdf, method)()
         elif method == "geom_equals_exact":
             output_geoutils = getattr(vector1, method)(vector2, tolerance=0.1)
-            output_geopandas = getattr(vector1.ds, method)(vector2.ds, tolerance=0.1)
+            output_geopandas = getattr(vector1.gdf, method)(vector2.gdf, tolerance=0.1)
         elif method == "dwithin":
             output_geoutils = getattr(vector1, method)(vector2, distance=0.1)
-            output_geopandas = getattr(vector1.ds, method)(vector2.ds, distance=0.1)
+            output_geopandas = getattr(vector1.gdf, method)(vector2.gdf, distance=0.1)
         elif method == "relate_pattern":
             output_geoutils = getattr(vector1, method)(vector2, pattern="*T*******")
-            output_geopandas = getattr(vector1.ds, method)(vector2.ds, pattern="*T*******")
+            output_geopandas = getattr(vector1.gdf, method)(vector2.gdf, pattern="*T*******")
         else:
             output_geoutils = getattr(vector1, method)(vector2)
-            output_geopandas = getattr(vector1.ds, method)(vector2.ds)
+            output_geopandas = getattr(vector1.gdf, method)(vector2.gdf)
 
         # Assert equality
         assert_series_equal(output_geoutils, output_geopandas)
@@ -510,7 +503,7 @@ class TestGeoPandasMethods:
 
         # Get method for each class
         output_geoutils = getattr(vector, method)
-        output_geopandas = getattr(vector.ds, method)
+        output_geopandas = getattr(vector.gdf, method)
 
         # Assert output types
         assert isinstance(output_geoutils, gu.Vector)
@@ -519,13 +512,13 @@ class TestGeoPandasMethods:
         # Separate cases depending on GeoPandas' output
         if isinstance(output_geopandas, gpd.GeoSeries):
             # Assert geoseries equality
-            assert_geoseries_equal(output_geoutils.ds.geometry, output_geopandas)
+            assert_geoseries_equal(output_geoutils.gdf.geometry, output_geopandas)
         elif isinstance(output_geopandas, BaseGeometry):
             assert_geodataframe_equal(
-                output_geoutils.ds, gpd.GeoDataFrame({"geometry": [output_geopandas]}, crs=vector.crs)
+                output_geoutils.gdf, gpd.GeoDataFrame({"geometry": [output_geopandas]}, crs=vector.crs)
             )
         else:
-            assert_geodataframe_equal(output_geoutils.ds, output_geopandas)
+            assert_geodataframe_equal(output_geoutils.gdf, output_geopandas)
 
     specific_method_args = {
         "buffer": {"distance": 1},
@@ -535,7 +528,6 @@ class TestGeoPandasMethods:
         "rotate": {"angle": 90},
         "scale": {"xfact": 1.1, "yfact": 1.1, "zfact": 1.1, "origin": "center"},
         "skew": {"xs": 1.1, "ys": 1.1},
-        "interpolate": {"distance": 1},
         "simplify": {"tolerance": 0.1},
         "to_crs": {"crs": pyproj.CRS.from_epsg(32610)},
         "set_crs": {"crs": pyproj.CRS.from_epsg(32610), "allow_override": True},
@@ -555,7 +547,9 @@ class TestGeoPandasMethods:
 
     @pytest.mark.parametrize("vector1", [synthvec1, realvec1])
     @pytest.mark.parametrize("vector2", [synthvec2, realvec2])
-    @pytest.mark.parametrize("method", geo_methods)
+    @pytest.mark.parametrize(
+        "method", [method for method in geo_methods if method not in ("interpolate", "shared_paths")]
+    )
     def test_geo_methods(self, vector1: gu.Vector, vector2: gu.Vector, method: str) -> None:
         """Check geometric methods are consistent with GeoPandas."""
 
@@ -564,9 +558,7 @@ class TestGeoPandasMethods:
         warnings.simplefilter("ignore", category=FutureWarning)
 
         # Methods that require two inputs
-        if method in self.exceptions_skip_test:
-            return
-        elif method in [
+        if method in [
             "difference",
             "symmetric_difference",
             "union",
@@ -577,7 +569,7 @@ class TestGeoPandasMethods:
             "shortest_line",
         ]:
             output_geoutils = getattr(vector1, method)(vector2)
-            output_geopandas = getattr(vector1.ds, method)(vector2.ds)
+            output_geopandas = getattr(vector1.gdf, method)(vector2.gdf)
         # Methods that require zero input
         elif method in [
             "representative_point",
@@ -598,13 +590,13 @@ class TestGeoPandasMethods:
             "line_merge",
         ]:
             output_geoutils = getattr(vector1, method)()
-            output_geopandas = getattr(vector1.ds, method)()
+            output_geopandas = getattr(vector1.gdf, method)()
         elif method in ["snap"]:
             output_geoutils = getattr(vector1, method)(vector2, tolerance=0.1)
-            output_geopandas = getattr(vector1.ds, method)(vector2.ds, tolerance=0.1)
+            output_geopandas = getattr(vector1.gdf, method)(vector2.gdf, tolerance=0.1)
         elif method in self.specific_method_args.keys():
             output_geoutils = getattr(vector1, method)(**self.specific_method_args[method])
-            output_geopandas = getattr(vector1.ds, method)(**self.specific_method_args[method])
+            output_geopandas = getattr(vector1.gdf, method)(**self.specific_method_args[method])
         else:
             raise ValueError(f"The method '{method}' is not covered by this test.")
 
@@ -613,18 +605,51 @@ class TestGeoPandasMethods:
         assert isinstance(output_geopandas, (BaseGeometry, gpd.GeoSeries, gpd.GeoDataFrame))
 
         # Separate cases depending on GeoPandas' output, and nature of the function
-        # Simplify is a special case that can make geometries invalid, so adjust test
+        # Simplify can make geometries invalid, so compare their repaired results
         if method == "simplify":
-            # TODO: Unskip this random test failure (one index not matching) when this is fixed in GeoPandas/Shapely
-            pass
-            # assert_geoseries_equal(
-            #     output_geopandas.make_valid(), output_geoutils.ds.geometry.make_valid(), check_less_precise=True
-            # )
+            assert_geoseries_equal(
+                output_geopandas.make_valid(), output_geoutils.gdf.geometry.make_valid(), check_less_precise=True
+            )
         elif isinstance(output_geopandas, BaseGeometry):
-            output_geopandas.equals(output_geoutils.ds.geometry)
+            output_geopandas.equals(output_geoutils.gdf.geometry)
         # For geoseries output, check equality of it
         elif isinstance(output_geopandas, gpd.GeoSeries):
-            assert_geoseries_equal(output_geoutils.ds.geometry, output_geopandas)
+            assert_geoseries_equal(output_geoutils.gdf.geometry, output_geopandas)
         # For geodataframe output, check equality
         else:
-            assert_geodataframe_equal(output_geoutils.ds, output_geopandas)
+            assert_geodataframe_equal(output_geoutils.gdf, output_geopandas)
+
+    def test_project(self) -> None:
+        """Checks that project() returns the distance of a point along a line."""
+
+        # Line/point definitions
+        line = gu.Vector(gpd.GeoDataFrame(geometry=[LineString([(0, 0), (2, 0)])], crs=32633))
+        point = gu.Vector(gpd.GeoDataFrame(geometry=[Point(1, 0)], crs=32633))
+
+        # Compare with GeoPandas and known position
+        distance = line.project(point)
+        assert_series_equal(distance, line.gdf.project(point.gdf))
+        assert distance.iloc[0] == 1
+
+    def test_interpolate(self) -> None:
+        """Checks that interpolate() returns a point at the requested distance along a line."""
+
+        # Line definition
+        line = gu.Vector(gpd.GeoDataFrame(geometry=[LineString([(0, 0), (2, 0)])], crs=32633))
+
+        # Compare with GeoPandas and midpoint
+        point = line.interpolate(1)
+        assert_geoseries_equal(point.gdf.geometry, line.gdf.interpolate(1))
+        assert point.gdf.geometry.iloc[0].equals(Point(1, 0))
+
+    def test_shared_paths(self) -> None:
+        """Checks that shared_paths() returns the common segment of two lines."""
+
+        # We overlap two line segments for one unit
+        line = gu.Vector(gpd.GeoDataFrame(geometry=[LineString([(0, 0), (2, 0)])], crs=32633))
+        other = gu.Vector(gpd.GeoDataFrame(geometry=[LineString([(1, 0), (3, 0)])], crs=32633))
+
+        # Compare with GeoPandas
+        shared = line.shared_paths(other)
+        assert_geoseries_equal(shared.gdf.geometry, line.gdf.shared_paths(other.gdf))
+        assert shared.gdf.geometry.iloc[0].length == 1

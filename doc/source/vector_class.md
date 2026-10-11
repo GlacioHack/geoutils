@@ -22,7 +22,7 @@ Below, a summary of the {class}`~geoutils.Vector` object and its methods.
 
 ## Object definition and attributes
 
-A {class}`~geoutils.Vector` contains **a single main attribute**: a {class}`~geopandas.GeoDataFrame` as {attr}`~geoutils.Vector.ds`.
+A {class}`~geoutils.Vector` contains **a single main attribute**: a {class}`~geopandas.GeoDataFrame` as {attr}`~geoutils.Vector.gdf`.
 
 All other attributes are derivatives of the {class}`~geopandas.GeoDataFrame`.
 
@@ -30,7 +30,7 @@ In short, {class}`~geoutils.Vector` is a "convenience" composition class built o
 {class}`geoutils.Vector`, facilitate the interface with {class}`~geoutils.Raster`, and allow the addition of more complex vector functionalities.
 
 **All geometric functionalities of {class}`~geopandas.GeoDataFrame`'s methods are available directly from a {class}`~geoutils.Vector`**, as if working
-directly on the {class}`~geopandas.GeoDataFrame`. Dataframe functionalities from Pandas can be called from its {attr}`~geoutils.Vector.ds`.
+directly on the {class}`~geopandas.GeoDataFrame`. Dataframe functionalities from Pandas can be called from its {attr}`~geoutils.Vector.gdf`.
 
 ```{caution}
 The {attr}`~geoutils.Vector.bbox` attribute of a {class}`~geoutils.Vector` corresponds to the {attr}`~geopandas.GeoDataFrame.total_bounds` attribute of a

@@ -16,24 +16,24 @@ kernelspec:
 
 In GeoUtils, georeferenced rasters are exposed through two interfaces:
 
-- The Xarray {class}`rst <geoutils.RasterAccessor>` accessor for a {class}`xarray.DataArray`,
+- The Xarray {class}`rst <geoutils.DataArrayRasterAccessor>` accessor for a {class}`xarray.DataArray`,
 - The {class}`~geoutils.Raster`.
 
-For new workflows, we **recommend using the {class}`rst <geoutils.RasterAccessor>` accessor**, and using either only accessors or only GeoUtils objects.
+For new workflows, we **recommend using the {class}`rst <geoutils.DataArrayRasterAccessor>` accessor**, and using either only accessors or only GeoUtils objects.
 While their behaviour is almost entirely similar, there are some differences that are summarized directly below.
 
-## Accessor {class}`rst <geoutils.RasterAccessor>` versus {class}`~geoutils.Raster`
+## Accessor {class}`rst <geoutils.DataArrayRasterAccessor>` versus {class}`~geoutils.Raster`
 
 The main differences are the following:
 
-1. A {class}`~geoutils.Raster` relies on NumPy's {class}`~numpy.ma.MaskedArray` to **manipulate integer-type arrays while respecting {attr}`~geoutils.Raster.nodata`** values, while through Xarray the {class}`rst <geoutils.RasterAccessor>` accessor only supports floating-type {class}`~numpy.ndarray` to propagate NaNs. We thus **enforce conversion of {class}`~xarray.DataArray` to floating-type on file opening**.
+1. A {class}`~geoutils.Raster` relies on NumPy's {class}`~numpy.ma.MaskedArray` to **manipulate integer-type arrays while respecting {attr}`~geoutils.Raster.nodata`** values, while through Xarray the {class}`rst <geoutils.DataArrayRasterAccessor>` accessor only supports floating-type {class}`~numpy.ndarray` to propagate NaNs. We thus **enforce conversion of {class}`~xarray.DataArray` to floating-type on file opening**.
 
 2. A {class}`~geoutils.Raster` has **control over data-structure operations** (e.g. {func}`+<operator.add>`, {func}`-<operator.sub>`, or NumPy interfacing), allowing to raise errors where appropriate
 (e.g., if two rasters have same shape but different {attr}`~geoutils.Raster.crs`). For a {class}`~xarray.DataArray`, these operations **rely on user's rigour** but errors should be scarce as {attr}`~geoutils.Raster.shape` is checked during Xarray casting.
 
 3. A {class}`~geoutils.Raster` can have **ambiguous casting behaviour** for subclasses (e.g., a {class}`~xdem.DEM`) making maintenance difficult, while accessors' **data-structure-centered mechanism enables clearer interfacing**.
 
-4. A {class}`~geoutils.Raster` currently only supports **Multiprocessing** as scalable backend which is not lazy, while the {class}`rst <geoutils.RasterAccessor>` accessor supports **Dask**, allowing lazy graph building.
+4. A {class}`~geoutils.Raster` currently only supports **Multiprocessing** as scalable backend which is not lazy, while the {class}`rst <geoutils.DataArrayRasterAccessor>` accessor supports **Dask**, allowing lazy graph building.
 
 ```{important}
 To avoid accidentally propagating raw nodata values through operations, **{meth}`~geoutils.open_raster` forces conversion of the {class}`~xarray.DataArray` to floating-type to use NaNs**.
@@ -46,7 +46,7 @@ While this increases memory usage, it can be mitigated by using **Dask**. See th
 
 A **raster** has **four main attributes**:
 
-1. a data array {attr}`~geoutils.Raster.data`, as a {class}`numpy.ma.MaskedArray` ({class}`~geoutils.Raster`) or {class}`numpy.ndarray` ({class}`rst <geoutils.RasterAccessor>` accessor) of either {class}`~numpy.integer` or {class}`~numpy.floating` {class}`~numpy.dtype` (forced to {class}`~numpy.floating` for {class}`rst <geoutils.RasterAccessor>` accessor),
+1. a data array {attr}`~geoutils.Raster.data`, as a {class}`numpy.ma.MaskedArray` ({class}`~geoutils.Raster`) or {class}`numpy.ndarray` ({class}`rst <geoutils.DataArrayRasterAccessor>` accessor) of either {class}`~numpy.integer` or {class}`~numpy.floating` {class}`~numpy.dtype` (forced to {class}`~numpy.floating` for {class}`rst <geoutils.DataArrayRasterAccessor>` accessor),
 2. a geotransform {attr}`~geoutils.Raster.transform`, as a [{class}`affine.Affine`](https://rasterio.readthedocs.io/en/stable/topics/migrating-to-v1.html#affine-affine-vs-gdal-style-geotransforms) object,
 3. a coordinate reference system {attr}`~geoutils.Raster.crs`, as a {class}`pyproj.crs.CRS` object, and
 4. a nodata value {attr}`~geoutils.Raster.nodata`, as a {class}`float` or {class}`int`.
@@ -70,15 +70,12 @@ multi-band raster!
 ```
 
 Finally, the remaining attributes are only relevant when instantiating from an **on-disk** file: {attr}`~geoutils.Raster.name`, {attr}`~geoutils.Raster.driver`,
-{attr}`~geoutils.Raster.count_on_disk`, {attr}`~geoutils.Raster.bands_on_disk`, {attr}`~geoutils.Raster.is_loaded` and {attr}`~geoutils.Raster.is_modified`.
+and {attr}`~geoutils.Raster.is_loaded`.
 
 
 ```{note}
-The {attr}`~geoutils.Raster.count` and {attr}`~geoutils.Raster.bands` attributes always exist, while {attr}`~geoutils.Raster.count_on_disk` and
-{attr}`~geoutils.Raster.bands_on_disk` only refers to the number of bands on the **on-disk** dataset, if it exists.
-
-For example, {attr}`~geoutils.Raster.count` and {attr}`~geoutils.Raster.count_on_disk` will differ when a single band is loaded from a
-3-band **on-disk** file, by passing a single index to the `bands` argument in **raster** or {func}`~geoutils.Raster.load`.
+The {attr}`~geoutils.Raster.count` and {attr}`~geoutils.Raster.bands` describe the selected bands.
+For example, loading one band from a 3-band file by passing a single index to `bands` gives a count of 1.
 ```
 
 The complete list of **raster** attributes with description is available in {ref}`dedicated sections of the API<api-raster-attrs>`.

@@ -150,7 +150,7 @@ class TestSupport:
             None,
             input_support=raster,
             support=support,
-            support_dataframe=support.ds,
+            support_dataframe=support.gdf,
             name="values",
             interpolation="nearest",
             align="raise",
@@ -167,8 +167,8 @@ class TestSupport:
         # Create point values with duplicate row labels and a separate numeric column
         positions = np.arange(5, dtype=float)
         points = gu.PointCloud.from_xyz(positions, positions, positions + 10, crs=32633)
-        points.ds["weight"] = 2 * positions
-        points.ds.index = ["a", "b", "a", "c", "b"]
+        points.gdf["weight"] = 2 * positions
+        points.gdf.index = ["a", "b", "a", "c", "b"]
 
         # Read the selected column at the same ordered point locations
         result = _values_at_support(
@@ -176,7 +176,7 @@ class TestSupport:
             "weight",
             input_support=points,
             support=points,
-            support_dataframe=points.ds,
+            support_dataframe=points.gdf,
             name="weight",
             interpolation="nearest",
             align="raise",
@@ -184,7 +184,7 @@ class TestSupport:
         )
 
         # The returned array should follow dataframe row order (even when several rows have the same index label)
-        expected = points.ds["weight"].to_numpy()
+        expected = points.gdf["weight"].to_numpy()
         assert np.array_equal(result, expected)
 
     def test_mask_at_support__vector_on_raster(self) -> None:
@@ -215,7 +215,7 @@ class TestSupport:
         mask = gu.Vector(gpd.GeoDataFrame(geometry=[box(0, 3, 3, 6)], crs=raster.crs))
 
         # Create the polygon mask on the point support with inside/outside mode
-        result = _mask_at_support(mask, points, support_dataframe=points.ds, mask_mode=mask_mode)
+        result = _mask_at_support(mask, points, support_dataframe=points.gdf, mask_mode=mask_mode)
         assert result is not None
 
         # Check exact boolean output is as expected
@@ -237,7 +237,7 @@ class TestSupport:
         points = gu.PointCloud.from_xyz(x, y, np.arange(5, dtype=float), crs=raster.crs)
 
         # Read the boolean raster at each point location
-        result = _mask_at_support(mask, points, support_dataframe=points.ds)
+        result = _mask_at_support(mask, points, support_dataframe=points.gdf)
         assert result is not None
 
         # Check true pixels, false pixels, and the point outside the raster
@@ -252,7 +252,7 @@ class TestSupport:
         mask = np.ma.array([True, True, True, False, True], mask=[False, False, True, False, False])
 
         # Place the plain mask array on the ordered point support
-        result = _mask_at_support(mask, points, support_dataframe=points.ds)
+        result = _mask_at_support(mask, points, support_dataframe=points.gdf)
         assert result is not None
 
         # Check that only true, finite mask entries remain selected

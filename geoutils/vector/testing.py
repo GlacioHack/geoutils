@@ -36,7 +36,7 @@ from geoutils._misc import import_optional
 def _get_dataframe(obj: Any) -> Any:
     """Return an eager or Dask GeoDataFrame without computing it."""
 
-    ds = obj if isinstance(obj, gpd.GeoDataFrame) or is_dask_dataframe(obj) else get_geo_attr(obj, "ds")
+    ds = obj if isinstance(obj, gpd.GeoDataFrame) or is_dask_dataframe(obj) else get_geo_attr(obj, "_dataset")
     if not isinstance(ds, gpd.GeoDataFrame) and not is_dask_dataframe(ds):
         raise TypeError(f"Expected a Vector or GeoDataFrame, received {type(obj).__name__}.")
     return ds

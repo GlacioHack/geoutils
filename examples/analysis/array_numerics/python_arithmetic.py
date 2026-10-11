@@ -2,7 +2,7 @@
 Python arithmetic
 =================
 
-This example demonstrates arithmetic operations using raster arithmetic on :class:`xarray.DataArray` objects with the :class:`rst <geoutils.RasterAccessor>` accessor. See :ref:`core-py-ops` for more details.
+This example demonstrates arithmetic operations using raster arithmetic on :class:`xarray.DataArray` objects with the :class:`rst <geoutils.DataArrayRasterAccessor>` accessor. See :ref:`core-py-ops` for more details.
 """
 
 # %%

@@ -20,7 +20,7 @@ This **summary page** introduces scalability concepts, demonstrates usage, and l
 
 GeoUtils relies on two execution backends:
 
-- **Dask**, through its {class}`rst <geoutils.RasterAccessor>` Xarray accessor and {class}`vct <geoutils.VectorAccessor>` and {class}`pc <geoutils.PointCloudAccessor>` Pandas accessors (**lazy** and **chunked** execution),
+- **Dask**, through its {class}`rst <geoutils.DataArrayRasterAccessor>` Xarray accessor and {class}`vct <geoutils.VectorAccessor>` and {class}`pc <geoutils.GeoPandasPointCloudAccessor>` Pandas accessors (**lazy** and **chunked** execution),
 - **Multiprocessing**, through its {class}`~geoutils.Raster`, {class}`~geoutils.Vector` and {class}`~geoutils.PointCloud` objects for supported methods (**chunked** execution only).
 
 Both backends mirror the **exact same object operations and chunked logic**, and yield **identical** results as in-memory operations.
@@ -29,7 +29,7 @@ For details on scalability concepts, see the {ref}`scalability-concept` page.
 
 As a rule of thumb:
 
-- Use **Dask** to work on **Xarray and GeoPandas objects** through our accessors {class}`rst <geoutils.RasterAccessor>`, {class}`vct <geoutils.VectorAccessor>` and {class}`pc <geoutils.PointCloudAccessor>`, and if you want to chain several operations lazily.
+- Use **Dask** to work on **Xarray and GeoPandas objects** through our accessors {class}`rst <geoutils.DataArrayRasterAccessor>`, {class}`vct <geoutils.VectorAccessor>` and {class}`pc <geoutils.GeoPandasPointCloudAccessor>`, and if you want to chain several operations lazily.
 - Use **Multiprocessing** to work with our {class}`~geoutils.Raster`, {class}`~geoutils.Vector` and {class}`~geoutils.PointCloud` objects, and if you are fine with intermediate writing/reading between steps.
 - Use standard **in-memory execution** to work efficiently on small datasets, which is possible even if those were loaded from larger files (keep in mind that {meth}`~RasterBase.crop` or {meth}`~RasterBase.subsample` only load requested data, even without Dask/Multiprocessing).
 
@@ -56,7 +56,7 @@ ds = gu.open_raster(filename_rast, chunks={"x": 200, "y": 200})
 ds
 ```
 
-GeoUtils, through the {class}`rst <geoutils.RasterAccessor>` accessor, automatically detects the **Dask** input and switches to a chunked implementation for the given operation, for example to
+GeoUtils, through the {class}`rst <geoutils.DataArrayRasterAccessor>` accessor, automatically detects the **Dask** input and switches to a chunked implementation for the given operation, for example to
 {meth}`reproject() <RasterBase.reproject>` to a different resolution:
 
 ```{code-cell} python

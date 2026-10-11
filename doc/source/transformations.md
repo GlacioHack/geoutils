@@ -42,7 +42,7 @@ pyplot.rcParams['font.size'] = 9
 
 {meth}`ds.rst.reproject() or Raster.reproject() <RasterBase.reproject>`<br>
 {meth}`gdf.vct.reproject() or Vector.reproject() <VectorBase.reproject>`<br>
-{meth}`gdf.pc.reproject() or PointCloud.reproject() <PointCloudBase.reproject>`
+{meth}`gdf.pc.reproject() or PointCloud.reproject() <geoutils.pointcloud.base.GeometryPointCloudBase.reproject>`
 
 Reprojection **transforms data from one coordinate reference system to another**.
 
@@ -149,7 +149,7 @@ plt.tight_layout()
 
 {meth}`ds.rst.crop() or Raster.crop() <RasterBase.crop>`<br>
 {meth}`gdf.vct.crop() or Vector.crop() <VectorBase.crop>`<br>
-{meth}`gdf.pc.crop() or PointCloud.crop() <PointCloudBase.crop>`
+{meth}`gdf.pc.crop() or PointCloud.crop() <geoutils.pointcloud.base.GeometryPointCloudBase.crop>`
 
 Cropping **selects data in a rectangular extent** without modifying the selected values or geometries. A file-backed
 raster, vector or point cloud can store this selection and defer reading until its data are requested.
@@ -184,7 +184,7 @@ plt.tight_layout()
 
 {meth}`ds.rst.clip() or Raster.clip() <RasterBase.clip>`<br>
 {meth}`gdf.vct.clip() or Vector.clip() <VectorBase.clip>`<br>
-{meth}`gdf.pc.clip() or PointCloud.clip() <PointCloudBase.clip>`
+{meth}`gdf.pc.clip() or PointCloud.clip() <geoutils.pointcloud.base.GeometryPointCloudBase.clip>`
 
 Clipping **cuts values within exact geometry**. It masks raster cells outside the geometry, removes point
 cloud rows outside it, and cuts vector geometries at its boundary. Raster, vector and point cloud clipping support
@@ -216,7 +216,7 @@ plt.tight_layout()
 
 {meth}`ds.rst.translate() or Raster.translate() <RasterBase.translate>`<br>
 {meth}`gdf.vct.translate() or Vector.translate() <VectorBase.translate>`<br>
-{meth}`gdf.pc.translate() or PointCloud.translate() <PointCloudBase.translate>`
+{meth}`gdf.pc.translate() or PointCloud.translate() <geoutils.pointcloud.base.GeometryPointCloudBase.translate>`
 
 Translations **applies a horizontal offset to the georeferencing** without modifying the underlying data,
 which is especially useful to align the data due to positioning errors.
@@ -398,7 +398,7 @@ plt.tight_layout()
 
 ### Interpolation at points
 
-{meth}`ds.rst.interp_points() or Raster.interp_points() <RasterBase.interp_points>`
+{meth}`ds.rst.interp_at_points() or Raster.interp_at_points() <RasterBase.interp_at_points>`
 
 Point interpolation of a raster **consists in estimating the values at exact point coordinates by 2D regular-grid
 interpolation** such as nearest neighbour, bilinear (default), cubic, etc.
@@ -421,7 +421,7 @@ rng = np.random.default_rng(42)
 x_coords = rng.uniform(ds.rst.bbox.left, ds.rst.bbox.right, 50)
 y_coords = rng.uniform(ds.rst.bbox.bottom, ds.rst.bbox.top, 50)
 
-gdf_int = ds.rst.interp_points(points=(x_coords, y_coords))
+gdf_int = ds.rst.interp_at_points(points=(x_coords, y_coords))
 ```
 
 The interpolated points can be returned as a {class}`~geopandas.GeoDataFrame` or
@@ -448,10 +448,10 @@ Point reduction of a raster is **the estimation of the values at point coordinat
 median) to pixels contained in a window centered on the point**. For a window smaller than the pixel size, the value of
 the closest pixel is returned.
 
-{meth}`ds.rst.reduce_points() or Raster.reduce_points() <RasterBase.reduce_points>`
+{meth}`ds.rst.reduce_at_points() or Raster.reduce_at_points() <RasterBase.reduce_at_points>`
 
 ```{code-cell} ipython3
-gdf_red = ds.rst.reduce_points((x_coords, y_coords), window=5, reducer_function=np.nanmedian)
+gdf_red = ds.rst.reduce_at_points((x_coords, y_coords), window=5, reducer_function=np.nanmedian)
 ```
 
 The reduced points can be returned as a {class}`~geopandas.GeoDataFrame` or {class}`~geoutils.PointCloud`, enabling
