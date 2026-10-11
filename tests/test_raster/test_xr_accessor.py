@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from contextlib import nullcontext
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Literal
 
@@ -17,6 +18,7 @@ from shapely.geometry import box
 
 import geoutils as gu
 from geoutils import examples, open_raster
+from geoutils._misc import import_optional
 from geoutils.raster.base import RasterBase
 from tests.accessor_helpers import (
     assert_dataset_output_equal,
@@ -337,6 +339,27 @@ class TestDataArrayRasterAccessor:
         with rio.open(output_file) as output:
             assert output.nodata == ds.rst.nodata
 
+    @pytest.mark.parametrize("raster_gcp_rpc", ["rpc_polynomial", "rpc_rational"], indirect=True)
+    def test_to_file__explicit_rpcs(self, raster_gcp_rpc: gu.Raster, tmp_path: Path) -> None:
+        """Checks that to_file() writes explicit RPCs without assigning them to the input DataArray."""
+
+        # Create a DataArray with nodata sentinels and no stored GCPs/RPCs
+        source = raster_gcp_rpc
+        image = gu.DataArrayRasterAccessor.from_array(
+            source.data.filled(source.nodata), rio.Affine.identity(), None, nodata=source.nodata
+        )
+        filename = tmp_path / "explicit_rpcs.tif"
+
+        # Write the coefficients directly through the accessor
+        image.rst.to_file(filename, rpcs=source.rpcs)
+
+        # Rasterio must read the native RPC namespace while the input has no RPCs
+        with rio.open(filename) as dataset:
+            assert dataset.rpcs == source.rpcs
+            assert "RPC" not in dataset.tags()
+            np.testing.assert_array_equal(dataset.read(), source.data.filled(source.nodata))
+        assert image.rst.rpcs is None
+
     def test_cross_type_outputs_are_accessors(self) -> None:
         """Return accessor-backed vectors and point clouds when a raster operation changes type."""
 
@@ -446,6 +469,61 @@ class TestDataArrayRasterAccessor:
         rasterized_from_dataarray = polygons.vct.rasterize(ds, in_value=1, out_value=0, out_dtype=np.uint8)
         assert isinstance(rasterized_from_dataarray.data, da.Array)
         assert rasterized_from_dataarray.data.chunks == dask_arr.chunks
+
+    @pytest.mark.skipif(find_spec("dask") is None, reason="Dask is not installed")
+    @pytest.mark.parametrize("compute", [True, False])
+    def test_to_file__georeferencing(self, raster_gcp_rpc: gu.Raster, tmp_path: Path, compute: bool) -> None:
+        """Checks that immediate/deferred chunked writes preserve GCP/RPC metadata and exactly match eager files."""
+
+        dask = import_optional("dask")
+        from dask.callbacks import Callback
+
+        # Load an eager reference and split the same image into chunks of 7/9, including shorter final chunks
+        source = raster_gcp_rpc
+        eager = gu.open_raster(source.name).load()
+        lazy = gu.open_raster(source.name, chunks={"band": 1, "y": 7, "x": 9})
+        lazy.attrs["label"] = "input"
+        graph = lazy.data
+        assert eager.rst.is_loaded
+        assert eager.rst._chunks is None
+        assert lazy.rst._chunks is not None
+        assert not lazy.rst.is_loaded
+        eager_file = tmp_path / "eager.tif"
+        lazy_file = tmp_path / "chunked.tif"
+
+        # Write both files while leaving the Dask input lazy and its metadata unchanged
+        eager.rst.to_file(eager_file, tags={"label": "output"}, tiled=True, blockxsize=256, blockysize=256)
+        tasks = []
+        with Callback(pretask=lambda *args: tasks.append(1)):
+            pending = lazy.rst.to_file(
+                lazy_file, tags={"label": "output"}, tiled=True, blockxsize=256, blockysize=256, compute=compute
+            )
+            # A deferred write must leave every chunk unread until compute() is called
+            if compute:
+                assert pending is None
+            else:
+                assert dask.is_dask_collection(pending)
+                assert not tasks
+                pending.compute()
+            assert tasks
+        assert eager.rst.is_loaded
+        assert lazy.data is graph
+        assert not lazy.rst.is_loaded
+        assert lazy.attrs["label"] == "input"
+        assert lazy.rst.rpcs == source.rpcs
+
+        # Reopen unloaded results and compare values, missing pixels and GCPs/RPCs with eager output
+        expected = gu.Raster(eager_file)
+        result = gu.Raster(lazy_file)
+        assert not expected.is_loaded
+        assert not result.is_loaded
+        assert result.raster_equal(expected)
+        assert not source.is_loaded
+        assert not lazy.rst.is_loaded
+        with rio.open(lazy_file) as dataset:
+            assert "RPC" not in dataset.tags()
+            assert bool(dataset.tags(ns="RPC")) == (source.rpcs is not None)
+            assert dataset.tags()["label"] == "output"
 
     @pytest.mark.parametrize("as_type", ["geodataframe", "scene"])
     def test_open_raster__error_invalid_type(self, tmp_path: Path, as_type: str) -> None:

@@ -53,6 +53,7 @@ from geoutils.raster.referencing import (
     _cast_nodata,
     _cast_pixel_interpretation,
     _default_nodata,
+    _shift_gcps_rpcs,
 )
 from geoutils.raster.satimg import (
     decode_sensor_metadata,
@@ -427,6 +428,12 @@ class Raster(RasterBase):
 
                 self._transform = ds.transform
                 self._crs = ds.crs
+                self.gcps = ds.gcps
+                self.rpcs = ds.rpcs
+                if downsample != 1 and (self.gcps[0] or self.rpcs):
+                    raise NotImplementedError(
+                        "Reproject GCP/RPC rasters to an affine grid before opening with downsample."
+                    )
                 # Allow user to manually override the nodata value which may be specified in the file.
                 if force_nodata is not None:
                     self._nodata = force_nodata
@@ -853,6 +860,9 @@ class Raster(RasterBase):
         output._out_shape = (int(final_window.height), int(final_window.width))
         output._out_count = output.count
         output._set_transform(new_transform)
+        output.gcps, output.rpcs = _shift_gcps_rpcs(
+            self.gcps, self.rpcs, row_off=final_window.row_off, col_off=final_window.col_off
+        )
         return output
 
     def _load_only_mask(self, bands: int | list[int] | None = None, **kwargs: Any) -> NDArrayBool:
@@ -1000,6 +1010,9 @@ class Raster(RasterBase):
         area_or_point: Literal["Area", "Point"] | None = None,
         tags: dict[str, Any] = None,
         cast_nodata: bool = True,
+        *,
+        gcps: tuple[list[rio.control.GroundControlPoint], rio.crs.CRS | None] | None = None,
+        rpcs: rio.rpc.RPC | None = None,
     ) -> RasterType:
         """Create a raster from a numpy array and the georeferencing information.
 
@@ -1014,6 +1027,8 @@ class Raster(RasterBase):
         :param tags: Metadata stored in a dictionary.
         :param cast_nodata: Automatically cast nodata value to the default nodata for the new array type if not
             compatible. If False, will raise an error when incompatible.
+        :param gcps: Ground control points and their CRS as a (points, CRS) tuple, following Rasterio.
+        :param rpcs: Rational polynomial coefficients referenced to WGS84.
 
         :returns: Raster created from the provided array and georeferencing.
 
@@ -1042,6 +1057,8 @@ class Raster(RasterBase):
                 "nodata": nodata,
                 "area_or_point": area_or_point,
                 "tags": tags,
+                "gcps": copy.deepcopy(gcps) if gcps is not None else ([], None),
+                "rpcs": copy.deepcopy(rpcs),
             }
         )
 
@@ -1051,6 +1068,11 @@ class Raster(RasterBase):
         # Create handle to new memory file
         mfh = rio.io.MemoryFile()
 
+        # Read RPC dictionaries from metadata when no explicit model was assigned
+        rpcs = self.rpcs
+        if rpcs is None and self.tags.get("RPC") is not None:
+            rpcs = rio.rpc.RPC.from_gdal(self.tags["RPC"])
+
         # Write info to the memory file
         with rio.open(
             mfh,
@@ -1059,8 +1081,10 @@ class Raster(RasterBase):
             width=self.width,
             count=self.count,
             dtype=self.dtype,
-            crs=self.crs,
-            transform=self.transform,
+            crs=(self.gcps[1] or self.crs) if self.gcps[0] else self.crs,
+            transform=None if self.gcps[0] or (rpcs and self.transform == rio.Affine.identity()) else self.transform,
+            gcps=self.gcps[0] or None,
+            rpcs=rpcs,
             nodata=self.nodata,
             driver="GTiff",
         ) as ds:
@@ -1070,7 +1094,7 @@ class Raster(RasterBase):
                 ds.write(self.data)
 
             # Preserve custom tags and pixel interpretation when exporting through an in-memory file
-            ds.update_tags(**self.tags)
+            ds.update_tags(**{key: value for key, value in self.tags.items() if key != "RPC"})
 
         # Then open as a DatasetReader
         return mfh.open()
@@ -1257,7 +1281,9 @@ class Raster(RasterBase):
         out_data = self_data + other_data
 
         # Save to output Raster
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
+        out_rst = self.from_array(
+            out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop, gcps=self.gcps, rpcs=self.rpcs
+        )
 
         return out_rst
 
@@ -1290,7 +1316,9 @@ class Raster(RasterBase):
             self, other, operation_name="an arithmetic operation"
         )
         out_data = self_data - other_data
-        return self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
+        return self.from_array(
+            out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop, gcps=self.gcps, rpcs=self.rpcs
+        )
 
     # Skip Mypy not resolving forward operator typing with NumPy numbers: https://github.com/python/mypy/issues/11595
     def __rsub__(self: RasterType, other: NDArrayNum | Number) -> RasterType:  # type: ignore
@@ -1303,7 +1331,9 @@ class Raster(RasterBase):
             self, other, operation_name="an arithmetic operation"
         )
         out_data = other_data - self_data
-        return self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
+        return self.from_array(
+            out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop, gcps=self.gcps, rpcs=self.rpcs
+        )
 
     def __mul__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
         """
@@ -1317,7 +1347,9 @@ class Raster(RasterBase):
             self, other, operation_name="an arithmetic operation"
         )
         out_data = self_data * other_data
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
+        out_rst = self.from_array(
+            out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop, gcps=self.gcps, rpcs=self.rpcs
+        )
         return out_rst
 
     # Skip Mypy not resolving forward operator typing with NumPy numbers: https://github.com/python/mypy/issues/11595
@@ -1341,7 +1373,9 @@ class Raster(RasterBase):
             self, other, operation_name="an arithmetic operation"
         )
         out_data = self_data / other_data
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
+        out_rst = self.from_array(
+            out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop, gcps=self.gcps, rpcs=self.rpcs
+        )
         return out_rst
 
     # Skip Mypy not resolving forward operator typing with NumPy numbers: https://github.com/python/mypy/issues/11595
@@ -1355,7 +1389,9 @@ class Raster(RasterBase):
             self, other, operation_name="an arithmetic operation"
         )
         out_data = other_data / self_data
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
+        out_rst = self.from_array(
+            out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop, gcps=self.gcps, rpcs=self.rpcs
+        )
         return out_rst
 
     def __floordiv__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
@@ -1370,7 +1406,9 @@ class Raster(RasterBase):
             self, other, operation_name="an arithmetic operation"
         )
         out_data = self_data // other_data
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
+        out_rst = self.from_array(
+            out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop, gcps=self.gcps, rpcs=self.rpcs
+        )
         return out_rst
 
     # Skip Mypy not resolving forward operator typing with NumPy numbers: https://github.com/python/mypy/issues/11595
@@ -1384,7 +1422,9 @@ class Raster(RasterBase):
             self, other, operation_name="an arithmetic operation"
         )
         out_data = other_data // self_data
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
+        out_rst = self.from_array(
+            out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop, gcps=self.gcps, rpcs=self.rpcs
+        )
         return out_rst
 
     def __mod__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
@@ -1399,7 +1439,9 @@ class Raster(RasterBase):
             self, other, operation_name="an arithmetic operation"
         )
         out_data = self_data % other_data  # type: ignore
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop)
+        out_rst = self.from_array(
+            out_data, self.transform, self.crs, nodata=nodata, area_or_point=aop, gcps=self.gcps, rpcs=self.rpcs
+        )
         return out_rst
 
     def __pow__(self: RasterType, power: int | float) -> RasterType:
@@ -1413,7 +1455,15 @@ class Raster(RasterBase):
         # Calculate the product of arrays and save to new Raster
         out_data = self.data**power
         nodata = self.nodata
-        out_rst = self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=self.area_or_point)
+        out_rst = self.from_array(
+            out_data,
+            self.transform,
+            self.crs,
+            nodata=nodata,
+            area_or_point=self.area_or_point,
+            gcps=self.gcps,
+            rpcs=self.rpcs,
+        )
         return out_rst
 
     def __eq__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:  # type: ignore
@@ -1430,7 +1480,9 @@ class Raster(RasterBase):
             self, other, operation_name="an arithmetic operation"
         )
         out_data = self_data == other_data
-        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None, area_or_point=aop)
+        out_mask = self.from_array(
+            out_data, self.transform, self.crs, nodata=None, area_or_point=aop, gcps=self.gcps, rpcs=self.rpcs
+        )
         return out_mask
 
     def __ne__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:  # type: ignore
@@ -1447,7 +1499,9 @@ class Raster(RasterBase):
             self, other, operation_name="an arithmetic operation"
         )
         out_data = self_data != other_data
-        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None, area_or_point=aop)
+        out_mask = self.from_array(
+            out_data, self.transform, self.crs, nodata=None, area_or_point=aop, gcps=self.gcps, rpcs=self.rpcs
+        )
         return out_mask
 
     def __lt__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
@@ -1465,7 +1519,9 @@ class Raster(RasterBase):
             self, other, operation_name="an arithmetic operation"
         )
         out_data = self_data < other_data
-        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None, area_or_point=aop)
+        out_mask = self.from_array(
+            out_data, self.transform, self.crs, nodata=None, area_or_point=aop, gcps=self.gcps, rpcs=self.rpcs
+        )
         return out_mask
 
     def __le__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
@@ -1483,7 +1539,9 @@ class Raster(RasterBase):
             self, other, operation_name="an arithmetic operation"
         )
         out_data = self_data <= other_data
-        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None, area_or_point=aop)
+        out_mask = self.from_array(
+            out_data, self.transform, self.crs, nodata=None, area_or_point=aop, gcps=self.gcps, rpcs=self.rpcs
+        )
         return out_mask
 
     def __gt__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
@@ -1501,7 +1559,9 @@ class Raster(RasterBase):
             self, other, operation_name="an arithmetic operation"
         )
         out_data = self_data > other_data
-        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None, area_or_point=aop)
+        out_mask = self.from_array(
+            out_data, self.transform, self.crs, nodata=None, area_or_point=aop, gcps=self.gcps, rpcs=self.rpcs
+        )
         return out_mask
 
     def __ge__(self: RasterType, other: RasterType | NDArrayNum | Number) -> RasterType:
@@ -1519,7 +1579,9 @@ class Raster(RasterBase):
             self, other, operation_name="an arithmetic operation"
         )
         out_data = self_data >= other_data
-        out_mask = self.from_array(out_data, self.transform, self.crs, nodata=None, area_or_point=aop)
+        out_mask = self.from_array(
+            out_data, self.transform, self.crs, nodata=None, area_or_point=aop, gcps=self.gcps, rpcs=self.rpcs
+        )
         return out_mask
 
     def __and__(self: RasterType, other: RasterType | NDArrayBool) -> RasterType:
@@ -1648,7 +1710,15 @@ class Raster(RasterBase):
                 nodata = self.nodata
             else:
                 nodata = None if target_dtype == np.bool_ else _default_nodata(target_dtype)
-            return self.from_array(out_data, self.transform, self.crs, nodata=nodata, area_or_point=self.area_or_point)
+            return self.from_array(
+                out_data,
+                self.transform,
+                self.crs,
+                nodata=nodata,
+                area_or_point=self.area_or_point,
+                gcps=self.gcps,
+                rpcs=self.rpcs,
+            )
 
     def set_mask(self, mask: NDArrayBool | Raster) -> None:
         """
@@ -1696,6 +1766,8 @@ class Raster(RasterBase):
             "_area_or_point",
             "_bands",
             "_transform",
+            "_gcps",
+            "_rpcs",
             "_masked",
             "_is_mask",
             "_disk_shape",
@@ -1857,6 +1929,8 @@ class Raster(RasterBase):
                     crs=self.crs,
                     nodata=nodata,
                     area_or_point=aop,
+                    gcps=self.gcps,
+                    rpcs=self.rpcs,
                 )
 
             # If the universal function has two outputs (Note: no ufunc exists that has three outputs or more)
@@ -1868,8 +1942,16 @@ class Raster(RasterBase):
                     crs=self.crs,
                     nodata=nodata,
                     area_or_point=aop,
+                    gcps=self.gcps,
+                    rpcs=self.rpcs,
                 ), self.from_array(
-                    data=output[1], transform=self.transform, crs=self.crs, nodata=nodata, area_or_point=aop
+                    data=output[1],
+                    transform=self.transform,
+                    crs=self.crs,
+                    nodata=nodata,
+                    area_or_point=aop,
+                    gcps=self.gcps,
+                    rpcs=self.rpcs,
                 )
 
     def __array_function__(
@@ -1944,7 +2026,13 @@ class Raster(RasterBase):
                 if cast_required:
                     return tuple(
                         self.from_array(
-                            data=output, transform=self.transform, crs=self.crs, nodata=nodata, area_or_point=aop
+                            data=output,
+                            transform=self.transform,
+                            crs=self.crs,
+                            nodata=nodata,
+                            area_or_point=aop,
+                            gcps=self.gcps,
+                            rpcs=self.rpcs,
                         )
                         for output in outputs
                     )
@@ -1958,7 +2046,13 @@ class Raster(RasterBase):
                 # If casting was not necessary, copy all attributes except array
                 if cast_required:
                     return self.from_array(
-                        data=outputs, transform=self.transform, crs=self.crs, nodata=nodata, area_or_point=aop
+                        data=outputs,
+                        transform=self.transform,
+                        crs=self.crs,
+                        nodata=nodata,
+                        area_or_point=aop,
+                        gcps=self.gcps,
+                        rpcs=self.rpcs,
                     )
                 else:
                     return self.copy(new_array=outputs)
@@ -1977,8 +2071,9 @@ class Raster(RasterBase):
         blank_value: int | float | None = None,
         co_opts: dict[str, str] | None = None,
         metadata: dict[str, Any] | None = None,
-        gcps: list[tuple[float, ...]] | None = None,
+        gcps: list[tuple[float, ...]] | list[rio.control.GroundControlPoint] | None = None,
         gcps_crs: CRS | None = None,
+        rpcs: rio.rpc.RPC | None = None,
     ) -> None:
         """
         Write the raster to file.
@@ -2001,8 +2096,10 @@ class Raster(RasterBase):
             corresponding to this value, instead of writing the image data to disk.
         :param co_opts: GDAL creation options provided as a dictionary, e.g. {'TILED':'YES', 'COMPRESS':'LZW'}.
         :param metadata: Pairs of metadata to save to disk, in addition to existing metadata in self.tags.
-        :param gcps: List of gcps, each gcp being [row, col, x, y, (z)].
-        :param gcps_crs: CRS of the GCPS.
+        :param gcps: GroundControlPoint objects or [row, col, x, y, (z)] tuples. Defaults to stored points;
+            an empty list omits them.
+        :param gcps_crs: CRS of the GCPs. Defaults to the stored GCP CRS, then the raster CRS.
+        :param rpcs: Rational polynomial coefficients. Defaults to stored coefficients.
 
         :returns: None.
         """
@@ -2018,11 +2115,34 @@ class Raster(RasterBase):
         if "BIGTIFF" not in map(str.upper, co_opts.keys()):
             co_opts["BIGTIFF"] = "IF_SAFER"
 
-        meta = self.tags if self.tags is not None else {}
+        meta = dict(self.tags) if self.tags is not None else {}
         if metadata is not None:
             meta.update(metadata)
+
+        # RPC dictionaries belong in GDAL's RPC namespace, rather than a string in the default tags
+        rpc_metadata = meta.pop("RPC", None)
+        rpcs = self.rpcs if rpcs is None else rpcs
+        if rpcs is None and rpc_metadata is not None:
+            rpcs = rio.rpc.RPC.from_gdal(rpc_metadata)
+
+        # Normalize explicit GCPs before opening the output file, preserving the legacy tuple input
+        explicit_gcps = gcps is not None
         if gcps is None:
-            gcps = []
+            gcps = self.gcps[0]
+        if not isinstance(gcps, list):
+            raise ValueError("gcps must be a list")
+        rio_gcps = [
+            gcp if isinstance(gcp, rio.control.GroundControlPoint) else rio.control.GroundControlPoint(*gcp)
+            for gcp in gcps
+        ]
+        gcps_crs = gcps_crs or self.gcps[1] or self.crs
+        if rio_gcps and gcps_crs is None:
+            raise ValueError("gcps_crs is required when saving GCPs without a raster CRS.")
+        if explicit_gcps and rio_gcps and self.transform != rio.Affine.identity():
+            warnings.warn(
+                "A geotransform previously set is going to be cleared due to the setting of GCPs.",
+                category=UserWarning,
+            )
 
         # Use nodata set by user, otherwise default to self's
         nodata = nodata if nodata is not None else self.nodata
@@ -2074,8 +2194,10 @@ class Raster(RasterBase):
             width=self.width,
             count=self.count,
             dtype=save_data.dtype,
-            crs=self.crs,
-            transform=self.transform,
+            crs=gcps_crs if rio_gcps else self.crs,
+            transform=None if rio_gcps or (rpcs and self.transform == rio.Affine.identity()) else self.transform,
+            gcps=rio_gcps or None,
+            rpcs=rpcs,
             nodata=nodata,
             **co_opts,
         ) as dst:
@@ -2083,24 +2205,6 @@ class Raster(RasterBase):
 
             # Add metadata (tags in rio)
             dst.update_tags(**meta)
-
-            # Save GCPs
-            if not isinstance(gcps, list):
-                raise ValueError("gcps must be a list")
-
-            if len(gcps) > 0:
-                rio_gcps = []
-                for gcp in gcps:
-                    rio_gcps.append(rio.control.GroundControlPoint(*gcp))
-
-                # Warning: this will overwrite the transform
-                if dst.transform != rio.transform.Affine(1, 0, 0, 0, 1, 0):
-                    warnings.warn(
-                        "A geotransform previously set is going to be cleared due to the setting of GCPs.",
-                        category=UserWarning,
-                    )
-
-                dst.gcps = (rio_gcps, gcps_crs)
 
     @deprecate(
         removal_version=Version("0.3.0"),
@@ -2142,7 +2246,14 @@ class Raster(RasterBase):
         tags = ds.attrs
 
         raster = cls.from_array(
-            data=ds.data, transform=transform, crs=crs, nodata=nodata, area_or_point=area_or_point, tags=tags
+            data=ds.data,
+            transform=transform,
+            crs=crs,
+            nodata=nodata,
+            area_or_point=area_or_point,
+            tags=tags,
+            gcps=ds.rst.gcps,
+            rpcs=ds.rst.rpcs,
         )
 
         if dtype is not None:
@@ -2171,6 +2282,11 @@ class Raster(RasterBase):
         ds = rioxarray.open_rasterio(updated_raster.to_rio_dataset(), masked=True)
         # When reading as masked, the nodata is not written to the dataset so we do it manually
         ds.rio.set_nodata(self.nodata)
+        if self.rpcs is not None:
+            ds.attrs["RPC"] = self.rpcs.to_gdal()
+            if self.gcps[0]:
+                # Rioxarray's RPC reader assigns WGS84, so restore the CRS of the GCP coordinates
+                ds.rio.write_gcps(*self.gcps, inplace=True)
 
         if name is not None:
             ds.name = name

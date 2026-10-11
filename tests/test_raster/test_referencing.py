@@ -240,6 +240,61 @@ class TestReferencing:
         np.testing.assert_array_equal(result_x, np.asarray(expected_x).reshape(raster.shape))
         np.testing.assert_array_equal(result_y, np.asarray(expected_y).reshape(raster.shape))
 
+    @pytest.mark.parametrize("loaded", [False, True])
+    def test_icrop__gcp_rcp(self, raster_gcp_rpc: gu.Raster, loaded: bool) -> None:
+        """Checks that pixel cropping shifts GCP/RPC image offsets and preserves ground coordinates."""
+
+        # Start away from the image origin to reveal incorrect image offsets in GCPs/RPCs
+        source = raster_gcp_rpc
+        if loaded:
+            source.load()
+        result = source.icrop((9, 7, 50, 45))
+        assert result.is_loaded is loaded
+        assert source.is_loaded is loaded
+
+        # Only image coordinates change; ground coordinates and polynomial scales stay identical
+        for old, new in zip(source.gcps[0], result.gcps[0]):
+            assert (new.row, new.col) == (old.row - 7, old.col - 9)
+            assert (new.x, new.y, new.z) == (old.x, old.y, old.z)
+        if source.rpcs:
+            assert result.rpcs.line_off == source.rpcs.line_off - 7
+            assert result.rpcs.samp_off == source.rpcs.samp_off - 9
+            assert result.rpcs.line_scale == source.rpcs.line_scale
+            assert result.rpcs.samp_scale == source.rpcs.samp_scale
+        np.testing.assert_array_equal(result.data, source.data[:, 7:45, 9:50])
+
+    def test_outside_image__gcp_rcp(self, raster_gcp_rpc: gu.Raster) -> None:
+        """Checks that outside_image() accepts image indices and requires an affine grid for ground coordinates."""
+
+        # Open a raster referenced by GCPs/RPCs whose pixel dimensions are known without loading
+        raster = raster_gcp_rpc
+
+        # Check valid/out-of-bounds pixel indices directly
+        assert not raster.outside_image(1, 2)
+        assert raster.outside_image(raster.width + 1, raster.height + 1)
+
+        # Ground coordinates need a regular grid for the current affine coordinate helper
+        with pytest.raises(ValueError, match=r"outside_image\(\) requires an affine grid"):
+            raster.outside_image(10, 50, index=False)
+        assert not raster.is_loaded
+
+    def test_georeferenced_grid_equal__gcp_rcp_difference(self, raster_gcp_rpc: gu.Raster) -> None:
+        """Checks that different GCPs/RPCs make otherwise identical raster grids unequal."""
+
+        # Modify GCPs/RPCs to change ground locations while leaving the affine placeholder unchanged
+        source = raster_gcp_rpc
+        result = source.copy()
+        assert result.georeferenced_grid_equal(source)
+        assert result.raster_equal(source)
+        if result.gcps[0]:
+            result.gcps[0][0].x += 0.1
+        else:
+            result.rpcs.long_off += 0.1
+
+        # Grid and raster equality must both consider GCPs/RPCs
+        assert not result.georeferenced_grid_equal(source)
+        assert not result.raster_equal(source)
+
     def test_coords__error_rotated_without_grid(self) -> None:
         """Checks an error is raised when rotated coordinates are requested as separate axes."""
 
@@ -250,3 +305,59 @@ class TestReferencing:
         # Require the full coordinate grid instead of returning incomplete axes
         with pytest.raises(ValueError, match="Rotated rasters require grid=True"):
             raster.coords(grid=False, force_offset="center")
+
+
+class TestReferencingErrors:
+    """Test module for affine grid requirements in bounds, resolution and coordinate calculations."""
+
+    @pytest.mark.parametrize("raster_type", ["raster", "dataarray"])
+    @pytest.mark.parametrize("property_name", ["res", "bbox", "bounds", "footprint"])
+    def test_properties__error_gcp_rcp_georeferencing(
+        self, raster_gcp_rpc: gu.Raster, raster_type: str, property_name: str
+    ) -> None:
+        """Checks an error is raised when requesting affine metadata/properties on GCP/RPC rasters."""
+
+        # Open a raster referenced only by GCPs/RPCs
+        raster = raster_gcp_rpc if raster_type == "raster" else gu.open_raster(raster_gcp_rpc.name).rst
+        assert not raster.is_loaded
+
+        # Raise error and say to the user he needs to reproject
+        with pytest.raises(ValueError, match=r"requires an affine grid.*Call reproject\(\) first"):
+            getattr(raster, property_name)
+        assert not raster.is_loaded
+
+    @pytest.mark.parametrize("raster_type", ["raster", "dataarray"])
+    @pytest.mark.parametrize(
+        "method, arguments",
+        [
+            ("coords", ()),
+            ("xy2ij", (10, 50)),
+            ("ij2xy", (1, 2)),
+            ("get_bounds_projected", (4326,)),
+            ("get_footprint_projected", (4326,)),
+        ],
+    )
+    def test_methods__error_gcp_rcp_coordinates(
+        self, raster_gcp_rpc: gu.Raster, raster_type: str, method: str, arguments: tuple[int, ...]
+    ) -> None:
+        """Checks an error is raised for affine coordinate calculations on GCP/RPC rasters."""
+
+        raster = raster_gcp_rpc if raster_type == "raster" else gu.open_raster(raster_gcp_rpc.name).rst
+
+        # Raise error and say to the user he needs to reproject
+        with pytest.raises(ValueError, match=r"requires an affine grid.*Call reproject\(\) first"):
+            getattr(raster, method)(*arguments)
+        assert not raster.is_loaded
+
+    def test_intersection__error_gcp_rcp_georeferencing(self, raster_gcp_rpc: gu.Raster) -> None:
+        """Checks an error is raised for intersections involving a GCP/RPC raster."""
+
+        raster = raster_gcp_rpc
+        affine_raster = gu.Raster.from_array(np.ones((10, 10)), Affine(0.01, 0, 10, 0, -0.01, 50), crs=4326)
+
+        # Raise error and say to the user he needs to reproject
+        with pytest.raises(ValueError, match="requires an affine grid"):
+            raster.intersection(affine_raster)
+        with pytest.raises(ValueError, match="requires an affine grid"):
+            affine_raster.intersection(raster)
+        assert not raster.is_loaded
