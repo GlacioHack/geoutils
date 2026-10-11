@@ -1465,6 +1465,10 @@ class TestTransformationChunked:
 
     @pytest.mark.parametrize("resampling", ["nearest", "bilinear"])
     @pytest.mark.parametrize("backend", ["dask", "mp"])
+    @pytest.mark.skipif(
+        Version(rio.__version__) < Version("1.5.0"),
+        reason="Exact GCP/RPC reprojection comparisons require Rasterio 1.5 or newer.",
+    )
     def test_reproject__chunk_invariance(
         self, raster_gcp_rpc: gu.Raster, tmp_path: Path, resampling: str, backend: str
     ) -> None:
@@ -1506,6 +1510,10 @@ class TestTransformationChunked:
         np.testing.assert_array_equal(values, expected.data.filled(np.nan))
         assert not source.is_loaded
 
+    @pytest.mark.skipif(
+        Version(rio.__version__) < Version("1.5.0"),
+        reason="Exact GCP/RPC reprojection comparisons require Rasterio 1.5 or newer.",
+    )
     def test_reproject__rpc_transformer_option(self, raster_gcp_rpc: gu.Raster, tmp_path: Path) -> None:
         """Checks that RPC_HEIGHT transformer option behaves properly with eager/lazy reprojection."""
 
@@ -1537,6 +1545,10 @@ class TestTransformationChunked:
         assert not lazy.rst.is_loaded
         assert not source.is_loaded
 
+    @pytest.mark.skipif(
+        Version(rio.__version__) < Version("1.5.0"),
+        reason="Exact GCP/RPC reprojection comparisons require Rasterio 1.5 or newer.",
+    )
     def test_reproject__gcp_transformer_option(self, raster_gcp_rpc: gu.Raster) -> None:
         """Checks that TPS transformer option for GCP behaves properly, and matches lazy/eager."""
 
@@ -1562,6 +1574,10 @@ class TestTransformationChunked:
     @pytest.mark.parametrize("raster_gcp_rpc", ["gcp_rpc_polynomial", "gcp_rpc_rational"], indirect=True)
     @pytest.mark.parametrize("source_method", ["RPC", "GCP_POLYNOMIAL", "GCP_TPS"])
     @pytest.mark.parametrize("backend", ["dask", "mp"])
+    @pytest.mark.skipif(
+        Version(rio.__version__) < Version("1.5.0"),
+        reason="Exact GCP/RPC reprojection comparisons require Rasterio 1.5 or newer.",
+    )
     def test_reproject__selected_gcp_rcp_chunk_invariance(
         self, raster_gcp_rpc: gu.Raster, tmp_path: Path, source_method: str, backend: str
     ) -> None:
@@ -1625,6 +1641,10 @@ class TestTransformationChunked:
         self, raster_gcp_rpc: gu.Raster, tmp_path: Path, backend: str, georeferencing: str
     ) -> None:
         """Checks that empty chunks keep the right number of bands during reprojection."""
+
+        # GCP/RPC comparisons need exact transforms, affine can still be tested
+        if georeferencing == "gcp_rcp" and Version(rio.__version__) < Version("1.5.0"):
+            pytest.skip("Exact GCP/RPC reprojection comparisons require Rasterio 1.5 or newer.")
 
         # We use several bands and request a reprojected extent larger than source to create empty output chunks
         filename = tmp_path / "integer_image.tif"
