@@ -2639,7 +2639,7 @@ class TestTransformationErrorsChunked:
         chunked: gu.Raster | gu.DataArrayRasterAccessor
         options: dict[str, Any] = {}
         if backend == "dask":
-            import_optional("dask")
+            pytest.importorskip("dask")
             lazy = gu.open_raster(source.name, chunks={"band": 1, "y": 7, "x": 9})
             chunked = lazy.rst
             original_data = lazy.data
