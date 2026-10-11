@@ -732,7 +732,8 @@ class TestTransformation:
 
         # Use the same source loaded/unloaded
         source = raster_gcp_rpc
-        if tolerance and Version(rio.__version__) < Version("1.5.0"):
+        supports_tolerance = Version(rio.__version__) >= Version("1.5.0")
+        if tolerance and not supports_tolerance:
             pytest.skip("Setting tolerance requires Rasterio >= 1.5")
         if loaded:
             source.load()
@@ -754,7 +755,12 @@ class TestTransformation:
         with rio.open(source.name) as dataset:
             values = dataset.read()
         expected = np.empty((source.count, height, width), dtype=source.dtype)
-        with silence_rasterio_message(param_name="RPC_HEIGHT"):
+
+        # Match GeoUtils' tolerance handling and filter known GDAL option warnings
+        rasterio_controls: dict[str, Any] = {}
+        if supports_tolerance:
+            rasterio_controls["tolerance"] = 0 if tolerance is None else tolerance
+        with silence_rasterio_message(param_name="RPC_HEIGHT"), silence_rasterio_message(param_name="SCALE"):
             rio.warp.reproject(
                 values,
                 expected,
@@ -764,9 +770,9 @@ class TestTransformation:
                 dst_transform=transform,
                 dst_nodata=source.nodata,
                 resampling=rio.enums.Resampling.nearest,
-                tolerance=0 if tolerance is None else tolerance,
                 XSCALE=1,
                 YSCALE=1,
+                **rasterio_controls,
                 **georeferencing,
                 **options,
             )
@@ -1225,6 +1231,10 @@ class TestTransformationChunked:
         self, tmp_path: Path, backend: str, apply_vertical: bool, tolerance: float
     ) -> None:
         """Checks that Dask/MP applies vertical shift or tolerance, matching eager."""
+
+        # Positive tolerance requires Rasterio's explicit tolerance argument
+        if tolerance and Version(rio.__version__) < Version("1.5.0"):
+            pytest.skip("Setting tolerance requires Rasterio >= 1.5")
 
         # We create and write a constant DEM with a NaN, and a transformation with 10 m vertical offset
         # (We use an affine transform, so approximation gives the same coordinates at either tolerance)
@@ -2436,8 +2446,9 @@ class TestReprojectionErrors:
 
     @pytest.mark.parametrize("operator", [Nearest(), Mean()])
     @pytest.mark.parametrize("controls", [{"tolerance": 0.125}, {"apply_vertical": True}])
+    @pytest.mark.parametrize("rasterio_version", ["1.4.4", "1.5.0"])
     def test_reproject__error_warp_controls_operator(
-        self, operator: Interpolator | Reducer, controls: dict[str, Any]
+        self, operator: Interpolator | Reducer, controls: dict[str, Any], rasterio_version: str
     ) -> None:
         """Checks an error is raised for Rasterio warp controls with a GeoUtils Interpolator or Reducer."""
 
@@ -2445,8 +2456,9 @@ class TestReprojectionErrors:
         source = gu.Raster.from_array(np.ones((4, 4)), rio.transform.from_origin(0, 4, 1, 1), 32631)
 
         # These warp controls apply to Rasterio's calculation rather than custom resampling
-        with pytest.raises(ValueError, match="require a Rasterio resampling method"):
-            source.reproject(res=2, resampling=operator, **controls)
+        with patch("geoutils.raster.transformation.rio.__version__", rasterio_version):
+            with pytest.raises(ValueError, match="require a Rasterio resampling method"):
+                source.reproject(res=2, resampling=operator, **controls)
 
     def test_reproject__error_missing_crs(self) -> None:
         """Checks that we raise an error during reprojection if source raster has no CRS."""

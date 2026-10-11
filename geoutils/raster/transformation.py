@@ -218,10 +218,10 @@ def _check_reproj_warp_options(
 
     if not np.isfinite(tolerance) or tolerance < 0:
         raise ValueError("tolerance must be a finite, non-negative number of source pixels.")
-    if tolerance != 0 and Version(rio.__version__) < Version("1.5.0"):
-        raise NotImplementedError("Setting tolerance requires Rasterio >= 1.5.")
     if isinstance(resampling, (Interpolator, Reducer)) and (tolerance != 0 or apply_vertical):
         raise ValueError("Positive tolerance and apply_vertical=True require a Rasterio resampling method.")
+    if tolerance != 0 and Version(rio.__version__) < Version("1.5.0"):
+        raise NotImplementedError("Setting tolerance requires Rasterio >= 1.5.")
 
 
 def _check_reproj_georeferencing(
