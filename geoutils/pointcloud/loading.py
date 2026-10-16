@@ -20,7 +20,7 @@
 from __future__ import annotations
 
 import pathlib
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -35,10 +35,6 @@ from geoutils._dispatch import is_dask_dataframe
 from geoutils._misc import _deprecate_keyword, _validate_downsample
 from geoutils._typing import Number
 from geoutils.pointcloud.dataframe import _build_pointcloud_output, _get_dataframe_attrs, _set_dataframe_attrs
-from geoutils.pointcloud.parquet import _is_parquet_supported
-
-if TYPE_CHECKING:
-    from laspy.copc import Entry
 
 #####################
 # Open point cloud
@@ -54,7 +50,6 @@ def open_pointcloud(
     downsample: Number = 1,
     *,
     as_type: Literal["dataarray", "dataset", "geodataframe"] = "dataarray",
-    level: int | range | None = None,
 ) -> xr.DataArray | xr.Dataset | gpd.GeoDataFrame | Any:
     """
     Open a point cloud as a Xarray DataArray, Dataset or GeoDataFrame.
@@ -64,12 +59,7 @@ def open_pointcloud(
 
     Passing ``chunks`` opens the point data lazily using Dask arrays (Xarray objects) or Dask-GeoPandas (Pandas
     object). Use ``downsample`` to  select a deterministic random sample. For example, ``downsample=2`` returns
-    half the points, rounded up. For COPC, the coarsest cumulative levels containing enough points are read first,
-    then sampled to the requested count. Other formats sample the full point cloud.
-
-    Use ``level`` to select COPC octree depths explicitly, following LasPy: an integer selects one depth and a
-    range selects several. For example, ``level=range(3)`` reads depths 0 through 2. Smaller depths contain coarser
-    samples. Like raster ``overview_level``, explicit levels cannot be combined with ``downsample > 1``.
+    half the points, rounded up.
 
     :param filename: Point file or directory of GeoParquet partitions.
     :param data_name: Attribute containing point values. Defaults to Z for LAS, the saved active attribute for
@@ -80,7 +70,6 @@ def open_pointcloud(
         groups. None loads the point data eagerly.
     :param downsample: Factor reducing the point count to ceil(N / downsample), with a deterministic random sample.
     :param as_type: Returned representation: dataarray (the default), dataset, or geodataframe.
-    :param level: COPC octree depth or range of depths to read. None selects all depths unless downsample is used.
     :returns: A DataArray with active values and auxiliary coordinates, a Dataset with separate value variables,
         or a GeoDataFrame.
     """
@@ -88,53 +77,17 @@ def open_pointcloud(
     downsample = _validate_downsample(downsample)
     if chunks is not None and (isinstance(chunks, bool) or not isinstance(chunks, int) or chunks <= 0):
         raise ValueError("Argument 'chunks' must be a strictly positive integer.")
-    if as_type not in ("dataarray", "dataset", "geodataframe"):
-        raise ValueError("Argument 'as_type' must be 'dataarray', 'dataset' or 'geodataframe'.")
-    if level is not None:
-        if isinstance(level, range):
-            valid_level = level.start >= 0 and level.step > 0 and len(level) > 0
-        else:
-            valid_level = (
-                not isinstance(level, (bool, np.bool_)) and isinstance(level, (int, np.integer)) and level >= 0
-            )
-        if not valid_level:
-            raise ValueError(
-                "Argument 'level' must be a non-negative integer or a non-empty increasing range of depths."
-            )
-        if downsample > 1:
-            raise ValueError("downsample and level cannot be used together.")
-
-    # Plan COPC reads from hierarchy counts without loading point records
-    from geoutils.pointcloud.las import _is_laspy_supported, _load_laspy_metadata, _select_copc_nodes
-
-    copc_nodes = None
-    source_count = None
-    if level is not None or downsample > 1:
-        if _is_laspy_supported(filename):
-            metadata = _load_laspy_metadata(filename)
-            if metadata.is_copc:
-                source_count = metadata.point_count
-                target_count = int(np.ceil(source_count / downsample)) if downsample > 1 else None
-                copc_nodes = _select_copc_nodes(str(filename), level, target_count)
-        if level is not None and copc_nodes is None:
-            raise ValueError("Argument 'level' is only supported for COPC files.")
 
     # 2/ Dispatch by request representation
     if as_type in ("dataarray", "dataset"):
-        points = _open_pointcloud_array(str(filename), data_name, columns, chunks, copc_nodes)
+        points = _open_pointcloud_array(str(filename), data_name, columns, chunks)
+    elif as_type == "geodataframe":
+        points = _open_pointcloud_geodataframe(str(filename), data_name, columns, chunks)
     else:
-        points = _open_pointcloud_geodataframe(str(filename), data_name, columns, chunks, copc_nodes)
+        raise ValueError("Argument 'as_type' must be 'dataarray', 'dataset' or 'geodataframe'.")
 
     # 3/ Downsample, if requested
-    partition_lengths = None
-    if as_type == "geodataframe" and chunks is not None and copc_nodes is not None:
-        # Count the dataframe partitions formed by splitting each compressed node
-        lengths = []
-        for node in copc_nodes:
-            for offset in range(0, node.point_count, chunks):
-                lengths.append(min(chunks, node.point_count - offset))
-        partition_lengths = tuple(lengths) or (0,)
-    points = _downsample_open_pointcloud(points, downsample, source_count, partition_lengths)
+    points = _downsample_open_pointcloud(points, downsample)
 
     # 4/ Convert to a Xarray Dataset, if requested
     if as_type == "dataset":
@@ -155,7 +108,6 @@ def _open_pointcloud_array(
     data_name: str | None,
     columns: Literal["all", "main"] | list[str],
     chunks: int | None,
-    copc_nodes: list[Entry] | None = None,
 ) -> xr.DataArray:
     """Open numeric point coordinates directly when the format supports them."""
     from geoutils.pointcloud.las import _is_laspy_supported, _open_las_array
@@ -163,8 +115,8 @@ def _open_pointcloud_array(
 
     # Native LAS and GeoParquet point fields avoid allocating Shapely objects
     if _is_laspy_supported(filename):
-        points = _open_las_array(filename, data_name, columns, chunks, copc_nodes)
-    elif _is_parquet_supported(filename):
+        points = _open_las_array(filename, data_name, columns, chunks)
+    elif pathlib.Path(filename).suffix.lower() == ".parquet" or pathlib.Path(filename).is_dir():
         points = _open_point_parquet(filename, data_name=data_name, columns=columns, chunks=chunks)
     else:
         # Other vector formats expose their coordinates through the geometry reader
@@ -187,7 +139,6 @@ def _open_pointcloud_geodataframe(
     data_name: str | None,
     columns: Literal["all", "main"] | list[str],
     chunks: int | None,
-    copc_nodes: list[Entry] | None = None,
 ) -> gpd.GeoDataFrame | Any:
     """Open point geometry with the format reader and attach GeoUtils point metadata."""
     from geoutils.pointcloud.las import _is_laspy_supported, _open_las_geodataframe
@@ -197,8 +148,8 @@ def _open_pointcloud_geodataframe(
 
     # Format-specific readers supply native attribute dtypes and geospatial metadata
     if _is_laspy_supported(filename):
-        return _open_las_geodataframe(filename, data_name, columns, chunks, copc_nodes)
-    if _is_parquet_supported(filename):
+        return _open_las_geodataframe(filename, data_name, columns, chunks)
+    if pathlib.Path(filename).suffix.lower() == ".parquet" or pathlib.Path(filename).is_dir():
         return _open_parquet_geodataframe(filename, data_name=data_name, columns=columns, chunks=chunks)
     if chunks is None:
         # Preserve the established eager PointCloud loading and validation path
@@ -249,47 +200,20 @@ def _set_pointcloud_attrs_from_file(ds: Any, filename: str, data_name: str | Non
     )
 
 
-def _downsample_open_pointcloud(
-    pointcloud: Any,
-    downsample: float,
-    source_count: int | None = None,
-    partition_lengths: tuple[int, ...] | None = None,
-) -> Any:
-    """
-    Apply the same deterministic opening sample to arrays and GeoDataFrames.
-
-    COPC reads provide the original count and known partition lengths so _subsample_numpy() can choose row
-    positions without loading point values. _pointcloud_from_subsample_indices() selects those rows lazily.
-    """
+def _downsample_open_pointcloud(pointcloud: Any, downsample: float) -> Any:
+    """Apply the same deterministic opening sample to arrays and GeoDataFrames."""
 
     if downsample == 1:
         return pointcloud
 
     # Convert the factor to the count convention shared by eager and Dask point subsampling
     source = pointcloud.pc
-    original_count = source.point_count if source_count is None else source_count
-    if original_count == 0:
+    source_count = source.point_count
+    if source_count == 0:
         return pointcloud
-    target_count = max(1, int(np.ceil(original_count / downsample)))
-    if target_count == source.point_count:
-        return pointcloud
-
-    # Request a fraction for one point because subsample(1) selects every row
-    request: int | float = target_count if target_count > 1 else 1 / source.point_count
-    if source_count is None:
-        sampled = source.subsample(request, random_state=0)
-    else:
-        from geoutils.sampling.subsampling import _pointcloud_from_subsample_indices, _subsample_numpy
-
-        # COPC counts let us sample row positions without reading coordinates or measurements
-        rows = _subsample_numpy(
-            np.empty(source.point_count, dtype=np.uint8),
-            request,
-            return_indices=True,
-            random_state=0,
-            skip_nodata=False,
-        )[0]
-        sampled = _pointcloud_from_subsample_indices(source, rows, partition_lengths=partition_lengths)
+    target_count = max(1, int(np.ceil(source_count / downsample)))
+    request: int | float = target_count if target_count > 1 else 1 / source_count
+    sampled = source.subsample(request, random_state=0)
 
     if isinstance(sampled, xr.DataArray):
         return sampled
@@ -395,7 +319,7 @@ def _load_pointcloud_bounds(
             data_name=data_name or "Z",
         )
 
-    if _is_parquet_supported(filename):
+    if pathlib.Path(filename).suffix.lower() == ".parquet" or pathlib.Path(filename).is_dir():
         from geoutils.pointcloud.parquet import _open_point_parquet
 
         points = _open_point_parquet(filename, data_name=data_name, columns="main", chunks=524_288)
@@ -418,7 +342,7 @@ def _read_point_file_rows(filename: str | pathlib.Path, columns: list[str], star
             start=start,
             count=count,
         )
-    if _is_parquet_supported(filename):
+    if pathlib.Path(filename).suffix.lower() == ".parquet" or pathlib.Path(filename).is_dir():
         from geoutils.pointcloud.parquet import _open_point_parquet
 
         points = _open_point_parquet(filename, columns="all", chunks=max(count, 1))

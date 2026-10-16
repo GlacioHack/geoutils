@@ -35,7 +35,6 @@ import xarray as xr
 from pyproj import CRS
 from rasterio.coords import BoundingBox
 
-from geoutils._io import _get_filesystem, _is_remote_path, _path_suffix
 from geoutils._misc import import_optional
 
 #################################
@@ -43,52 +42,17 @@ from geoutils._misc import import_optional
 #################################
 
 
-def _is_parquet_supported(filename: str | pathlib.Path) -> bool:
-    """Recognize GeoParquet files and dataset directories without altering remote URLs."""
-    if _path_suffix(filename) == ".parquet":
-        return True
-    if _is_remote_path(filename):
-        if _path_suffix(filename) and not str(filename).endswith("/"):
-            return False
-        try:
-            return _get_filesystem(filename).isdir(str(filename))
-        except ImportError:
-            # Other vector formats can still use GDAL when the optional remote filesystem is unavailable
-            return False
-    return pathlib.Path(filename).is_dir()
-
-
-def _parquet_files(filename: str | pathlib.Path) -> list[str]:
-    """
-    List files in a partitioned dataset in deterministic filename order.
-
-    Remote discovery uses fsspec's find() and unstrip_protocol() so workers receive complete URLs:
-    https://filesystem-spec.readthedocs.io/en/latest/api.html#fsspec.spec.AbstractFileSystem
-    """
-
-    # Discover remote objects through their filesystem so URLs survive in delayed row reads
-    if _is_remote_path(filename):
-        filesystem = _get_filesystem(filename)
-        if filesystem.isfile(str(filename)):
-            return [str(filename)]
-        files = sorted(
-            filesystem.unstrip_protocol(path) for path in filesystem.find(str(filename)) if path.endswith(".parquet")
-        )
-    else:
-        path = pathlib.Path(filename)
-        files = [str(file) for file in sorted(path.rglob("*.parquet"))] if path.is_dir() else [str(path)]
+def _parquet_files(filename: str | pathlib.Path) -> list[pathlib.Path]:
+    """List files in a partitioned dataset in deterministic filename order."""
+    path = pathlib.Path(filename)
+    files = sorted(path.rglob("*.parquet")) if path.is_dir() else [path]
     if not files:
         raise ValueError("The GeoParquet dataset contains no Parquet files.")
     return files
 
 
 def _point_parquet_metadata(filename: str | pathlib.Path) -> dict[str, Any]:
-    """
-    Read point count, CRS, schema and available bounds from Parquet footers.
-
-    ParquetFile() accepts fsspec filesystems for metadata and row group reads:
-    https://arrow.apache.org/docs/python/generated/pyarrow.parquet.ParquetFile.html
-    """
+    """Read point count, CRS, schema and available bounds from Parquet footers."""
     import_optional("pyarrow")
     import pyarrow.parquet as pq
 
@@ -100,80 +64,77 @@ def _point_parquet_metadata(filename: str | pathlib.Path) -> dict[str, Any]:
     schema = None
     for path in _parquet_files(filename):
         # Check point encoding and geometry types before reading any rows
-        with pq.ParquetFile(path, filesystem=_get_filesystem(path)) as file:
-            encoded = (file.schema_arrow.metadata or {}).get(b"geo")
-            if encoded is None:
-                raise ValueError("Point Parquet input must contain GeoParquet geometry metadata.")
-            geo = json.loads(encoded)
-            name = geo["primary_column"]
-            geometry = geo["columns"][name]
-            if geometry["encoding"] not in ("point", "WKB"):
-                raise ValueError("GeoParquet point clouds require point or WKB geometry encoding.")
-            types = geometry.get("geometry_types", [])
-            if any(value not in ("Point", "Point Z") for value in types):
-                raise ValueError("GeoParquet point clouds require point geometries.")
+        file = pq.ParquetFile(path)
+        encoded = (file.schema_arrow.metadata or {}).get(b"geo")
+        if encoded is None:
+            raise ValueError("Point Parquet input must contain GeoParquet geometry metadata.")
+        geo = json.loads(encoded)
+        name = geo["primary_column"]
+        geometry = geo["columns"][name]
+        if geometry["encoding"] not in ("point", "WKB"):
+            raise ValueError("GeoParquet point clouds require point or WKB geometry encoding.")
+        types = geometry.get("geometry_types", [])
+        if any(value not in ("Point", "Point Z") for value in types):
+            raise ValueError("GeoParquet point clouds require point geometries.")
 
-            # A missing CRS means "CRS84" under GeoParquet, while explicit null means unspecified coordinates
-            crs = geometry.get("crs", "OGC:CRS84")
-            crs = None if crs is None else CRS.from_user_input(crs)
-            # Separate stored Pandas row labels from point attributes
-            pandas_metadata = json.loads((file.schema_arrow.metadata or {}).get(b"pandas", b"{}"))
-            index_columns = [column for column in pandas_metadata.get("index_columns", []) if isinstance(column, str)]
-            columns = [column for column in file.schema_arrow.names if column not in (name, *index_columns)]
-            attrs = json.loads((file.schema_arrow.metadata or {}).get(b"geoutils", b"{}"))
-            current = {
-                "crs": crs,
-                "columns": columns,
-                "geometry_name": name,
-                "encoding": geometry["encoding"],
-                "geometry_type": "Point Z" if "Point Z" in types else "Point",
-                "attrs": attrs,
-                "index_columns": index_columns,
-                "pandas_metadata": pandas_metadata,
-            }
-            # Check every partition before combining its rows with the rest of the dataset
-            if metadata is not None:
-                matching_metadata = all(
-                    current[key] == metadata[key]
-                    for key in ("crs", "columns", "geometry_name", "encoding", "geometry_type", "attrs")
-                )
-                if not matching_metadata or not file.schema_arrow.equals(schema, check_metadata=False):
-                    raise ValueError(
-                        "GeoParquet partitions must have matching coordinate systems, schemas and attributes."
-                    )
-            metadata = current
-            schema = file.schema_arrow
-            count += file.metadata.num_rows
-
-            # Save row  group sizes to construct delayed arrays without opening the footers again
-            row_groups.extend(
-                (str(path), group, file.metadata.row_group(group).num_rows)
-                for group in range(file.metadata.num_row_groups)
+        # A missing CRS means "CRS84" under GeoParquet, while explicit null means unspecified coordinates
+        crs = geometry.get("crs", "OGC:CRS84")
+        crs = None if crs is None else CRS.from_user_input(crs)
+        # Separate stored Pandas row labels from point attributes
+        pandas_metadata = json.loads((file.schema_arrow.metadata or {}).get(b"pandas", b"{}"))
+        index_columns = [column for column in pandas_metadata.get("index_columns", []) if isinstance(column, str)]
+        columns = [column for column in file.schema_arrow.names if column not in (name, *index_columns)]
+        attrs = json.loads((file.schema_arrow.metadata or {}).get(b"geoutils", b"{}"))
+        current = {
+            "crs": crs,
+            "columns": columns,
+            "geometry_name": name,
+            "encoding": geometry["encoding"],
+            "geometry_type": "Point Z" if "Point Z" in types else "Point",
+            "attrs": attrs,
+            "index_columns": index_columns,
+            "pandas_metadata": pandas_metadata,
+        }
+        # Check every partition before combining its rows with the rest of the dataset
+        if metadata is not None:
+            matching_metadata = all(
+                current[key] == metadata[key]
+                for key in ("crs", "columns", "geometry_name", "encoding", "geometry_type", "attrs")
             )
+            if not matching_metadata or not file.schema_arrow.equals(schema, check_metadata=False):
+                raise ValueError("GeoParquet partitions must have matching coordinate systems, schemas and attributes.")
+        metadata = current
+        schema = file.schema_arrow
+        count += file.metadata.num_rows
 
-            # Native coords stats give a complete extent even when the optional file bbox is absent
-            if "bbox" not in geometry and geometry["encoding"] == "point":
-                axis_statistics = {"x": [], "y": []}
-                for group in range(file.metadata.num_row_groups):
-                    row_group = file.metadata.row_group(group)
-                    for column_index in range(row_group.num_columns):
-                        # Read coordinate extrema from statistics rather than loading point arrays
-                        column = row_group.column(column_index)
-                        axis = column.path_in_schema.removeprefix(name + ".")
-                        statistics = column.statistics
-                        if axis in axis_statistics and statistics is not None and statistics.has_min_max:
-                            axis_statistics[axis].append((statistics.min, statistics.max))
-                if all(axis_statistics.values()):
-                    geometry["bbox"] = [
-                        min(value[0] for value in axis_statistics["x"]),
-                        min(value[0] for value in axis_statistics["y"]),
-                        max(value[1] for value in axis_statistics["x"]),
-                        max(value[1] for value in axis_statistics["y"]),
-                    ]
-            if "bbox" in geometry:
-                # Select horizontal bounds from either a 2D or 3D bounding box
-                bbox = geometry["bbox"]
-                extents.append([bbox[0], bbox[1], bbox[len(bbox) // 2], bbox[len(bbox) // 2 + 1]])
+        # Save row  group sizes to construct delayed arrays without opening the footers again
+        row_groups.extend(
+            (str(path), group, file.metadata.row_group(group).num_rows) for group in range(file.metadata.num_row_groups)
+        )
+
+        # Native coords stats give a complete extent even when the optional file bbox is absent
+        if "bbox" not in geometry and geometry["encoding"] == "point":
+            axis_statistics = {"x": [], "y": []}
+            for group in range(file.metadata.num_row_groups):
+                row_group = file.metadata.row_group(group)
+                for column_index in range(row_group.num_columns):
+                    # Read coordinate extrema from statistics rather than loading point arrays
+                    column = row_group.column(column_index)
+                    axis = column.path_in_schema.removeprefix(name + ".")
+                    statistics = column.statistics
+                    if axis in axis_statistics and statistics is not None and statistics.has_min_max:
+                        axis_statistics[axis].append((statistics.min, statistics.max))
+            if all(axis_statistics.values()):
+                geometry["bbox"] = [
+                    min(value[0] for value in axis_statistics["x"]),
+                    min(value[0] for value in axis_statistics["y"]),
+                    max(value[1] for value in axis_statistics["x"]),
+                    max(value[1] for value in axis_statistics["y"]),
+                ]
+        if "bbox" in geometry:
+            # Select horizontal bounds from either a 2D or 3D bounding box
+            bbox = geometry["bbox"]
+            extents.append([bbox[0], bbox[1], bbox[len(bbox) // 2], bbox[len(bbox) // 2 + 1]])
 
     # Combine file extents into the bounds of the complete point cloud
     assert metadata is not None
@@ -193,8 +154,7 @@ def _read_point_parquet_group(filename: str, group: int, geometry_name: str, col
     import pyarrow.parquet as pq
 
     # Read the selected attributes and geometry together for this row group
-    with pq.ParquetFile(filename, filesystem=_get_filesystem(filename)) as file:
-        table = file.read_row_group(group, columns=[geometry_name, *columns])
+    table = pq.ParquetFile(filename).read_row_group(group, columns=[geometry_name, *columns])
     geometry = table[geometry_name].combine_chunks()
     arrays = {name: table[name].to_numpy() for name in columns}
     geo = json.loads(table.schema.metadata[b"geo"])
@@ -220,18 +180,12 @@ def _read_point_parquet_group(filename: str, group: int, geometry_name: str, col
 
 
 def _read_point_parquet_frame(filename: str, group: int, columns: list[str]) -> gpd.GeoDataFrame:
-    """
-    Decode one GeoParquet row group without resetting its stored Pandas index.
-
-    Reuse GeoPandas' geometry decoder, which read_parquet() also uses:
-    https://github.com/geopandas/geopandas/blob/main/geopandas/io/arrow.py
-    """
+    """Decode one GeoParquet row group without resetting its stored Pandas index."""
     import_optional("pyarrow")
     import pyarrow.parquet as pq
     from geopandas.io.arrow import _arrow_to_geopandas
 
-    with pq.ParquetFile(filename, filesystem=_get_filesystem(filename)) as file:
-        table = file.read_row_group(group, columns=columns)
+    table = pq.ParquetFile(filename).read_row_group(group, columns=columns)
     return _arrow_to_geopandas(table)
 
 
@@ -391,12 +345,7 @@ def _open_parquet_geodataframe(
     columns: Literal["all", "main"] | list[str] = "all",
     chunks: int | None = None,
 ) -> gpd.GeoDataFrame | Any:
-    """
-    Use GeoPandas to decode point geometry while preserving the selected values and lazy metadata.
-
-    Eager reads pass the configured filesystem to read_parquet(), as documented at
-    https://geopandas.org/en/stable/docs/reference/api/geopandas.read_parquet.html.
-    """
+    """Use GeoPandas to decode point geometry while preserving the selected values and lazy metadata."""
     from geoutils.pointcloud.dataframe import _build_pointcloud_output
     from geoutils.vector.pd_accessor import _import_dask_geopandas
 
@@ -410,18 +359,13 @@ def _open_parquet_geodataframe(
 
     # GeoPandas handles native point and WKB decoding; Dask-GeoPandas delays the same geometry work
     if chunks is None:
-        frame = gpd.read_parquet(files, columns=read_columns, filesystem=_get_filesystem(filename))
+        frame = gpd.read_parquet(files, columns=read_columns)
         frame = _set_parquet_point_values(frame, active_column)
     else:
         descriptors = metadata["pandas_metadata"].get("columns", [])
         index_names = [item["name"] for item in descriptors if item["field_name"] in metadata["index_columns"]]
         # Dask-GeoPandas assumes 2D bounds, so read 3D points with the existing row group reader
-        # The same reader lets remote workers reopen files with the configured filesystem
-        if (
-            metadata["geometry_type"] == "Point Z"
-            or any(name in metadata["columns"] for name in index_names)
-            or _is_remote_path(filename)
-        ):
+        if metadata["geometry_type"] == "Point Z" or any(name in metadata["columns"] for name in index_names):
             # Dask's Parquet reader resets named indexes, which fails when a value uses the same name
             # Decode bounded row groups with GeoPandas instead, preserving that valid Pandas layout
             dask = import_optional("dask")
@@ -434,10 +378,7 @@ def _open_parquet_geodataframe(
                 dask.delayed(_read_point_parquet_frame)(path, group, group_columns)
                 for path, group, _ in metadata["row_groups"]
             ]
-
-            # Preserve stored attribute dtypes when Dask constructs the delayed partitions
-            with dask.config.set({"dataframe.convert-string": False}):
-                frame = _import_dask_geopandas().from_dask_dataframe(dd.from_delayed(parts, meta=meta))
+            frame = _import_dask_geopandas().from_dask_dataframe(dd.from_delayed(parts, meta=meta))
         else:
             frame = _import_dask_geopandas().read_parquet(files, columns=read_columns, split_row_groups=True)
 

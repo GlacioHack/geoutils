@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import io
 import os
-import struct
 import tempfile
-from contextlib import nullcontext
 from dataclasses import replace
+from importlib.util import find_spec
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Literal
 
 import geopandas as gpd
@@ -19,18 +16,18 @@ import xarray as xr
 
 import geoutils as gu
 import geoutils.pointcloud.las as las_module
+from geoutils._misc import import_optional
 from geoutils.multiproc import MultiprocConfig
 from geoutils.pointcloud.las import (
     _iter_laspy_spatial_chunks,
     _load_laspy_data_bounds,
     _load_laspy_data_slice,
     _load_laspy_metadata,
-    _select_copc_nodes,
     _spatial_bounds_grid,
     _write_laspy_spatial_chunks,
 )
 
-laspy = pytest.importorskip("laspy")
+pytestmark = pytest.mark.skipif(find_spec("laspy") is None, reason="Only runs if laspy is installed.")
 
 
 class TestLasPyIO:
@@ -130,43 +127,6 @@ class TestLasPyIO:
             assert np.allclose(cropped.geometry.y.values, self.y[[0, 1, 3, 4]])
             assert np.allclose(cropped.data, self.z[[0, 1, 3, 4]])
             assert not unloaded.is_loaded
-
-    def test_select_copc_nodes__hierarchy_pages(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Checks that COPC selection follows child hierarchy pages and orders selected nodes by file position."""
-
-        from laspy.copc import HierarchyPage
-
-        # Create a small COPC index, which locates groups of points (nodes) without reading them
-        # We pack entries as (depth, voxel X/Y/Z, byte offset, byte size, point count), as in a real file
-        # Store one depth 1 node in a separate page, linked from the root page by a point count of -1
-        child_bytes = struct.pack("<iiiiQii", 1, 0, 0, 0, 10, 8, 3)
-        root_bytes = b"".join(
-            [
-                struct.pack("<iiiiQii", 1, 0, 0, 0, 0, len(child_bytes), -1),
-                struct.pack("<iiiiQii", 0, 0, 0, 0, 20, 8, 2),
-                struct.pack("<iiiiQii", 2, 0, 0, 0, 30, 8, 7),
-                struct.pack("<iiiiQii", 1, 1, 0, 0, 40, 8, 5),
-            ]
-        )
-
-        # Replace the file reader with our index bytes so node selection needs no actual point data
-        # The header counts all 3 + 2 + 7 + 5 points
-        reader = SimpleNamespace(
-            root_page=HierarchyPage.from_bytes(root_bytes),
-            source=io.BytesIO(child_bytes),
-            header=SimpleNamespace(point_count=17),
-        )
-        monkeypatch.setattr(las_module, "_open_las_reader", lambda filename, **kwargs: nullcontext(reader))
-
-        # Run both selection modes: request one depth or gather enough points for downsampling
-        # Automatic selection adds whole depths from the root until it reaches the target
-        explicit = _select_copc_nodes("hierarchy.copc.laz", level=1, target_count=None)
-        automatic = _select_copc_nodes("hierarchy.copc.laz", level=None, target_count=6)
-
-        # Check nodes are sorted by file offset, including the node reached through the separate page
-        # Depth 1 has 8 points: adding the root gives 10, so depth 2 is unnecessary for a target of 6
-        assert [(node.offset, node.point_count) for node in explicit] == [(10, 3), (40, 5)]
-        assert [(node.offset, node.point_count) for node in automatic] == [(10, 3), (20, 2), (40, 5)]
 
     def test_load_laspy_bounds__copc_errors_are_not_hidden(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Propagate indexed-reader failures when the LAS header identifies a COPC file."""
@@ -269,9 +229,7 @@ class TestLasPyIO:
         """Write a Dask-backed LAS point cloud partition by partition."""
 
         # Skip cleanly when lazy GeoDataFrames are unavailable
-        pytest.importorskip("dask")
-        if as_type == "geodataframe":
-            dgpd = pytest.importorskip("dask_geopandas")
+        dgpd = pytest.importorskip("dask_geopandas")
 
         # Write and reopen a source as several lazy LAS partitions
         pc = gu.PointCloud(self.gdf, data_name="z")
@@ -298,8 +256,7 @@ class TestLasPyIO:
     def test_to_las__roundtrip(self, tmp_path: Path, suffix: str) -> None:
         """Checks direct array LAS/LAZ opening/writing from the `pc` DataArray accessor in a round trip."""
 
-        if suffix == "laz":
-            pytest.importorskip("lazrs")
+        import_optional("laspy")
 
         # Create a point cloud DataArray with "classification" and "id" variables with different types to check they
         # remain separate from floating values/coords
@@ -324,6 +281,7 @@ class TestLasPyIO:
 
     def test_to_las__active_values(self, tmp_path: Path) -> None:
         """Checks that selecting intensity as active values preserves the native LAS elevation dimension."""
+        laspy = import_optional("laspy")
 
         # We create a DataArray where elevation differs from selected intensity values
         points = gu.DataArrayPointCloudAccessor.from_xyz(
