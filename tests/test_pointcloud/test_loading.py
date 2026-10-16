@@ -1,7 +1,7 @@
 """Test point cloud loading by bounds and row ranges."""
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -98,6 +98,76 @@ class TestPointCloudOpening:
         assert values.pc.point_count == 3
         np.testing.assert_array_equal(values.pc.to_array(), expected.to_array())
 
+    @pytest.mark.parametrize("as_type", ["dataarray", "dataset", "geodataframe"])
+    @pytest.mark.parametrize("level", [0, 1, range(2), range(0, 3, 2), 99])
+    @pytest.mark.parametrize("data_name", ["Z", "intensity"])
+    def test_open_pointcloud__copc_levels(
+        self,
+        copc_file: Path,
+        as_type: Literal["dataarray", "dataset", "geodataframe"],
+        level: int | range,
+        data_name: str,
+    ) -> None:
+        """Checks that COPC level of details can be selected properly through open_pointcloud, comparing to LasPy."""
+
+        # We query the same levels with LasPy as a reference
+        laspy = pytest.importorskip("laspy")
+        with laspy.CopcReader.open(copc_file) as reader:
+            expected = reader.query(level=level)
+            crs = reader.header.parse_crs()
+        expected_values = expected.z if data_name == "Z" else expected.intensity
+        expected_array = np.stack([expected.x, expected.y, expected_values])
+
+        # Open with levels
+        points = gu.open_pointcloud(copc_file, level=level, columns="all", data_name=data_name, as_type=as_type)
+
+        # We select only active values and "intensity" for comparison
+        values = points[data_name] if as_type == "dataset" else points
+        if as_type in ("dataset", "geodataframe"):
+            intensity = points["intensity"]
+        else:
+            intensity = points if data_name == "intensity" else points.coords["intensity"]
+
+        # Check exact values (and native integer dtype of "intensity")
+        np.testing.assert_array_equal(values.pc.to_array(), expected_array)
+        np.testing.assert_array_equal(intensity, expected.intensity)
+        assert intensity.dtype == np.uint16
+        assert values.pc.point_count == len(expected)
+        assert values.pc.crs == crs
+        assert values.pc.is_loaded
+
+    @pytest.mark.parametrize("as_type", ["dataarray", "dataset", "geodataframe"])
+    @pytest.mark.parametrize("downsample", [1, 2, 4.5, 1_000_000])
+    def test_open_pointcloud__copc_downsample(
+        self, copc_file: Path, as_type: Literal["dataarray", "dataset", "geodataframe"], downsample: float
+    ) -> None:
+        """Checks that downsampling with COPC automatically use levels of details."""
+
+        # Build a reference with LasPy level read directly + subsampling
+        laspy = pytest.importorskip("laspy")
+        with laspy.CopcReader.open(copc_file) as reader:
+            target_count = int(np.ceil(reader.header.point_count / downsample))
+            selected = reader.query(level=0)
+            assert 0 < len(selected) < reader.header.point_count
+            if len(selected) < target_count:
+                selected = reader.query()
+        reference = gu.PointCloud.from_xyz(selected.x, selected.y, selected.z, 32633, "Z")
+        reference["intensity"] = np.asarray(selected.intensity)
+        expected = reference
+        if target_count < len(selected):
+            request = target_count if target_count > 1 else 1 / len(selected)
+            expected = reference.subsample(request, random_state=0)
+
+        # Open with downsampling, and extract Z + intensity
+        points = gu.open_pointcloud(copc_file, downsample=downsample, columns=["intensity"], as_type=as_type)
+        values = points["Z"] if as_type == "dataset" else points
+        intensity = points["intensity"] if as_type in ("dataset", "geodataframe") else points.coords["intensity"]
+
+        # Check we get expected arrays
+        assert values.pc.point_count == target_count
+        np.testing.assert_array_equal(values.pc.to_array(), expected.to_array())
+        np.testing.assert_array_equal(intensity, expected["intensity"])
+
 
 class TestPointCloudOpeningChunked:
     """Test module ``open_pointcloud()`` with chunked backends (Dask only)."""
@@ -147,6 +217,84 @@ class TestPointCloudOpeningChunked:
         assert actual_values.pc.is_loaded
         assert not lazy_values.pc.is_loaded
 
+    @pytest.mark.parametrize("as_type", ["dataarray", "dataset", "geodataframe"])
+    @pytest.mark.parametrize(
+        "options",
+        [
+            {},
+            {"level": 0},
+            {"level": range(2)},
+            {"level": 99},
+            {"downsample": 2},
+            {"downsample": 4.5},
+            {"downsample": 1_000_000},
+        ],
+    )
+    def test_open_pointcloud__copc_loading_laziness(
+        self,
+        copc_file: Path,
+        as_type: Literal["dataarray", "dataset", "geodataframe"],
+        options: dict[str, Any],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Checks that COPC lazy reading works properly, including with levels of details/downsampling."""
+
+        dask = pytest.importorskip("dask")
+        if as_type == "geodataframe":
+            pytest.importorskip("dask_geopandas")
+        laspy = pytest.importorskip("laspy")
+
+        # Open an eager reference with same options
+        eager = gu.open_pointcloud(copc_file, columns="all", as_type=as_type, **options)
+        fetch_nodes = laspy.CopcReader._fetch_and_decompress_points_of_nodes
+
+        # Below we'll record node offsets to check which levels of details are read
+        read_offsets = []
+
+        def record_reads(reader: object, nodes: list[Any]) -> object:
+            read_offsets.extend(node.offset for node in nodes)
+            return fetch_nodes(reader, nodes)
+
+        monkeypatch.setattr(laspy.CopcReader, "_fetch_and_decompress_points_of_nodes", record_reads)
+
+        # Open with chunks (shorter final chunk to reveal potential issues)
+        lazy = gu.open_pointcloud(copc_file, columns="all", chunks=7001, as_type=as_type, **options)
+        eager_values = eager["Z"] if as_type == "dataset" else eager
+        lazy_values = lazy["Z"] if as_type == "dataset" else lazy
+
+        # Check loading and metadata
+        assert eager_values.pc.is_loaded
+        assert not lazy_values.pc.is_loaded
+        assert lazy_values.pc.point_count == eager_values.pc.point_count
+        assert not read_offsets
+
+        # Compute
+        with dask.config.set(scheduler="synchronous"):
+            actual = lazy.compute()
+
+        # Check every field matches the eager call
+        if as_type in ("dataarray", "dataset"):
+            xr.testing.assert_identical(actual, eager)
+        else:
+            assert_geodataframe_equal(actual, eager)
+
+        # Check computed result is loaded and the original output stays lazy
+        actual_values = actual["Z"] if as_type == "dataset" else actual
+        assert actual_values.pc.is_loaded
+        assert not lazy_values.pc.is_loaded
+        if as_type != "geodataframe":
+            assert max(lazy_values.chunks[0], default=0) <= 7001
+
+        # Check reductions read only the root node
+        if options.get("downsample", 1) in (4.5, 1_000_000):
+            with laspy.CopcReader.open(copc_file) as reader:
+                root_offsets = {
+                    entry.offset
+                    for entry in reader.root_page.entries.values()
+                    if entry.key.level == 0 and entry.point_count > 0
+                }
+            assert set(read_offsets) == root_offsets
+
 
 class TestPointCloudOpeningErrors:
     """Test module for errors in ``open_pointcloud()``."""
@@ -174,9 +322,42 @@ class TestPointCloudOpeningErrors:
         with pytest.raises((TypeError, ValueError), match="downsample must be"):
             gu.open_pointcloud(filename, as_type=as_type, downsample=downsample)  # type: ignore[arg-type]
 
+    @pytest.mark.parametrize(
+        "level", [True, np.bool_(False), -1, 1.5, "wrong", range(0), range(-1, 2), range(2, 0, -1)]
+    )
+    def test_open_pointcloud__error_invalid_level(self, tmp_path: Path, level: object) -> None:
+        """Checks an error is raised for invalid COPC levels before opening a file."""
+
+        # Create an invalid filename (should not matter, arguments are checked before opening)
+        filename = tmp_path / "absent.copc.laz"
+        # Check invalid depths fail before file access
+        with pytest.raises(ValueError, match="Argument 'level'"):
+            gu.open_pointcloud(filename, level=level)  # type: ignore[arg-type]
+
+    def test_open_pointcloud__error_level_and_downsample(self, tmp_path: Path) -> None:
+        """Checks an error is raised with COPC levels + downsampling at once."""
+
+        # Create an invalid filename (should not matter, arguments are checked before opening)
+        filename = tmp_path / "absent.copc.laz"
+        # Check downsampling + levels are not accepted together
+        with pytest.raises(ValueError, match="downsample and level cannot be used together"):
+            gu.open_pointcloud(filename, level=0, downsample=2)
+
+    @pytest.mark.parametrize("suffix", ["las", "parquet", "gpkg"])
+    def test_open_pointcloud__error_level_without_copc(self, tmp_path: Path, suffix: str) -> None:
+        """Checks an error is raised when COPC levels are requested for other point formats."""
+
+        filename = tmp_path / f"points.{suffix}"
+        if suffix == "las":
+            laspy = pytest.importorskip("laspy")
+            laspy.create().write(filename)
+        # Check passing "level" requires a COPC header
+        with pytest.raises(ValueError, match="only supported for COPC"):
+            gu.open_pointcloud(filename, level=0)
+
 
 class TestPointCloudLoading:
-    """Test module for selecting point rows, joining partitions, and reading file slices."""
+    """Test module for loading helpers on point clouds."""
 
     def test_filter_points_by_bounds__inclusive_and_independent(self) -> None:
         """Checks that bounds include points on their edges and return values independent of the source."""

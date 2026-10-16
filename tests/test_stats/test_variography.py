@@ -416,7 +416,10 @@ class TestVariogramConversion:
         assert axes.get_xlabel() == "Lag distance"
         assert axes.get_ylabel() == "Semivariance"
         assert len(axes.lines) >= 2
-        np.testing.assert_allclose(axes.lines[-1].get_ydata()[0], result.variogram(0))
+
+        # Compare the fitted curve at its plotted distances, which are positive on the default logarithmic axis
+        fitted_curve = axes.lines[-1]
+        np.testing.assert_allclose(fitted_curve.get_ydata(), result.variogram(fitted_curve.get_xdata()))
         pyplot.close(axes.figure)
 
     def test_combine__flattens_nested_sum_and_uses_one_nugget(self) -> None:

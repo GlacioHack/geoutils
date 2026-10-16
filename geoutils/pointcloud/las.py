@@ -36,6 +36,7 @@ import os
 import pathlib
 import tempfile
 from collections.abc import Iterable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -47,9 +48,12 @@ from pyproj import CRS
 from rasterio.coords import BoundingBox
 
 from geoutils._dispatch import is_dask_dataframe
+from geoutils._io import _get_filesystem, _path_suffix
 from geoutils._misc import import_optional
 
 if TYPE_CHECKING:
+    from laspy.copc import Entry
+
     from geoutils.multiproc.mparray import MultiprocConfig
 
 
@@ -75,7 +79,7 @@ class LasMetadata:
 def _is_laspy_supported(filename: str | pathlib.Path) -> bool:
     """Return whether a filename looks like a LasPy-supported file."""
 
-    suffix = pathlib.Path(filename).suffix.lower()
+    suffix = _path_suffix(filename)
     return suffix in [".las", ".laz"]
 
 
@@ -227,14 +231,39 @@ def _point_bounds_mask(
 ########################################
 
 
+@contextmanager
+def _open_las_reader(filename: str | pathlib.Path, *, copc: bool = False) -> Iterator[Any]:
+    """
+    Open a LAS or COPC reader and close its local or remote stream after use.
+
+    LasPy accepts seekable file objects for both readers:
+    https://laspy.readthedocs.io/en/latest/api/index.html#laspy.open
+    https://laspy.readthedocs.io/en/latest/api/laspy.copc.html#laspy.copc.CopcReader
+    Remote buffering follows https://filesystem-spec.readthedocs.io/en/latest/features.html#file-buffering-and-random-access.
+    """
+    laspy = import_optional("laspy")
+
+    # Buffer remote byte ranges and pass the original URL, including signed query parameters
+    filesystem = _get_filesystem(filename)
+    stream = (
+        open(filename, "rb") if filesystem is None else filesystem.open(os.fspath(filename), "rb", block_size=1024**2)
+    )
+
+    # The outer context owns the stream, including when reader construction or decompression fails
+    with stream:
+        reader = laspy.CopcReader(stream, close_fd=False) if copc else laspy.open(stream, closefd=False)
+        with reader:
+            yield reader
+
+
 def _load_laspy_metadata(filename: str | pathlib.Path) -> LasMetadata:
     """Read the header metadata needed to plan all LAS/LAZ loading paths."""
 
-    laspy = import_optional("laspy")
+    import_optional("laspy")
     from laspy.copc import CopcInfoVlr
 
     # Opening the reader gives access to the header without reading point records
-    with laspy.open(filename) as f:
+    with _open_las_reader(filename) as f:
         crs = f.header.parse_crs(prefer_wkt=False)
         point_count = f.header.point_count
         bounds = BoundingBox(
@@ -260,8 +289,6 @@ def _load_laspy_data(
 ) -> gpd.GeoDataFrame:
     """Read all requested points into the eager GeoDataFrame used by ``PointCloud.load()``."""
 
-    laspy = import_optional("laspy")
-
     # Validate requested dimensions before reading the complete file
     metadata = _load_laspy_metadata(filename)
     columns_to_load = _resolve_las_columns(
@@ -270,29 +297,27 @@ def _load_laspy_data(
         available_columns=metadata.columns,
     )
     # Convert all records only after column and metadata checks have passed
-    las = laspy.read(filename)
+    with _open_las_reader(filename) as reader:
+        las = reader.read()
     return _laspy_points_to_geodataframe(points=las, crs=metadata.crs, columns=columns_to_load)
 
 
 def _load_laspy_data_slice(
-    filename: str | pathlib.Path, columns: list[str], start: int, count: int
+    filename: str | pathlib.Path,
+    columns: list[str],
+    start: int,
+    count: int,
+    copc_nodes: list[Entry] | None = None,
 ) -> gpd.GeoDataFrame:
     """Read one point-index slice for a Dask or multiprocessing partition."""
-
-    laspy = import_optional("laspy")
 
     if start < 0:
         raise ValueError("Slice start must be positive.")
     if count < 0:
         raise ValueError("Slice count must be positive.")
 
-    # Seek directly to the requested row range instead of reading earlier points
-    with laspy.open(filename) as reader:
-        crs = reader.header.parse_crs(prefer_wkt=False)
-        if count > 0:
-            reader.seek(start)
-        points = reader.read_points(count)
-
+    # Read the requested records through the ordinary or indexed COPC reader
+    points, crs = _read_las_records(filename, start, count, copc_nodes)
     return _laspy_points_to_geodataframe(points=points, crs=crs, columns=columns)
 
 
@@ -300,20 +325,98 @@ def _load_laspy_data_slice(
 ################################
 
 
-def _read_las_arrays(filename: str, columns: list[str], start: int, count: int) -> dict[str, Any]:
+def _select_copc_nodes(filename: str, level: int | range | None, target_count: int | None) -> list[Entry]:
+    """
+    Select COPC nodes in file order without reading points.
+
+    Hierarchy pages supply node depths, byte offsets and counts. For automatic downsampling, cumulative counts
+    select the shallowest depth with at least target_count points; explicit levels select only their requested depths.
+    Page references and point counts follow the COPC hierarchy specification: https://copc.io/#hierarchy-page
+    Integer and range selection follow https://laspy.readthedocs.io/en/latest/api/laspy.copc.html#laspy.copc.CopcReader.query.
+    """
+    import_optional("laspy")
+    from laspy.copc import HierarchyPage
+
+    # Interpret an integer as a single octree depth
+    if isinstance(level, (int, np.integer)):
+        level = range(int(level), int(level) + 1)
+
+    # Follow hierarchy page references to collect every node's count and file offset
+    entries: list[Entry] = []
+    with _open_las_reader(filename, copc=True) as reader:
+        pages = [reader.root_page]
+        while pages:
+            page = pages.pop()
+            for entry in page.entries.values():
+                if entry.point_count == -1:
+                    reader.source.seek(entry.offset)
+                    pages.append(HierarchyPage.from_bytes(reader.source.read(entry.byte_size)))
+                elif entry.point_count > 0:
+                    entries.append(entry)
+
+        # Check hierarchy counts match the LAS header
+        if sum(entry.point_count for entry in entries) != reader.header.point_count:
+            raise ValueError("COPC hierarchy point count does not match the LAS header.")
+
+    # Count points at each depth for automatic level selection
+    if level is None and target_count is not None:
+        counts_by_level: dict[int, int] = {}
+        for entry in entries:
+            depth = entry.key.level
+            counts_by_level[depth] = counts_by_level.get(depth, 0) + entry.point_count
+
+        # Stop at the shallowest cumulative sample with enough points
+        cumulative_count = 0
+        for depth in sorted(counts_by_level):
+            cumulative_count += counts_by_level[depth]
+            if cumulative_count >= target_count:
+                level = range(depth + 1)
+                break
+
+    # Return native hierarchy entries in the same file order as LasPy's COPC queries
+    entries.sort(key=lambda entry: entry.offset)
+    if level is None:
+        return entries
+    return [entry for entry in entries if entry.key.level in level]
+
+
+def _read_las_records(
+    filename: str | pathlib.Path, start: int, count: int, copc_nodes: list[Entry] | None
+) -> tuple[Any, CRS | None]:
+    """
+    Read a LAS row slice or the supplied COPC nodes, including their CRS.
+
+    COPC nodes use LasPy's internal decoder to share its byte range merging and decompression:
+    https://github.com/laspy/laspy/blob/master/laspy/copc.py
+    """
+
+    # Ordinary LAS slices need one seek and read; empty slices only supply native dtypes
+    if copc_nodes is None or count == 0:
+        with _open_las_reader(filename) as reader:
+            crs = reader.header.parse_crs(prefer_wkt=False)
+            if count:
+                reader.seek(start)
+            return reader.read_points(count), crs
+
+    # Decode whole COPC nodes with the same byte range reader used by CopcReader.query()
+    with _open_las_reader(filename, copc=True) as reader:
+        crs = reader.header.parse_crs(prefer_wkt=False)
+        points = reader._fetch_and_decompress_points_of_nodes(copc_nodes)
+    return points, crs
+
+
+def _read_las_arrays(
+    filename: str, columns: list[str], start: int, count: int, copc_nodes: list[Entry] | None = None
+) -> dict[str, Any]:
     """Read one consecutive LAS record slice into separate numeric arrays."""
-    laspy = import_optional("laspy")
 
-    # Seek to the requested records without allocating point geometry
-    with laspy.open(filename) as reader:
-        if count:
-            reader.seek(start)
-        points = reader.read_points(count)
+    # Read the requested records without allocating point geometry
+    points, _ = _read_las_records(filename, start, count, copc_nodes)
 
-        # Extract each native dimension separately so attributes preserve their original dtypes
-        arrays = {"x": np.asarray(points.x), "y": np.asarray(points.y)}
-        for name in columns:
-            arrays[name] = np.asarray(points.z if name == "Z" else points[name])
+    # Extract each native dimension separately so attributes preserve their original dtypes
+    arrays = {"x": np.asarray(points.x), "y": np.asarray(points.y)}
+    for name in columns:
+        arrays[name] = np.asarray(points.z if name == "Z" else points[name])
     return arrays
 
 
@@ -322,12 +425,14 @@ def _open_las_array(
     data_name: str | None,
     columns: Literal["all", "main"] | list[str],
     chunks: int | None,
+    copc_nodes: list[Entry] | None = None,
 ) -> xr.DataArray:
     """
     Read LAS coordinates and attributes as eager arrays or delayed record slices.
 
     _load_laspy_metadata() supplies row counts and dimensions. _read_las_arrays() reads each requested slice,
     and from_xyz() assembles its values and coordinates without constructing geometries.
+    For COPC files, _select_copc_nodes() supplies the compressed nodes shared by the output chunks.
     """
     from geoutils.pointcloud.xr_accessor import DataArrayPointCloudAccessor
 
@@ -337,26 +442,41 @@ def _open_las_array(
     if data_name not in metadata.columns:
         raise ValueError(f"Point data column {data_name!r} does not exist.")
     selected = _resolve_las_columns(columns, data_name, metadata.columns)
+
+    # Default COPC reads include every depth; selected nodes supply their exact row count
+    if metadata.is_copc and copc_nodes is None:
+        copc_nodes = _select_copc_nodes(filename, level=None, target_count=None)
+    point_count = metadata.point_count if copc_nodes is None else sum(node.point_count for node in copc_nodes)
     empty = _read_las_arrays(filename, selected, 0, 0)
+
+    # Read eager records immediately or describe delayed reads using their known lengths
     if chunks is None:
-        arrays = _read_las_arrays(filename, selected, 0, metadata.point_count)
+        arrays = _read_las_arrays(filename, selected, 0, point_count, copc_nodes)
     else:
         dask = import_optional("dask")
         import dask.array as da
 
-        # Share one record read between every dimension in a row chunk
+        # Plan one read per COPC node because compressed nodes must be decoded as a whole
+        if copc_nodes is None:
+            lengths = [min(chunks, point_count - start) for start in range(0, point_count, chunks)]
+        else:
+            lengths = [node.point_count for node in copc_nodes]
+
+        # Delay each read so output fields share the same records
         parts = []
-        lengths = []
-        for start in range(0, metadata.point_count, chunks):
-            length = min(chunks, metadata.point_count - start)
-            parts.append(dask.delayed(_read_las_arrays)(filename, selected, start, length))
-            lengths.append(length)
+        start = 0
+        for index, length in enumerate(lengths):
+            read_nodes = None if copc_nodes is None else [copc_nodes[index]]
+            parts.append(dask.delayed(_read_las_arrays)(filename, selected, start, length, read_nodes))
+            start += length
+
+        # Assemble fields with their native dtypes and requested chunk sizes
         arrays = {}
         for name, values in empty.items():
             blocks = [
                 da.from_delayed(part[name], shape=(length,), dtype=values.dtype) for part, length in zip(parts, lengths)
             ]
-            arrays[name] = da.concatenate(blocks) if blocks else da.from_array(values, chunks=chunks)
+            arrays[name] = da.concatenate(blocks).rechunk(chunks) if blocks else da.from_array(values, chunks=chunks)
 
     # Construct one point DataArray from the selected values and separate coordinate arrays
     result = DataArrayPointCloudAccessor.from_xyz(
@@ -370,11 +490,13 @@ def _open_las_array(
     return result
 
 
-def _load_laspy_data_slice_dataframe(filename: str, columns: list[str], start: int, count: int) -> gpd.GeoDataFrame:
-    """Adapt the common LAS point-slice reader into one indexed Dask partition."""
+def _load_laspy_data_slice_dataframe(
+    filename: str, columns: list[str], start: int, count: int, copc_nodes: list[Entry] | None = None
+) -> gpd.GeoDataFrame:
+    """Read a LAS row slice or COPC nodes and index the dataframe from start."""
 
     # Give every partition its source row range so indexes stay unique after assembly
-    ds = _load_laspy_data_slice(filename, columns, start, count)
+    ds = _load_laspy_data_slice(filename, columns, start, count, copc_nodes)
     ds.index = pd.RangeIndex(start, start + count)
     return ds
 
@@ -384,8 +506,15 @@ def _open_las_geodataframe(
     data_name: str | None,
     columns: Literal["all", "main"] | list[str],
     chunks: int | None,
+    copc_nodes: list[Entry] | None = None,
 ) -> gpd.GeoDataFrame | Any:
-    """Read LAS points as one GeoDataFrame or ordered Dask-GeoPandas record slices."""
+    """
+    Read LAS points as one GeoDataFrame or ordered Dask-GeoPandas record slices.
+
+    _load_laspy_metadata() supplies dimensions and counts. _select_copc_nodes() identifies COPC nodes, and
+    _load_laspy_data_slice_dataframe() reads them before they are split into output partitions.
+    _build_pointcloud_output() attaches spatial metadata to eager COPC and lazy dataframe results.
+    """
     from geoutils.pointcloud.dataframe import (
         _build_pointcloud_output,
         _get_dataframe_attrs,
@@ -411,6 +540,20 @@ def _open_las_geodataframe(
         available_columns=metadata.columns,
     )
 
+    # Use every COPC depth by default and count selected nodes before reading points
+    if metadata.is_copc and copc_nodes is None:
+        copc_nodes = _select_copc_nodes(filename, level=None, target_count=None)
+    point_count = metadata.point_count if copc_nodes is None else sum(node.point_count for node in copc_nodes)
+    if chunks is None and copc_nodes is not None:
+        # Read only the selected COPC rows before attaching the same metadata as partitioned output
+        frame = _load_laspy_data_slice_dataframe(filename, columns_to_load, 0, point_count, copc_nodes)
+        return _build_pointcloud_output(
+            frame,
+            data_name=data_name,
+            as_dataframe=True,
+            attrs={"bounds": metadata.bounds, "point_count": point_count},
+            preserve_locations=True,
+        )
     if chunks is None:
         # The eager path loads all requested LAS dimensions into one GeoDataFrame
         pc = PointCloud(filename, data_name=data_name, downsample=1)
@@ -424,17 +567,22 @@ def _open_las_geodataframe(
     dask = import_optional("dask")
     delayed = dask.delayed
 
-    # Represent every contiguous LAS row slice as one delayed partition
-    starts = list(range(0, metadata.point_count, chunks))
-    parts = [
-        delayed(_load_laspy_data_slice_dataframe)(
-            filename,
-            columns_to_load,
-            start,
-            min(chunks, metadata.point_count - start),
-        )
-        for start in starts
-    ]
+    # Plan whole COPC node reads so smaller dataframe partitions share their decoded records
+    if copc_nodes is None:
+        lengths = [min(chunks, point_count - start) for start in range(0, point_count, chunks)]
+    else:
+        lengths = [node.point_count for node in copc_nodes]
+
+    # Assign unique row indexes before splitting decoded nodes into output partitions
+    parts = []
+    start = 0
+    for index, length in enumerate(lengths):
+        read_nodes = None if copc_nodes is None else [copc_nodes[index]]
+        part = delayed(_load_laspy_data_slice_dataframe)(filename, columns_to_load, start, length, read_nodes)
+        for offset in range(0, length, chunks):
+            parts.append(part.iloc[offset : offset + chunks])
+        start += length
+
     # Read zero records to preserve each native LAS dtype in Dask metadata and empty results
     empty = _load_laspy_data_slice_dataframe(filename, columns_to_load, start=0, count=0)
     if not parts:
@@ -451,7 +599,7 @@ def _open_las_geodataframe(
         {
             "crs": metadata.crs,
             "bounds": metadata.bounds,
-            "point_count": metadata.point_count,
+            "point_count": point_count,
             "data_name": data_name,
             "geometry_type": "Point",
         },
@@ -529,8 +677,6 @@ def _iter_laspy_data_chunks(
     a Dask-GeoPandas collection.
     """
 
-    laspy = import_optional("laspy")
-
     if chunk_size <= 0:
         raise ValueError("Argument 'chunk_size' must be a strictly positive integer.")
 
@@ -543,7 +689,7 @@ def _iter_laspy_data_chunks(
     )
 
     # Yield each source chunk independently so callers control memory retention
-    with laspy.open(filename) as reader:
+    with _open_las_reader(filename) as reader:
         crs = reader.header.parse_crs(prefer_wkt=False)
         for points in reader.chunk_iterator(chunk_size):
             if bounds is not None:
@@ -569,7 +715,7 @@ def _load_laspy_data_bounds_copc(
 
     # COPC can use its spatial index instead of scanning all point records
     bbox = _bounds_from_tuple(bounds)
-    with laspy.CopcReader.open(filename) as reader:
+    with _open_las_reader(filename, copc=True) as reader:
         crs = reader.header.parse_crs(prefer_wkt=False)
         query_bounds = laspy.Bounds(
             mins=np.array([bbox.left, bbox.bottom]),
@@ -636,8 +782,6 @@ def _iter_laspy_spatial_chunks(
     on tile boundaries for a non-overlapping block grid.
     """
 
-    laspy = import_optional("laspy")
-
     if chunk_size <= 0:
         raise ValueError("Argument 'chunk_size' must be a strictly positive integer.")
 
@@ -656,7 +800,7 @@ def _iter_laspy_spatial_chunks(
     parts: list[list[gpd.GeoDataFrame]] = [[] for _ in blocks]
     full_bounds = metadata.bounds
 
-    with laspy.open(filename) as reader:
+    with _open_las_reader(filename) as reader:
         crs = reader.header.parse_crs(prefer_wkt=False)
         for points in reader.chunk_iterator(chunk_size):
             # Convert scaled coordinates once per source chunk before checking blocks
