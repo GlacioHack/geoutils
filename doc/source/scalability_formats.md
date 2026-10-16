@@ -19,12 +19,12 @@ suited to **large datasets** and **cloud storage**.
 Note that these formats are inherently supported through packages such as
 [Rasterio](https://rasterio.readthedocs.io/en/stable/), [Pyogrio](https://pyogrio.readthedocs.io/en/latest/),
 [PyArrow](https://arrow.apache.org/docs/python/), [LasPy](https://laspy.readthedocs.io/en/latest/) and
-[Zarr](https://zarr.readthedocs.io/en/stable/). Below, we simply examplify **how to use them through GeoUtils**. 
-See {ref}`dependencies` for GeoUtils optional dependencies 
+[Zarr](https://zarr.readthedocs.io/en/stable/). Below, we simply examplify **how to use them through GeoUtils**.
+See {ref}`dependencies` for GeoUtils optional dependencies
 and [Xarray's installation guide](https://docs.xarray.dev/en/stable/getting-started-guide/installing.html#for-netcdf-and-io)
 for its optional file readers.
 
-This page focuses on **how to choose a file format that fits your scalable analysis**, as a file format and its storage 
+This page focuses on **how to choose a file format that fits your scalable analysis**, as a file format and its storage
 layout sometimes determine how much data must be read for an operation.
 These choices complement {ref}`chunked execution <scalability-usage>`, which limits memory during computation.
 
@@ -34,9 +34,10 @@ For large data analysis, we recommend **COG** for rasters, **COPC** for LiDAR,
 **GeoParquet** for vectors and point cloud attributes, or **Zarr** for multidimensional datasets.
 Choose the format and its tile, row group or chunk layout to match the data selections used in your analysis.
 
-The table summarizes format capabilities. 
-**Chunked I/O** means efficient block/partition reading for large files. 
+The table summarizes format capabilities.
+**Chunked I/O** means efficient block/partition reading for large files.
 **Cloud reading** means efficient access and streaming of remote files.
+Formats marked "No" for cloud reading can still be opened remotely, but may require reading much more data.
 
 ```{list-table}
 :widths: 2 1 1 4
@@ -130,7 +131,8 @@ GeoTIFFs, [GDAL recommends tiles and overviews](https://gdal.org/en/stable/user/
 
 **COPC can speed up spatial operations** by letting GeoUtils
 [read points from the area needed](https://laspy.readthedocs.io/en/latest/api/laspy.copc.html) instead of repeatedly
-scanning the file. Opening with `chunks` still reads points in file order.
+scanning the file. Use `level` to select {ref}`levels of detail <scalability-downsampling-copc>`, or `downsample`
+to select a smaller point sample automatically. Both work with `chunks` for lazy reading.
 
 Writing COPC requires building its spatial index with a writer such as
 [PDAL](https://pdal.io/en/stable/stages/writers.copc.html); LasPy supports reading COPC, but does not write it.
@@ -290,6 +292,7 @@ with rio.open(cog_path) as source:
     print("Overview factors:", source.overviews(1))
 ```
 
+(scalability-array-formats)=
 ## Zarr and NetCDF datasets
 
 Open **Zarr** and **NetCDF** datasets with Xarray, then use GeoUtils' `rst` accessor on their raster variables.
@@ -329,235 +332,103 @@ The NetCDF example uses **NetCDF4**, which supports stored chunks and compressio
 For details on storage options and writing, see
 [Xarray's file format guide](https://docs.xarray.dev/en/stable/user-guide/io.html).
 
-(scalability-cloud)=
-## Reading from cloud storage
-
-Cloud reads use the file readers shown below. The Zarr, NetCDF, COPC, GeoParquet and GeoPackage examples use
-placeholder addresses: replace them with your own dataset locations. Authentication follows each reader's
-configuration. Install [Fsspec](https://filesystem-spec.readthedocs.io/en/latest/) with its HTTP extra
-(`fsspec[http]`) for the HTTP examples, or with [S3fs](https://s3fs.readthedocs.io/en/latest/) for `s3://`.
-
-### GeoTIFF and COG
-
-GeoUtils can open remote rasters by passing an **HTTPS URL** or a supported cloud address, such as `s3://`, to
-{func}`~geoutils.open_raster`. With a server supporting **HTTP range requests**, Rasterio reads only the required
-sections of the file. Authentication follows
-[Rasterio's virtual filesystems](https://rasterio.readthedocs.io/en/stable/topics/vsi.html).
-
-For example, we read the COG created above through a local HTTP server with range support, using `cog_url` as its
-address. The same calls work with a COG in cloud storage. We crop to a 64 × 64 window before calculating statistics:
-
-```{code-cell} ipython3
-:tags: [hide-input]
-:mystnb:
-:  code_prompt_show: "Show local HTTP service preparation"
-:  code_prompt_hide: "Hide local HTTP service preparation"
-
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Thread
-
-# Serve one file with byte ranges, recording response sizes to check selective reading
-cog_bytes = cog_path.read_bytes()
-transfers = []
-
-class RangeHandler(BaseHTTPRequestHandler):
-    """Serve the example COG and record the byte ranges read by GDAL."""
-
-    def do_HEAD(self) -> None:
-        """Return the file size without a response body."""
-        self.respond(send_body=False)
-
-    def do_GET(self) -> None:
-        """Return a complete file or the requested byte range."""
-        self.respond(send_body=True)
-
-    def respond(self, send_body: bool) -> None:
-        """Handle file existence and single byte ranges for this example service."""
-        if self.path != "/elevation.tif":
-            self.send_error(404)
-            return
-
-        # GDAL requests explicit, inclusive byte ranges from the COG
-        requested_range = self.headers.get("Range")
-        start, end = 0, len(cog_bytes) - 1
-        if requested_range:
-            first, last = requested_range.removeprefix("bytes=").split("-")
-            start = int(first)
-            end = min(int(last) if last else end, end)
-        self.send_response(206 if requested_range else 200)
-        self.send_header("Accept-Ranges", "bytes")
-        self.send_header("Content-Length", str(end - start + 1))
-        if requested_range:
-            self.send_header("Content-Range", f"bytes {start}-{end}/{len(cog_bytes)}")
-        self.end_headers()
-        if send_body:
-            transfers.append((start, end + 1))
-            self.wfile.write(cog_bytes[start:end + 1])
-
-    def log_message(self, format: str, *args: object) -> None:
-        """Keep request logging out of notebook output."""
-        return
-
-server = ThreadingHTTPServer(("127.0.0.1", 0), RangeHandler)
-server_thread = Thread(target=server.serve_forever, daemon=True)
-server_thread.start()
-cog_url = f"http://127.0.0.1:{server.server_port}/elevation.tif"
-```
-
-```{code-cell} ipython3
-# Avoid checking the remote directory for auxiliary files
-with rio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR"):
-    ds_remote = gu.open_raster(cog_url, chunks={"x": 128, "y": 128})
-    ds_window = ds_remote.rst.crop((501_280, 3_200, 501_920, 3_840))
-    summary = ds_window.rst.stats(["mean", "std"])
-print("Window shape:", ds_window.rst.shape)
-print(summary)
-```
-
-```{code-cell} ipython3
-print("Complete COG:", len(cog_bytes), "bytes")
-print("HTTP response bodies:", sum(end - start for start, end in transfers), "bytes")
-```
-
-The source and cropped arrays remain **lazy**, and only the statistics are returned to memory. The number of bytes
-read includes metadata and depends on the window, tile layout and GDAL's cache. When a coarser raster is sufficient,
-{ref}`downsampling and overviews <scalability-downsampling>` can further reduce the amount of data read.
-
 ```{code-cell} ipython3
 :tags: [remove-cell]
 
-# Check the actual HTTP results, then stop the service and remove the temporary files
-assert ds_window.rst.shape == (64, 64)
-assert not ds_remote._in_memory and not ds_window._in_memory
-np.testing.assert_allclose(summary["mean"], np.mean(terrain[128:192, 128:192], dtype="float64"), rtol=1e-12)
-np.testing.assert_allclose(summary["std"], np.std(terrain[128:192, 128:192], dtype="float64"), rtol=1e-12)
-assert transfers and sum(end - start for start, end in transfers) < len(cog_bytes)
-ds_remote.close()
-ds_window.close()
-server.shutdown()
-server.server_close()
-server_thread.join()
+# Close the local examples before removing their temporary files
 ds.close()
+ds_lidar.close()
+ds_saved.close()
+ds_parts.close()
 files.cleanup()
 ```
 
-### Zarr
+(scalability-cloud)=
+## Reading from cloud storage
 
-Xarray can open a Zarr store directly in cloud storage. As with the COG above, select a spatial window before
-computing statistics so that only the intersecting chunks are read:
-
-```python
-import xarray as xr
-
-# Open a Zarr store, preserving its CRS and spatial coordinates
-ds_cloud = xr.open_zarr(
-    "s3://my-bucket/elevation.zarr", chunks={"x": 256, "y": 256}, decode_coords="all",
-)
-
-# Read the same window as the COG example when calculating statistics
-window = ds_cloud["elevation"].rst.crop((501_280, 3_200, 501_920, 3_840))
-print(window.rst.stats(["mean", "std"]))
-ds_cloud.close()
-```
-
-See [Xarray's Zarr guide](https://docs.xarray.dev/en/stable/user-guide/io.html#zarr) for cloud authentication,
-consolidated metadata and writing results back to object storage.
-
-### NetCDF
-
-For a **NetCDF4 file over HTTP**, Fsspec provides a file object with remote byte reads and
-[h5netcdf](https://h5netcdf.org/) with [h5py](https://www.h5py.org/) opens its arrays through Xarray.
-Compute the result while the remote file is open:
+Pass an **HTTPS URL** or an **S3 address** directly to {func}`~geoutils.open_raster`,
+{func}`~geoutils.open_pointcloud` or {func}`~geoutils.open_vector`, using the same options as for a local file.
+Replace the example location below with your own dataset address:
 
 ```python
-import fsspec
-import xarray as xr
-
-# Open a NetCDF4 file without downloading the complete file first
-with fsspec.open("https://example.org/elevation.nc", "rb") as remote_file:
-    with xr.open_dataset(
-        remote_file, engine="h5netcdf", chunks={"x": 256, "y": 256}, decode_coords="all",
-    ) as ds_cloud:
-        window = ds_cloud["elevation"].rst.crop((501_280, 3_200, 501_920, 3_840))
-        print(window.rst.stats(["mean", "std"]))
-```
-
-This requires an HTTP server supporting byte ranges; Fsspec can also open an `s3://` file with S3fs.
-For a dataset served through **OPeNDAP**, use `xr.open_dataset(url, engine="netcdf4", chunks="auto")` instead.
-See [Xarray's OPeNDAP guide](https://docs.xarray.dev/en/stable/user-guide/io.html#opendap).
-
-### COPC
-
-Use LasPy's CopcReader to read a spatial selection from a remote COPC. The query loads the selected points into
-memory, so choose bounds and a resolution appropriate for the analysis:
-
-```python
-import laspy
-import numpy as np
 import geoutils as gu
 
-# Query the same horizontal bounds as the raster examples, at a coarser point spacing
-bounds = laspy.copc.Bounds(mins=np.array([501_280, 3_200]), maxs=np.array([501_920, 3_840]))
-with laspy.CopcReader.open("https://example.org/survey.copc.laz") as reader:
-    points = reader.query(bounds=bounds, resolution=10)
-    ds_points = gu.pointcloud.from_xyz(
-        np.asarray(points.x), np.asarray(points.y), np.asarray(points.z),
-        crs=reader.header.parse_crs(), data_name="Z",
-    )
-
-# Use GeoUtils on the selected points
-print(ds_points.pc.stats(["mean", "std"]))
+location = "https://example.org/data"  # Or "s3://my-bucket/data"
+ds = gu.open_raster(f"{location}/elevation.tif", chunks={"x": 256, "y": 256})
+points = gu.open_pointcloud(f"{location}/survey.copc.laz", level=range(3), chunks=100_000)
+features = gu.open_vector(f"{location}/regions.gpkg", chunks=10_000)
 ```
 
-[CopcReader's documentation](https://laspy.readthedocs.io/en/latest/api/laspy.copc.html) describes bounds and levels
-of detail. HTTP reading also requires [Requests](https://requests.readthedocs.io/en/latest/).
+The point cloud call also accepts **LAS, LAZ and GeoParquet** files (or a directory of GeoParquet partitions);
+omit `level` for formats other than COPC. The vector call accepts formats supported by GDAL, such as GeoPackage
+and GeoJSON. These functions select the file reader automatically, so no separate download is needed.
 
-### GeoParquet
-
-PyArrow can read selected columns from a remote GeoParquet file **one batch at a time**. Here, each printed mean
-describes one batch of elevation values:
+With `chunks`, the data stays **lazy** until a computation needs it. For example, select a spatial window before
+calculating raster statistics:
 
 ```python
+window = ds.rst.crop((501_280, 3_200, 501_920, 3_840))
+print(window.rst.stats(["mean", "std"]))
+```
+
+Efficient partial reads require **HTTP range requests** and a suitable file layout, as summarized in the table above.
+Readers also fetch metadata and complete tiles, compressed point blocks or row groups, so the transferred data can
+exceed the selected values. {ref}`Downsampling and overviews <scalability-downsampling>` can further reduce reads.
+
+Raster and vector formats use GDAL through Rasterio and Pyogrio. Native LAS/COPC and point GeoParquet readers use
+[Fsspec](https://filesystem-spec.readthedocs.io/en/latest/): install `fsspec[http]` for HTTPS or
+[S3fs](https://s3fs.readthedocs.io/en/latest/) for S3. For multidimensional Zarr and NetCDF datasets, use Xarray
+as shown {ref}`above <scalability-array-formats>`; see its
+[cloud storage guide](https://docs.xarray.dev/en/stable/user-guide/io.html#cloud-storage) for remote access.
+
+### Passwords and other credentials
+
+Authentication follows the reader's configuration; the open functions do not share a `password` or `storage_options`
+argument. For an **HTTPS server using a username and password**, configure GDAL for rasters and vectors, or Fsspec
+for native point cloud files, before opening:
+
+```python
+import os
+from base64 import b64encode
+from getpass import getpass
+
 import fsspec
-import numpy as np
-import pyarrow.parquet as pq
 
-# Read elevation values in batches rather than loading every point and attribute
-with fsspec.open("https://example.org/survey.parquet", "rb") as remote_file:
-    parquet = pq.ParquetFile(remote_file)
-    for batch in parquet.iter_batches(batch_size=1_000, columns=["Z"]):
-        values = batch.column("Z").to_numpy()
-        print(np.nanmean(values))
+username = input("Username: ")
+password = getpass("Password: ")
+
+# Encode HTTP Basic credentials for the Authorization header
+authorization = "Basic " + b64encode(f"{username}:{password}".encode()).decode("ascii")
+
+# Configure raster and vector reads through GDAL
+os.environ["GDAL_HTTP_HEADERS"] = f"Authorization: {authorization}"
+
+# Configure LAS/COPC and point GeoParquet reads through Fsspec
+fsspec.config.conf["http"] = {"headers": {"Authorization": authorization}}
+
+ds_private = gu.open_raster("https://example.org/private/elevation.tif", chunks={"x": 256, "y": 256})
+points_private = gu.open_pointcloud("https://example.org/private/survey.parquet", chunks=100_000)
 ```
 
-The HTTP server must support byte ranges. For a remote GeoDataFrame, use
-[GeoPandas' read_parquet()](https://geopandas.org/en/stable/docs/reference/api/geopandas.read_parquet.html), which
-loads the selected rows and columns into memory.
+For password-protected vector URLs, use `gu.open_vector("/vsicurl/https://example.org/private/regions.gpkg")`
+to send requests directly through GDAL, including authentication, instead of GeoPandas' initial URL check.
+See [GDAL's HTTP authentication options](https://gdal.org/en/stable/user/configoptions.html#networking-options)
+and [Fsspec's HTTP options](https://filesystem-spec.readthedocs.io/en/latest/_modules/fsspec/implementations/http.html)
+for other authentication methods. A **signed URL** can be passed directly, including its query string.
 
-### GeoPackage
-
-Pyogrio can read a remote GeoPackage through
-[GDAL's virtual filesystems](https://gdal.org/en/stable/user/virtual_file_systems.html). A bounding box limits the
-features loaded into memory, although the database layout can require many HTTP requests:
+For **private S3 storage**, both readers can use the standard `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and,
+for temporary credentials, `AWS_SESSION_TOKEN` environment variables. See
+[GDAL's S3 credentials](https://gdal.org/en/stable/user/virtual_file_systems.html#vsis3-aws-s3-files-random-access)
+and [S3fs credentials](https://s3fs.readthedocs.io/en/latest/#credentials) for profiles and IAM roles.
+For a public bucket, enable anonymous reads before opening:
 
 ```python
-import pyogrio
-
-# Read features intersecting the example bounds from a remote GeoPackage
-features = pyogrio.read_dataframe(
-    "/vsicurl/https://example.org/regions.gpkg",
-    bbox=(501_280, 3_200, 501_920, 3_840), columns=["name"],
-)
-print(features.head())
+os.environ["AWS_NO_SIGN_REQUEST"] = "YES"  # GDAL
+fsspec.config.conf["s3"] = {"anon": True}  # Fsspec/S3fs
+points_public = gu.open_pointcloud("s3://my-public-bucket/survey.copc.laz", level=range(3), chunks=100_000)
 ```
 
-For a file on S3, use a `/vsis3/my-bucket/regions.gpkg` path and configure GDAL's credentials.
-
-Opening remote arrays with `chunks` uses **Dask's local scheduler** by default.
-For repeated reads of large datasets, we recommend running computations near the storage. A Dask `Client` allows
-using several machines when needed; see {ref}`scalability-usage` and
+Credentials must remain available until lazy reads finish. With distributed Dask, configure them on **each worker**;
+changes to `fsspec.config.conf` in the client process are not automatically applied to workers.
+For repeated reads of large datasets, run computations near the storage; see {ref}`scalability-usage` and
 [Dask's remote data guidance](https://docs.dask.org/en/stable/how-to/connect-to-remote-data.html).
-
-GeoUtils' native LAS and GeoParquet readers and writers currently use **local paths**, so those inputs need to be
-copied to the processing machine and accessible to any remote workers. Large outputs can be written in chunks,
-then uploaded as COG or Parquet files with your storage provider's tools.

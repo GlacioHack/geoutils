@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any
+from collections.abc import Callable
+from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -14,6 +15,7 @@ from packaging.version import Version
 from pyproj import CRS
 from pyproj.crs import CompoundCRS
 
+import geoutils as gu
 from geoutils import (
     ErrorComponent,
     ErrorStructure,
@@ -27,6 +29,7 @@ from geoutils.raster import MultiprocConfig
 from geoutils.raster.base import RasterBase
 from geoutils.raster.xr_accessor import DataArrayRasterAccessor
 from tests.accessor_helpers import assert_output_equal
+from tests.remote_helpers import RemoteFiles
 
 
 def should_be_loaded(method: str, args: dict[str, Any], noload: list[str], noload_allowed_args: dict[str, Any]) -> bool:
@@ -705,3 +708,139 @@ class TestRasterEdit:
         assert edited.nodata is None
         assert edited.tags == {}
         assert edited.area_or_point is None
+
+
+@pytest.fixture
+def remote_raster(remote_files: RemoteFiles) -> str:
+    """Write a tile-by-tile GeoTIFF to a "mocked" remote cloud file."""
+
+    values = np.arange(256 * 256, dtype="float32").reshape(256, 256)
+    values[0, 0] = -9999
+    filename = remote_files.directory / "raster.tif"
+    with rio.open(
+        filename,
+        "w",
+        driver="COG",
+        width=256,
+        height=256,
+        count=1,
+        dtype=values.dtype,
+        crs=32633,
+        transform=rio.transform.from_origin(500000, 5100000, 10, 10),
+        nodata=-9999,
+        blocksize=128,
+    ) as destination:
+        destination.write(values, 1)
+    return filename.name
+
+
+class TestRasterRemote:
+    """Test module for remote raster reading (in the cloud)."""
+
+    @pytest.mark.parametrize("load_data", [True, False])
+    def test_init__remote(
+        self, remote_files: RemoteFiles, remote_url: Callable[[str], str], remote_raster: str, load_data: bool
+    ) -> None:
+        """Checks that instantiating a Raster on a remote file in the cloud works properly."""
+
+        # Open both as remote/local
+        expected = gu.Raster(remote_files.directory / remote_raster, load_data=True)
+        remote = gu.Raster(remote_url(remote_raster), load_data=load_data)
+
+        # Check loading, metadata and exact equality after loading
+        assert remote.is_loaded == load_data
+        assert remote.crs == expected.crs
+        assert remote.transform == expected.transform
+        assert remote.bounds == expected.bounds
+        assert remote.shape == expected.shape
+        assert remote.nodata == expected.nodata
+        if not load_data:
+            remote.load()
+        assert remote.is_loaded
+        assert remote.raster_equal(expected)
+
+        # Check that remote reads requested part of a file
+        assert any(method == "GET" and byte_range for method, path, byte_range in remote_files.requests)
+
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
+    def test_open_raster__remote(
+        self,
+        remote_files: RemoteFiles,
+        remote_url: Callable[[str], str],
+        remote_raster: str,
+        as_object_type: Literal["dataarray", "dataset"],
+    ) -> None:
+        """Checks that open_raster() works properly on a remote file in the cloud."""
+
+        # Open both local/remote
+        expected = gu.open_raster(
+            str(remote_files.directory / remote_raster), as_object_type=as_object_type, data_name="height"
+        )
+        remote = gu.open_raster(remote_url(remote_raster), as_object_type=as_object_type, data_name="height")
+
+        # Check equality, and close the backing file handles
+        try:
+            xr.testing.assert_identical(remote, expected)
+            assert remote.rio.crs == expected.rio.crs
+        finally:
+            remote.close()
+            expected.close()
+
+        # Check that remote reads requested part of a file
+        assert any(method == "GET" and byte_range for method, path, byte_range in remote_files.requests)
+
+
+class TestRasterRemoteChunked:
+    """Test module for remote raster files with lazy/chunked Dask reading."""
+
+    def test_open_raster__remote_laziness(
+        self, remote_files: RemoteFiles, remote_url: Callable[[str], str], remote_raster: str
+    ) -> None:
+        """Checks that remote raster chunks stay lazy and compute exactly the eager local raster."""
+
+        pytest.importorskip("dask")
+
+        # Open both local/remote with chunks (Dask)
+        expected = gu.open_raster(str(remote_files.directory / remote_raster)).load()
+        remote = gu.open_raster(remote_url(remote_raster), chunks={"x": 90, "y": 70})
+        assert expected.rst.is_loaded
+        assert not remote.rst.is_loaded
+        assert remote.chunks is not None
+        requests_before_compute = len(remote_files.requests)
+
+        # Compute and check equality, without loading the original lazy object
+        try:
+            computed = remote.compute(scheduler="synchronous")
+            xr.testing.assert_identical(computed, expected)
+            assert computed.rst.is_loaded
+            assert not remote.rst.is_loaded
+            assert len(remote_files.requests) > requests_before_compute
+        finally:
+            remote.close()
+            expected.close()
+
+        # Check that remote reads requested part of a file
+        assert any(method == "GET" and byte_range for method, path, byte_range in remote_files.requests)
+
+
+class TestRasterRemoteErrors:
+    """Test module for errors/warnings for raster remote files."""
+
+    def test_init__error_missing_remote_file(self, remote_url: Callable[[str], str]) -> None:
+        """Checks an error is raised when a remote raster file is unavailable."""
+        with pytest.raises(rio.errors.RasterioIOError):
+            gu.Raster(remote_url("missing.tif"))
+
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
+    @pytest.mark.parametrize("chunks", [None, {"x": 90, "y": 70}])
+    def test_open_raster__error_missing_remote_file(
+        self,
+        remote_url: Callable[[str], str],
+        as_object_type: Literal["dataarray", "dataset"],
+        chunks: dict[str, int] | None,
+    ) -> None:
+        """Checks an error is raised when open_raster() cannot find a remote file, with or without chunks."""
+
+        filename = remote_url("missing.tif")
+        with pytest.raises(rio.errors.RasterioIOError):
+            gu.open_raster(filename, as_object_type=as_object_type, chunks=chunks)

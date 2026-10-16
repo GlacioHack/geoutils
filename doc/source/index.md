@@ -39,8 +39,8 @@ and point cloud operations and some vector operations, and is **composable** by 
 and backends that can be reused across operations. It also provides **accessors** to naturally extend
 existing Python data structures (Xarray, GeoPandas).
 
-GeoUtils makes quantitative analysis **accessible** through an intuitive API, similar in spirit to
-GDAL's overhauled CLI, while accounting for geospatial intricacies (nodata values, projections, pixel interpretation).
+Finally, it strives to make quantitative analysis **accessible** through an intuitive API, similar in spirit to
+GDAL's overhauled CLI, while accounting implicitly for geospatial intricacies (nodata values, projections, pixel interpretation).
 
 If you are looking to **port your GDAL or QGIS workflow in Python** while supporting large datasets, GeoUtils is made for you!
 

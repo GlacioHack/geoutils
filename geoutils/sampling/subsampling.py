@@ -2592,8 +2592,13 @@ def _select_point_subsample_partition(
 def _pointcloud_from_subsample_indices(
     source_pointcloud: PointCloudBase,
     indices: NDArrayNum,
+    partition_lengths: Sequence[int] | None = None,
 ) -> Any:
-    """Build an eager or lazy point cloud containing the sampled source rows."""
+    """
+    Build an eager or lazy point cloud containing the sampled source rows.
+
+    Known partition lengths let Dask select rows without first reading partitions to count them.
+    """
 
     positions = np.asarray(indices, dtype=np.int64)
     if source_pointcloud._is_xr:
@@ -2602,12 +2607,16 @@ def _pointcloud_from_subsample_indices(
         selected = source_pointcloud._dataset.iloc[positions].copy()
         return source_pointcloud._cast_pointcloud_output(selected)
 
-    # Split global row positions between the existing Dask dataframe partitions
+    # Calculate partition boundaries from supplied counts or a scan of the dataframe
     dask = import_optional("dask")
-    partition_lengths = np.asarray(source_pointcloud._dataset.map_partitions(len).compute(), dtype=np.int64)
-    partition_starts = np.cumsum(np.concatenate(([0], partition_lengths[:-1])))
+    if partition_lengths is None:
+        partition_lengths = source_pointcloud._dataset.map_partitions(len).compute()
+    lengths = np.asarray(partition_lengths, dtype=np.int64)
+    partition_starts = np.cumsum(np.concatenate(([0], lengths[:-1])))
+
+    # Select local rows and record their order in the complete sample
     selected_parts = []
-    for dataframe, start, length in zip(source_pointcloud._dataset.to_delayed(), partition_starts, partition_lengths):
+    for dataframe, start, length in zip(source_pointcloud._dataset.to_delayed(), partition_starts, lengths):
         sample_positions = np.flatnonzero((positions >= start) & (positions < start + length)).astype(np.int64)
         if len(sample_positions) == 0:
             continue

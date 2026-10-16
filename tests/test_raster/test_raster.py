@@ -9,6 +9,7 @@ import pathlib
 import re
 import tempfile
 import warnings
+from pathlib import Path
 from tempfile import TemporaryFile
 
 import numpy as np
@@ -16,6 +17,7 @@ import pytest
 import rasterio as rio
 import xarray as xr
 from PIL import Image
+from pyproj import CRS
 
 import geoutils as gu
 from geoutils import examples
@@ -214,6 +216,26 @@ class TestRaster:
                         f"{stats_band[stat]:.2f}"
                         in output_with_stats_split[start + band * len(r.stats(values=1)) + band + 1 + s]
                     )
+
+    def test_info__gcp_rcp_georeferencing(self, raster_gcp_rpc: gu.Raster) -> None:
+        """Checks that info() identifies GCP/RPC referencing properly."""
+
+        # Open a raster referenced only by GCPs/RPCs
+        raster = raster_gcp_rpc
+        georeferencing_name = "GCPs" if raster.gcps[0] else "RPCs"
+        expected_crs = CRS(raster.gcps[1]) if raster.gcps[0] else CRS.from_epsg(4326)
+
+        # We run info()
+        result = raster.info(verbose=False)
+
+        # Finally, we check GCPs/RPCs replace the affine pixel size and corner coordinates in the summary
+        # (without showing the identity affine placeholder)
+        assert f"Georeferencing:       {georeferencing_name}" in result
+        assert f"Coordinate system:    {[expected_crs.name]}" in result
+        assert "Pixel size:" not in result
+        assert "Upper left corner:" not in result
+        assert "Lower right corner:" not in result
+        assert not raster.is_loaded
 
     def test_load(self) -> None:
         """
@@ -527,6 +549,85 @@ class TestRaster:
             ds = rst.to_xarray()
             rst3 = gu.Raster.from_xarray(ds=ds, dtype=rst.dtype)
             assert rst3.raster_equal(rst, strict_masked=False)
+
+    @pytest.mark.parametrize(
+        "raster_gcp_rpc",
+        ["gcp_projected", "gcp_nonlinear", "rpc_polynomial", "rpc_rational", "gcp_rpc_polynomial", "gcp_rpc_rational"],
+        indirect=True,
+    )
+    @pytest.mark.parametrize("method", ["to_file", "to_rio_dataset", "to_xarray", "to_xarray_file", "from_xarray_file"])
+    def test_metadata__roundtrip(self, raster_gcp_rpc: gu.Raster, tmp_path: Path, method: str) -> None:
+        """Checks that GCPs/RPCs and values survive both disk writing/reading, and in-memory conversions."""
+
+        # Export, then read the result back as a Raster
+        source = raster_gcp_rpc
+        if method == "to_file":
+            filename = tmp_path / "roundtrip.tif"
+            source.to_file(filename)
+            result = gu.Raster(filename)
+        elif method == "to_rio_dataset":
+            with source.to_rio_dataset() as dataset:
+                assert "RPC" not in dataset.tags()
+                result = gu.Raster(dataset, load_data=True)
+        else:
+            ds = source.to_xarray()
+            result = ds.rst.to_geoutils()
+            assert [g.asdict() for g in ds.rst.gcps[0]] == [g.asdict() for g in source.gcps[0]]
+            assert ds.rst.gcps[1] == source.gcps[1]
+            assert ds.rst.rpcs == source.rpcs
+            if method in ("to_xarray_file", "from_xarray_file"):
+                filename = tmp_path / "xarray_roundtrip.tif"
+                if method == "to_xarray_file":
+                    ds.rst.to_file(filename, tiled=True, blockxsize=256, blockysize=256)
+                else:
+                    result.to_file(filename)
+                result = gu.Raster(filename)
+                assert ds.rst.rpcs == source.rpcs
+                assert ds.rst.gcps[1] == source.gcps[1]
+                assert [g.asdict() for g in ds.rst.gcps[0]] == [g.asdict() for g in source.gcps[0]]
+
+        # We also read file metadata directly -so an RPC dictionary cannot be hidden in a default string tag)
+        if method in ("to_file", "to_xarray_file", "from_xarray_file"):
+            with rio.open(filename) as dataset:
+                assert "RPC" not in dataset.tags()
+                assert dataset.rpcs == source.rpcs
+
+        # TIFF rewrites GCP identifiers, so compare pixel and ground coordinates independently
+        expected_points = [(g.row, g.col, g.x, g.y, g.z) for g in source.gcps[0]]
+        actual_points = [(g.row, g.col, g.x, g.y, g.z) for g in result.gcps[0]]
+        assert actual_points == expected_points
+        assert result.gcps[1] == source.gcps[1]
+        assert result.rpcs == source.rpcs
+        np.testing.assert_array_equal(result.data.filled(source.nodata), source.data.filled(source.nodata))
+
+    @pytest.mark.parametrize("raster_gcp_rpc", ["gcp_projected", "gcp_nonlinear"], indirect=True)
+    @pytest.mark.parametrize("method", ["to_file", "to_rio_dataset", "to_xarray"])
+    def test_methods__gcp_raster_crs(self, raster_gcp_rpc: gu.Raster, tmp_path: Path, method: str) -> None:
+        """Checks that export methods with GCPs properly use the raster CRS (when the GCP tuple input has no CRS)."""
+
+        # Assign the GCP CRS to the raster (we do not set the GCP tuple CRS)
+        source = raster_gcp_rpc
+        points, gcp_crs = source.gcps
+        source.crs = gcp_crs
+        source.gcps = (points, None)
+
+        # Export to file or other in-memory structure
+        if method == "to_file":
+            filename = tmp_path / "gcp_raster_crs.tif"
+            source.to_file(filename)
+            result = gu.Raster(filename)
+        elif method == "to_rio_dataset":
+            with source.to_rio_dataset() as dataset:
+                result = gu.Raster(dataset, load_data=True)
+        else:
+            result = source.to_xarray().rst.to_geoutils()
+
+        # We check the output stores the GCP CRS
+        assert result.gcps[1] == gcp_crs
+        assert [(point.row, point.col, point.x, point.y, point.z) for point in result.gcps[0]] == [
+            (point.row, point.col, point.x, point.y, point.z) for point in points
+        ]
+        assert source.gcps[1] is None
 
     @pytest.mark.parametrize("nodata_init", [None, "type_default"])
     @pytest.mark.parametrize(
@@ -1969,6 +2070,87 @@ class TestRaster:
         assert np.dtype(saved.dtype) == np.dtype("float32")
         assert np.array_equal(saved.data, values.astype(np.float32))
 
+    @pytest.mark.parametrize("explicit", [False, True])
+    def test_to_file__georeferencing(self, raster_gcp_rpc: gu.Raster, tmp_path: Path, explicit: bool) -> None:
+        """Checks that GCPs/RPCs are written properly (whether stored in the Raster object or passed during writing)."""
+
+        # Create an image with a CRS differing from the GCP CRS, and we add ordinary metadata
+        source = raster_gcp_rpc
+        image = gu.Raster.from_array(source.data, rio.Affine.identity(), 3857, nodata=source.nodata)
+        image.tags["label"] = "source"
+        if source.rpcs is not None:
+            image.tags["RPC"] = source.rpcs.to_gdal()
+        options = {}
+        if explicit:
+            options = {"gcps": source.gcps[0], "gcps_crs": source.gcps[1], "rpcs": source.rpcs}
+        else:
+            image.gcps, image.rpcs = source.gcps, source.rpcs
+        filename = tmp_path / "gcp_rcp_metadata.tif"
+
+        # We write to file, passing GCPs/RCPs in options
+        image.to_file(filename, metadata={"label": "output"}, **options)
+
+        # As TIFF rewrites GCP identifiers, we compare their coordinates and CRS separately
+        with rio.open(filename) as dataset:
+            points, point_crs = dataset.gcps
+            assert [(g.row, g.col, g.x, g.y, g.z) for g in points] == [
+                (g.row, g.col, g.x, g.y, g.z) for g in source.gcps[0]
+            ]
+            assert point_crs == source.gcps[1]
+            assert dataset.rpcs == source.rpcs
+            assert "RPC" not in dataset.tags()
+            assert bool(dataset.tags(ns="RPC")) == (source.rpcs is not None)
+            assert dataset.tags()["label"] == "output"
+            np.testing.assert_array_equal(dataset.read(), source.data.filled(source.nodata))
+        assert image.tags["label"] == "source"
+        if source.rpcs is not None:
+            assert image.tags["RPC"] == source.rpcs.to_gdal()
+
+    @pytest.mark.parametrize("raster_gcp_rpc", ["rpc_polynomial", "rpc_rational"], indirect=True)
+    @pytest.mark.parametrize("method", ["to_file", "to_rio_dataset"])
+    def test_methods__rpc_tags(self, raster_gcp_rpc: gu.Raster, tmp_path: Path, method: str) -> None:
+        """Checks that an RPC dictionary present in the raster tags is accounted for."""
+
+        # Create an image with RPC metadata in tags
+        source = raster_gcp_rpc
+        assert source.rpcs is not None
+        rpc_tags = source.rpcs.to_gdal()
+        image = gu.Raster.from_array(
+            source.data, rio.Affine.identity(), None, nodata=source.nodata, tags={"RPC": rpc_tags}
+        )
+
+        # Export to a file or an in-memory Rasterio dataset
+        if method == "to_file":
+            filename = tmp_path / "rpc_tags.tif"
+            image.to_file(filename)
+            dataset = rio.open(filename)
+        else:
+            dataset = image.to_rio_dataset()
+
+        # We check it is properly written
+        with dataset:
+            assert dataset.rpcs == source.rpcs
+            assert "RPC" not in dataset.tags()
+            assert dataset.tags(ns="RPC")
+        assert image.tags["RPC"] == rpc_tags
+
+    def test_to_file__legacy_gcp_tuples(self, tmp_path: Path) -> None:
+        """Checks that passing a GCP when writing overwrites the affine transform of the raster, with a warning."""
+
+        # We create GCPs
+        source = gu.Raster.from_array(np.ones((4, 5)), rio.transform.from_origin(0, 4, 1, 1), 4326)
+        points = [(0, 0, 10, 50), (0, 5, 10.05, 50), (4, 0, 10, 49.96), (4, 5, 10.05, 49.96)]
+        filename = tmp_path / "legacy_gcps.tif"
+
+        # Check warning is raised, and affine transform is overwritten
+        with pytest.warns(UserWarning, match="geotransform previously set"):
+            source.to_file(filename, gcps=points)
+        result = gu.Raster(filename)
+        assert result.transform == rio.Affine.identity()
+        assert result.crs is None
+        assert result.gcps[1] == source.crs
+        assert [(g.row, g.col, g.x, g.y) for g in result.gcps[0]] == points
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_from_array(self, example: str) -> None:
 
@@ -2076,6 +2258,35 @@ class TestRaster:
         red, green, blue = img.split_bands(deep=False)
         assert np.shares_memory(red.data, img.data)
 
+    @pytest.mark.parametrize("loaded", [False, True])
+    def test_metadata__same_grid_operations(self, raster_gcp_rpc: gu.Raster, loaded: bool) -> None:
+        """Checks that copying, casting, band selection and arithmetic preserve GCPs/RPCs."""
+
+        # Loading state must not affect the metadata copied by operations on the same pixel grid
+        source = raster_gcp_rpc
+        if loaded:
+            source.load()
+        copied = source.copy()
+        converted = source.astype("float64")
+        bands = source.split_bands()
+        assert copied.is_loaded is loaded
+        assert converted.is_loaded is loaded
+        assert all(band.is_loaded is loaded for band in bands)
+
+        # Arithmetic loads values but still represents the same image pixels
+        for result in [copied, converted, *bands, source + 2, np.add(source, 2), source > 10]:
+            assert [g.asdict() for g in result.gcps[0]] == [g.asdict() for g in source.gcps[0]]
+            assert result.gcps[1] == source.gcps[1]
+            assert result.rpcs == source.rpcs
+        if source.gcps[0]:
+            original_row = source.gcps[0][0].row
+            copied.gcps[0][0].row += 1
+            assert source.gcps[0][0].row == original_row
+            assert copied.gcps[0][0].row == original_row + 1
+        else:
+            copied.rpcs.line_off += 1
+            assert copied.rpcs != source.rpcs
+
     def test__is_bigtiff_true(self, tmp_path: os.Path) -> None:
         """Test _is_bigtiff function for BigTIFF"""
 
@@ -2123,6 +2334,13 @@ class TestRaster:
         )
         assert r1.stack(r2, reference=1, use_ref_bounds=True).shape == r2.shape
         assert r2.stack(r1, reference=1, use_ref_bounds=True).shape == r1.shape
+
+    def test_init__error_gcp_rcp_downsample(self, raster_gcp_rpc: gu.Raster) -> None:
+        """Checks an error is raised for opening downsampling before GCP/RPC orthorectification."""
+        with pytest.raises(NotImplementedError, match="before opening with downsample"):
+            gu.Raster(raster_gcp_rpc.name, downsample=2)
+        with pytest.raises(NotImplementedError, match="before opening with downsample"):
+            gu.open_raster(raster_gcp_rpc.name, downsample=2)
 
 
 class TestMask:

@@ -20,9 +20,9 @@ Downsampling should be seen as an **alternative** to processing the full dataset
 for example when finer detail would anyway not be visible given a figure's resolution, or when a reduced sample is still large
 enough to estimate statistics of interest.
 
-Downsampling can be performed **on-the-fly** during operations such as opening, plotting or specific functionalities. 
-Formats such as COG and COPC can also store **overviews or levels of detail**. GeoUtils reads raster overviews
-automatically; COPC level selection uses LasPy directly, as shown below.
+Downsampling can be performed **on-the-fly** during operations such as opening, plotting or specific functionalities.
+Formats such as COG and COPC can also store **overviews or levels of detail**. GeoUtils reads these automatically
+when downsampling, or lets you select them explicitly.
 
 Below, we describe these features:
 
@@ -80,6 +80,8 @@ print("Sample stays lazy:", ds_coarse.chunks is not None)
 
 For **point clouds**, using `downsample` selects a random sample of size the total number of points divided by the downsampling factor.
 For example, `downsample=2.5` selects about 40% of the points.
+For **COPC**, GeoUtils first selects {ref}`levels of detail <scalability-downsampling-copc>` from coarse to fine
+until enough points are available, then samples those points to the requested count.
 
 ```{code-cell} ipython3
 point_path = gu.examples.get_path("coromandel_lidar")
@@ -90,8 +92,8 @@ print("Sampled points:", ds_sample.pc.point_count)
 print("Sample stays lazy:", ds_sample.chunks is not None)
 ```
 
-For rasters, dimensions are rounded down to complete sampling intervals, omitting an incomplete interval 
-at the right or bottom edge. Downsampling leaves the source file unchanged, and is also available 
+For rasters, dimensions are rounded down to complete sampling intervals, omitting an incomplete interval
+at the right or bottom edge. Downsampling leaves the source file unchanged, and is also available
 when opening {class}`~geoutils.Raster` and {class}`~geoutils.PointCloud` objects.
 
 ```{code-cell} ipython3
@@ -117,7 +119,7 @@ np.testing.assert_array_equal(sample_computed.classification, sample_eager.class
 The {meth}`~RasterBase.plot` function **automatically downsamples rasters and point clouds to the figure's size
 and resolution**, omitting detail too fine to see in the plot.
 
-By default, `"auto"` determines the limit from the axes size and figure DPI, with a maximum of 100,000 points. 
+By default, `"auto"` determines the limit from the axes size and figure DPI, with a maximum of 100,000 points.
 The maximum number of pixels or points used can also be controlled manually with the `max_pixels` and `max_points` arguments.
 Passing `None` displays the original grid or every point.
 
@@ -136,7 +138,7 @@ print("Source points:", ds_lidar.pc.point_count)
 print("Displayed points:", len(axes[1].collections[0].get_offsets()))
 ```
 
-For a preview of a specific area at **original resolution** on a large dataset, simply select a window with {meth}`~RasterBase.crop` (which will defer loading to this area only), 
+For a preview of a specific area at **original resolution** on a large dataset, simply select a window with {meth}`~RasterBase.crop` (which will defer loading to this area only),
 then call {meth}`~RasterBase.plot`!
 
 (scalability-downsampling-operations)=
@@ -144,7 +146,7 @@ then call {meth}`~RasterBase.plot`!
 
 Some forms of downsampling are also **directly supported in certain operations**.
 
-Most of these operations are statistical or conversions, such as {meth}`~RasterBase.stats`, 
+Most of these operations are statistical or conversions, such as {meth}`~RasterBase.stats`,
 {meth}`~RasterBase.variogram`, {meth}`~RasterBase.estimate_error_structure`, or {meth}`~RasterBase.to_pointcloud`.
 Under-the-hood, these operations rely on methods from **the {ref}`sampling` module**.
 
@@ -233,36 +235,25 @@ files.cleanup()
 (scalability-downsampling-copc)=
 ## Point cloud levels of detail
 
-COPC levels of detail can be selected through
-[LasPy's CopcReader](https://laspy.readthedocs.io/en/latest/api/laspy.copc.html), then converted to a GeoUtils point array.
-
 [**COPC**](https://copc.io/) stores points in an **octree**, a hierarchy of progressively smaller spatial cells.
 Its **levels of detail** serve a similar purpose to raster overviews, allowing a coarser view to be read without
 reading every point.
-GeoUtils' `open_pointcloud(downsample=...)` instead selects a deterministic random sample from point records,
-including for COPC files; it does not select octree levels.
 
-To read a **specific stored level of detail**, use CopcReader.query() with `level=`. Level `0` is the coarsest;
-higher levels correspond to finer octree cells. An integer selects only that level, while a range selects several.
+Use the `level` argument of {func}`~geoutils.open_pointcloud` to select **stored levels of detail**.
+Each point belongs to one level: level `0` holds a coarse sample, and higher levels add points.
+An integer selects only that level; a range combines several levels into one point cloud.
 
-For an existing local `survey.copc.laz`, we compare explicit level selection with record downsampling:
+For an existing `survey.copc.laz`, we can combine levels 0 through 2 or read level 3 alone:
 
 ```python
 import geoutils as gu
-import laspy
-import numpy as np
 
-copc_path = "survey.copc.laz"
-with laspy.CopcReader.open(copc_path) as reader:
-    selected = reader.query(level=3)
-    ds_detail = gu.pointcloud.from_xyz(
-        np.asarray(selected.x), np.asarray(selected.y), np.asarray(selected.z),
-        crs=reader.header.parse_crs(), data_name="Z",
-    )
-ds_copc_coarse = gu.open_pointcloud(copc_path, data_name="Z", downsample=4)
-print("Stored level points:", ds_detail.pc.point_count)
-print("downsample=4 points:", ds_copc_coarse.pc.point_count)
+ds_coarse = gu.open_pointcloud("survey.copc.laz", level=range(3), chunks=100_000)
+ds_level3 = gu.open_pointcloud("survey.copc.laz", level=3, chunks=100_000)
 ```
+
+Passing `chunks` leaves the selected point data **lazy** until computation. Without `level`, all levels are combined,
+unless `downsample` selects them automatically. Explicit `level` selection cannot be combined with `downsample > 1`.
 
 Levels of detail select **original points**, preserving their coordinates, values and attributes. The selected
 points remain irregularly spaced. See {ref}`scalability-formats` for remote COPC reading and optional dependencies.

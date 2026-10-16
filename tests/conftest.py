@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from geoutils import Raster, examples
+from tests.remote_helpers import remote_files, remote_url  # noqa: F401
 
 
 class LoggingWarningCollector(logging.Handler):

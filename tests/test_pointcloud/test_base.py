@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import inspect
 import os.path
+import shutil
+import subprocess
 import tempfile
 import warnings
-from importlib.util import find_spec
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
+import pyogrio
 import pytest
 import rasterio as rio
 import xarray as xr
@@ -30,6 +33,7 @@ from geoutils.pointcloud.base import GeometryPointCloudBase, PointCloudBase
 from geoutils.pointcloud.pd_accessor import GeoDataFramePointCloudAccessor
 from geoutils.pointcloud.xr_accessor import DataArrayPointCloudAccessor
 from tests.accessor_helpers import assert_output_equal
+from tests.remote_helpers import RemoteFiles
 
 
 class NeedsTestError(ValueError):
@@ -756,12 +760,15 @@ class TestAccessorDask:
         assert_output_equal(expected, result.compute())
         assert not ds.pc.is_loaded
 
-    @pytest.mark.skipif(find_spec("laspy") is None, reason="Only runs if laspy is installed.")
     @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_open_las__multiprocessing_and_dask(self, as_object_type: Literal["dataarray", "geodataframe"]) -> None:
         """Check LAS chunked loading through Multiprocessing and Dask."""
 
-        dgpd = pytest.importorskip("dask_geopandas")
+        pytest.importorskip("laspy")
+        pytest.importorskip("lazrs")
+        pytest.importorskip("dask")
+        if as_object_type == "geodataframe":
+            dgpd = pytest.importorskip("dask_geopandas")
 
         # Establish one eager reference for both chunked backends
         fn_las = gu.examples.get_path_test("coromandel_lidar")
@@ -789,13 +796,15 @@ class TestAccessorDask:
         assert np.allclose(ds_pc.data, pc.data)
         assert not ds.pc.is_loaded
 
-    @pytest.mark.skipif(find_spec("laspy") is None, reason="Only runs if laspy is installed.")
     @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_grid_las__multiprocessing_and_dask(self, as_object_type: Literal["dataarray", "geodataframe"]) -> None:
         """Test LAS point-cloud gridding with Dask and Multiprocessing."""
 
-        pytest.importorskip("dask_geopandas")
-        import dask.array as da
+        pytest.importorskip("laspy")
+        pytest.importorskip("lazrs")
+        da = pytest.importorskip("dask.array")
+        if as_object_type == "geodataframe":
+            pytest.importorskip("dask_geopandas")
 
         # Build a small eager grid that both chunked implementations must match
         fn_las = gu.examples.get_path_test("coromandel_lidar")
@@ -1119,3 +1128,405 @@ class TestPointCloudNames:
             for accessor in [df.pc, df.vct, da.pc]:
                 assert not hasattr(accessor, "gdf")
                 assert accessor.ds is not None
+
+
+@pytest.fixture
+def remote_points(remote_files: RemoteFiles) -> str:
+    """Write a "mocked" GPKG point cloud in the cloud."""
+
+    coordinates = np.arange(7.0)
+    frame = gpd.GeoDataFrame(
+        {"height": coordinates + 10, "quality": np.arange(7, dtype="int32")},
+        geometry=gpd.points_from_xy(coordinates + 500000, coordinates + 5100000),
+        crs=32633,
+    )
+    filename = remote_files.directory / "points.gpkg"
+    frame.to_file(filename)
+    return filename.name
+
+
+@pytest.fixture(params=["las", "laz", "copc.laz", "parquet"])
+def remote_native_points(request: pytest.FixtureRequest, remote_files: RemoteFiles) -> str:
+    """Write "mocked" LAS/LAZ/COPC/GeoParquet point clouds in the cloud."""
+
+    # Skip unavailable format libraries, then create known point values that LAS can represent exactly
+    suffix = request.param
+    if suffix == "gpkg":
+        return request.getfixturevalue("remote_points")
+    if suffix == "copc-levels":
+        # Copy a COPC file with two levels
+        filename = remote_files.directory / "levels.copc.laz"
+        shutil.copyfile(request.getfixturevalue("copc_file"), filename)
+        return filename.name
+
+    dependencies = ["pyarrow"] if suffix.startswith("parquet") else ["laspy"]
+    if suffix.endswith("laz"):
+        dependencies.append("lazrs")
+    for dependency in dependencies:
+        pytest.importorskip(dependency)
+    cloud = gu.PointCloud.from_xyz(np.arange(7.0), np.arange(7.0) + 1, np.arange(7.0) + 10, crs=32633)
+    cloud.gdf["intensity"] = np.arange(7, dtype="uint16")
+    partitioned = suffix == "parquet-partitioned"
+    filename = remote_files.directory / ("partitions" if partitioned else f"points.{suffix}")
+
+    # Use PDAL for COPC (only format not supported directly by LasPy)
+    if suffix.startswith("parquet"):
+        # Write string and integer attributes
+        cloud.gdf["label"] = pd.Series(["ground", "tree", "ground", "tree", "ground", "tree", "ground"], dtype=object)
+        cloud.to_parquet(str(filename), chunks=3, partitioned=partitioned)
+    elif suffix == "copc.laz":
+        pdal = shutil.which("pdal")
+        if pdal is not None:
+            source = remote_files.directory / "source.las"
+            cloud.to_las(str(source))
+            subprocess.run(
+                [pdal, "translate", str(source), str(filename), "--writer=writers.copc"], check=True, timeout=30
+            )
+        else:
+            pytest.skip("Requires PDAL to write the local COPC reference file.")
+    else:
+        cloud.to_las(str(filename))
+    return filename.name
+
+
+_REMOTE_POINT_FILES = [
+    ("gpkg", "height"),
+    ("las", None),
+    ("laz", None),
+    ("copc.laz", None),
+    ("parquet", None),
+]
+_REMOTE_POINT_OPEN_CASES = [
+    pytest.param(suffix, data_name, {}, id=suffix) for suffix, data_name in _REMOTE_POINT_FILES
+] + [
+    pytest.param("parquet-partitioned", None, {}, id="parquet-partitioned"),
+    pytest.param("copc-levels", None, {"level": 0}, id="copc-root"),
+    pytest.param("copc-levels", None, {"level": range(2)}, id="copc-levels"),
+    pytest.param("copc-levels", None, {"downsample": 4.5}, id="copc-downsample"),
+]
+_REMOTE_POINT_READERS = [
+    pytest.param(gu.PointCloud, {}, id="pointcloud"),
+    pytest.param(gu.open_pointcloud, {"as_object_type": "dataarray"}, id="dataarray"),
+    pytest.param(gu.open_pointcloud, {"as_object_type": "dataset"}, id="dataset"),
+    pytest.param(gu.open_pointcloud, {"as_object_type": "geodataframe"}, id="geodataframe"),
+    pytest.param(gu.open_pointcloud, {"as_object_type": "dataarray", "chunks": 3}, id="dataarray-chunked"),
+    pytest.param(gu.open_pointcloud, {"as_object_type": "dataset", "chunks": 3}, id="dataset-chunked"),
+    pytest.param(gu.open_pointcloud, {"as_object_type": "geodataframe", "chunks": 3}, id="geodataframe-chunked"),
+]
+
+
+class TestPointCloudRemote:
+    """Test module for reading remote point clouds (in the cloud)."""
+
+    @pytest.mark.parametrize("remote_url", ["s3"], indirect=True)
+    @pytest.mark.parametrize("remote_native_points,data_name", _REMOTE_POINT_FILES, indirect=["remote_native_points"])
+    def test_init__remote(
+        self,
+        remote_files: RemoteFiles,
+        remote_url: Callable[[str], str],
+        remote_native_points: str,
+        data_name: str | None,
+    ) -> None:
+        """Checks that PointCloud instantiation works on a remote file."""
+
+        # Open local/remote
+        filename = remote_native_points
+        expected = gu.PointCloud(remote_files.directory / filename, data_name=data_name)
+        remote = gu.PointCloud(remote_url(filename), data_name=data_name)
+
+        # Check metadata, loading and equality after loading
+        assert not expected.is_loaded
+        assert not remote.is_loaded
+        assert remote.crs == expected.crs
+        assert remote.bounds == expected.bounds
+        assert remote.columns.equals(expected.columns)
+        assert remote.point_count == expected.point_count == 7
+        expected.load(columns="all")
+        remote.load(columns="all")
+        assert remote.is_loaded
+        assert_geodataframe_equal(remote.gdf, expected.gdf)
+
+        # Check that remote reads requested part of a file
+        assert any(method == "GET" and byte_range for method, path, byte_range in remote_files.requests)
+
+    @pytest.mark.parametrize("remote_url", ["s3"], indirect=True)
+    @pytest.mark.parametrize(
+        "remote_native_points,data_name,options", _REMOTE_POINT_OPEN_CASES, indirect=["remote_native_points"]
+    )
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
+    def test_open_pointcloud__remote(
+        self,
+        remote_files: RemoteFiles,
+        remote_url: Callable[[str], str],
+        remote_native_points: str,
+        data_name: str | None,
+        as_object_type: Literal["dataarray", "dataset", "geodataframe"],
+        options: dict[str, Any],
+    ) -> None:
+        """Checks that open_pointcloud() opens a remote point cloud file properly."""
+
+        # Open local and remote
+        filename = remote_native_points
+        options = {"data_name": data_name, "columns": "all", "as_object_type": as_object_type, **options}
+        expected = gu.open_pointcloud(remote_files.directory / filename, **options)
+        remote = gu.open_pointcloud(remote_url(filename), **options)
+
+        # Check exact equality
+        remote_values = remote[next(iter(remote.data_vars))] if as_object_type == "dataset" else remote
+        assert remote_values.pc.is_loaded
+        assert_output_equal(remote, expected)
+
+        # Check that remote reads requested part of a file
+        assert any(method == "GET" and filename in path for method, path, byte_range in remote_files.requests)
+        assert any(method == "GET" and byte_range for method, path, byte_range in remote_files.requests)
+
+    @pytest.mark.filterwarnings("ignore:.*GPKG application_id.*non conformant file extension:RuntimeWarning")
+    @pytest.mark.parametrize("remote_url", ["http", "http-query"], indirect=True)
+    @pytest.mark.parametrize(
+        "remote_native_points,data_name",
+        [("gpkg", "height"), ("las", None), ("parquet", None)],
+        indirect=["remote_native_points"],
+    )
+    def test_open_pointcloud__remote_http_urls(
+        self,
+        remote_files: RemoteFiles,
+        remote_url: Callable[[str], str],
+        remote_native_points: str,
+        data_name: str | None,
+    ) -> None:
+        """Checks that open_pointcloud() preserves HTTP URLs with/without query strings."""
+
+        # Open local and remote files through GDAL, LasPy or PyArrow
+        filename = remote_native_points
+        expected = gu.open_pointcloud(remote_files.directory / filename, data_name=data_name, columns="all")
+        remote = gu.open_pointcloud(remote_url(filename), data_name=data_name, columns="all")
+
+        # For query URLs, the server refuses requests that lose the token
+        xr.testing.assert_identical(remote, expected)
+        assert remote.pc.is_loaded
+        assert any(method == "GET" and byte_range for method, path, byte_range in remote_files.requests)
+
+    @pytest.mark.parametrize("remote_url", ["s3"], indirect=True)
+    def test_crop__remote_native_format(
+        self, remote_files: RemoteFiles, remote_url: Callable[[str], str], remote_native_points: str
+    ) -> None:
+        """Checks crop on remote files."""
+
+        # Open local/remote without loading points
+        expected = gu.PointCloud(remote_files.directory / remote_native_points)
+        remote = gu.PointCloud(remote_url(remote_native_points))
+        bounds = (1.5, 2.5, 4.5, 5.5)
+
+        # Crop
+        expected_crop = expected.crop(bounds)
+        remote_crop = remote.crop(bounds)
+        assert not expected.is_loaded and not remote.is_loaded
+        assert not expected_crop.is_loaded and not remote_crop.is_loaded
+
+        # Load crops and check equality
+        expected_crop.load(columns="all")
+        remote_crop.load(columns="all")
+        assert expected_crop.is_loaded and remote_crop.is_loaded
+        assert remote_crop.point_count == 3
+        assert_geodataframe_equal(remote_crop.gdf, expected_crop.gdf)
+        assert not expected.is_loaded and not remote.is_loaded
+
+        # Check that remote reads requested part of a file
+        assert any(method == "GET" and byte_range for method, path, byte_range in remote_files.requests)
+
+    @pytest.mark.parametrize("remote_url", ["s3"], indirect=True)
+    @pytest.mark.parametrize("remote_native_points", ["las"], indirect=True)
+    def test_init__remote_metadata_range_reads(
+        self, remote_files: RemoteFiles, remote_url: Callable[[str], str], remote_native_points: str
+    ) -> None:
+        """Checks that opening remote LAS metadata uses byte ranges without downloading all point records."""
+
+        # Write enough points to exceed 1 MB buffer
+        coordinates = np.arange(100_000.0)
+        cloud = gu.PointCloud.from_xyz(coordinates, coordinates + 1, coordinates + 10, crs=32633)
+        filename = remote_files.directory / remote_native_points
+        cloud.to_las(str(filename))
+
+        # Open metadata and check that points stay unloaded
+        remote = gu.PointCloud(remote_url(filename.name))
+        assert not remote.is_loaded
+        assert remote.point_count == len(coordinates)
+        assert remote.crs == cloud.crs
+
+        # Count requested bytes, clipping ranges to the file size
+        file_size = filename.stat().st_size
+        ranges = [byte_range for method, path, byte_range in remote_files.requests if method == "GET"]
+        assert ranges
+        requested_bytes = 0
+        for byte_range in ranges:
+            assert byte_range is not None
+            start, end = byte_range.removeprefix("bytes=").split("-")
+            requested_bytes += min(int(end) + 1, file_size) - int(start)
+        assert requested_bytes < file_size
+
+        # Check that remote reads requested part of a file
+        assert any(method == "GET" and byte_range for method, path, byte_range in remote_files.requests)
+
+
+class TestPointCloudRemoteChunked:
+    """Test module for lazy/chunked reading on remote point clouds."""
+
+    @pytest.mark.parametrize("remote_url", ["s3"], indirect=True)
+    @pytest.mark.parametrize(
+        "remote_native_points,data_name,options", _REMOTE_POINT_OPEN_CASES, indirect=["remote_native_points"]
+    )
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
+    def test_open_pointcloud__remote_laziness(
+        self,
+        remote_files: RemoteFiles,
+        remote_url: Callable[[str], str],
+        remote_native_points: str,
+        data_name: str | None,
+        as_object_type: Literal["dataarray", "dataset", "geodataframe"],
+        options: dict[str, Any],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Checks that remote point chunks stay lazy and compute exactly the eager local points."""
+
+        pytest.importorskip("dask")
+        if as_object_type == "geodataframe" or remote_native_points.endswith(".gpkg"):
+            pytest.importorskip("dask_geopandas")
+
+        copc_selection = bool(options)
+        if copc_selection:
+            # Open remote COPC chunks for level selection (larger to match the fixture)
+            chunks = 7001
+        else:
+            # Open local/remote with chunks (smaller for other files)
+            chunks = 3
+        filename = remote_native_points
+        options = {"data_name": data_name, "columns": "all", "as_object_type": as_object_type, **options}
+        expected = gu.open_pointcloud(remote_files.directory / filename, **options)
+
+        # We record when points are decoded
+        read_offsets = []
+        if copc_selection:
+            laspy = pytest.importorskip("laspy")
+            original = laspy.CopcReader._fetch_and_decompress_points_of_nodes
+
+            def record_nodes(reader: Any, nodes: list[Any]) -> Any:
+                read_offsets.extend(node.offset for node in nodes)
+                return original(reader, nodes)
+
+            monkeypatch.setattr(laspy.CopcReader, "_fetch_and_decompress_points_of_nodes", record_nodes)
+
+        # Open local and remote selections
+        remote = gu.open_pointcloud(remote_url(filename), chunks=chunks, **options)
+        expected_values = expected[next(iter(expected.data_vars))] if as_object_type == "dataset" else expected
+        remote_values = remote[next(iter(remote.data_vars))] if as_object_type == "dataset" else remote
+        assert expected_values.pc.is_loaded
+        assert not remote_values.pc.is_loaded
+        expected_count = expected_values.pc.point_count if copc_selection else 7
+        assert remote_values.pc.point_count == expected_values.pc.point_count == expected_count
+        assert not read_offsets
+
+        # Compute and check equality without loading the original object
+        computed = remote.compute(scheduler="synchronous")
+        assert_output_equal(computed, expected)
+        computed_values = computed[next(iter(computed.data_vars))] if as_object_type == "dataset" else computed
+        assert computed_values.pc.is_loaded
+        assert not remote_values.pc.is_loaded
+        if copc_selection:
+            assert read_offsets
+
+        # Check that remote reads requested part of a file
+        assert any(method == "GET" and byte_range for method, path, byte_range in remote_files.requests)
+
+    @pytest.mark.parametrize("remote_url", ["s3", "http-query"], indirect=True)
+    @pytest.mark.parametrize("remote_native_points", ["laz", "parquet"], indirect=True)
+    def test_open_pointcloud__remote_process_workers(
+        self, remote_files: RemoteFiles, remote_url: Callable[[str], str], remote_native_points: str
+    ) -> None:
+        """Checks that Dask processes reopen remote files and compute the same points as eager local reads."""
+
+        pytest.importorskip("dask")
+
+        # Open local/remote with chunks (Dask)
+        expected = gu.open_pointcloud(remote_files.directory / remote_native_points, columns="all")
+        remote = gu.open_pointcloud(remote_url(remote_native_points), columns="all", chunks=3)
+        assert expected.pc.is_loaded
+        assert not remote.pc.is_loaded
+
+        # Compute in new processes and check equality
+        computed = remote.compute(scheduler="processes", num_workers=2)
+        xr.testing.assert_identical(computed, expected)
+        assert computed.pc.is_loaded
+        assert not remote.pc.is_loaded
+
+        # Check that remote reads requested part of a file
+        assert any(method == "GET" and byte_range for method, path, byte_range in remote_files.requests)
+
+
+class TestPointCloudRemoteErrors:
+    """Test module for errors/warnings on remote point cloud files."""
+
+    @pytest.mark.parametrize("remote_url", ["s3"], indirect=True)
+    @pytest.mark.parametrize("reader,options", _REMOTE_POINT_READERS)
+    @pytest.mark.parametrize(
+        "suffix,error",
+        [("gpkg", pyogrio.errors.DataSourceError), ("las", FileNotFoundError), ("parquet", ValueError)],
+    )
+    def test_methods__error_missing_remote_file(
+        self,
+        remote_url: Callable[[str], str],
+        reader: Callable[..., Any],
+        options: dict[str, Any],
+        suffix: str,
+        error: type[Exception],
+    ) -> None:
+        """Checks an error is raised when a remote point file is unavailable."""
+
+        # Skip optional readers
+        dependency = {"las": "laspy", "parquet": "pyarrow"}.get(suffix)
+        if dependency is not None:
+            pytest.importorskip(dependency)
+        if options.get("chunks") is not None and suffix == "gpkg":
+            pytest.importorskip("dask_geopandas")
+        filename = remote_url(f"missing.{suffix}")
+        # Check that opening fails immediately, including with chunks
+        with pytest.raises(error):
+            reader(filename, data_name="height", **options)
+
+    @pytest.mark.parametrize("remote_url", ["s3"], indirect=True)
+    @pytest.mark.parametrize("reader,options", _REMOTE_POINT_READERS)
+    @pytest.mark.parametrize("remote_native_points", ["gpkg", "las", "parquet"], indirect=True)
+    def test_methods__error_missing_data_name(
+        self,
+        remote_url: Callable[[str], str],
+        remote_native_points: str,
+        reader: Callable[..., Any],
+        options: dict[str, Any],
+    ) -> None:
+        """Checks an error is raised when a requested point attribute is absent from a remote file."""
+
+        if options.get("chunks") is not None and remote_native_points.endswith(".gpkg"):
+            pytest.importorskip("dask_geopandas")
+
+        filename = remote_url(remote_native_points)
+        with pytest.raises(ValueError, match="missing"):
+            reader(filename, data_name="missing", **options)
+
+    @pytest.mark.parametrize("remote_url", ["s3"], indirect=True)
+    @pytest.mark.parametrize("reader,options", _REMOTE_POINT_READERS)
+    def test_methods__error_non_point_geometries(
+        self,
+        remote_files: RemoteFiles,
+        remote_url: Callable[[str], str],
+        reader: Callable[..., Any],
+        options: dict[str, Any],
+    ) -> None:
+        """Checks an error is raised when a remote vector file contains polygons rather than points."""
+
+        if options.get("chunks") is not None:
+            pytest.importorskip("dask_geopandas")
+
+        frame = gpd.GeoDataFrame({"height": [10.0]}, geometry=[box(0, 0, 1, 1)], crs=32633)
+        filename = remote_files.directory / "polygons.gpkg"
+        frame.to_file(filename)
+        with pytest.raises(ValueError, match="non-point"):
+            reader(remote_url(filename.name), data_name="height", **options)

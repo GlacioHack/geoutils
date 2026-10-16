@@ -23,13 +23,48 @@ Functions for manipulating georeferencing of the raster objects.
 from __future__ import annotations
 
 import warnings
-from typing import Iterable, Literal
+from copy import deepcopy
+from typing import Any, Iterable, Literal
 
 import numpy as np
 import rasterio as rio
 
 from geoutils._config import config
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayNum
+
+
+def _check_affine_georeferencing(raster: Any, operation: str) -> None:
+    """Require an affine grid for operations that cannot use a GCP/RPC model."""
+
+    # A stored model takes precedence over the dataset's affine transform
+    gcps = getattr(raster, "gcps", ([], None))[0]
+    rpcs = getattr(raster, "rpcs", None)
+    if gcps or rpcs is not None:
+        raise ValueError(
+            f"{operation} requires an affine grid. Call reproject() first for rasters referenced by GCPs or RPCs."
+        )
+
+
+def _shift_gcps_rpcs(
+    gcps: tuple[list[rio.control.GroundControlPoint], rio.crs.CRS | None],
+    rpcs: rio.rpc.RPC | None,
+    row_off: float = 0,
+    col_off: float = 0,
+) -> tuple[tuple[list[rio.control.GroundControlPoint], rio.crs.CRS | None], rio.rpc.RPC | None]:
+    """Shift GCP/RPC image coordinates to a cropped pixel grid without changing ground coordinates."""
+
+    # Subtract the window origin from the full image pixel coordinates
+    new_gcps = deepcopy(gcps)
+    for gcp in new_gcps[0]:
+        gcp.row -= row_off
+        gcp.col -= col_off
+
+    # RPC image offsets use the same pixel units
+    new_rpcs = deepcopy(rpcs)
+    if new_rpcs is not None:
+        new_rpcs.line_off -= row_off
+        new_rpcs.samp_off -= col_off
+    return new_gcps, new_rpcs
 
 
 def _ij2xy(
