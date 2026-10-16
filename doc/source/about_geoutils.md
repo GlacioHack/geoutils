@@ -2,54 +2,62 @@
 
 # About GeoUtils
 
-Prefer to **grasp GeoUtils' core concepts by comparing with other Python packages**? Further below is a **{ref}`side-by-side code comparison with Rasterio and GeoPandas<comparison-rasterio-geopandas>`**.
-
 ## What is GeoUtils?
 
-GeoUtils<sup>1</sup> is a **[Python](https://www.python.org/) package for the analysis of georeferenced data**, developed with the objective of
-making such analysis accessible, efficient and reliable.
+GeoUtils<sup>1</sup> is an open source **[Python](https://www.python.org/) package for geospatial analysis**, aiming to improve
+**scalability and interoperability** with Python GIS packages.
 
 ```{margin}
 <sup>1</sup>With name standing for *Geospatial Utilities*.
 ```
 
-In a few words, GeoUtils can be described as a **convenience package for end-users focusing on geospatial analysis**. It allows to write shorter
-code through consistent higher-level operations, implicit object behaviour and interfacing. In addition, GeoUtils adds several analysis-oriented
-functions that require many steps to perform with other packages, and which are robustly tested.
-
-GeoUtils is designed for all Earth and planetary observation science. However, it is generally **most useful for surface applications that rely on
-moderate- to high-resolution data** (requiring reprojection, re-gridding, point interpolation, and other types of fine-grid analysis).
-
-GeoUtils is built on top of [Rasterio](https://rasterio.readthedocs.io/en/latest/), [GeoPandas](https://geopandas.org/en/stable/docs.html)
-and [PyProj](https://pyproj4.github.io/pyproj/stable/index.html) for georeferenced operations, and relies on [NumPy](https://numpy.org/doc/stable/),
-[SciPy](https://docs.scipy.org/doc/scipy/) and [Xarray](https://docs.xarray.dev/en/stable/) for scientific computing to provide:
-- A **common and consistent framework** for efficient raster, vector and point data handling,
-- A structure following the **principal of least knowledge**<sup>2</sup> to foster accessibility,
-- A **pythonic arithmetic** and **NumPy interfacing** for numerical computing.
+GeoUtils **can be seen primarily as an extension of [Xarray](https://docs.xarray.dev/en/stable/) and
+[GeoPandas](https://geopandas.org/en/stable/docs.html)**, adding **higher-level analysis tools** at the interface of
+rasters, vectors and point clouds, from operations such as transformations (e.g., reprojection, point gridding,
+polygonization) to more advanced statistics (e.g., grouped stats, spatial correlation estimation, random fields)<sup>2</sup>.
 
 ```{margin}
-<sup>2</sup>Or the [Law of Demeter](https://en.wikipedia.org/wiki/Law_of_Demeter) for software development.
+<sup>2</sup> Explore the {ref}`full feature list <feature-overview>`.
 ```
 
-In particular, GeoUtils:
-- Rarely requires more than **single-line operations** thanks to its object-based structure,
-- Strives to rely on **lazy operations** under-the-hood to avoid unnecessary data loading,
-- Allows for **match-reference operations** to facilitate geospatial handling,
-- Re-implements **several of [GDAL](https://gdal.org/)'s features** missing in other packages (e.g., proximity, gdalDEM),
-- Naturally handles **different `dtype` and `nodata`** values through its NumPy masked-array interface.
+GeoUtils adds **lazy, chunked execution** with [Dask](https://docs.dask.org/en/stable/) for all raster and point cloud
+operations and some vector operations<sup>3</sup>. Operations rely directly on the Python statistical and geospatial stack (e.g.,
+[Rasterio](https://rasterio.readthedocs.io/en/latest/), [PyProj](https://pyproj4.github.io/pyproj/stable/index.html),
+[SciPy](https://docs.scipy.org/doc/scipy/), [Numba](https://numba.readthedocs.io/en/stable/),
+[GSTools](https://geostat-framework.readthedocs.io/projects/gstools/en/stable/),
+[SciKit-GStat](https://scikit-gstat.readthedocs.io/en/latest/), [GPyTorch](https://docs.gpytorch.ai/en/stable/)),
+with **composable** methods and backends that can be easily
+customized while GeoUtils handles georeferencing and chunked execution.
+Finally, GeoUtils strives to make these tools **accessible** through a shared interface across rasters, point clouds and
+vectors, with a structure following the principle of least astonishment for software development.
 
-```{note}
-GeoUtils provides lazy, chunked Dask execution through the {class}`rst <geoutils.DataArrayRasterAccessor>`,
-{class}`vct <geoutils.VectorAccessor>` and {class}`pc <geoutils.GeoPandasPointCloudAccessor>` accessors.
+```{margin}
+<sup>3</sup> Check {ref}`scalability-support` with Dask, and **visualize chunked implementations** through their
+{ref}`logic diagrams <scalability-logic>`.
 ```
+
+For example, a kriging interpolator can be reused for raster resampling, gap-filling or point gridding, and a weighted mean
+reducer for resampling, filtering or zonal statistics<sup>4</sup>. With kriging, **we don't reinvent the underlying mathematics**, 
+instead relying on existing geostatistical packages where relevant, and adding only specific logic to make the operations 
+scalable on large data (out-of-memory pair sampling and reduction, covariance-aware chunking).
+
+```{margin}
+<sup>4</sup> See {ref}`core-operators` for reusable interpolators and reducers.
+```
+
+GeoUtils is designed for all Earth and planetary observation science, and generally **most useful for quantitative analysis of large datasets**.
 
 ## Who is behind GeoUtils?
 
-GeoUtils was created by a group of researchers with expertise in geospatial data analysis for the cryosphere.
+GeoUtils was created by a group of researchers with expertise in geostatistics, GIS, and remote sensing of the cryosphere.
 Nowadays, its development is **jointly led by researchers in geospatial analysis** (including funding from NASA and SNSF) **and
 engineers from CNES** (French Space Agency).
 
-Most contributors and users are scientists or industrials working in **various fields of Earth observation**.
+Most contributors and users are scientists or industrials working in **various fields of Earth observation**<sup>5</sup>.
+
+```{margin}
+<sup>5</sup> More details about the people behind GeoUtils, funding sources, and the package's objectives can be found on the **{ref}`credits` pages**.
+```
 
 ::::{grid}
 :reverse:
@@ -100,81 +108,39 @@ Most contributors and users are scientists or industrials working in **various f
 
 ::::
 
-More details about the people behind GeoUtils, funding sources, and the package's objectives can be found on the **{ref}`credits` pages**.
+## Things GeoUtils does for you under the hood
 
-## Why the need for GeoUtils?
+GeoUtils does not only add scalability to existing features, but also **adds modularity or optimization under-the-hood** 
+for more efficient geospatial analysis.
 
-Recent community efforts have improved open-source geospatial analysis in Python, allowing to **move away from the low-level functions and
-complexity of [GDAL and OGR](https://gdal.org/)'s Python bindings** for raster and vector handling. Those efforts include in particular
-[Rasterio](https://rasterio.readthedocs.io/en/latest/) and [GeoPandas](https://geopandas.org/en/stable/docs.html).
+For example:
 
-However, these new packages still maintain a relatively low-level API to serve all types of geospatial informatics users, **slowing down end-users focusing
-on data analysis**. As a result, basic interfacing between vectors and rasters is not always straightforward and simple higher-level operations (such as
-reprojection to match a vector or raster reference, or point interpolation) are not always computed consistently in the community.
-
-On one hand, [Rasterio](https://rasterio.readthedocs.io/en/latest/) focuses largely on reading, projecting and writing, and thus **requires
-array extraction, re-encapsulation, and the volatile passing of metadata** either before, during or after any numerical calculations. On the other hand,
-[GeoPandas](https://geopandas.org/en/stable/docs.html) focuses on integrating [Shapely](https://shapely.readthedocs.io/en/stable/) geometries in the
-[Pandas](https://pandas.pydata.org/) framework, which is practical for tabular analysis but **yields a multitude of outputs (dataframes, series, geoseries,
-geometries), often requiring object re-construction and specific reprojection routines** to analyze with other data, or derive metric attributes (area,
-length).
-
-Finally, **many common geospatial analysis tools are generally unavailable** in existing packages (e.g., boolean-masking from vectors,
-[proximity](https://gdal.org/programs/gdal_proximity.html) estimation, metric buffering) as they rely on a combination of lower-level operations.
-
-```{admonition} Conclusion
-Having higher-level geospatial tools implemented in a **consistent** manner and tested for **robustness** is essential for the wider geospatial community.
+We **add customizable NaN handling on top of existing filters and interpolators**, to facilitate analysis with missing data<sup>6</sup>.
+```{margin}
+<sup>6</sup> Choose a **{ref}`nodata propagation rule <core-nodata>`**.
 ```
 
-(comparison-rasterio-geopandas)=
-## Side-by-side examples with Rasterio and GeoPandas
+We **interpolate large rasters much faster** than Xarray's {meth}`~xarray.DataArray.interp` (based on SciPy's rectilinear interpolation) 
+by simply relying on better-adapted equal-grid interpolation from {func}`~scipy.ndimage.map_coordinates`.<sup>7</sup>
 
-This first side-by-side example demonstrates the difference with Rasterio for opening a raster, reprojecting on
-another "reference" raster, performing array operations respectful of nodata values, and saving to file.
-
-
-```{note}
-**GeoUtils does not just wrap the Rasterio or GeoPandas operations showed below**. Instead, it defines **raster- and
-vector-centered objects to ensure consistent geospatial object behaviour that facilitates those operations** (e.g., by implicitly passing metadata, loading, or interfacing).
+```{margin}
+<sup>7</sup> Compare **{ref}`resampling methods and backends <transformations-resampling>`**.
 ```
 
-`````{list-table}
----
-header-rows: 1
----
-* - GeoUtils
-  - Rasterio
-* - ```{eval-rst}
-    .. literalinclude:: code/about_geoutils_sidebyside_raster_geoutils.py
-        :language: python
-        :lines: 16-31
-    ```
+We **support varied statistics on datasets larger than memory**, building on Dask/Flox reductions<sup>8</sup>, but 
+adding more direct support for **subsampling**, **weights** or **zonal statistics from vectors**, including fractional 
+geometry-grid intersections.
 
-  - ```{eval-rst}
-    .. literalinclude:: code/about_geoutils_sidebyside_raster_rasterio.py
-        :language: python
-        :lines: 11-58
-    ```
-`````
+```{margin}
+<sup>8</sup> See **{ref}`stats-grouped`** for grouping and chunked reductions.
+```
 
-This second side-by-side example demonstrates the difference with GeoPandas (and Rasterio) for opening a vector,
-applying a metric geometric operation (buffering), rasterizing into a boolean mask, and indexing a raster with that mask.
+We **facilitate estimating spatial correlations** by efficiently sampling pairs out-of-memory from large rasters or point clouds while 
+equally representing all distances (as random samples on large data tend to rarely fall on two neighbouring points!). We also 
+efficiently compute **variography estimators on larger-than-memory spatial pairs**, building on Dask/Flox as for the statistics above. 
+During all of this, we reuse [SciKit-GStat](https://scikit-gstat.readthedocs.io/en/latest/) estimators and models to add the smallest layer necessary for scalability, 
+and provide conversion to other covariance models (GSTools, GPyTorch) to facilitate interoperability.<sup>9</sup>.
 
-`````{list-table}
----
-header-rows: 1
----
-* - GeoUtils
-  - GeoPandas (and Rasterio)
-* - ```{eval-rst}
-    .. literalinclude:: code/about_geoutils_sidebyside_vector_geoutils.py
-        :language: python
-        :lines: 11-26
-    ```
-
-  - ```{eval-rst}
-    .. literalinclude:: code/about_geoutils_sidebyside_vector_geopandas.py
-        :language: python
-        :lines: 11-34
-    ```
-`````
+```{margin}
+<sup>9</sup> See **{ref}`sampling-pairs`** and **{ref}`spatial correlation estimation <uncertainty-correlation>`**.
+```

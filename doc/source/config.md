@@ -30,7 +30,8 @@ gu.config["shift_area_or_point"] = False
 
 ## Default configuration file
 
-Below is the full default configuration file, which is updated by changes in configuration during a session.
+Below is the default configuration file. Changes to `gu.config` apply only to the current Python session,
+they do not modify this file.
 
 ```{literalinclude} ../../geoutils/config.ini
 :class: full-width

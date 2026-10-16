@@ -168,6 +168,7 @@ geoutils/example_data/
 
 # Directory where myst_nb executes jupyter code
 doc/jupyter_execute/
+doc/.jupyter_cache/
 doc/source/sg_execution_times.rst
 
 # Files that should have been deleted by Sphinx at end of build (but can exist if build fails)

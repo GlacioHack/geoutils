@@ -15,7 +15,7 @@ Several operations are easy to support for **chunked execution** as they directl
 - Vector and point cloud cropping, clipping, reprojection and translation preserve or map GeoPandas partitions.
 
 Other operations are more complex and require {ref}`specific logic described further below<specific-logic>` and summarized as:
-- The {meth}`~RasterBase.reproject` function **maps the intersection of projected source grid chunks for each destination chunk** (with potentially different CRS, resolution and bounds), and defines default output chunksizes based on resolution change to avoid unexpected memory blowup,
+- The {meth}`~RasterBase.reproject` function **maps the intersection of projected source grid chunks for each destination chunk** (with potentially different CRS, resolution and bounds),
 - The {meth}`~RasterBase.polygonize` function implements **three chunk-boundary reconciliation strategies** with different considerations for connected-component labeling and stitching of geometries,
 - The {meth}`~VectorBase.rasterize` function performs a geometry subsetting then directly **maps rasterized output blocks** only utilizing these subset geometries,
 - The {meth}`~RasterBase.interp_at_points` function performs a **fast regular-grid mapping of point locations in raster chunks**, expanding raster chunks by a few pixels depending on the resampling method, then performing ordered concatenation of outputs,
@@ -37,13 +37,16 @@ The diagram below illustrates this mapping procedure, with a new CRS and a downs
 ```
 
 
-During reprojection, destination chunks are **expanded by 3 pixels** to ensure adequate resampling at chunk boundaries. As a result of this and deformations, the number of source chunks used at once in memory is therefore **always 4-9**.
+The source mapping buffers destination bounds by **two output pixels** and includes neighboring source chunks.
+Configured operator neighborhoods can require a wider source margin. The number of source chunks read together
+depends on the projection, resolution change, chunk sizes and neighborhood.
 
-Unlike most chunked operations, **reprojection does not preserve identical input and output chunk sizes**. When the resolution changes, maintaining the same chunk size would cause the number of intersecting source chunks to scale approximately with **the square of the downsampling factor** (because reprojection operates in two spatial dimensions). For example, a downsampling factor of 2 would cause four times more source chunks to be accessed per destination chunk, which would quickly increase memory usage during coarse reprojection.
+With Dask, output chunks default to the source's spatial chunk sizes in pixels. A coarser output pixel covers more
+source pixels, so downsampling can increase memory per output chunk. For example, doubling both pixel dimensions
+makes an output chunk cover about four times the source area. Choose smaller source chunks before reprojection
+when that increase would exceed available memory. Multiprocessing uses `mp_config.chunks` for the output tiles.
 
-To prevent this, GeoUtils automatically **scales the output chunk size according to the resolution change**, keeping the number of source chunks involved in each operation bounded.
-
-Finally, note that **chunked reprojection with GCPs or RCPs is currently not supported**.
+Chunked reprojection requires an affine source grid; **GCP/RPC transformation models are not supported**.
 
 ### Chunked polygonization
 
@@ -127,5 +130,5 @@ The diagram below illustrates the workflow:
 Subsampling proceeds in **two stages**. First, GeoUtils performs a lightweight pass that counts the number of **valid pixels in each chunk**. These counts are summed to determine the final subsample size requested by the user, which may be specified either as a **fraction of valid pixels** or as an **absolute number**. This pass is inexpensive because it only requires scanning chunk masks and does not materialize the valid-value array.
 
 Once the target sample size is known, pixels are selected using one of two strategies:
-- With **`topk` (default, chunk-invariant)** sampling, each valid pixel is assigned a deterministic pseudo-random key derived from the random seed and its global linear index (row + col * number of rows). The **k smallest keys** are selected globally. Because the key depends only on the pixel index and the seed, the resulting subsample is **independent of chunk layout** and reproducible with any chunking or fully in-memory raster.
+- With **`topk` (default, chunk-invariant)** sampling, each valid pixel is assigned a deterministic pseudo-random key derived from the random seed and its global linear index (row * number of columns + col). The **k smallest keys** are selected globally. Because the key depends only on the pixel index and the seed, the resulting subsample is **independent of chunk layout** and reproducible with any chunking or fully in-memory raster.
 - With **`sequential` (chunk-dependent)** sampling, pixels are drawn from the **flattened sequence of valid values encountered during chunk traversal**. This strategy is typically **faster** because it avoids computing deterministic keys, but the result **depends on the chunk structure and valid-value ordering**.

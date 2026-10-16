@@ -21,25 +21,28 @@ title: GeoUtils
 :class: sd-fs-3
 :child-align: center
 
-GeoUtils is a Python package for **accessible**, **consistent** and **scalable** geospatial analysis.
+GeoUtils is a Python package for **scalable**, **composable** and **accessible** geospatial analysis.
 ::::
 
 ```{important}
 :class: margin
-GeoUtils ``v0.3`` is released with Xarray/GeoPandas accessors and full Dask support for rasters and point clouds (with benchmarking)! We are refining composability and vector scalability before a ``v1.0``.
+GeoUtils ``v0.3`` introduces Xarray/GeoPandas accessors and finalizes Dask support for all raster and point cloud operations (with benchmarking)! GPU support is planned as we refine the API before a ``v1.0``.
 ```
 
-GeoUtils is built on top of core geospatial packages (Rasterio, GeoPandas, PyProj) and numerical packages
-(NumPy, SciPy, Numba) to provide **consistent higher-level functionalities for raster, vector and point
-cloud objects** (such as reprojection, rasterization, polygonization, point interpolation, or gridding).
+GeoUtils is built on top of core geospatial packages (Rasterio, Shapely, PyProj) and numerical packages
+(NumPy, SciPy, Numba) to provide **higher-level tools** for raster, vector and point
+cloud objects, from transformations (e.g., reprojection, polygonization, point gridding) to 
+geostatistics (e.g., variography, random fields, kriging), and much more.
 
-It is **computationally scalable** by implementing **lazy and chunked execution (Dask, Multiprocessing)** to all **raster, point cloud and vector** operations
-and **provides accessors to naturally extend existing Python data-structures** (Xarray, Pandas).
+It adds **scalable** implementation respecting lazy and chunked execution (Dask, multiprocessing) for all raster
+and point cloud operations and some vector operations, and is **composable** by exposing customizable methods
+and backends that can be reused across operations. It also provides **accessors** to naturally extend
+existing Python data structures (Xarray, GeoPandas).
 
-GeoUtils is **tailored to perform quantitative analysis that implicitly understands the intricacies of geospatial data**
-(nodata values, projection, pixel interpretation), through **an intuitive API to foster accessibility** (similar spirit as GDAL's new overhauled CLI).
+GeoUtils makes quantitative analysis **accessible** through an intuitive API, similar in spirit to
+GDAL's overhauled CLI, while accounting for geospatial intricacies (nodata values, projections, pixel interpretation).
 
-If you are looking to **port your GDAL or QGIS workflow in Python**, GeoUtils is made for you!
+If you are looking to **port your GDAL or QGIS workflow in Python** while supporting large datasets, GeoUtils is made for you!
 
 ----------------
 
@@ -80,8 +83,6 @@ Dive into the full documentation.
 
 ::::
 
-Prefer to **grasp GeoUtils' core concepts by comparing with other Python packages**? Read through a short **{ref}`side-by-side code comparison with Rasterio and GeoPandas<comparison-rasterio-geopandas>`**.
-
 Looking to **learn a specific feature by running an example**? Jump straight into our **example galleries on {ref}`examples-io`, {ref}`examples-handling` and {ref}`examples-analysis`**.
 
 
@@ -108,13 +109,15 @@ feature_overview
 
 core_index
 scalability_index
-data_object_index
+data_struct_index
 referencing
 transformations
 proximity
 filters
+gapfill
 sampling
 stats
+uncertainty
 ```
 
 ```{toctree}

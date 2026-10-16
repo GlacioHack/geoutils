@@ -102,7 +102,7 @@ def _get_registered_accessor(obj: Any, name: str) -> Any:
             return None
     accessor = getattr(obj, name, None)
     if isinstance(obj, xr.Dataset) and name in ("rst", "pc") and accessor is not None:
-        if not accessor.variables:
+        if not accessor.compatible_variables:
             return None
     return accessor
 

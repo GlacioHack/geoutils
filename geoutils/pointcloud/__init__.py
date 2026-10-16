@@ -18,8 +18,9 @@
 
 """Point cloud objects and specific loading/writing, specific LAS/LAZ/COPC/Parquet support, or functionalities."""
 
+from geoutils.pointcloud.constructors import from_xyz  # noqa
 from geoutils.pointcloud.loading import open_pointcloud  # noqa
 from geoutils.pointcloud.pointcloud import PointCloud  # noqa
-from geoutils.pointcloud.pd_accessor import GeoPandasPointCloudAccessor  # noqa
+from geoutils.pointcloud.pd_accessor import GeoDataFramePointCloudAccessor  # noqa
 from geoutils.pointcloud.xr_accessor import DataArrayPointCloudAccessor  # noqa
 from geoutils.pointcloud.xr_accessor import DatasetPointCloudAccessor  # noqa

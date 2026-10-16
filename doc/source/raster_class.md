@@ -80,6 +80,10 @@ For example, loading one band from a 3-band file by passing a single index to `b
 
 The complete list of **raster** attributes with description is available in {ref}`dedicated sections of the API<api-raster-attrs>`.
 
+The {attr}`~RasterBase.area_or_point` attribute records whether a value represents an area sample (`"Area"`), a
+point sample (`"Point"`), or an unspecified interpretation (`None`). See {ref}`pixel-interpretation` for its effect
+on coordinates and raster–point operations.
+
 ## Open and save
 
 A **raster** is opened by instantiating with either a {class}`str`, a {class}`pathlib.Path`, a {class}`rasterio.io.DatasetReader` or a
@@ -171,11 +175,12 @@ rast.to_nanarray()
 ```
 
 ```{important}
-Getting a {class}`~numpy.ndarray` filled with {class}`~numpy.nan` will automatically cast the {class}`dtype<numpy.dtype>` to {class}`numpy.float32`. This
-might result in larger memory usage than in the original **raster** (if of {class}`int` type).
+An integer Raster is cast to {class}`numpy.float32` by default so the output can represent missing values as NaNs.
+Use `floating_dtype` to select another floating type. This can increase memory usage; floating rasters preserve
+their data type.
 
-Thanks to the {ref}`core-array-funcs`, **NumPy functions applied directly to a **raster** will respect {class}`~geoutils.Raster.nodata`
-values** as well as if computing with the {class}`~numpy.ma.MaskedArray` or an unmasked {class}`~numpy.ndarray` filled with {class}`~numpy.nan`.
+Thanks to the {ref}`core-array-funcs`, **NumPy functions applied directly to a raster respect nodata values**,
+as when computing with its {class}`~numpy.ma.MaskedArray` or an array filled with NaNs.
 
 Additionally, the **raster** will automatically cast between different {class}`dtype<numpy.dtype>`, and possibly re-define missing
 {class}`nodatas<geoutils.Raster.nodata>`.
@@ -192,8 +197,7 @@ A **raster** can be applied any pythonic arithmetic operation ({func}`+<operator
 ```
 
 A **raster** can also be applied any pythonic logical comparison operation ({func}`==<operator.eq>`, {func}` != <operator.ne>`, {func}`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`,
-{func}`<<operator.lt>`) with another **raster**, {class}`~numpy.ndarray` or number. It will cast to a raster mask, i.e. a boolean {class}
-`~geoutils.Raster`.
+{func}`<<operator.lt>`) with another **raster**, {class}`~numpy.ndarray` or number. It returns a boolean {class}`~geoutils.Raster` mask.
 
 ```{code-cell} ipython3
 # What raster pixels are less than 100?
@@ -227,9 +231,9 @@ See {ref}`core-array-funcs` for more details.
 A **raster** can be exported to different formats, to facilitate inter-compatibility with different packages and code versions.
 
 Those include exporting to:
-- a {class}`xarray.Dataset` with {class}`~geoutils.Raster.to_xarray`,
-- a {class}`rasterio.io.DatasetReader` with {class}`~geoutils.Raster.to_rio_dataset`,
-- a {class}`numpy.ndarray` or {class}`geoutils.Vector` as a point cloud with {class}`~geoutils.Raster.to_pointcloud`.
+- a {class}`xarray.DataArray` with {meth}`~geoutils.Raster.to_xarray`,
+- a {class}`rasterio.io.DatasetReader` with {meth}`~geoutils.Raster.to_rio_dataset`,
+- a {class}`~geoutils.PointCloud` or an array of coordinates and values (`as_array=True`) with {meth}`~geoutils.Raster.to_pointcloud`.
 
 ```{code-cell} ipython3
 # Export to rasterio dataset-reader through a memoryfile
@@ -389,7 +393,7 @@ For more details on features applicable to rasters, refer to the following pages
 | Topic                                                                | Documentation |
 |----------------------------------------------------------------------|---|
 | Metadata, CRS, bounds, footprints, and coordinates                   | {ref}`referencing` |
-| Reprojection, crop, clip, raster–vector, and raster–point operations | {ref}`transformations` |
+| Reprojection, cropping, clipping, raster–vector, and raster–point operations | {ref}`transformations` |
 | Distance to raster values or vector geometries                       | {ref}`proximity` |
 | Built-in and custom window filters                                   | {ref}`filters` |
 | Subsampling, co-sampling, and pair sampling                          | {ref}`sampling` |

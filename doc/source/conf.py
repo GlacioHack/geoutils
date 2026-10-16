@@ -77,7 +77,7 @@ intersphinx_mapping = {
     "shapely": ("https://shapely.readthedocs.io/en/stable/", None),
     "xarray": ("https://docs.xarray.dev/en/stable/", None),
     "xdem": ("https://xdem.readthedocs.io/en/stable", None),
-    "rioxarray": ("https://corteva.github.io/rioxarray/stable/", None),
+    "rioxarray": ("https://vylor.github.io/rioxarray/stable/", None),
     "pandas": ("https://pandas.pydata.org/docs/", None),
     "scipy": ("https://docs.scipy.org/doc/scipy/", None),
     "dask": ("https://docs.dask.org/en/stable/", None),
@@ -132,6 +132,10 @@ extlinks = {
 
 # For matplotlib figures generate with sphinx plot: (suffix, dpi)
 plot_formats = [(".png", 500)]
+
+# Hide download links beside plots; code cells already show the examples
+plot_html_show_source_link = False
+plot_html_show_formats = False
 
 # To avoid long path names in inheritance diagrams
 inheritance_alias = {

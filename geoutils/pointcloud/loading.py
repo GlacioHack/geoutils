@@ -49,7 +49,7 @@ def open_pointcloud(
     chunks: int | None = None,
     downsample: Number = 1,
     *,
-    as_type: Literal["dataarray", "dataset", "geodataframe"] = "dataarray",
+    as_object_type: Literal["dataarray", "dataset", "geodataframe"] = "dataarray",
 ) -> xr.DataArray | xr.Dataset | gpd.GeoDataFrame | Any:
     """
     Open a point cloud as a Xarray DataArray, Dataset or GeoDataFrame.
@@ -69,7 +69,7 @@ def open_pointcloud(
     :param chunks: Points per Dask chunk or partition. GeoParquet GeoDataFrame partitions follow the stored row
         groups. None loads the point data eagerly.
     :param downsample: Factor reducing the point count to ceil(N / downsample), with a deterministic random sample.
-    :param as_type: Returned representation: dataarray (the default), dataset, or geodataframe.
+    :param as_object_type: Returned representation: dataarray (the default), dataset, or geodataframe.
     :returns: A DataArray with active values and auxiliary coordinates, a Dataset with separate value variables,
         or a GeoDataFrame.
     """
@@ -79,27 +79,21 @@ def open_pointcloud(
         raise ValueError("Argument 'chunks' must be a strictly positive integer.")
 
     # 2/ Dispatch by request representation
-    if as_type in ("dataarray", "dataset"):
+    if as_object_type in ("dataarray", "dataset"):
         points = _open_pointcloud_array(str(filename), data_name, columns, chunks)
-    elif as_type == "geodataframe":
+    elif as_object_type == "geodataframe":
         points = _open_pointcloud_geodataframe(str(filename), data_name, columns, chunks)
     else:
-        raise ValueError("Argument 'as_type' must be 'dataarray', 'dataset' or 'geodataframe'.")
+        raise ValueError("Argument 'as_object_type' must be 'dataarray', 'dataset' or 'geodataframe'.")
 
     # 3/ Downsample, if requested
     points = _downsample_open_pointcloud(points, downsample)
 
     # 4/ Convert to a Xarray Dataset, if requested
-    if as_type == "dataset":
-        # Value attributes become separate variables while coordinates and lazy graphs stay shared
-        names = [name for name in points.pc.columns if name != points.name and name != "_geometry_z"]
-        dataset = points.rename({"x": "x_point", "y": "y_point"}).to_dataset().reset_coords(names)
-        dataset = dataset[[points.name, *names]]
-        for name in dataset.data_vars:
-            dataset[name].attrs["crs"] = points.attrs.get("crs")
-        dataset.attrs = points.attrs.copy()
-        dataset.encoding = points.encoding.copy()
-        return dataset
+    if as_object_type == "dataset":
+        from geoutils.pointcloud.xr_accessor import _pointcloud_array_to_dataset
+
+        return _pointcloud_array_to_dataset(points)
     return points
 
 

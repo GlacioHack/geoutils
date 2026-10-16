@@ -166,7 +166,7 @@ class Interpolator:
 
     .. code-block:: python
 
-        nearby = gu.operators.PointNeighbours(k=8, radius=50)
+        nearby = gu.operators.PointNeighbours(max_points=8, radius=50)
         gridded = point_cloud.grid(
             ref=reference_raster, resampling=SimpleInverseDistance(neighborhood=nearby)
         )
@@ -842,6 +842,8 @@ def _resolve_irregular_interpolator(
     if isinstance(method, Kriging):
         method.validate_geospatial_support(2)
     if isinstance(method, Interpolator):
+        if isinstance(method, RasterConvolution):
+            raise ValueError("Point gridding does not support raster convolution; a regular raster grid is required.")
         if type(method) is ScipyInterpolator and method.method not in ("nearest", "linear", "cubic"):
             raise ValueError(f"Point gridding does not support the regular-grid SciPy method {method.method!r}.")
         return method
@@ -1671,7 +1673,7 @@ class Kriging(Interpolator):
     def _gstools_coefficients(self, relative: NDArrayNum) -> tuple[NDArrayNum, float]:
         """Use GSTools to solve the ordinary kriging weights and variance."""
 
-        gstools = import_optional("gstools", extra_name="geostat")
+        gstools = import_optional("gstools")
         converted = self.variogram.to_gstools(dim=relative.shape[1])
         positions = tuple(relative[:, dimension] for dimension in range(relative.shape[1]))
 
@@ -1696,8 +1698,8 @@ class Kriging(Interpolator):
     def _gpytorch_coefficients(self, relative: NDArrayNum) -> tuple[NDArrayNum, float]:
         """Use GPyTorch covariance values to solve the ordinary kriging weights and variance."""
 
-        torch = import_optional("torch", extra_name="gp")
-        import_optional("gpytorch", extra_name="gp")
+        torch = import_optional("torch")
+        import_optional("gpytorch")
 
         # Calculate covariance between source points and from each source point to the requested coordinate
         active_dims = tuple(range(relative.shape[1]))

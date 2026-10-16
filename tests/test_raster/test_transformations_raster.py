@@ -1974,7 +1974,7 @@ class TestReprojectionErrors:
         # Identical grids still validate the reducer configuration before any early return
         raster = gu.Raster.from_array(np.ones((4, 4)), rio.transform.from_origin(0, 4, 1, 1), crs=32631)
         with pytest.raises(ValueError, match="PointNeighbours applies to point sources"):
-            raster.reproject(raster, resampling=Mean(neighborhood=PointNeighbours(k=3)))
+            raster.reproject(raster, resampling=Mean(neighborhood=PointNeighbours(max_points=3)))
 
     @pytest.mark.parametrize("operator_type", [Nearest, Linear])
     def test_reproject__warn_regular_offsets(self, operator_type: type[Interpolator]) -> None:

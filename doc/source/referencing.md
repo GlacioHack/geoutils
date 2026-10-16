@@ -181,7 +181,7 @@ By default, **pixel interpretation induces a half-pixel shift during raster–po
 but only **raises a warning for raster–raster operations** if interpretations differ.
 
 This behaviour can be modified at the package-level by using GeoUtils' {ref}`config`
-`shift_area_or_point` and `warns_area_or_point`.
+`shift_area_or_point` and `warn_area_or_point`.
 ```
 
 ## Manipulation

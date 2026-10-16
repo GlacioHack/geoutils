@@ -224,8 +224,8 @@ class TestLasPyIO:
             )
             self._assert_roundtrip(pc, multiproc)
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
-    def test_to_las_chunked_dask(self, as_type: Literal["dataarray", "geodataframe"]) -> None:
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
+    def test_to_las_chunked_dask(self, as_object_type: Literal["dataarray", "geodataframe"]) -> None:
         """Write a Dask-backed LAS point cloud partition by partition."""
 
         # Skip cleanly when lazy GeoDataFrames are unavailable
@@ -236,8 +236,8 @@ class TestLasPyIO:
         with tempfile.TemporaryDirectory() as temp_dir:
             source = self._write_source(pc, temp_dir, filename="dask-source.las")
 
-            ds = gu.open_pointcloud(source, columns="all", chunks=2, as_type=as_type)
-            assert isinstance(ds, xr.DataArray if as_type == "dataarray" else dgpd.GeoDataFrame)
+            ds = gu.open_pointcloud(source, columns="all", chunks=2, as_object_type=as_object_type)
+            assert isinstance(ds, xr.DataArray if as_object_type == "dataarray" else dgpd.GeoDataFrame)
             assert not ds.pc.is_loaded
 
             # The writer computes one partition at a time into the final LAS stream

@@ -8,11 +8,8 @@ from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import FancyArrowPatch, Rectangle
 
-# -----------------------------------------------------------------------------
 # Example data
-# -----------------------------------------------------------------------------
 
-# Raster grid
 NROWS = 8
 NCOLS = 10
 CHUNK_ROWS = (4, 4)
@@ -25,11 +22,11 @@ DEPTH = 4
 SELECTED_CHUNK_LW = 2.8
 EXAMPLE_CHUNK_LW = 4.2
 
-# Input point coordinates in raster data coordinates
+# Use raster coordinates for the input points
 POINT_X = np.array([0.9, 1.8, 3.7, 4.4, 1.4, 6.2, 8.4, 8.7, 2.6, 6.9])
 POINT_Y = np.array([6.7, 5.2, 6.0, 2.2, 1.4, 5.6, 2.3, 1.3, 1.8, 2.7])
 
-# Conceptual chunking of the input point ribbon
+# Split the point sequence into three chunks
 POINT_CHUNKS = (4, 3, 3)
 HIGHLIGHT_POINT_CHUNK = 1
 
@@ -55,13 +52,11 @@ POINT_CHUNK_LOC = [point_to_raster_chunk(float(x), float(y)) for x, y in zip(POI
 HIGHLIGHTED_RASTER_CHUNKS = sorted({POINT_CHUNK_LOC[i] for i in POINT_IDS_HIGHLIGHT})
 highlighted_raster_chunk = POINT_CHUNK_LOC[POINT_IDS_HIGHLIGHT[0]]
 
-# Example interpolated values for the output ribbon
+# Use fixed example values for the output sequence
 OUTPUT_VALUES = np.array([12.4, 15.0, 14.1, 9.8, 11.3, 10.7, 13.2, 8.9, 7.4, 10.1])
 
 
-# -----------------------------------------------------------------------------
 # Styling
-# -----------------------------------------------------------------------------
 
 NEUTRAL = "#333333"
 PIXEL_GRID = "0.80"
@@ -73,9 +68,7 @@ POINT_FADED = "#BFD7EA"
 OVERLAP_FILL_ALPHA = 0.18
 
 
-# -----------------------------------------------------------------------------
 # Geometry helpers
-# -----------------------------------------------------------------------------
 
 
 def raster_chunk_bounds(chunk_loc: tuple[int, int]) -> tuple[float, float, float, float]:
@@ -108,9 +101,7 @@ def expanded_chunk_bounds(
     return left - depth_px, bottom - depth_px, right + depth_px, top + depth_px
 
 
-# -----------------------------------------------------------------------------
 # Plot helpers
-# -----------------------------------------------------------------------------
 
 
 def _setup_axis(ax: plt.Axes, *, xlim: tuple[float, float], ylim: tuple[float, float]) -> None:
@@ -380,8 +371,6 @@ def _add_visual_legend(fig: plt.Figure) -> None:
     sym_w = 0.032
     txt_gap = 0.012
 
-    # ---------------- Row 1 ----------------
-    # Pixel grid
     cx = centers[0]
     x = cx - 0.075
     fig.add_artist(
@@ -396,7 +385,6 @@ def _add_visual_legend(fig: plt.Figure) -> None:
     )
     fig.text(x + sym_w + txt_gap, y1, "Raster pixel grid", transform=fig.transFigure, va="center", fontsize=10)
 
-    # Chunk boundary
     cx = centers[1]
     x = cx - 0.085
     fig.add_artist(
@@ -411,7 +399,6 @@ def _add_visual_legend(fig: plt.Figure) -> None:
     )
     fig.text(x + sym_w + txt_gap, y1, "Raster chunk boundary", transform=fig.transFigure, va="center", fontsize=10)
 
-    # All input points (light blue)
     cx = centers[2]
     x = cx - 0.080
     fig.add_artist(
@@ -428,7 +415,6 @@ def _add_visual_legend(fig: plt.Figure) -> None:
     )
     fig.text(x + sym_w + txt_gap, y1, "All input points", transform=fig.transFigure, va="center", fontsize=10)
 
-    # Selected point chunk (darker blue)
     cx = centers[3]
     x = cx - 0.090
     fig.add_artist(
@@ -445,8 +431,6 @@ def _add_visual_legend(fig: plt.Figure) -> None:
     )
     fig.text(x + sym_w + txt_gap, y1, "Selected point chunk", transform=fig.transFigure, va="center", fontsize=10)
 
-    # ---------------- Row 2 ----------------
-    # Selected raster chunks
     cx = centers[1]
     x = cx - 0.25
     rect1 = Rectangle(
@@ -468,7 +452,6 @@ def _add_visual_legend(fig: plt.Figure) -> None:
         fontsize=10,
     )
 
-    # Example raster chunk / overlap
     cx = centers[3]
     x = cx - 0.25
     rect_fill = Rectangle(
@@ -552,20 +535,15 @@ def _draw_highlight_chunks(
         ax.add_patch(rect)
 
 
-# -----------------------------------------------------------------------------
-# Main figure
-# -----------------------------------------------------------------------------
-
-
 def make_chunked_interp_points_diagram() -> tuple[plt.Figure, np.ndarray]:
     """Build a 4-panel schematic for chunked raster-to-point interpolation."""
     fig = plt.figure(figsize=(8, 6))
     gs = fig.add_gridspec(2, 2, hspace=0.5, wspace=0.30)
 
-    ax_ul = fig.add_subplot(gs[0, 0])  # Input points
-    ax_ur = fig.add_subplot(gs[0, 1])  # Assign to raster chunks
-    ax_bl = fig.add_subplot(gs[1, 0])  # Reordered outputs
-    ax_br = fig.add_subplot(gs[1, 1])  # Interpolate on overlap-expanded chunks
+    ax_ul = fig.add_subplot(gs[0, 0])
+    ax_ur = fig.add_subplot(gs[0, 1])
+    ax_bl = fig.add_subplot(gs[1, 0])
+    ax_br = fig.add_subplot(gs[1, 1])
 
     axes = np.array([ax_ul, ax_ur, ax_bl, ax_br], dtype=object)
 
@@ -573,9 +551,7 @@ def make_chunked_interp_points_diagram() -> tuple[plt.Figure, np.ndarray]:
     chunk_bounds = max(chunk_bounds_list, key=lambda b: (b[3], b[2]))  # Use upper-right selected chunk
     overlap_bounds = expanded_chunk_bounds(chunk_bounds, depth_px=1.0)
 
-    # -------------------------------------------------------------------------
     # Upper left: input points
-    # -------------------------------------------------------------------------
     _draw_point_ribbon(ax_ul, highlight_chunk=HIGHLIGHT_POINT_CHUNK, title="Point chunk")
     ax_ul.text(
         0.5,
@@ -601,9 +577,7 @@ def make_chunked_interp_points_diagram() -> tuple[plt.Figure, np.ndarray]:
     _setup_axis(ax_ul, xlim=(-0.4, len(POINT_X) + 0.4), ylim=(-1.0, 1.4))
     ax_ul.set_aspect("auto")
 
-    # -------------------------------------------------------------------------
     # Upper right: assign to raster chunks
-    # -------------------------------------------------------------------------
     _draw_pixel_grid(ax_ur, nrows=NROWS, ncols=NCOLS, extend=1.0)
     _draw_chunk_boundaries(ax_ur, extend=1.0)
     _draw_points_on_raster(ax_ur, highlight_ids=POINT_IDS_HIGHLIGHT, show_ids=True)
@@ -637,9 +611,7 @@ def make_chunked_interp_points_diagram() -> tuple[plt.Figure, np.ndarray]:
     )
     _setup_axis(ax_ur, xlim=(-1.2, NCOLS + 1.2), ylim=(-1.2, NROWS + 1.2))
 
-    # -------------------------------------------------------------------------
     # Bottom right: interpolate on overlap-expanded chunks
-    # -------------------------------------------------------------------------
     _draw_pixel_grid(ax_br, nrows=NROWS, ncols=NCOLS, extend=1.0)
     _draw_chunk_boundaries(ax_br, extend=1.0)
     _draw_overlap_chunk(ax_br, overlap_bounds)
@@ -670,9 +642,7 @@ def make_chunked_interp_points_diagram() -> tuple[plt.Figure, np.ndarray]:
     )
     _setup_axis(ax_br, xlim=(-1.2, NCOLS + 1.2), ylim=(-1.2, NROWS + 1.2))
 
-    # -------------------------------------------------------------------------
     # Bottom left: reordered outputs
-    # -------------------------------------------------------------------------
     _draw_point_ribbon(
         ax_bl,
         highlight_chunk=HIGHLIGHT_POINT_CHUNK,
@@ -704,9 +674,6 @@ def make_chunked_interp_points_diagram() -> tuple[plt.Figure, np.ndarray]:
     _setup_axis(ax_bl, xlim=(-0.4, len(POINT_X) + 0.4), ylim=(-1.0, 1.4))
     ax_bl.set_aspect("auto")
 
-    # -------------------------------------------------------------------------
-    # Global title
-    # -------------------------------------------------------------------------
     fig.text(
         0.5,
         0.99,
@@ -718,9 +685,7 @@ def make_chunked_interp_points_diagram() -> tuple[plt.Figure, np.ndarray]:
         color="0.35",
     )
 
-    # -------------------------------------------------------------------------
-    # Workflow arrows
-    # -------------------------------------------------------------------------
+    # Resolve axes positions before drawing arrows between panels
     fig.canvas.draw()
 
     pos_ul = ax_ul.get_position()
@@ -728,7 +693,6 @@ def make_chunked_interp_points_diagram() -> tuple[plt.Figure, np.ndarray]:
     pos_br = ax_br.get_position()
     pos_bl = ax_bl.get_position()
 
-    # UL to UR
     _add_workflow_arrow(
         fig,
         (pos_ul.x1 + 0.01, 0.5 * (pos_ul.y0 + pos_ul.y1)),
@@ -736,7 +700,7 @@ def make_chunked_interp_points_diagram() -> tuple[plt.Figure, np.ndarray]:
         rad=0.0,
     )
 
-    # UR to BR (curved outward to avoid the BR title)
+    # Curve the arrow outward to avoid the lower-right title
     _add_workflow_arrow(
         fig,
         (pos_ur.x1 - 0.25, 0.5 * (pos_ur.y0 + pos_ur.y1) - 0.02),
@@ -744,7 +708,6 @@ def make_chunked_interp_points_diagram() -> tuple[plt.Figure, np.ndarray]:
         rad=0.45,
     )
 
-    # BR to BL
     _add_workflow_arrow(
         fig,
         (pos_br.x0 - 0.01, 0.5 * (pos_br.y0 + pos_br.y1)),

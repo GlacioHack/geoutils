@@ -16,8 +16,9 @@ kernelspec:
 
 A point cloud represents 2D point geometries of georeferenced coordinates associated with a main 1D data array, and optionally auxiliary data.
 
-GeoUtils also exposes point cloud methods through the {class}`pc <geoutils.GeoPandasPointCloudAccessor>` accessor on a
-{class}`geopandas.GeoDataFrame`. We recommend this interface for new workflows, while the
+GeoUtils also exposes point cloud methods through the {class}`DataArray.pc <geoutils.DataArrayPointCloudAccessor>`,
+{class}`Dataset.pc <geoutils.DatasetPointCloudAccessor>` and {class}`GeoDataFrame.pc <geoutils.GeoDataFramePointCloudAccessor>`
+accessors. We recommend these interfaces for new workflows, while the
 {class}`~geoutils.PointCloud` object remains available with the same point cloud methods.
 
 Although a subtype of {class}`~geoutils.Vector`, point clouds have a very different nature than other vectors and are
@@ -31,9 +32,8 @@ GeoUtils aims to support these features, as well the reading and writing of poin
 geoparquet) usually used for **sparse point clouds**, and from point-cloud-type files (e.g., LAS, LAZ, COPC) usually
 used for **dense point clouds**.
 
-```{warning}
-Support for LAS files is still preliminary and loads all data in memory for most operations. We are working on adding operations with chunked reading.
-```
+LAS, LAZ, COPC and GeoParquet points can be opened lazily with `open_pointcloud(chunks=...)`.
+See {ref}`scalability-formats` for how record slices, row groups and spatial queries affect reading.
 
 Below, a summary of the {class}`~geoutils.PointCloud` object and its methods.
 
@@ -41,7 +41,7 @@ Below, a summary of the {class}`~geoutils.PointCloud` object and its methods.
 
 ## Object definition and attributes
 
-A {class}`~geoutils.PointCloud` is a {class}`~geoutils.Vector` is a vector of 2D point geometries associated to
+A {class}`~geoutils.PointCloud` is a vector of 2D point geometries associated with
 numeric values from a named {attr}`~geoutils.PointCloud.data` attribute, and can also contain auxiliary attributes.
 
 It inherits the main {class}`~geoutils.Vector` attribute {attr}`~geoutils.Vector.gdf` containing the geodataframe, and adds **another
@@ -84,6 +84,38 @@ pc
 
 See {ref}`core-downsampling` to reduce point cloud density when opening or plotting, including how GeoUtils selects
 deterministic point samples.
+
+### Opening native arrays or dataframes
+
+{func}`~geoutils.open_pointcloud` returns a Xarray DataArray by default. The active measurement is its value array;
+selected auxiliary attributes are coordinates on the same point dimension.
+
+```{code-cell} ipython3
+# Open elevation and classification as lazy numeric arrays from the LAS file
+points = geoutils.open_pointcloud(filename_dem, data_name="Z", columns=["classification"], chunks=5000)
+points
+```
+
+Use `as_object_type="dataset"` to represent several measurements as separate variables, or `as_object_type="geodataframe"`
+to work with point geometry and native GeoPandas methods. `columns="main"`, `"all"` or a list selects attributes
+for LAS and GeoParquet. CRS, X/Y coordinates and the active measurement are read together.
+
+### Writing points
+
+Point accessors provide `to_file()`, `to_las()` and `to_parquet()`. The GeoParquet writer can process a lazy array in
+bounded row groups or write a directory of partition files:
+
+```python
+# Write lazy point arrays in groups of 5000 rows
+points.pc.to_parquet("elevations.parquet", chunks=5000)
+
+# Reopen the saved active measurement and auxiliary attributes
+reopened = geoutils.open_pointcloud("elevations.parquet", columns="all", chunks=5000)
+```
+
+Writes execute the required tasks; `to_parquet()` does not return a deferred write. GeoParquet stores the point
+coordinates, CRS and active measurement. See {ref}`scalability-formats` for file selection and partition sizes,
+and {ref}`core-composition` for conversions between array and geometry interfaces.
 
 ## Create from arrays or tuples
 
@@ -151,9 +183,12 @@ For more details on features applicable to point clouds, refer to the following 
 | Topic | Documentation |
 |---|---|
 | CRS, bounds, and footprints | {ref}`referencing` |
-| Reprojection, crop, clip, interpolation, reduction, and gridding | {ref}`transformations` |
+| Reprojection, cropping, clipping, interpolation, reduction, and gridding | {ref}`transformations` |
 | Subsampling, co-sampling, and pair sampling | {ref}`sampling` |
 | Global, grouped, and spatial statistics | {ref}`stats` |
+| Neighborhood filtering and missing values | {ref}`filters-points` |
+| Error models, uncertainty propagation and simulation | {ref}`uncertainty` |
+| Native point formats and partitioned writing | {ref}`scalability-formats` |
 | Downsampling for opening and plotting | {ref}`core-downsampling` |
 | Lazy and out-of-memory execution | {ref}`scalability-index` |
 | Complete method and attribute listing | {ref}`pointcloud-api` |

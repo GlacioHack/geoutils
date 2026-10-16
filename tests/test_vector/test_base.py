@@ -16,7 +16,7 @@ from shapely import Polygon
 
 from geoutils import PointCloud, Raster, Vector
 from geoutils.vector.base import VectorBase
-from geoutils.vector.pd_accessor import VectorAccessor
+from geoutils.vector.pd_accessor import GeoDataFrameVectorAccessor
 from tests.accessor_helpers import assert_output_equal
 
 
@@ -280,6 +280,6 @@ class TestClassVsAccessorConsistency:
         """Test class method output exactly the same objects."""
 
         output_vector = getattr(Vector, method)(**kwargs)
-        output_ds = getattr(VectorAccessor, method)(**kwargs)
+        output_ds = getattr(GeoDataFrameVectorAccessor, method)(**kwargs)
 
         assert_output_equal(output_vector, output_ds)

@@ -1030,9 +1030,9 @@ class TestGroupedStatsChunked:
         assert np.array_equal(np.asarray(masks[(1, 2)]), [True, False, True])
 
     @pytest.mark.parametrize("source_type", ["pointcloud", "dataframe", "dask"])
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_stats__point_column_existing_categories(
-        self, as_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, source_type: str
+        self, as_object_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, source_type: str
     ) -> None:
         """Checks that point columns return categories in their existing order, including absent categories."""
 
@@ -1057,9 +1057,13 @@ class TestGroupedStatsChunked:
             _register_dask_pointcloud_accessor()
             points_filename, points_chunks, points_column = pointcloud_file(points.gdf, 2)
             opened = gu.open_pointcloud(
-                points_filename, data_name=points_column, columns="all", chunks=points_chunks, as_type=as_type
+                points_filename,
+                data_name=points_column,
+                columns="all",
+                chunks=points_chunks,
+                as_object_type=as_object_type,
             )
-            if as_type == "geodataframe":
+            if as_object_type == "geodataframe":
                 # Read the categorical dictionaries while leaving point values backed by Dask
                 opened = opened.categorize(columns=["zone"])
                 opened = opened.assign(zone=opened.zone.cat.set_categories(dataframe.zone.cat.categories))
@@ -1069,7 +1073,7 @@ class TestGroupedStatsChunked:
         # Infer the same definition from the named column as from its original Pandas categorical values
         options = (
             {"categories": {"zone": dataframe["zone"].cat.categories}}
-            if as_type == "dataarray" and source_type == "dask"
+            if as_object_type == "dataarray" and source_type == "dask"
             else {}
         )
         table = points.stats("mean", by={"zone": "zone"}, observed=False, **options)
@@ -1101,9 +1105,9 @@ class TestGroupedStatsChunked:
         expected_values = np.array([[2, 2], [2, 6], [0, np.nan]], dtype=float)
         np.testing.assert_allclose(result["value"], expected_values, equal_nan=True)
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_stats__external_values_on_common_support(
-        self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path
+        self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
     ) -> None:
         """Checks that Dask point inputs use the same common support and return the same result as eager points."""
 
@@ -1135,7 +1139,7 @@ class TestGroupedStatsChunked:
         # Write a point file to disk with height and zone columns, then reopen it as Dask partitions
         filename = tmp_path / "points.gpkg"
         points.gdf.to_file(filename)
-        points = gu.open_pointcloud(str(filename), chunks=2, data_name="height", as_type=as_type).pc
+        points = gu.open_pointcloud(str(filename), chunks=2, data_name="height", as_object_type=as_object_type).pc
         assert not points.is_loaded
 
         # Let the external point data define the common support for all selected values and grouping variables
@@ -1158,7 +1162,7 @@ class TestGroupedStatsChunked:
         mask_values = mask.pc.data
         import dask.dataframe as dd
 
-        if as_type == "dataarray":
+        if as_object_type == "dataarray":
             assert is_dask_array(mask_values)
         else:
             assert isinstance(mask_values, dd.Series)
@@ -1208,9 +1212,12 @@ class TestGroupedStatsChunked:
         np.testing.assert_allclose(table[("raster", "mean")], [4.0, 6.5])
         np.testing.assert_allclose(table[("slope", "mean")], [5.0, 15.0])
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_stats__vector_projection_shared_by_point_partitions(
-        self, as_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, monkeypatch: pytest.MonkeyPatch
+        self,
+        as_object_type: Literal["dataarray", "geodataframe"],
+        pointcloud_file: Any,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Checks that vectors are reprojected once and later features provide values where polygons overlap."""
 
@@ -1242,7 +1249,7 @@ class TestGroupedStatsChunked:
         _register_dask_pointcloud_accessor()
         points_filename, points_chunks, points_column = pointcloud_file(dataframe, 3)
         points = gu.open_pointcloud(
-            points_filename, data_name=points_column, columns="all", chunks=points_chunks, as_type=as_type
+            points_filename, data_name=points_column, columns="all", chunks=points_chunks, as_object_type=as_object_type
         ).pc
         assert not points.is_loaded
 
@@ -1527,9 +1534,9 @@ class TestGroupedStatsChunked:
 
     @pytest.mark.parametrize("source_type", ["pointcloud", "dataframe", "dask"])
     @pytest.mark.parametrize("size", [1, 3])
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_stats__point_mask_rows_and_geometry(
-        self, as_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, source_type: str, size: int
+        self, as_object_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, source_type: str, size: int
     ) -> None:
         """Checks that point masks have the same 3D geometry and row order, including singleton inputs."""
 
@@ -1553,7 +1560,11 @@ class TestGroupedStatsChunked:
             _register_dask_pointcloud_accessor()
             points_filename, points_chunks, points_column = pointcloud_file(dataframe, min(size, 2))
             points = gu.open_pointcloud(
-                points_filename, data_name=points_column, columns="all", chunks=points_chunks, as_type=as_type
+                points_filename,
+                data_name=points_column,
+                columns="all",
+                chunks=points_chunks,
+                as_object_type=as_object_type,
             ).pc
 
         # Request complete masks and replace only the active point data column with boolean mask values
@@ -1565,7 +1576,7 @@ class TestGroupedStatsChunked:
         if source_type == "dask":
             assert output.pc.data.dtype == bool
             output = output.compute()
-            if as_type == "dataarray":
+            if as_object_type == "dataarray":
                 output = output.pc.to_geoutils().gdf
 
         # Group zero contains every second original row, with all coordinates and other attributes unchanged

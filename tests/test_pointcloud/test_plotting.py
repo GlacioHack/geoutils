@@ -78,15 +78,15 @@ class TestPlot:
         assert pointcloud.data.dtype == bool
         plt.close()
 
-    @pytest.mark.parametrize("as_type", ["pointcloud", "geodataframe", "dataarray"])
-    def test_plot__fixed_color(self, as_type: Literal["pointcloud", "geodataframe", "dataarray"]) -> None:
+    @pytest.mark.parametrize("as_object_type", ["pointcloud", "geodataframe", "dataarray"])
+    def test_plot__fixed_color(self, as_object_type: Literal["pointcloud", "geodataframe", "dataarray"]) -> None:
         """Checks that an explicit color overrides the default data column without creating a colorbar."""
 
         # Create a point cloud whose main data column would otherwise control marker colors
         pointcloud = gu.PointCloud(_point_grid(3), data_column="value")
-        if as_type == "dataarray":
+        if as_object_type == "dataarray":
             source = pointcloud.to_xarray().pc
-        elif as_type == "geodataframe":
+        elif as_object_type == "geodataframe":
             source = pointcloud.gdf.pc
         else:
             source = pointcloud
@@ -120,7 +120,10 @@ class TestPlot:
         assert ax.get_ylim()[1] >= pointcloud.bounds.top
         plt.close()
 
-    def test_plot__geographic_colorbar_placement(self) -> None:
+    @pytest.mark.parametrize("as_object_type", ["pointcloud", "geodataframe", "dataarray"])
+    def test_plot__geographic_colorbar_placement(
+        self, as_object_type: Literal["pointcloud", "geodataframe", "dataarray"]
+    ) -> None:
         """Checks that a plot in geographic CRS keeps its colorbar properly positioned/sized."""
 
         # Create a high-latitude that strongly adjusts geographic map aspect
@@ -132,9 +135,15 @@ class TestPlot:
             crs=4326,
         )
         pointcloud = gu.PointCloud(dataframe, data_name="value")
+        if as_object_type == "dataarray":
+            source = pointcloud.to_xarray().pc
+        elif as_object_type == "geodataframe":
+            source = pointcloud.gdf.pc
+        else:
+            source = pointcloud
 
         # Draw the figure before comparing the final map and colorbar positions
-        ax, colorbar_ax = pointcloud.plot(return_axes=True)
+        ax, colorbar_ax = source.plot(return_axes=True)
         assert colorbar_ax is not None
         ax.figure.canvas.draw()
         map_position = ax.get_position()
@@ -143,10 +152,14 @@ class TestPlot:
 
         # Check that position/shape is correct
         assert 0 <= gap < map_position.width / 2
+        assert colorbar_position.y0 == pytest.approx(map_position.y0)
         assert colorbar_position.height == pytest.approx(map_position.height)
         plt.close(ax.figure)
 
-    def test_plot__reference_panel_size(self) -> None:
+    @pytest.mark.parametrize("as_object_type", ["pointcloud", "geodataframe", "dataarray"])
+    def test_plot__reference_panel_size(
+        self, as_object_type: Literal["pointcloud", "geodataframe", "dataarray"]
+    ) -> None:
         """Checks that a reference-matched point plot has the same map and colorbar size as a raster plot."""
 
         # Create a wide reference that makes equal-aspect axes shorter than their original subplot slots
@@ -157,13 +170,19 @@ class TestPlot:
             crs=3857,
         )
         pointcloud = gu.PointCloud(dataframe, data_column="value")
+        if as_object_type == "dataarray":
+            source = pointcloud.to_xarray().pc
+        elif as_object_type == "geodataframe":
+            source = pointcloud.gdf.pc
+        else:
+            source = pointcloud
 
         # Plot the same extent in paired panels whose titles occupy one and two lines
         fig, axes = plt.subplots(1, 2)
         axes[0].set_title("Raster")
         raster_ax, raster_colorbar_ax = reference.plot(ax=axes[0], max_pixels=None, return_axes=True)
         axes[1].set_title("Reduced\npoint cloud")
-        point_ax, point_colorbar_ax = pointcloud.plot(
+        point_ax, point_colorbar_ax = source.plot(
             ref=reference,
             ax=axes[1],
             max_points=None,
@@ -180,6 +199,7 @@ class TestPlot:
         assert point_position.y0 == pytest.approx(raster_position.y0)
         assert point_position.width == pytest.approx(raster_position.width)
         assert point_position.height == pytest.approx(raster_position.height)
+        assert point_colorbar_ax.get_position().y0 == pytest.approx(point_position.y0)
         assert point_colorbar_ax.get_position().width == pytest.approx(raster_colorbar_ax.get_position().width)
         assert point_colorbar_ax.get_position().height == pytest.approx(raster_colorbar_ax.get_position().height)
 
@@ -271,17 +291,17 @@ class TestPlot:
 class TestPlotChunked:
     """Test module for lazy point plotting, bounded row loading, and eager result equivalence."""
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_plot__loading_laziness(
-        self, as_type: Literal["dataarray", "geodataframe"], tmp_path: pathlib.Path
+        self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: pathlib.Path
     ) -> None:
         """Checks that plotting materializes only selected rows and keeps the source dataframe lazy."""
 
         # Write 100 points and reopen them in partitions of 17, including a shorter final partition
         filename = tmp_path / "points.gpkg"
         _point_grid().to_file(filename, index=False)
-        lazy = gu.open_pointcloud(str(filename), data_name="value", chunks=17, as_type=as_type)
-        eager = gu.open_pointcloud(str(filename), data_name="value", as_type=as_type)
+        lazy = gu.open_pointcloud(str(filename), data_name="value", chunks=17, as_object_type=as_object_type)
+        eager = gu.open_pointcloud(str(filename), data_name="value", as_object_type=as_object_type)
         assert lazy.pc._is_dask
 
         # Plot the same deterministic seven-row sample from both backends

@@ -13,23 +13,22 @@ kernelspec:
 (scalability-usage)=
 # Usage and good practices
 
-GeoUtils supports scalable execution for most of its **raster** and **point cloud** operations, as well as selection,
-transformation and raster-output operations for **vectors**.
+GeoUtils supports scalable execution for most **raster** and **point cloud** operations, as well as some **vector** operations.
 
 This **summary page** introduces scalability concepts, demonstrates usage, and lists good practices. For more details on scalability concepts, support or implementations, refer to the next pages.
 
 GeoUtils relies on two execution backends:
 
-- **Dask**, through its {class}`rst <geoutils.DataArrayRasterAccessor>` Xarray accessor and {class}`vct <geoutils.VectorAccessor>` and {class}`pc <geoutils.GeoPandasPointCloudAccessor>` Pandas accessors (**lazy** and **chunked** execution),
-- **Multiprocessing**, through its {class}`~geoutils.Raster`, {class}`~geoutils.Vector` and {class}`~geoutils.PointCloud` objects for supported methods (**chunked** execution only).
+- **Dask**, through the {class}`rst <geoutils.DataArrayRasterAccessor>` and {class}`pc <geoutils.DataArrayPointCloudAccessor>` Xarray accessors and the {class}`vct <geoutils.GeoDataFrameVectorAccessor>` and {class}`pc <geoutils.GeoDataFramePointCloudAccessor>` GeoPandas accessors (**lazy** and **chunked** execution),
+- **Multiprocessing**, through its {class}`~geoutils.Raster`, {class}`~geoutils.Vector` and {class}`~geoutils.PointCloud` objects (**chunked** execution only).
 
-Both backends mirror the **exact same object operations and chunked logic**, and yield **identical** results as in-memory operations.
+Both backends use the **exact same chunked logic**, and yield **identical** results as in-memory operations.
 **Lazy** refers to deferred execution using Dask, while **chunked** refers to processing raster tiles or dataframe partitions separately to limit memory usage.
 For details on scalability concepts, see the {ref}`scalability-concept` page.
 
 As a rule of thumb:
 
-- Use **Dask** to work on **Xarray and GeoPandas objects** through our accessors {class}`rst <geoutils.DataArrayRasterAccessor>`, {class}`vct <geoutils.VectorAccessor>` and {class}`pc <geoutils.GeoPandasPointCloudAccessor>`, and if you want to chain several operations lazily.
+- Use **Dask** to work on **Xarray and GeoPandas objects** through our accessors {class}`rst <geoutils.DataArrayRasterAccessor>`, {class}`vct <geoutils.GeoDataFrameVectorAccessor>` and {class}`pc <geoutils.GeoDataFramePointCloudAccessor>`, and if you want to chain several operations lazily.
 - Use **Multiprocessing** to work with our {class}`~geoutils.Raster`, {class}`~geoutils.Vector` and {class}`~geoutils.PointCloud` objects, and if you are fine with intermediate writing/reading between steps.
 - Use standard **in-memory execution** to work efficiently on small datasets, which is possible even if those were loaded from larger files (keep in mind that {meth}`~RasterBase.crop` or {meth}`~RasterBase.subsample` only load requested data, even without Dask/Multiprocessing).
 
@@ -50,9 +49,7 @@ This behavior is enabled by opening a raster with the `chunks` argument, which r
 import geoutils as gu
 
 filename_rast = gu.examples.get_path("exploradores_aster_dem")
-
 ds = gu.open_raster(filename_rast, chunks={"x": 200, "y": 200})
-
 ds
 ```
 
@@ -68,16 +65,15 @@ ds_reproj = ds.rst.reproject(
     res=out_res,
     resampling="bilinear",
 )
-
 ds_reproj
 ```
 
 The resulting raster remains **lazy**. Computation (reading input files and applying all chained operations) only happens when later explicitly requested with {meth}`~dask.array.Array.compute()`.
 
-For a raster output, one typically wants to write to file lazily to avoid loading it in-memory, using the `compute=True` option:
+For a raster output, one typically wants to write to file while avoid loading it in-memory:
 
 ```{code-cell} python
-# ds_reproj.rst.to_file("reproj_rast.tif", compute=True)
+ds_reproj.rst.to_file("reproj_rast.tif", compute=True)
 ```
 
 This triggers computation and writes the raster **chunk-by-chunk** to the output file.
@@ -89,7 +85,6 @@ Or, the output can be chained with another operation. For example, we can extrac
 sub_ds = ds_reproj.rst.subsample(
     subsample=5000,
 )
-
 sub_ds
 ```
 
@@ -107,7 +102,6 @@ Multiprocessing performs **chunked execution** (only loads chunks in-memory), bu
 
 ```{code-cell} python
 rast = gu.Raster(filename_rast)
-
 rast
 ```
 
@@ -126,7 +120,6 @@ rast_reproj_mp = rast.reproject(
     resampling="bilinear",
     mp_config=mp_config,
 )
-
 rast_reproj_mp
 ```
 
@@ -142,7 +135,6 @@ samp_rast_mp = rast_reproj_mp.subsample(
     subsample=5000,
     mp_config=point_config,
 )
-
 samp_rast_mp
 ```
 
@@ -164,7 +156,10 @@ This backend is convenient when working directly with {class}`~geoutils.Raster` 
 
 ## Good practices with chunked and lazy operations
 
-- If **memory** is the limitating factor for you, use a **single-threaded scheduler** through Dask (```dask.config.set(scheduler='single-threaded')```) or Multiprocessing (default cluster),
+- Reduce data to the detail your analysis or figure needs. See {ref}`scalability-downsampling` for opening smaller
+  datasets, limiting plotting data and using raster overviews. Eager point cloud downsampling happens after reading
+  the file, so use `chunks` when the initial read must also stay partitioned and lazy.
+- If **memory** is the limiting factor for you, use a **single-threaded scheduler** through Dask (`dask.config.set(scheduler='single-threaded')`) or sequential chunk processing through Multiprocessing (default cluster),
 - If **speed** is the limiting factor for you, use **parallelized processes** through Dask (see [Dask scheduler configuration](https://docs.dask.org/en/stable/scheduler-overview.html#scheduler-overview)) or Multiprocessing (see our Cluster configuration),
 - Choose chunk sizes large enough to reduce scheduling overhead, but **small enough to fit comfortably in memory**,
 - Check that your data files have **on-disk chunksizes** (otherwise loads everything) and use a multiple of it for optimal **in-memory chunking**,
@@ -175,3 +170,7 @@ This backend is convenient when working directly with {class}`~geoutils.Raster` 
 - For more guidance on chunk sizing and performance, see the [Dask array best practices](https://docs.dask.org/en/stable/array-best-practices.html).
 
 The full description of supported methods is available on the {ref}`scalability-support` page.
+
+Storage layout also determines how much data is read for a chunk. See {ref}`scalability-formats` for choosing
+between GeoPackage, LAS/LAZ/COPC and GeoParquet, matching raster chunks to disk tiles, and reading remote data or
+processing it on cloud machines.

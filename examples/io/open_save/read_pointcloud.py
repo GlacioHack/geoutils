@@ -2,7 +2,7 @@
 Open/save a point cloud
 =======================
 
-This example demonstrates opening a point cloud with :func:`geoutils.open_pointcloud` and saving it with the :class:`pc <geoutils.GeoPandasPointCloudAccessor>` accessor.
+This example demonstrates opening a point cloud with :func:`geoutils.open_pointcloud` and saving it with the :class:`pc <geoutils.GeoDataFramePointCloudAccessor>` accessor.
 """
 
 import geoutils as gu
@@ -10,12 +10,12 @@ import geoutils as gu
 # %%
 # We open an example vector.
 filename_pc = gu.examples.get_path("coromandel_lidar")
-pc = gu.open_pointcloud(filename_pc, data_name="Z", as_type="geodataframe")
+pc = gu.open_pointcloud(filename_pc, data_name="Z", as_object_type="geodataframe")
 pc
 
 # %%
 # A point cloud is a :class:`geopandas.GeoDataFrame`, with a main attribute :attr:`~geoutils.pointcloud.base.PointCloudBase.data_name` pointing to the main data column
-# through its ``pc`` accessor.
+# through its :class:`pc <geoutils.GeoDataFramePointCloudAccessor>` accessor.
 # All other attributes are :ref:`inherited from Shapely and GeoPandas<vector-from-geopandas>`. See also :ref:`vector-class`.
 
 # %%
@@ -31,6 +31,6 @@ pc.pc.info()
 pc.pc.plot(cbar_title="Elevation (m)")
 
 # %%
-# Finally, a point cloud is saved using :meth:`~geoutils.VectorAccessor.to_file`.
+# Finally, a point cloud is saved using :meth:`~geoutils.GeoDataFrameVectorAccessor.to_file`.
 
 pc.pc.to_file("mypc.gpkg")

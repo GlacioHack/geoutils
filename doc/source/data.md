@@ -14,31 +14,70 @@ kernelspec:
 
 # Data examples
 
-GeoUtils uses and proposes several data examples to manipulate and test the different features.
+GeoUtils relies on **several data examples** to manipulate and test its different features.
 
 ## Description
 
-Several sites (Coromandel Peninsula in New Zealand, Mount Everest and Exploradores Glacier in Chile) are proposed to cover different kinds of data:
+Three sites (Coromandel Peninsula in New Zealand, Mount Everest and Exploradores Glacier in Chile) cover different kinds of data:
 
-| Alias                          |                        Site and Filename                         |    Type     |                                     Description                                    |
-|-------------------------------:|:----------------------------------------------------------------:|:-----------:|:----------------------------------------------------------------------------------:|
-| `"coromandel_lidar"`           |                 Coromandel_Lidar<br/>points.laz                  | Point Cloud |              Land elevation over the area measured in 2021 [(1)](#doi)             |
-| `"everest_landsat_b4"`         |         Everest_Landsa<br/>LE71400412000304SGS00_B4.tif          |   Raster    |                  B04 (red) image of the Mount Everest area in 2000                 |
-| `"everest_landsat_b4_cropped"` |     Everest_Landsat<br/>LE71400412000304SGS00_B4_cropped.tif     |   Raster    |              B04 (red) cropped image of the Mount Everest area in 2000             |
-| `"everest_landsat_rgb"`        |       Everest_Landsat<br/>LE71400412000304SGS00_RGB.tif          |   Raster    |                     RGB image of the Mount Everest area in 2000                    |
-| `"everest_rgi_outlines"`       |        Everest_Landsat<br/>15_rgi60_glacier_outlines.gpkg        |   Vector    |          Glacier outlines around the Mount Everest around 2000 [(2)](#doi)         |
-| `"exploradores_aster_dem"`     |      Exploradores_ASTER<br/>AST_L1A_00303182012144228_Z.tif      |   Raster    |          Land elevation of the Exploradores Glacier area 2012 [(3)](#doi)          |
-| `"exploradores_rgi_outlines"`  |      Exploradores_ASTER<br/>17_rgi60_glacier_outlines.gpkg       |   Vector    | Glacier outlines around the Exploradores Glacier around 2000 [(2)](#doi) |
+```{list-table}
+:header-rows: 1
+:widths: 34 14 52
+:align: left
 
+* - Alias
+  - Type
+  - Description
+* - `coromandel_lidar`
+  - Point cloud
+  - Land elevation over the area measured in 2021 [(1)](#doi)
+* - `everest_landsat_b4`
+  - Raster
+  - Band 4 (near infrared) image of the Mount Everest area in 2000
+* - `everest_landsat_b4_cropped`
+  - Raster
+  - Band 4 (near infrared) cropped image of the Mount Everest area in 2000
+* - `everest_landsat_rgb`
+  - Raster
+  - RGB image of the Mount Everest area in 2000
+* - `everest_rgi_outlines`
+  - Vector
+  - Glacier outlines around the Mount Everest around 2000 [(2)](#doi)
+* - `exploradores_aster_dem`
+  - Raster
+  - Land elevation of the Exploradores Glacier area 2012 [(3)](#doi)
+* - `exploradores_rgi_outlines`
+  - Vector
+  - Glacier outlines around the Exploradores Glacier around 2000 [(2)](#doi)
+```
+
+:::{dropdown} Source filenames
+
+**Coromandel_Lidar**
+
+- `coromandel_lidar`: `points.laz`
+
+**Everest_Landsat**
+
+- `everest_landsat_b4`: `LE71400412000304SGS00_B4.tif`
+- `everest_landsat_b4_cropped`: `LE71400412000304SGS00_B4_cropped.tif`
+- `everest_landsat_rgb`: `LE71400412000304SGS00_RGB.tif`
+- `everest_rgi_outlines`: `15_rgi60_glacier_outlines.gpkg`
+
+**Exploradores_ASTER**
+
+- `exploradores_aster_dem`: `AST_L1A_00303182012144228_Z.tif`
+- `exploradores_rgi_outlines`: `17_rgi60_glacier_outlines.gpkg`
+:::
 
 (doi)=
 ```{note}
-If you need more information about the data, you can read this [page](https://github.com/GlacioHack/geoutils-data/blob/main/README.md)
-of the [geoutils-data repository project](https://github.com/GlacioHack/geoutils-data) where they are stored, described and referenced with their Digital Object Identifier:
+For more information about the data, refer to the [GitHub page of geoutils-data](https://github.com/GlacioHack/geoutils-data/blob/main/README.md)
+ where they are stored, described and referenced, along with their digital object identifiers (DOIs):
 
-1. DOI: [10.5069/G91J980G](https://doi.org/10.5069/G91J980G)
-2. DOI: [10.7265/N5-RGI-60](https://doi.org/10.7265/N5-RGI-60)
-3. DOI: [10.5067/ASTER/AST_L1A.003](https://doi.org/10.5067/ASTER/AST_L1A.003)
+1. New Zealand lidar: [10.5069/G91J980G](https://doi.org/10.5069/G91J980G)
+2. Randolph Glacier Inventory: [10.7265/N5-RGI-60](https://doi.org/10.7265/N5-RGI-60)
+3. ASTER L1A imagery: [10.5067/ASTER/AST_L1A.003](https://doi.org/10.5067/ASTER/AST_L1A.003)
 ```
 
 ## Access to data

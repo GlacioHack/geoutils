@@ -26,9 +26,9 @@ class TestPointCloudOpening:
     """
 
     @pytest.mark.parametrize("suffix", ["gpkg", "las", "parquet"])
-    @pytest.mark.parametrize("as_type", [None, "dataarray", "dataset", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", [None, "dataarray", "dataset", "geodataframe"])
     def test_open_pointcloud__return_type(
-        self, tmp_path: Path, suffix: str, as_type: Literal["dataarray", "dataset", "geodataframe"] | None
+        self, tmp_path: Path, suffix: str, as_object_type: Literal["dataarray", "dataset", "geodataframe"] | None
     ) -> None:
         """Checks that opening defaults to a DataArray and every data type/point format loads correct values and CRS."""
         if suffix == "las":
@@ -48,33 +48,35 @@ class TestPointCloudOpening:
             cloud.to_file(str(filename))
 
         # Check proper data type is opened
-        if as_type is None:
+        if as_object_type is None:
             points = gu.open_pointcloud(filename, data_name=data_name, columns=["quality"])
         else:
-            points = gu.open_pointcloud(filename, data_name=data_name, columns=["quality"], as_type=as_type)
-        if as_type == "dataset":
+            points = gu.open_pointcloud(
+                filename, data_name=data_name, columns=["quality"], as_object_type=as_object_type
+            )
+        if as_object_type == "dataset":
             assert isinstance(points, xr.Dataset)
-            assert points.pc.variables == [data_name, "quality"]
+            assert list(points.pc.compatible_variables.keys()) == [data_name, "quality"]
             assert points[data_name].dims == points.quality.dims == ("point",)
             assert "x_point" in points.coords and "y_point" in points.coords
             assert points.quality.pc.crs == cloud.crs
             values = points[data_name]
         else:
-            assert isinstance(points, gpd.GeoDataFrame if as_type == "geodataframe" else xr.DataArray)
+            assert isinstance(points, gpd.GeoDataFrame if as_object_type == "geodataframe" else xr.DataArray)
             values = points
 
         # Check exact equality with initial point cloud
         np.testing.assert_array_equal(values.pc.to_array(), cloud.to_array())
-        quality = points["quality"] if as_type in ("dataset", "geodataframe") else points.coords["quality"]
+        quality = points["quality"] if as_object_type in ("dataset", "geodataframe") else points.coords["quality"]
         np.testing.assert_array_equal(quality, cloud["quality"])
         assert values.pc.crs == cloud.crs
         assert values.pc.point_count == 3
         assert values.pc.is_loaded
 
     @pytest.mark.parametrize("suffix", ["gpkg", "las", "parquet"])
-    @pytest.mark.parametrize("as_type", ["dataarray", "dataset", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
     def test_open_pointcloud__downsample(
-        self, tmp_path: Path, suffix: str, as_type: Literal["dataarray", "dataset", "geodataframe"]
+        self, tmp_path: Path, suffix: str, as_object_type: Literal["dataarray", "dataset", "geodataframe"]
     ) -> None:
         """Checks that every opening type/format uses the same deterministic downsampling."""
         if suffix == "las":
@@ -93,8 +95,8 @@ class TestPointCloudOpening:
         expected = cloud.subsample(3, random_state=0)
 
         # Open with same downsampling, and check equality
-        points = gu.open_pointcloud(filename, data_name=data_name, downsample=4, as_type=as_type)
-        values = points[data_name] if as_type == "dataset" else points
+        points = gu.open_pointcloud(filename, data_name=data_name, downsample=4, as_object_type=as_object_type)
+        values = points[data_name] if as_object_type == "dataset" else points
         assert values.pc.point_count == 3
         np.testing.assert_array_equal(values.pc.to_array(), expected.to_array())
 
@@ -103,14 +105,14 @@ class TestPointCloudOpeningChunked:
     """Test module ``open_pointcloud()`` with chunked backends (Dask only)."""
 
     @pytest.mark.parametrize("suffix", ["gpkg", "las", "parquet"])
-    @pytest.mark.parametrize("as_type", ["dataarray", "dataset", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
     def test_open_pointcloud__loading_laziness(
-        self, tmp_path: Path, suffix: str, as_type: Literal["dataarray", "dataset", "geodataframe"]
+        self, tmp_path: Path, suffix: str, as_object_type: Literal["dataarray", "dataset", "geodataframe"]
     ) -> None:
         """Checks that chunked opening is lazy on all point formats/data structure types."""
 
         pytest.importorskip("dask")
-        if as_type == "geodataframe" or suffix == "gpkg":
+        if as_object_type == "geodataframe" or suffix == "gpkg":
             pytest.importorskip("dask_geopandas")
         if suffix == "las":
             pytest.importorskip("laspy")
@@ -129,21 +131,21 @@ class TestPointCloudOpeningChunked:
             cloud.to_file(str(filename))
 
         # Open eagerly/ lazily with an explicit type
-        eager = gu.open_pointcloud(filename, data_name=data_name, as_type=as_type)
-        lazy = gu.open_pointcloud(filename, data_name=data_name, chunks=3, as_type=as_type)
-        eager_values = eager[data_name] if as_type == "dataset" else eager
-        lazy_values = lazy[data_name] if as_type == "dataset" else lazy
+        eager = gu.open_pointcloud(filename, data_name=data_name, as_object_type=as_object_type)
+        lazy = gu.open_pointcloud(filename, data_name=data_name, chunks=3, as_object_type=as_object_type)
+        eager_values = eager[data_name] if as_object_type == "dataset" else eager
+        lazy_values = lazy[data_name] if as_object_type == "dataset" else lazy
         assert eager_values.pc.is_loaded
         assert not lazy_values.pc.is_loaded
         assert lazy_values.pc.point_count == 7
 
         # Check exact equality and laziness
         actual = lazy.compute()
-        if as_type in ("dataarray", "dataset"):
+        if as_object_type in ("dataarray", "dataset"):
             xr.testing.assert_identical(actual, eager)
         else:
             assert_geodataframe_equal(actual, eager)
-        actual_values = actual[data_name] if as_type == "dataset" else actual
+        actual_values = actual[data_name] if as_object_type == "dataset" else actual
         assert actual_values.pc.is_loaded
         assert not lazy_values.pc.is_loaded
 
@@ -154,8 +156,8 @@ class TestPointCloudOpeningErrors:
     def test_open_pointcloud__error_invalid_type(self, tmp_path: Path) -> None:
         """Checks an error is raised for a return type other than DataArray or GeoDataFrame."""
         filename = tmp_path / "absent.las"
-        with pytest.raises(ValueError, match="as_type"):
-            gu.open_pointcloud(filename, as_type="scene")  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="as_object_type"):
+            gu.open_pointcloud(filename, as_object_type="scene")  # type: ignore[arg-type]
 
     @pytest.mark.parametrize("chunks", [0, -1, False, 1.5])
     def test_open_pointcloud__error_invalid_chunks(self, tmp_path: Path, chunks: object) -> None:
@@ -164,15 +166,15 @@ class TestPointCloudOpeningErrors:
         with pytest.raises(ValueError, match="strictly positive integer"):
             gu.open_pointcloud(filename, chunks=chunks)  # type: ignore[arg-type]
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "dataset", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
     @pytest.mark.parametrize("downsample", [True, np.bool_(False), 0, -1, np.nan, np.inf, "wrong"])
     def test_open_pointcloud__error_invalid_downsample(
-        self, tmp_path: Path, as_type: Literal["dataarray", "dataset", "geodataframe"], downsample: object
+        self, tmp_path: Path, as_object_type: Literal["dataarray", "dataset", "geodataframe"], downsample: object
     ) -> None:
         """Checks an error is raised for invalid downsampling factors."""
         filename = tmp_path / "absent.las"
         with pytest.raises((TypeError, ValueError), match="downsample must be"):
-            gu.open_pointcloud(filename, as_type=as_type, downsample=downsample)  # type: ignore[arg-type]
+            gu.open_pointcloud(filename, as_object_type=as_object_type, downsample=downsample)  # type: ignore[arg-type]
 
 
 class TestPointCloudLoading:

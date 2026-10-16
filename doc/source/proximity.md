@@ -40,6 +40,10 @@ with {meth}`get_metric_crs() <RasterBase.get_metric_crs>`).
 Proximity corresponds to **the distance to the closest target geospatial data**, computed on each pixel of a raster's grid.
 The target geospatial data can be either a vector or a raster.
 
+```{caution}
+With Dask or multiprocessing, proximity only works until a finite `max_distance` around each chunk. Cells farther remain nodata.
+```
+
 ```{code-cell} ipython3
 :tags: [hide-cell]
 :mystnb:

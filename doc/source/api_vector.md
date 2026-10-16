@@ -2,13 +2,16 @@
 # Vector
 
 {class}`~geoutils.Vector` is the GeoUtils object for vectors.
-Its GeoUtils-specific API is mirrored in the {class}`vct <geoutils.VectorAccessor>` accessor on {class}`geopandas.GeoDataFrame` objects.
+Its GeoUtils-specific API is mirrored in the {class}`vct <geoutils.GeoDataFrameVectorAccessor>` accessor on {class}`geopandas.GeoDataFrame` objects.
 
 **For the main vector API reference page, see {ref}`vector-api`.**
 Below is the full class description specific to {class}`~geoutils.Vector`:
 
 ```{eval-rst}
 .. currentmodule:: geoutils
+
+.. py:class:: Vector
+    :no-typesetting:
 
 .. autoclass:: Vector
     :members:

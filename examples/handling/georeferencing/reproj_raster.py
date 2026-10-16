@@ -24,7 +24,7 @@ rast2.rst.info()
 # Let's plot the first raster, with the warped extent of the second one.
 
 rast1.rst.plot(cmap="Blues")
-vect_bounds_rast2 = gu.VectorAccessor.from_bounds_projected(rast2)
+vect_bounds_rast2 = gu.GeoDataFrameVectorAccessor.from_bounds_projected(rast2)
 vect_bounds_rast2.vct.plot(fc="none", ec="r", lw=2)
 
 # %%
@@ -32,15 +32,27 @@ vect_bounds_rast2.vct.plot(fc="none", ec="r", lw=2)
 # as single argument to :meth:`~geoutils.raster.base.RasterBase.reproject`. See :ref:`core-match-ref` for more details.
 #
 # By default, a "bilinear" resampling algorithm is used. Any string or :class:`~rasterio.enums.Resampling` can be passed.
+#
+# .. rst-class:: expected-warning
+
+# sphinx_gallery_start_ignore
+import warnings
+
+saved_warning_formatter = warnings.formatwarning
+warnings.formatwarning = lambda message, category, *args, **kwargs: f"{category.__name__}: {message}\n"
+# sphinx_gallery_end_ignore
 
 rast1_warped = rast1.rst.reproject(rast2)
 rast1_warped
 
+# sphinx_gallery_start_ignore
+warnings.formatwarning = saved_warning_formatter
+# sphinx_gallery_end_ignore
+
 # %%
 # .. note::
-#   Because no :attr:`geoutils.Raster.nodata` value is defined in the original image, the default value ``255`` for :class:`numpy.uint8` is used. This
-#   value is detected as already existing in the original raster, however, which raises a ``UserWarning``. If your :attr:`geoutils.Raster.nodata` is not defined,
-#   use :meth:`~geoutils.raster.base.RasterBase.set_nodata`.
+#   The rasters have different pixel interpretations ("Point" and "Area"), which raises a ``UserWarning``.
+#   Correct the metadata if needed, or configure this warning through :ref:`config`.
 #
 # Now the shape and georeferencing should be the same as that of the second raster, shown above.
 

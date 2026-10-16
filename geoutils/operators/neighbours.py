@@ -69,7 +69,8 @@ class PointNeighbours:
     Define a point neighborhood by a max number of points inside a radius.
 
     Pass a PointNeighbours to an Interpolator/Reducer to change which nearby points it uses. For example,
-    ``InverseDistance(neighborhood=PointNeighbours(k=12, radius=50))`` uses up to 12 points within 50 coordinate units.
+    ``InverseDistance(neighborhood=PointNeighbours(max_points=12, radius=50))`` uses up to 12 points within
+    50 coordinate units.
     Distances are measured in X/Y, so the radius defines a circle around each requested position.
     A Reducer can use the same neighborhood when grid() combines nearby point values.
 
@@ -79,24 +80,28 @@ class PointNeighbours:
         from geoutils.operators.interpolator import InverseDistance
         from geoutils.operators.reducer import Mean
 
-        nearby = PointNeighbours(k=12, radius=50)
+        nearby = PointNeighbours(max_points=12, radius=50)
         gridded = points.grid(ref=reference_raster, resampling=InverseDistance(neighborhood=nearby))
         averaged = points.grid(ref=reference_raster, resampling=Mean(neighborhood=nearby))
 
-    :param k: Maximum number of nearest observations.
+    :param max_points: Maximum number of nearest observations. None uses all observations within the radius.
     :param radius: Maximum distance from the target in coordinate units.
     """
 
-    k: int | None = None
+    max_points: int | None = None
     radius: float | None = None
 
     def __post_init__(self) -> None:
         """Check that at least one valid limit was given."""
 
-        if self.k is None and self.radius is None:
-            raise ValueError("PointNeighbours requires at least one of k or radius.")
-        if self.k is not None and (isinstance(self.k, bool) or not isinstance(self.k, (int, np.integer)) or self.k < 1):
-            raise ValueError("PointNeighbours k must be a positive integer.")
+        if self.max_points is None and self.radius is None:
+            raise ValueError("PointNeighbours requires at least one of max_points or radius.")
+        if self.max_points is not None and (
+            isinstance(self.max_points, bool)
+            or not isinstance(self.max_points, (int, np.integer))
+            or self.max_points < 1
+        ):
+            raise ValueError("PointNeighbours max_points must be a positive integer.")
         if self.radius is not None and (
             isinstance(self.radius, (bool, np.bool_)) or not np.isfinite(self.radius) or self.radius < 0
         ):
@@ -292,8 +297,8 @@ def _resolve_point_neighbours_for_interpolator(operator: Interpolator) -> PointN
     if isinstance(operator, Kriging):
         return PointNeighbours(radius=operator.max_overlap)
     if isinstance(operator, Nearest):
-        return PointNeighbours(k=1)
-    return PointNeighbours(k=8)
+        return PointNeighbours(max_points=1)
+    return PointNeighbours(max_points=8)
 
 
 def _resolve_point_neighbours_for_reducer(operator: Reducer) -> PointNeighbours | None:
@@ -1064,9 +1069,9 @@ def _query_point_neighbours(
 
     from scipy.spatial import cKDTree
 
-    if neighborhood.k is not None:
+    if neighborhood.max_points is not None:
         # Request one extra neighbor when we will remove the target row from the results
-        query_count = neighborhood.k + int(not include_self)
+        query_count = neighborhood.max_points + int(not include_self)
         query_count = min(query_count, len(source_coordinates))
         distance_limit = _compute_query_distance_upper_bound(neighborhood.radius)
         distances, indexes = source_tree.query(
@@ -1115,15 +1120,15 @@ def _query_point_neighbours(
         source_indexes = source_indexes[keep]
         distances = distances[keep]
 
-        # After removing each target's own row, select at most k neighbours from the remaining candidates
-        if neighborhood.k is not None and len(target_indexes) > 0:
-            # Sort neighbors by target and distance, then select the first k neighbors for each target
+        # After removing each target's own row, select at most max_points neighbours from the remaining candidates
+        if neighborhood.max_points is not None and len(target_indexes) > 0:
+            # Sort neighbors by target and distance, then select the first max_points neighbors for each target
             order = np.lexsort((source_indexes, distances, target_indexes))
             ordered_targets = target_indexes[order]
             group_starts = np.flatnonzero(np.r_[True, ordered_targets[1:] != ordered_targets[:-1]])
             group_lengths = np.diff(np.r_[group_starts, len(order)])
             rank = np.arange(len(order)) - np.repeat(group_starts, group_lengths)
-            keep_ordered = rank < neighborhood.k
+            keep_ordered = rank < neighborhood.max_points
             order = order[keep_ordered]
             target_indexes = target_indexes[order]
             source_indexes = source_indexes[order]

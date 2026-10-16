@@ -2,7 +2,7 @@
 # From Shapely and GeoPandas
 
 The methods on this page are inherited by {class}`~geoutils.Vector`. With the
-{class}`vct <geoutils.VectorAccessor>` interface, call them directly on the
+{class}`vct <geoutils.GeoDataFrameVectorAccessor>` interface, call them directly on the
 {class}`~geopandas.GeoDataFrame`.
 
 ```{eval-rst}
@@ -85,10 +85,8 @@ This first category of attributes and methods return a geometric output converte
 
 ## Non-geometric per-feature attributes and methods
 
-This second category of attributes and methods return a non-geometric output with same length as the number of features. They are thus appended in the
-dataframe of the current {class}`~geoutils.Vector` by default, using as column name the name of the operation (e.g., "area", "contains" or "intersects").
-
-Otherwise, calling the method from {attr}`Vector.gdf<geoutils.Vector.gdf>`, they return a {class}`pandas.Series` as in GeoPandas.
+This second category returns a non-geometric {class}`pandas.Series` with one result per feature, as in GeoPandas.
+Assign that Series to a column of {attr}`Vector.gdf<geoutils.Vector.gdf>` to store it with the geometries.
 
 **Attributes:**
 

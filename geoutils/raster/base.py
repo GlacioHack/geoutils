@@ -34,6 +34,7 @@ from typing import (
     TypeVar,
     Union,
     cast,
+    get_args,
     overload,
 )
 
@@ -72,6 +73,14 @@ from geoutils.interface.resampling import (
 from geoutils.interface.vectorization import _polygonize
 from geoutils.multiproc import MultiprocConfig
 from geoutils.operators.interpolator import Interpolator, Kriging, KrigingBackend
+from geoutils.operators.methods import (
+    FilterMethod,
+    ResamplingBackend,
+    ResamplingMethod,
+    _resampling_backend,
+    _resampling_keyword,
+    _resampling_operator,
+)
 from geoutils.operators.neighbours import GridCoverage, _build_kriging_grid_neighbours
 from geoutils.operators.nodata import NodataChoice, NodataPropagation
 from geoutils.operators.overlap import OverlapBackend, RasterOverlapBackend
@@ -1545,7 +1554,7 @@ class RasterBase(ABC):
         bounds: dict[str, float] | rio.coords.BoundingBox | None = None,
         nodata: int | float | None = None,
         dtype: DTypeLike | None = None,
-        resampling: Resampling | str | Interpolator | Reducer = None,
+        resampling: Resampling | ResamplingMethod | Interpolator | Reducer | None = None,
         force_source_nodata: int | float | None = None,
         silent: bool = False,
         inplace: bool = False,
@@ -1559,6 +1568,8 @@ class RasterBase(ABC):
         window_shape: Literal["square", "circular"] | None = None,
         coverage: GridCoverage | None = None,
         area_weighting: Literal["diagonal_bounds", "intersection"] = "diagonal_bounds",
+        backend: ResamplingBackend = "auto",
+        resampling_kwargs: dict[str, Any] | None = None,
     ) -> RasterType | None:
         """
         Reproject raster to a different geotransform (resolution, bounds) and/or coordinate reference system (CRS).
@@ -1584,13 +1595,16 @@ class RasterBase(ABC):
         :param nodata: Destination nodata value. If set to ``None``, will use the same as source. If source does
             not exist, will use GDAL's default.
         :param dtype: Destination data type of array.
-        :param resampling: A Rasterio resampling method or a custom Interpolator or Reducer. Existing methods can be
-            passed as strings and continue to use Rasterio. By default, a Reducer weights source cells by their
+        :param resampling: Built-in method name, such as "linear", "mean" or "median". Advanced callers can supply
+            an Interpolator or Reducer. By default, a Reducer weights source cells by their
             covered area. With GridNeighbours, it uses a fixed window around the transformed destination center.
             Defaults to bilinear.
             Can be configured with the global setting geoutils.config["reprojection_method"].
             See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
             for the full list.
+        :param backend: "auto" preserves GDAL for supported string methods and uses SciPy for operator settings
+            or other methods. "gdal" and "scipy" select one explicitly; "gstools" and "gpytorch" select kriging.
+        :param resampling_kwargs: Settings for a named method, such as a quantile q or a fitted kriging model.
         :param force_source_nodata: Force a source nodata value (read from the metadata by default).
         :param inplace: (DEPRECATED. Use rast = rast.reproject() instead) Whether to reproject in-place or not.
         :param silent: Whether to print warning statements.
@@ -1622,6 +1636,48 @@ class RasterBase(ABC):
         # If resampling method undefined, default to the global system config
         if resampling is None:
             resampling = config["reprojection_method"]
+        # Match public aliases to GDAL names before choosing the calculation backend
+        name = resampling.name if isinstance(resampling, Resampling) else resampling
+        gdal_name = None
+        if isinstance(name, str):
+            gdal_aliases = {
+                "linear": "bilinear",
+                "cubic_convolution": "cubic",
+                "mean": "average",
+                "median": "med",
+                "minimum": "min",
+                "maximum": "max",
+            }
+            gdal_name = gdal_aliases.get(name, name)
+
+        # Window geometry and observation errors need the GeoUtils calculation
+        needs_operator = (
+            isinstance(resampling, (Interpolator, Reducer))
+            or error_structure is not None
+            or window is not None
+            or window_shape is not None
+            or coverage is not None
+            or area_weighting == "intersection"
+            or nodata_propagation is not None
+            or bool(resampling_kwargs)
+        )
+        default_backend: ResamplingBackend = "scipy"
+        if not needs_operator and gdal_name in Resampling.__members__:
+            default_backend = "gdal"
+        selected_backend = _resampling_backend(
+            backend, default=default_backend, allowed=("gdal", "scipy", "gstools", "gpytorch")
+        )
+        # Resolve the method before eager, Dask or multiprocessing reprojection
+        if selected_backend == "gdal":
+            if needs_operator:
+                raise ValueError("The GDAL backend accepts string methods without operator or window options.")
+            if gdal_name not in Resampling.__members__:
+                raise ValueError(f"The GDAL backend does not support resampling={name!r}.")
+            assert isinstance(gdal_name, str)
+            resampling = Resampling[gdal_name]
+        else:
+            operator_backend: ResamplingBackend = "auto" if backend == "auto" else selected_backend
+            resampling = _resampling_operator(name, backend=operator_backend, options=resampling_kwargs)
         if error_structure is not None:
             resampling = _with_error_structure(_resolve_reprojection_operator(resampling), error_structure)
 
@@ -1999,6 +2055,9 @@ class RasterBase(ABC):
         shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
         error_structure: ErrorStructure | None = None,
+        resampling: ResamplingMethod | Interpolator | None = None,
+        backend: ResamplingBackend = "auto",
+        resampling_kwargs: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> PointCloud: ...
 
@@ -2015,6 +2074,9 @@ class RasterBase(ABC):
         shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
         error_structure: ErrorStructure | None = None,
+        resampling: ResamplingMethod | Interpolator | None = None,
+        backend: ResamplingBackend = "auto",
+        resampling_kwargs: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> NDArrayNum: ...
 
@@ -2031,6 +2093,9 @@ class RasterBase(ABC):
         shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
         error_structure: ErrorStructure | None = None,
+        resampling: ResamplingMethod | Interpolator | None = None,
+        backend: ResamplingBackend = "auto",
+        resampling_kwargs: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> NDArrayNum | PointCloud: ...
 
@@ -2046,6 +2111,10 @@ class RasterBase(ABC):
         shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
         error_structure: ErrorStructure | None = None,
+        *,
+        resampling: ResamplingMethod | Interpolator | None = None,
+        backend: ResamplingBackend = "auto",
+        resampling_kwargs: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> Any:
         """
@@ -2069,6 +2138,10 @@ class RasterBase(ABC):
             'splinef2d'. String methods use the existing SciPy array functions. A custom Interpolator defines the
             calculation for source cells at fixed GridNeighbours offsets. Defaults to the configured interpolation
             method.
+        :param resampling: Built-in interpolation name, such as "nearest" or "linear", or an advanced Interpolator.
+            method remains an alias; defaults to the configured interpolation method.
+        :param backend: "auto" uses SciPy; "gstools" and "gpytorch" select a kriging solver.
+        :param resampling_kwargs: Settings for the named interpolation, including a fitted model for kriging.
         :param nodata_handling: ``"nearest"`` masks values whose nearest source cell is missing; ``"ignore"`` uses
             available finite cells; ``"propagate"`` masks values using a missing source cell. A non-negative integer
             or half-order choice instead masks cells within that distance of missing source values. Defaults to
@@ -2089,6 +2162,9 @@ class RasterBase(ABC):
         return self.resample_at_points(
             points,
             method=method,
+            resampling=resampling,
+            backend=backend,
+            resampling_kwargs=resampling_kwargs,
             band=band,
             input_latlon=input_latlon,
             as_array=as_array,
@@ -2112,6 +2188,9 @@ class RasterBase(ABC):
         shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
         error_structure: ErrorStructure | None = None,
+        resampling: ResamplingMethod | Interpolator | None = None,
+        backend: ResamplingBackend = "auto",
+        resampling_kwargs: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> PointCloud: ...
 
@@ -2128,6 +2207,9 @@ class RasterBase(ABC):
         shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
         error_structure: ErrorStructure | None = None,
+        resampling: ResamplingMethod | Interpolator | None = None,
+        backend: ResamplingBackend = "auto",
+        resampling_kwargs: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> NDArrayNum: ...
 
@@ -2144,6 +2226,9 @@ class RasterBase(ABC):
         shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
         error_structure: ErrorStructure | None = None,
+        resampling: ResamplingMethod | Interpolator | None = None,
+        backend: ResamplingBackend = "auto",
+        resampling_kwargs: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> NDArrayNum | PointCloud: ...
 
@@ -2158,6 +2243,10 @@ class RasterBase(ABC):
         shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
         error_structure: ErrorStructure | None = None,
+        *,
+        resampling: ResamplingMethod | Interpolator | None = None,
+        backend: ResamplingBackend = "auto",
+        resampling_kwargs: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> Any:
         """Interpolate raster values at points using the deprecated name for interp_at_points().
@@ -2171,6 +2260,9 @@ class RasterBase(ABC):
         return self.interp_at_points(
             points,
             method=method,
+            resampling=resampling,
+            backend=backend,
+            resampling_kwargs=resampling_kwargs,
             nodata_handling=nodata_handling,
             band=band,
             input_latlon=input_latlon,
@@ -2185,8 +2277,11 @@ class RasterBase(ABC):
     def resample_at_points(
         self,
         points: tuple[NDArrayNum, NDArrayNum] | tuple[Number, Number] | PointCloudLike,
-        method: InterpolationMethodLike | Reducer | Callable[[NDArrayNum], float],
+        method: ResamplingMethod | Interpolator | Reducer | Callable[[NDArrayNum], float] | None = None,
         *,
+        resampling: ResamplingMethod | Interpolator | Reducer | None = None,
+        backend: ResamplingBackend = "auto",
+        resampling_kwargs: dict[str, Any] | None = None,
         coverage: GridCoverage | None = None,
         band: int = 1,
         input_latlon: bool = False,
@@ -2199,14 +2294,19 @@ class RasterBase(ABC):
         boundless: bool = True,
         **kwargs: Any,
     ) -> Any:
-        """Calculate raster values at points with an Interpolator or Reducer.
+        """
+        Resample raster values at points with a named interpolation or statistic.
 
-        Interpolators use the same SciPy and chunked paths as interp_at_points(). Reducers combine raster cells
-        selected by GridNeighbours. By default, a reducer receives a 3 x 3 window around each point; pass
-        GridNeighbours(size=5) to the Reducer when constructing it to change those cells.
+        Interpolation shares the SciPy and chunked paths of interp_at_points(). Statistics summarize a 3 x 3
+        window by default; pass window=5 to use five cells along each axis. Advanced callers can supply an
+        Interpolator or Reducer for custom calculations or neighborhoods.
 
         :param points: X/Y coordinates or a point cloud defining the requested positions.
-        :param method: Interpolator, Reducer, a reduction callable, or a built-in interpolation name.
+        :param method: Legacy alias for resampling, also accepting a reduction callable.
+        :param resampling: Built-in method name, such as "linear", "mean" or "median", or an advanced operator.
+            Defaults to the configured interpolation method.
+        :param backend: "auto" uses SciPy; "gstools" and "gpytorch" select a kriging solver.
+        :param resampling_kwargs: Method settings, such as a quantile q or a fitted kriging model.
         :param coverage: Select cells by center, include all touched cells, or weight by covered area.
         :param band: Source band number, starting at one.
         :param input_latlon: Convert tuple coordinates from longitude/latitude to the raster CRS.
@@ -2222,6 +2322,15 @@ class RasterBase(ABC):
         :param kwargs: Additional interp_at_points() options when method is an Interpolator or method name.
         :returns: Resampled values.
         """
+
+        # Resolve the public choices once before dispatching eager or chunked inputs
+        method = _resampling_keyword(method, resampling, default=config["interpolation_method"])
+        selected_backend = _resampling_backend(backend, default="scipy", allowed=("scipy", "gstools", "gpytorch"))
+        if isinstance(method, (str, Interpolator, Reducer)):
+            operator_backend: ResamplingBackend = "auto" if backend == "auto" else selected_backend
+            method = _resampling_operator(method, backend=operator_backend, options=resampling_kwargs)
+        elif resampling_kwargs or selected_backend != "scipy":
+            raise ValueError("A reduction callable uses the SciPy backend without resampling_kwargs.")
 
         return _resample_at_points(
             self,
@@ -2243,7 +2352,7 @@ class RasterBase(ABC):
     def reduce_at_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
-        reducer_function: Callable[[NDArrayNum], float] | Reducer = np.ma.mean,
+        reducer_function: Callable[[NDArrayNum], float] | Reducer | None = None,
         window: int | None = None,
         input_latlon: bool = False,
         band: int | None = None,
@@ -2255,6 +2364,9 @@ class RasterBase(ABC):
         window_shape: Literal["square", "circular"] | None = None,
         error_structure: ErrorStructure | None = None,
         mp_config: MultiprocConfig | None = None,
+        resampling: ResamplingMethod | Reducer | None = None,
+        backend: ResamplingBackend = "auto",
+        resampling_kwargs: dict[str, Any] | None = None,
     ) -> Any:
         """
         Reduce raster values around point coordinates.
@@ -2265,7 +2377,10 @@ class RasterBase(ABC):
         :param points: Point(s) at which to interpolate raster value. Can be either a tuple of array-like of X/Y
             coordinates (same CRS as raster or latitude/longitude, see "input_latlon") or a pointcloud in any CRS.
             If points fall outside of image, value returned is nan.
-        :param reducer_function: Reducer or function to apply to the values in each window (defaults to np.mean).
+        :param reducer_function: Legacy method argument, accepting a Reducer or reduction callable.
+        :param resampling: Statistic name or an advanced Reducer. Defaults to the mean.
+        :param backend: "auto" or "scipy" for window reductions.
+        :param resampling_kwargs: Settings for a named statistic, such as a quantile q.
         :param window: Window size to read around coordinates. Must be odd.
         :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster
             CRS.
@@ -2282,16 +2397,26 @@ class RasterBase(ABC):
         :returns: Point cloud of reduced values, or a scalar/array when as_array=True.
         """
 
+        # Select the statistic without changing a supplied reducer's neighborhood
+        selected_method = _resampling_keyword(reducer_function, resampling, default=np.ma.mean)
+        _resampling_backend(backend, default="scipy", allowed=("scipy",))
+        if isinstance(selected_method, (str, Reducer)):
+            selected_method = _resampling_operator(selected_method, options=resampling_kwargs)
+            if not isinstance(selected_method, Reducer):
+                raise ValueError("Point reduction requires a reducer resampling method.")
+        elif resampling_kwargs:
+            raise ValueError("Configure a reduction callable directly instead of using resampling_kwargs.")
+        # Preserve the legacy one-cell default when no window is configured
         selected_window = window
         if selected_window is None and (
-            not isinstance(reducer_function, Reducer) or reducer_function.default_neighborhood is None
+            not isinstance(selected_method, Reducer) or selected_method.default_neighborhood is None
         ):
             selected_window = 1
 
         return _resample_at_points(
             self,
             points=points,
-            method=reducer_function,
+            method=selected_method,
             window=selected_window,
             input_latlon=input_latlon,
             band=band,
@@ -2307,7 +2432,7 @@ class RasterBase(ABC):
     def reduce_points(
         self,
         points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | PointCloudLike,
-        reducer_function: Callable[[NDArrayNum], float] | Reducer = np.ma.mean,
+        reducer_function: Callable[[NDArrayNum], float] | Reducer | None = None,
         window: int | None = None,
         input_latlon: bool = False,
         band: int | None = None,
@@ -2319,6 +2444,9 @@ class RasterBase(ABC):
         window_shape: Literal["square", "circular"] | None = None,
         error_structure: ErrorStructure | None = None,
         mp_config: MultiprocConfig | None = None,
+        resampling: ResamplingMethod | Reducer | None = None,
+        backend: ResamplingBackend = "auto",
+        resampling_kwargs: dict[str, Any] | None = None,
     ) -> Any:
         """Reduce raster values around points using the deprecated name for reduce_at_points().
 
@@ -2331,6 +2459,9 @@ class RasterBase(ABC):
         return self.reduce_at_points(
             points,
             reducer_function=reducer_function,
+            resampling=resampling,
+            backend=backend,
+            resampling_kwargs=resampling_kwargs,
             window=window,
             input_latlon=input_latlon,
             band=band,
@@ -2343,36 +2474,44 @@ class RasterBase(ABC):
             mp_config=mp_config,
         )
 
+    @_deprecate_keyword("size", "window")
+    @_deprecate_keyword("kernel_shape", "window_shape")
     @profiler.profile("geoutils.raster.base.filter", memprof=True)
     def filter(
         self: RasterType,
-        method: str | Reducer | Callable[..., NDArrayNum],
-        size: int | None = None,
+        method: FilterMethod | Reducer | Callable[..., NDArrayNum],
+        window: int | None = None,
         sigma: int = 1,
-        engine: Literal["scipy", "numba"] = "scipy",
+        engine: Literal["scipy", "numba"] | None = None,
         outlier_threshold: float = 2.0,
         mp_config: MultiprocConfig | None = None,
         coverage: GridCoverage | None = None,
-        kernel_shape: Literal["square", "circular"] | None = None,
-        **kwargs: dict[str, Any],
+        window_shape: Literal["square", "circular"] | None = None,
+        backend: ResamplingBackend = "auto",
+        method_kwargs: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> RasterType:
         """
         Apply a filter to the raster array.
 
-        A Reducer can select its cells with GridNeighbours, for example
+        Choose a built-in filter with method and set its neighborhood with window, window_shape and coverage.
+        Advanced callers can supply a Reducer or custom callable. A Reducer can select cells with GridNeighbours,
+        for example
         ``filter(Mean(neighborhood=GridNeighbours(size=5, shape="circular", coverage="fractional")))``.
-        Its configured window is used unless size, kernel_shape or coverage is supplied.
+        Its configured window is used unless window, window_shape or coverage is supplied.
+        size and kernel_shape remain deprecated aliases for window and window_shape.
 
-        :param method: The filter to apply. Can be a string ("gaussian", "median", "mean", "max", "min", "distance")
-            for built-in filters, or a custom callable that takes a 2D ndarray and returns one.
-        :param size: Window size for filter
+        :param method: Built-in filter or statistic name (e.g. "gaussian", "median", "mean", "max", "min", "distance"),
+            a Reducer, or a custom callable that takes a 2D ndarray and returns one.
+        :param backend: "auto" uses SciPy; "scipy" and "numba" select the calculation explicitly.
+        :param method_kwargs: Settings for a named statistic, such as a quantile q.
+        :param window: Window size for filter, in source pixels.
         :param mp_config: Multiprocessing configuration.
         :param coverage: Select cells by center, include all touched cells, or weight by covered area.
-        :param kernel_shape: Use a square or circular window for a Reducer.
+        :param window_shape: Use a square or circular window for a Reducer.
         :param sigma: Optional standard deviation for Gaussian filtering.
             Only used when `method="gaussian"`.
-        :param engine: Optional engine to use for filtering, either "scipy" (default) or "numba".
-            Only used with built-in filters.
+        :param engine: Legacy alias for backend ("scipy" or "numba").
         :param outlier_threshold:  The minimum difference abs(array - mean) for a pixel to be considered an outlier.
             Only used when `method="distance"`.
         :param kwargs: Additional keyword arguments passed to the underlying filter implementation.
@@ -2387,16 +2526,34 @@ class RasterBase(ABC):
         if "inplace" in kwargs:
             raise DeprecationWarning("Argument 'inplace' is deprecated, use rst = rst.filter() instead.")
 
+        # Preserve optimized filters while resolving other statistics and area-weighted windows
+        selected_method: str | Reducer | Callable[..., NDArrayNum] = method
+        selected_backend = _resampling_backend(backend, default="scipy", allowed=("scipy", "numba"), engine=engine)
+        if isinstance(selected_method, str):
+            if selected_method not in get_args(ResamplingMethod) and selected_method not in ("gaussian", "distance"):
+                raise ValueError(f"Unsupported filter method {selected_method!r}.")
+            selected_method = {"minimum": "min", "maximum": "max", "average": "mean"}.get(
+                selected_method, selected_method
+            )
+            simple_filter = selected_method in ("gaussian", "median", "mean", "min", "max", "distance")
+            if not simple_filter or method_kwargs or coverage is not None:
+                operator = _resampling_operator(selected_method, options=method_kwargs)
+                if not isinstance(operator, Reducer):
+                    raise ValueError("Raster filtering requires a reducer method.")
+                selected_method = operator
+        elif method_kwargs:
+            raise ValueError("Configure a supplied reducer or callable directly instead of using method_kwargs.")
+
         output = _filter(
             source_raster=self,
-            method=method,
-            size=size,
+            method=selected_method,
+            size=window,
             mp_config=mp_config,
             sigma=sigma,
-            engine=engine,
+            engine=cast(Literal["scipy", "numba"], selected_backend),
             outlier_threshold=outlier_threshold,
             coverage=coverage,
-            kernel_shape=kernel_shape,
+            kernel_shape=window_shape,
             **kwargs,
         )
         return self._cast_raster_output(output)
@@ -2429,8 +2586,11 @@ class RasterBase(ABC):
         self: RasterType,
         max_search_distance: float = 100.0,
         smoothing_iterations: int = 0,
-        interpolation: Literal["inv_dist", "nearest"] = "inv_dist",
+        interpolation: Literal["inv_dist", "nearest"] | None = None,
         mask: RasterLike | NDArrayBool | None = None,
+        *,
+        resampling: Literal["idw", "inv_dist", "nearest"] | None = None,
+        backend: ResamplingBackend = "auto",
     ) -> RasterType:
         """
         Fill nodata cells from nearby finite values.
@@ -2440,12 +2600,22 @@ class RasterBase(ABC):
 
         :param max_search_distance: Maximum search distance in pixels (defaults to 100).
         :param smoothing_iterations: Number of 3 by 3 smoothing passes after filling (defaults to 0).
-        :param interpolation: ``inv_dist`` for inverse-distance weighting or ``nearest`` (defaults to ``inv_dist``).
+        :param interpolation: Legacy alias using "inv_dist" or "nearest".
+        :param resampling: "idw" (default) for inverse distance weighting, or "nearest".
+        :param backend: "auto" or "gdal" for GDAL gap filling.
         :param mask: Optional Boolean raster or array where ``True`` values can provide interpolation values.
 
         :return: Raster copy with reachable nodata cells filled.
         """
 
+        # Translate the common names to GDAL's two gap-filling methods
+        _resampling_backend(backend, default="gdal", allowed=("gdal",))
+        selected_interpolation = _resampling_keyword(
+            "idw" if interpolation == "inv_dist" else interpolation, resampling, default="idw"
+        )
+        if selected_interpolation not in ("idw", "inv_dist", "nearest"):
+            raise ValueError("Gap filling supports resampling='idw' or 'nearest' with the GDAL backend.")
+        interpolation = "nearest" if selected_interpolation == "nearest" else "inv_dist"
         output = _fill_nodata(
             source_raster=self,
             max_search_distance=max_search_distance,
@@ -3021,7 +3191,7 @@ class RasterBase(ABC):
             The aliases "average", "min" and "max" select "mean", "minimum" and "maximum".
         :param resample_method: Raster interpolation using the SciPy methods "nearest", "linear", "cubic", "quintic",
             "slinear", "pchip" or "splinef2d". Window reduction ("reduce") is not implemented.
-        :param grid_kwargs: Options for PointCloud.grid(), e.g. {"dist_nodata_pixel": 2, "min_points": 3} sets a
+        :param grid_kwargs: Options for PointCloud.grid(), e.g. {"radius": 2, "min_points": 3} sets a
             two-pixel radius and minimum of three finite points for circular methods. Other options include
             "distance_power" for IDW and "engine" ("scipy" or "numba").
             Set locations and method with at and grid_method.

@@ -24,7 +24,7 @@ transform = rio.transform.from_bounds(0, 0, 1, 1, 3, 3)
 crs = pyproj.CRS.from_epsg(4326)
 
 # Create a raster
-rast = gu.DataArrayRasterAccessor.from_array(data=arr, transform=transform, crs=crs, nodata=255)
+rast = gu.raster.from_array(data=arr, transform=transform, crs=crs, nodata=255)
 rast
 
 # %%
@@ -43,7 +43,7 @@ mask = rng.integers(0, 2, size=(5, 5), dtype="bool")
 ma = np.ma.masked_array(data=arr, mask=mask)
 
 # This time, we pass directly the masked array
-rast = gu.DataArrayRasterAccessor.from_array(data=ma, transform=transform, crs=crs, nodata=255)
+rast = gu.raster.from_array(data=ma, transform=transform, crs=crs, nodata=255)
 rast
 
 # %%

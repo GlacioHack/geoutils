@@ -44,14 +44,14 @@ class TestDataArrayRasterAccessor:
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
 
-    @pytest.mark.parametrize("as_type", [None, "dataarray", "dataset"])
+    @pytest.mark.parametrize("as_object_type", [None, "dataarray", "dataset"])
     @pytest.mark.parametrize("data_name", [None, "elevation"])
     @pytest.mark.parametrize("bands", [1, 2])
     @pytest.mark.parametrize("is_mask", [False, True])
     def test_open_raster__return_type(
         self,
         tmp_path: Path,
-        as_type: Literal["dataarray", "dataset"] | None,
+        as_object_type: Literal["dataarray", "dataset"] | None,
         data_name: str | None,
         bands: int,
         is_mask: bool,
@@ -67,14 +67,14 @@ class TestDataArrayRasterAccessor:
         reference.to_file(path)
 
         # Check we open with the right type
-        if as_type is None:
+        if as_object_type is None:
             result = open_raster(str(path), data_name=data_name, is_mask=is_mask)
         else:
-            result = open_raster(str(path), as_type=as_type, data_name=data_name, is_mask=is_mask)
-        if as_type == "dataset":
+            result = open_raster(str(path), as_object_type=as_object_type, data_name=data_name, is_mask=is_mask)
+        if as_object_type == "dataset":
             assert isinstance(result, xr.Dataset)
             name = data_name or "raster"
-            assert result.rst.variables == [name]
+            assert list(result.rst.compatible_variables.keys()) == [name]
             variable = result[name]
         else:
             assert isinstance(result, xr.DataArray)
@@ -134,16 +134,16 @@ class TestDataArrayRasterAccessor:
         assert result.rst.transform == transform
         np.testing.assert_array_equal(result.data, expected)
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "dataset"])
-    def test_open_raster__downsample(self, tmp_path: Path, as_type: Literal["dataarray", "dataset"]) -> None:
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
+    def test_open_raster__downsample(self, tmp_path: Path, as_object_type: Literal["dataarray", "dataset"]) -> None:
         """Checks that downsampling uses a suitable overview while keeping the requested output grid."""
 
         # Write input for full array, then open with downsampling (without overview)
         values = np.arange(5_000, dtype=np.int32).reshape(50, 100)
         path = tmp_path / "gradient.tif"
         gu.Raster.from_array(values, from_origin(0, 50, 1, 1), 4326).to_file(path)
-        without_overview = open_raster(str(path), downsample=6, as_type=as_type)
-        without_overview = without_overview["raster"] if as_type == "dataset" else without_overview
+        without_overview = open_raster(str(path), downsample=6, as_object_type=as_object_type)
+        without_overview = without_overview["raster"] if as_object_type == "dataset" else without_overview
         without_overview_values = without_overview.values.copy()
 
         # Add overview for factors of 2 and 4, factor 4 should be the closest suitable overview
@@ -152,8 +152,8 @@ class TestDataArrayRasterAccessor:
 
         # Check that downsampling the new file uses the overview (slightly changes the sampled values)
         # without changing the size/transform of the requested grid
-        result = open_raster(str(path), downsample=6, as_type=as_type)
-        result = result["raster"] if as_type == "dataset" else result
+        result = open_raster(str(path), downsample=6, as_object_type=as_object_type)
+        result = result["raster"] if as_object_type == "dataset" else result
         assert not result._in_memory
         output = result.values
         expected = gu.Raster(path, downsample=6).data.data
@@ -163,8 +163,8 @@ class TestDataArrayRasterAccessor:
         np.testing.assert_array_equal(output, expected)
         assert not np.array_equal(output, without_overview_values)
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "dataset"])
-    def test_open_raster__overview_level(self, tmp_path: Path, as_type: Literal["dataarray", "dataset"]) -> None:
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
+    def test_open_raster__overview_level(self, tmp_path: Path, as_object_type: Literal["dataarray", "dataset"]) -> None:
         """Checks that overview selection is distinct from downsampling."""
 
         # Store two overview levels (the level 0 represents the factor-2 grid)
@@ -175,17 +175,17 @@ class TestDataArrayRasterAccessor:
             dataset.build_overviews([2, 4], rio.enums.Resampling.nearest)
 
         # Check error is raised when combining exact overview selection with downsampling
-        overview = open_raster(str(path), overview_level=0, as_type=as_type)
-        overview = overview["raster"] if as_type == "dataset" else overview
+        overview = open_raster(str(path), overview_level=0, as_object_type=as_object_type)
+        overview = overview["raster"] if as_object_type == "dataset" else overview
         assert overview.rst.shape == (8, 8)
         assert overview.rst.transform == from_origin(0, 16, 2, 2)
         with pytest.raises(ValueError, match="downsample and overview_level cannot be used together"):
-            open_raster(str(path), downsample=3, overview_level=0, as_type=as_type)
+            open_raster(str(path), downsample=3, overview_level=0, as_object_type=as_object_type)
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "dataset"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
     @pytest.mark.parametrize("downsample", [1, 6])
     def test_open_raster__downsample_loading_laziness(
-        self, tmp_path: Path, as_type: Literal["dataarray", "dataset"], downsample: int
+        self, tmp_path: Path, as_object_type: Literal["dataarray", "dataset"], downsample: int
     ) -> None:
         """Checks that chunked downsampling stays lazy and exactly matches eager opening."""
 
@@ -198,11 +198,11 @@ class TestDataArrayRasterAccessor:
         gu.Raster.from_array(values, from_origin(0, 50, 1, 1), 4326).to_file(path)
 
         # Uneven tiles expose shorter final chunks on both the native and reduced grids
-        eager = open_raster(str(path), downsample=downsample, as_type=as_type)
+        eager = open_raster(str(path), downsample=downsample, as_object_type=as_object_type)
         with Callback(pretask=lambda *args: pytest.fail("Opening rasters must read only metadata")):
-            lazy = open_raster(str(path), downsample=downsample, chunks={"y": 3, "x": 7}, as_type=as_type)
-        eager_values = eager["raster"] if as_type == "dataset" else eager
-        lazy_values = lazy["raster"] if as_type == "dataset" else lazy
+            lazy = open_raster(str(path), downsample=downsample, chunks={"y": 3, "x": 7}, as_object_type=as_object_type)
+        eager_values = eager["raster"] if as_object_type == "dataset" else eager
+        lazy_values = lazy["raster"] if as_object_type == "dataset" else lazy
         assert not eager_values._in_memory
         assert not lazy_values._in_memory
         expected_chunks = ((3,) * 16 + (2,), (7,) * 14 + (2,)) if downsample == 1 else ((3, 3, 2), (7, 7, 2))
@@ -211,7 +211,7 @@ class TestDataArrayRasterAccessor:
         # Check result leaves source lazy and matches exactly with eager resampling
         computed = lazy.compute()
         xr.testing.assert_identical(computed, eager)
-        computed_values = computed["raster"] if as_type == "dataset" else computed
+        computed_values = computed["raster"] if as_object_type == "dataset" else computed
         assert computed_values._in_memory
         assert not lazy_values._in_memory
 
@@ -447,13 +447,13 @@ class TestDataArrayRasterAccessor:
         assert isinstance(rasterized_from_dataarray.data, da.Array)
         assert rasterized_from_dataarray.data.chunks == dask_arr.chunks
 
-    @pytest.mark.parametrize("as_type", ["geodataframe", "scene"])
-    def test_open_raster__error_invalid_type(self, tmp_path: Path, as_type: str) -> None:
+    @pytest.mark.parametrize("as_object_type", ["geodataframe", "scene"])
+    def test_open_raster__error_invalid_type(self, tmp_path: Path, as_object_type: str) -> None:
         """Checks an error is raised before reading a file for an unsupported raster return type."""
 
         path = tmp_path / "absent.tif"
-        with pytest.raises(ValueError, match="as_type"):
-            open_raster(str(path), as_type=as_type)  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match="as_object_type"):
+            open_raster(str(path), as_object_type=as_object_type)  # type: ignore[arg-type]
 
 
 class TestDatasetRasterAccessor:
@@ -472,9 +472,40 @@ class TestDatasetRasterAccessor:
         assert not isinstance(mixed_dataset.rst, RasterBase)
         assert isinstance(mixed_dataset.dem.rst, gu.DataArrayRasterAccessor)
         assert isinstance(mixed_dataset.dem.rst, RasterBase)
-        assert mixed_dataset.rst.variables == ["dem", "slope"]
-        assert mixed_dataset.pc.variables == ["point_z", "point_sigma"]
+        assert list(mixed_dataset.rst.compatible_variables.keys()) == ["dem", "slope"]
+        assert list(mixed_dataset.pc.compatible_variables.keys()) == ["point_z", "point_sigma"]
         assert not hasattr(mixed_dataset.rst, "ds")
+
+        # Check the native Xarray mapping exposes DataArrays sharing the original values
+        rasters = mixed_dataset.rst.compatible_variables
+        assert isinstance(rasters, type(mixed_dataset.data_vars))
+        for name, variable in rasters.items():
+            xr.testing.assert_identical(variable, mixed_dataset[name])
+            assert variable.data is mixed_dataset[name].data
+
+    def test_compatible_variables__file_loading_laziness(self, tmp_path: Path) -> None:
+        """Checks that discovering and accessing compatible rasters leaves file-backed values unloaded."""
+
+        # Write a small raster with known values, then open it without loading its pixels
+        values = np.arange(35, dtype=np.float32).reshape(5, 7)
+        filename = tmp_path / "survey.tif"
+        gu.Raster.from_array(values, from_origin(0, 5, 1, 1), 32631).to_file(filename)
+        source = gu.open_raster(str(filename), as_object_type="dataset", data_name="dem")
+        assert not source["dem"]._in_memory
+
+        # Discover the raster and access its DataArray through the mapping
+        variables = source.rst.compatible_variables
+        names = list(variables.keys())
+        variable = variables["dem"]
+
+        # Check metadata access leaves the source and view unloaded
+        assert names == ["dem"]
+        assert not source["dem"]._in_memory
+        assert not variable._in_memory
+
+        # Read the pixels only now and compare them with the values written to the file
+        np.testing.assert_array_equal(variable.values, values)
+        source.close()
 
     @pytest.mark.parametrize("lazy", [False, True])
     @pytest.mark.parametrize("coordinates,with_time", [("native", False), ("cf", False), ("cf", True)])
@@ -539,7 +570,7 @@ class TestDatasetRasterAccessor:
         # We test a potential time dimension too, to be sure we don't mix time axes when they exist
         if with_time:
             dates = np.array(["2026-01-01", "2026-01-02"], dtype="datetime64[D]")
-            rasters = canonical[canonical.rst.variables].expand_dims(band=dates).copy(deep=True)
+            rasters = canonical[list(canonical.rst.compatible_variables.keys())].expand_dims(band=dates).copy(deep=True)
             for name in rasters.data_vars:
                 rasters[name].data[1] += 100
             canonical = canonical.assign({name: rasters[name] for name in rasters.data_vars})
@@ -562,13 +593,13 @@ class TestDatasetRasterAccessor:
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(1)) if lazy else nullcontext():
             result = getattr(source.rst, method)(variables=variables, **options)
-        names = source.rst.variables if variables is None else variables
+        names = list(source.rst.compatible_variables.keys()) if variables is None else variables
         if lazy:
             # Check that construction is lazy
             assert not tasks
             assert all(source[name].chunks and result[name].chunks for name in names)
             assert result.point_z.data is source.point_z.data
-            for name in source.rst.variables:
+            for name in source.rst.compatible_variables:
                 if name not in names:
                     assert result[name].data is source[name].data
         outputs = {}
@@ -603,7 +634,7 @@ class TestDatasetRasterAccessor:
             np.testing.assert_array_equal(actual.regions.data, expected_labels)
         xr.testing.assert_identical(source, original)
         if lazy:
-            assert all(source[name].chunks for name in source.rst.variables)
+            assert all(source[name].chunks for name in source.rst.compatible_variables)
             assert source.point_z.chunks
 
     @pytest.mark.parametrize("lazy", [False, True])
@@ -680,7 +711,7 @@ class TestDatasetRasterAccessor:
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(1)) if lazy else nullcontext():
             result = getattr(source.rst, method)(points, variables=variables, **options)
-        names = source.rst.variables if variables is None else variables
+        names = list(source.rst.compatible_variables.keys()) if variables is None else variables
         if lazy:
             # Check that sampling runs no tasks and leaves the point results and original point graph lazy
             assert not tasks
@@ -688,7 +719,7 @@ class TestDatasetRasterAccessor:
                 assert source[name].chunks and result[name].chunks
                 assert result[name].dims == ("point",)
             assert result.point_z.data is source.point_z.data
-            for name in source.rst.variables:
+            for name in source.rst.compatible_variables:
                 if name not in names:
                     assert result[name].data is source[name].data
         reference_points = points.pc.to_xarray() if representation == "geodataframe" else mixed_dataset.point_z
@@ -701,7 +732,7 @@ class TestDatasetRasterAccessor:
         assert_dataset_output_equal(source, result.compute() if lazy else result, outputs)
         xr.testing.assert_identical(source, original)
         if lazy:
-            assert all(source[name].chunks for name in source.rst.variables)
+            assert all(source[name].chunks for name in source.rst.compatible_variables)
             assert source.point_z.chunks
             if representation != "geodataframe":
                 assert source.x_point.chunks and source.y_point.chunks
@@ -789,7 +820,7 @@ class TestDatasetRasterAccessor:
             from dask.callbacks import Callback
 
             # Use shorter edge chunks and add a raster that raises an error if it is read
-            names = source.rst.variables if variables is None else variables
+            names = list(source.rst.compatible_variables.keys()) if variables is None else variables
             chunks = {"northing": 3, "easting": 4, "point": 4} if dimensions == "cf" else {"y": 3, "x": 4, "point": 4}
             source = source.chunk(chunks)
             read_unused = Mock(side_effect=AssertionError("Variograms must not read unselected rasters."))
@@ -813,7 +844,7 @@ class TestDatasetRasterAccessor:
 
         # 2/ Run Dataset and DataArray methods with the same mask, bins and random state
         # Run the DataArray method per variable name
-        names = source.rst.variables if variables is None else variables
+        names = list(source.rst.compatible_variables.keys()) if variables is None else variables
         if "random_state" in reference_options:
             reference_options["random_state"] = 7 if random_state == "seed" else np.random.default_rng(7)
         expected = {name: getattr(canonical[name].rst, method)(**reference_options) for name in names}
@@ -832,7 +863,7 @@ class TestDatasetRasterAccessor:
             # Check that selected tasks ran without reading the unused raster or changing the lazy source arrays
             assert tasks
             assert not read_unused.called
-            assert all(source[name].chunks for name in source.rst.variables)
+            assert all(source[name].chunks for name in source.rst.compatible_variables)
             assert source.point_z.chunks
             if method == "variogram":
                 assert all(isinstance(variogram.semivariance, np.ndarray) for variogram in result.values())
@@ -889,7 +920,7 @@ class TestDatasetRasterAccessor:
         result = source.rst.reproject(crs=4326, nodata=-99999, variables=variables)
 
         # Then we reproject through every data array, and compare for exact equality
-        for name in source.rst.variables:
+        for name in source.rst.compatible_variables:
             if variables is None or name in variables:
                 raster = source[name]
                 dimensions = {raster.rio.x_dim: "x", raster.rio.y_dim: "y"}
@@ -932,7 +963,7 @@ class TestDatasetRasterAccessor:
             result = getattr(source.rst, method)(mask=mask, **options)
 
         # Finally, we check exact equality with the DataArray operation
-        for name in source.rst.variables:
+        for name in source.rst.compatible_variables:
             expected = getattr(mixed_dataset[name].rst, method)(mask=canonical_mask, **options)
             np.testing.assert_array_equal(result[name].transpose("northing", "easting").data, expected.data)
             assert result[name].rio.transform() == expected.rst.transform
@@ -1176,7 +1207,7 @@ class TestDatasetRasterAccessor:
 
         # 2/ Run raster operations without reading the file
         # Select both rasters for reprojection because they share coordinates, otherwise process only the DEM
-        names = lazy.rst.variables if variables is None else variables
+        names = list(lazy.rst.compatible_variables.keys()) if variables is None else variables
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(1)):
             result = getattr(lazy.rst, method)(variables=variables, **options)
@@ -1184,7 +1215,7 @@ class TestDatasetRasterAccessor:
         # Check lazy raster inputs/outputs, no executed tasks and unchanged graphs for unselected rasters
         assert not tasks
         assert all(lazy[name].chunks and result[name].chunks for name in names)
-        for name in lazy.rst.variables:
+        for name in lazy.rst.compatible_variables:
             if name not in names:
                 assert result[name].data is lazy[name].data
 
@@ -1226,11 +1257,11 @@ class TestDatasetRasterAccessor:
             raster_path = str(converted_path)
 
         raster = gu.open_raster(raster_path).to_dataset(name="image")
-        points = gu.open_pointcloud(point_path, columns="all", as_type="dataset")
+        points = gu.open_pointcloud(point_path, columns="all", as_object_type="dataset")
         eager = xr.merge([raster, points], compat="no_conflicts")
         # Open both files in chunks (leaving shorter final blocks)
         lazy_raster = gu.open_raster(raster_path, chunks={"x": 64, "y": 51}).to_dataset(name="image")
-        lazy_points = gu.open_pointcloud(point_path, columns="all", chunks=2001, as_type="dataset")
+        lazy_points = gu.open_pointcloud(point_path, columns="all", chunks=2001, as_object_type="dataset")
         lazy = xr.merge([lazy_raster, lazy_points], compat="no_conflicts")
         original = lazy.copy(deep=True)
         encoding = lazy.image.encoding.copy()
@@ -1268,18 +1299,51 @@ class TestDatasetRasterAccessor:
         # Write in chunks and reopen lazily
         filename = tmp_path / "selected.parquet"
         actual.pc.to_parquet(filename, chunks=7)
-        reopened = gu.open_pointcloud(filename, columns="all", chunks=7, as_type="dataset")
+        reopened = gu.open_pointcloud(filename, columns="all", chunks=7, as_object_type="dataset")
         assert reopened.Z.chunks and reopened.sizes["point"] == 17
 
         # Compare exact equality
         stored = reopened.compute()
-        for name in actual.pc.variables:
+        for name in actual.pc.compatible_variables:
             np.testing.assert_array_equal(stored[name].data, actual[name].data)
             assert stored[name].dtype == actual[name].dtype
         np.testing.assert_array_equal(stored.x_point.data, actual.x_point.data)
         np.testing.assert_array_equal(stored.y_point.data, actual.y_point.data)
         assert stored.Z.pc.crs == actual.Z.pc.crs
         assert lazy.image.chunks and lazy.Z.chunks and reopened.Z.chunks
+
+
+class TestDatasetRasterAccessorChunked:
+    """Test module for lazy discovery and shared arrays in compatible raster variables."""
+
+    def test_compatible_variables__loading_laziness(self, mixed_dataset: xr.Dataset) -> None:
+        """Checks that compatible raster discovery and access share Dask arrays without running tasks."""
+
+        pytest.importorskip("dask")
+        from dask.callbacks import Callback
+
+        # Split raster rows/columns into 3/2 and 4/3, with independent points in chunks of 4/4/1
+        source = mixed_dataset.chunk({"y": 3, "x": 4, "point": 4})
+        assert source.dem.chunks and source.slope.chunks
+
+        # Discover and access the raster variables without computing their chunks
+        tasks = []
+        with Callback(pretask=lambda *args: tasks.append(1)):
+            variables = source.rst.compatible_variables
+            names = list(variables.keys())
+            arrays = dict(variables.items())
+
+        # Check exact names, no executed tasks and shared lazy arrays
+        assert names == ["dem", "slope"]
+        assert not tasks
+        for name, variable in arrays.items():
+            assert variable.chunks == source[name].chunks
+            assert variable.data is source[name].data
+
+        # Compute each view and compare values and metadata with the original eager fixture
+        for name, variable in arrays.items():
+            xr.testing.assert_identical(variable.compute(), mixed_dataset[name])
+            assert variable.chunks and source[name].chunks
 
 
 class TestDatasetRasterAccessorErrors:

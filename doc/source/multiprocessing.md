@@ -18,7 +18,7 @@ GeoUtils implements logics from Python's [multiprocessing library](https://docs.
 to process raster, vector and point cloud data in chunks without loading the entire dataset into memory when working with **GeoUtils objects**
 ({class}`~geoutils.Raster`, {class}`~geoutils.Vector` and {class}`~geoutils.PointCloud`),
 
-When using the {class}`rst <geoutils.DataArrayRasterAccessor>`, {class}`vct <geoutils.VectorAccessor>` and {class}`pc <geoutils.GeoPandasPointCloudAccessor>` **accessors**, use Dask instead.
+When using the {class}`rst <geoutils.DataArrayRasterAccessor>`, {class}`vct <geoutils.GeoDataFrameVectorAccessor>` and {class}`pc <geoutils.GeoDataFramePointCloudAccessor>` **accessors**, use Dask instead.
 
 See {ref}`scalability-usage` for the main Dask and Multiprocessing workflows, {ref}`scalability-concept` for the
 execution model, and {ref}`scalability-support` for the operations supported by each backend.

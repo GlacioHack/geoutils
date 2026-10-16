@@ -167,7 +167,7 @@ class Reducer:
         from geoutils.operators import PointNeighbours
         from geoutils.operators.reducer import Mean
 
-        nearby = PointNeighbours(k=8, radius=50)
+        nearby = PointNeighbours(max_points=8, radius=50)
         gridded = point_cloud.grid(ref=reference_raster, resampling=Mean(neighborhood=nearby))
     """
 

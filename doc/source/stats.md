@@ -14,14 +14,15 @@ kernelspec:
 # Statistics
 
 GeoUtils provides implementations to derive **statistical estimators relevant to geospatial data** on
-**rasters** and **point clouds**, with efficient reduction for large datasets.
+rasters and point clouds, with efficient reduction for large datasets.
 
 Several types of operations are supported:
 
-- {ref}`stats-global-grouped` derive **distributional estimators by bins or categories of other variables**,
+- {ref}`stats-global-grouped` derive **distributional estimators by bins or categories**,
 - {ref}`stats-spatial` derives **spatial correlation estimators** as a function of distance.
 
-**Zonal statistics are included** as a form of grouped statistics where vector features define the categories.
+**Zonal statistics** are included as grouped statistics where vector features define the categories, 
+with support for fractional polygon-raster intersections.
 
 Any custom estimator can be passed, with certain estimators listed below **optimized for
 larger-than-memory samples** (both for grouped and spatial estimators).
@@ -64,6 +65,12 @@ glaciers = gu.open_vector(gu.examples.get_path("exploradores_rgi_outlines"))
 
 Global statistics derive **estimators on the entire raster or point cloud**, while grouped statistics apply the
 same **estimators to continuous bins or discrete categories**, with potentially several groupings at once.
+
+```{note}
+Global and grouped statistics use NumPy reductions and optionally Flox's
+[groupby_reduce()](https://flox.readthedocs.io/en/latest/generated/flox.groupby_reduce.html).
+GeoUtils adds subsampling, weights support, and fractional vector-raster intersection support.
+```
 
 (stats-estimators)=
 ### Estimators
@@ -135,6 +142,10 @@ def count_high_elevations(data: np.ndarray) -> int:
 ds.rst.stats(count_high_elevations)
 ```
 
+Statistics also accept {class}`~geoutils.operators.Reducer` objects, such as `Mean()` or `Median()`, including custom
+definitions from {ref}`core-custom-operators`. A single reducer with `error_structure=` returns its value and an
+uncertainty summary; see {ref}`uncertainty-propagation` for an example.
+
 (stats-global-masking)=
 #### Masking
 
@@ -149,7 +160,7 @@ ds.rst.stats(["mean", "std", "valid count"], mask=glaciers)
 #### Subsampling
 
 Use `subsample` to cap the sample size, which is especially useful with **robust estimators**, such as the median and NMAD,
-that are less sensitive to outliers but need to hold the whole (see {ref}`stats-estimators`):
+that are less sensitive to outliers but need to hold the whole sample in memory (see {ref}`stats-estimators`):
 
 ```{code-cell} ipython3
 ds.rst.stats(["mean", "median", "std", "nmad"], subsample=100_000)
@@ -197,7 +208,7 @@ lower, upper = np.nanpercentile(elevation_values, [2, 98])
 normalized_elevation = np.clip((elevation_values - lower) / (upper - lower), 0, 1)
 terrain_rgb_values = plt.get_cmap("terrain")(normalized_elevation)[..., :3]
 terrain_rgb_values[~valid_elevation] = np.nan
-terrain_rgb = gu.DataArrayRasterAccessor.from_array(
+terrain_rgb = gu.raster.from_array(
     np.moveaxis(terrain_rgb_values, -1, 0),
     transform=ds.rst.transform,
     crs=ds.rst.crs,
@@ -316,6 +327,33 @@ accepted, including when the raster values are backed by Dask.
 features into inside/outside categories. `mask=zones` instead restricts all groups to locations inside the features.
 ```
 
+(stats-fractional)=
+#### Fractional zonal statistics
+
+For polygons cutting through raster cells, `fractional=True` weights each value by the **exact covered fraction
+of its cell**. The default center-based assignment described above remains useful for categorical membership;
+fractional coverage better describes an average over polygon area.
+
+```{code-cell} ipython3
+# Weight edge cells by the area each glacier polygon covers
+fractional_glacier_stats = ds.rst.stats(
+    ("mean", "sum"), by={"glacier": (glaciers, "RGIId")}, fractional=True
+)
+fractional_glacier_stats.head()
+```
+
+The mean normalizes coverage weights, while the sum adds coverage-weighted values. Choose the statistic according
+to whether values represent means, totals or densities, as explained in {ref}`core-weighting`.
+In fractional summaries, `count` is the sum of valid covered-cell fractions, which can differ from
+the number of intersected cells.
+
+This mode currently requires **one vector grouper on raster values**. Polygons with the same label are combined;
+different labels are evaluated independently, allowing a cell to contribute to several overlapping zones.
+`overlap_backend=` selects ExactExtract or Shapely, as for {ref}`transformations-fractional`.
+
+Fractional zonal statistics currently require **eager raster values**. Crop the raster to the area of interest
+before loading it; ordinary center-based zonal statistics support Dask inputs.
+
 #### Several grouping variables
 
 **Several grouping variables define their joint bins or categories**. For example, summarize the RGB bands jointly
@@ -414,7 +452,7 @@ to derive them without holding more than a chunk in memory.
 An empirical variogram groups sampled pairs by distance and estimates their semivariance. A fitted model describes
 this spatial variability with a correlation range, a structured variance (partial sill) and an optional nugget.
 
-Install `geoutils[geostat]` for the optional geostatistical backends. GeoUtils uses SciKit-GStat estimators and models
+Install `geoutils[opt]` for the optional geostatistical backends. GeoUtils uses SciKit-GStat estimators and models
 and returns a {class}`~geoutils.Variogram` with the empirical bins and fitted parameters.
 
 ```{code-cell} ipython3
@@ -490,6 +528,36 @@ gstools_model = known.to_gstools(dim=2).model
 conversion = known.to_gpytorch()
 kernel, noise = conversion.kernel, conversion.noise
 ```
+
+(stats-kriging)=
+### Kriging
+
+{meth}`points.pc.krige() or PointCloud.krige() <PointCloudBase.krige>`<br>
+{meth}`ds.rst.krige() or Raster.krige() <RasterBase.krige>`
+
+**Kriging predicts from observations and a fitted model of their spatial covariance.** This differs from
+distance-only interpolation: the variogram determines how measurements jointly contribute to the prediction.
+GeoUtils supports ordinary kriging through GSTools and GPyTorch.
+
+```{code-cell} ipython3
+# Grid a small elevation sample using the fitted terrain variogram
+kriging_points = ds.rst.subsample(400, random_state=42)
+kriged = kriging_points.pc.krige(
+    variogram, shape=(24, 24), bounds=tuple(ds.rst.bbox), max_overlap=1000, backend="gstools"
+)
+kriged.rst.shape
+```
+
+The model's longest effective range defines the default search distance. `max_overlap` caps that distance, in CRS
+units, to bound the observations and memory needed per output. The same search applies at chunk boundaries.
+`exact=True` preserves a source value when the prediction location matches it.
+
+Supply `error_structure=` to account for observation errors in the fitted prediction. A **variogram of the measured
+field** and an **error model for those measurements** describe different quantities; a terrain variogram is not
+automatically an elevation error model. Use {func}`~geoutils.uncertainty.propagate` to request output uncertainty,
+as described in {ref}`uncertainty-propagation`.
+
+For simulations from an error model instead of predictions from measurements, see {ref}`uncertainty-simulation`.
 
 (stats-chunked-strategies)=
 ## Chunked strategies

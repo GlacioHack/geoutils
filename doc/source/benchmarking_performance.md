@@ -73,7 +73,7 @@ These graphics show the latest complete CI benchmark and may be newer than this 
 
 Every GeoUtils operation listed as {ref}`chunked or lazy <scalability-support>` is tested
 on all supported Python versions and operating systems to ensure its respect of Dask laziness, deferred I/O, and loading behaviour,
-while yielding **exactly** the same output as in-memory operations.
+while yielding **exactly** the same output as in-memory operations, within numerical tolerances.
 
 In addition, GeoUtils also includes large data tests running on latest Python and Ubuntu releases,
 verifying that these operations use less memory than loading the full raster would require, while yielding a correct result.

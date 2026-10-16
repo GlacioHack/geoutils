@@ -49,4 +49,4 @@ The current lead development team includes **researchers in Earth observation an
 science or for operational use for 3D satellite missions<sup>3</sup>.
 
 Other volunteer contributors span diverse scientific backgrounds in industry or research. We welcome
-any new contributors! See how to contribute on [the dedicated page of our repository](https://github.com/GlacioHack/xdem/blob/main/CONTRIBUTING.md).
+any new contributors! See how to contribute on [the dedicated page of our repository](https://github.com/GlacioHack/geoutils/blob/main/CONTRIBUTING.md).

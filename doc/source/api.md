@@ -17,11 +17,14 @@ the main API method summaries. This needs to be listed before any other API.
 :maxdepth: 1
 :hidden:
 
-DataArrayRasterAccessor <api_rst>
+DataArray.rst accessor <api_rst>
+Dataset.rst accessor <api_rst_dataset>
 Raster <api_raster>
-VectorAccessor <api_vct>
+GeoDataFrame.vct accessor <api_vct>
 Vector <api_vector>
-GeoPandasPointCloudAccessor <api_pc>
+DataArray.pc accessor <api_pc_dataarray>
+Dataset.pc accessor <api_pc_dataset>
+GeoDataFrame.pc accessor <api_pc>
 PointCloud <api_pointcloud>
 Inherited Vector methods <api_vector_inherited>
 ```
@@ -29,30 +32,22 @@ Inherited Vector methods <api_vector_inherited>
 (raster-api)=
 ## Raster API
 
-GeoUtils exposes the raster API through two mirrored interfaces:
+GeoUtils exposes the raster API through the following interfaces:
 
-- A {class}`rst <geoutils.DataArrayRasterAccessor>` accessor extending {class}`xarray.DataArray` objects as rasters.
+- A {class}`DataArray.rst <geoutils.DataArrayRasterAccessor>` accessor extending {class}`xarray.DataArray` objects as rasters.
+- A {class}`Dataset.rst <geoutils.DatasetRasterAccessor>` accessor applying raster methods to compatible variables in {class}`xarray.Dataset` objects.
 - {class}`~geoutils.Raster`, an interface operating directly on a GeoUtils object.
 
 
-Both expose the **same methods and attributes**.
+The DataArray accessor and Raster expose the **same methods and attributes**. The Dataset accessor applies operations
+to all compatible raster variables by default, or to those selected with `variables`.
 
-Only **file opening** and **scalable execution** differ between the two interfaces:
+Only **file opening** and **scalable execution** differ between the DataArray accessor and Raster:
 
 - **File opening:** {class}`~geoutils.Raster` objects are opened by instantiating the class, whereas {meth}`~geoutils.open_raster` is used for an {class}`xarray.DataArray` object,
-- **Scalable execution:** the {class}`rst <geoutils.DataArrayRasterAccessor>` accessor supports **Dask**, while the {class}`~geoutils.Raster` supports **Multiprocessing** instead.
+- **Scalable execution:** the {class}`DataArray.rst <geoutils.DataArrayRasterAccessor>` accessor supports **Dask**, while the {class}`~geoutils.Raster` supports **Multiprocessing** instead.
 
 ### Opening a raster file
-
-Raster variables in a Dataset use {class}`~geoutils.DatasetRasterAccessor` through Dataset.rst.
-
-```{eval-rst}
-.. autosummary::
-    :toctree: gen_modules/
-    :template: dataset_accessor.rst
-
-    DatasetRasterAccessor
-```
 
 Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantiate for a {class}`~geoutils.Raster`.
 
@@ -73,6 +68,15 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
 ```
 
 ### Create raster from an array
+
+Use {func}`~geoutils.raster.from_array` to create a DataArray, or pass `as_object_type="dataset"` to create a Dataset.
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    ~raster.from_array
+```
 
 ```{eval-rst}
 .. autosummary::
@@ -169,6 +173,8 @@ Use {meth}`~geoutils.open_raster` for an {class}`xarray.DataArray`, or instantia
     :template: raster_method.rst
 
     ~raster.base.RasterBase.filter
+    ~raster.base.RasterBase.fill_nodata
+    ~raster.base.RasterBase.sieve
 ```
 
 ### Plotting
@@ -193,6 +199,7 @@ See {ref}`stats` for estimators, grouping by intervals or categories, and variog
 
     ~raster.base.RasterBase.stats
     ~raster.base.RasterBase.variogram
+    ~raster.base.RasterBase.estimate_error_structure
 ```
 
 (api-raster-sampling)=
@@ -317,14 +324,14 @@ Writing and conversion methods depend on the concrete interface.
 
 GeoUtils exposes the vector API through two mirrored interfaces:
 
-- A {class}`vct <geoutils.VectorAccessor>` accessor extending {class}`geopandas.GeoDataFrame` objects as vectors.
+- A {class}`vct <geoutils.GeoDataFrameVectorAccessor>` accessor extending {class}`geopandas.GeoDataFrame` objects as vectors.
 - {class}`~geoutils.Vector`, an interface operating directly on a GeoUtils object.
 
 Both expose the same GeoUtils-specific methods and attributes listed below. Native GeoPandas methods remain available
 directly on the GeoDataFrame.
 
 ```{eval-rst}
-.. minigallery:: geoutils.Vector geoutils.VectorAccessor
+.. minigallery:: geoutils.Vector geoutils.GeoDataFrameVectorAccessor
       :add-heading:
 ```
 
@@ -466,35 +473,23 @@ additional methods exposed by the {class}`~geoutils.Vector` wrapper and explains
 (pointcloud-api)=
 ## Point cloud
 
-GeoUtils exposes the point cloud API through two mirrored interfaces:
+GeoUtils exposes the point cloud API through the following interfaces:
 
-- A {class}`pc <geoutils.GeoPandasPointCloudAccessor>` accessor extending {class}`geopandas.GeoDataFrame` objects as point clouds.
+- A {class}`DataArray.pc <geoutils.DataArrayPointCloudAccessor>` accessor extending {class}`xarray.DataArray` objects as point clouds.
+- A {class}`Dataset.pc <geoutils.DatasetPointCloudAccessor>` accessor applying point cloud methods to compatible variables in {class}`xarray.Dataset` objects.
+- A {class}`pc <geoutils.GeoDataFramePointCloudAccessor>` accessor extending {class}`geopandas.GeoDataFrame` objects as point clouds.
 - {class}`~geoutils.PointCloud`, an interface operating directly on a GeoUtils object.
 
-Both expose the same GeoUtils-specific methods and attributes listed below. Native GeoPandas methods remain available
-directly on the GeoDataFrame.
+The DataArray and GeoDataFrame accessors and PointCloud expose the GeoUtils-specific methods and attributes listed below.
+The Dataset accessor applies operations to all compatible point variables by default, or to those selected with `variables`.
+Native Xarray and GeoPandas methods remain available directly on their objects.
 
 ```{eval-rst}
-.. minigallery:: geoutils.PointCloud geoutils.GeoPandasPointCloudAccessor
+.. minigallery:: geoutils.PointCloud geoutils.GeoDataFramePointCloudAccessor
       :add-heading:
 ```
 
-Point methods are available on the dedicated PointCloud, GeoDataFrame.pc, and DataArray.pc.
 See the {ref}`point cloud guide <point-cloud>` for their data and {ref}`scalability-usage` for execution options.
-
-```{eval-rst}
-.. autosummary::
-    :toctree: gen_modules/
-    :template: dataarray_accessor.rst
-
-    DataArrayPointCloudAccessor
-
-.. autosummary::
-    :toctree: gen_modules/
-    :template: dataset_accessor.rst
-
-    DatasetPointCloudAccessor
-```
 
 ### Opening a file
 
@@ -545,6 +540,16 @@ See the {ref}`point cloud guide <point-cloud>` for their data and {ref}`scalabil
 
 
 ### Create and convert from data
+
+Use {func}`~geoutils.pointcloud.from_xyz` to create a DataArray from coordinate and value arrays. Pass
+`as_object_type="dataset"` or `as_object_type="geodataframe"` to choose another representation.
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    ~pointcloud.from_xyz
+```
 
 ```{eval-rst}
 .. autosummary::
@@ -635,6 +640,7 @@ See {ref}`stats` for the same statistical workflows on point cloud values.
 
     ~pointcloud.base.PointCloudBase.stats
     ~pointcloud.base.PointCloudBase.variogram
+    ~pointcloud.base.PointCloudBase.estimate_error_structure
 ```
 
 (api-point-sampling)=
@@ -760,6 +766,11 @@ with dimensions `pair` and `endpoint`, containing values, source indexes, coordi
 
 ## Numerical operators and uncertainty
 
+See {ref}`core-operators` for neighborhoods and custom definitions, {ref}`core-weighting` for the meaning of
+weights and covariance, and {ref}`uncertainty` for estimation and propagation workflows.
+
+### Operator interfaces and neighborhoods
+
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
@@ -770,11 +781,56 @@ with dimensions `pair` and `endpoint`, containing values, source indexes, coordi
     operators.LinearCoefficients
     operators.PointNeighbours
     operators.GridNeighbours
+```
+
+### Interpolators
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    operators.interpolator.Nearest
+    operators.interpolator.ScipyInterpolator
+    operators.interpolator.Linear
+    operators.interpolator.Cubic
+    operators.interpolator.InverseDistance
+    operators.interpolator.RasterConvolution
     operators.interpolator.Kriging
+```
+
+### Reducers
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    operators.reducer.Mean
+    operators.reducer.Sum
+    operators.reducer.Quantile
+    operators.reducer.Median
+    operators.reducer.Mode
+    operators.reducer.Minimum
+    operators.reducer.Maximum
+    operators.reducer.Range
+    operators.reducer.Count
+    operators.reducer.RootMeanSquare
+    operators.reducer.StandardDeviation
+    operators.reducer.AverageDistance
+    operators.reducer.AveragePairwiseDistance
+```
+
+### Error models and propagation
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
     ErrorMagnitude
     ErrorComponent
     ErrorStructure
+    ErrorStructure.estimate
     PropagationSummary
+    uncertainty.propagate
     uncertainty.random_field
 ```
 

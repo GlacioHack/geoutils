@@ -46,10 +46,14 @@ In GeoUtils, **these higher-level operations are tested to ensure robustness and
 ```
 
 The package functionalities can be called either from the {class}`rst <geoutils.DataArrayRasterAccessor>`,
-{class}`vct <geoutils.VectorAccessor>` and {class}`pc <geoutils.GeoPandasPointCloudAccessor>` accessors or from the
+{class}`vct <geoutils.GeoDataFrameVectorAccessor>` and {class}`pc <geoutils.DataArrayPointCloudAccessor>` accessors (Xarray or GeoPandas for points) or from the
 {class}`~geoutils.Raster`, {class}`~geoutils.Vector` and {class}`~geoutils.PointCloud` classes.
-Below, in a few lines, we load raster, vector and point data, crop them to a common extent, re-assign raster values
-around a buffer of the vector, sample values, calculate statistics, and finally plot and save the result!
+Below, in just a few lines, we open raster, vector and point cloud files, crop the raster to the vector extent,
+re-assign raster values around a buffer of the vector, sample values, calculate statistics, and finally plot and
+save the raster result!
+
+Install the optional dependencies with `pip install "geoutils[opt]"` to run both tabs, or use the corresponding
+Conda packages listed in {ref}`how-to-install`.
 
 <!--- An empty margin to add some vertical padding --->
 ```{margin}
@@ -170,6 +174,6 @@ To dive into more illustrated code, explore our gallery of examples that is comp
 See also the full concatenated list of examples below.
 
 ```{eval-rst}
-.. minigallery:: geoutils.DataArrayRasterAccessor geoutils.VectorAccessor geoutils.GeoPandasPointCloudAccessor
+.. minigallery:: geoutils.DataArrayRasterAccessor geoutils.GeoDataFrameVectorAccessor geoutils.GeoDataFramePointCloudAccessor
     :add-heading: Examples using rasters, vectors and point clouds
 ```

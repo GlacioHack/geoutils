@@ -14,7 +14,7 @@ kernelspec:
 
 # The georeferenced vector
 
-GeoUtils also exposes vector methods through the {class}`vct <geoutils.VectorAccessor>` accessor on a
+GeoUtils also exposes vector methods through the {class}`vct <geoutils.GeoDataFrameVectorAccessor>` accessor on a
 {class}`geopandas.GeoDataFrame`. We recommend this interface for new workflows, while the {class}`~geoutils.Vector`
 object remains available with the same GeoUtils-specific methods.
 
@@ -63,7 +63,7 @@ Detailed information on the {class}`~geoutils.Vector` is printed using {func}`~g
 vect.info()
 ```
 
-A {class}`~geoutils.Vector` is saved to file by calling {func}`~geoutils.Raster.to_file` with a {class}`str` or a {class}`pathlib.Path`.
+A {class}`~geoutils.Vector` is saved to file by calling {meth}`~geoutils.Vector.to_file` with a {class}`str` or a {class}`pathlib.Path`.
 
 ```{code-cell} ipython3
 # Save vector to disk
@@ -89,8 +89,8 @@ In {class}`~geoutils.Vector`, those have three types of behaviour:
 
 1. Methods that return a geometric output (e.g., {attr}`~geoutils.Vector.boundary` or {func}`~geoutils.Vector.symmetric_difference`), which are cast into a
    {class}`~geoutils.Vector`,
-2. Methods that return a non-geometric series of same length as the number of features (e.g., {attr}`~geoutils.Vector.area` or {func}`~geoutils.Vector.overlaps`),
-   which can optionally be appended to the {class}`~geoutils.Vector` (instead of returning of the default {class}`pandas.Series`),
+2. Methods that return a non-geometric series of the same length as the number of features (e.g., {attr}`~geoutils.Vector.area` or {func}`~geoutils.Vector.overlaps`),
+   which return a {class}`pandas.Series` that can be assigned to a column of {attr}`~geoutils.Vector.gdf`,
 3. Methods that return any other type of output (e.g., {func}`~geoutils.Vector.has_sindex` or {func}`~geoutils.Vector.to_feather`), for which the output is
    preserved.
 
@@ -100,6 +100,14 @@ See the full list of supported methods in the {ref}`dedicated section of the API
 
 These behaviours aim to simplify the analysis of vectors, removing the need to operate on many different objects due to varying function outputs
 ({class}`geopandas.GeoDataFrame`, {class}`geopandas.GeoSeries`, {class}`shapely.Geometry`, {class}`pandas.Series`).
+
+```{code-cell} ipython3
+:tags: [remove-cell]
+
+# Show intentional warnings as just their type and message
+import warnings
+warnings.formatwarning = lambda message, category, *args, **kwargs: f"{category.__name__}: {message}\n"
+```
 
 ```{code-cell} ipython3
 # Example of method with geometric output
@@ -128,7 +136,7 @@ For more details on features applicable to vectors, refer to the following pages
 | Topic | Documentation |
 |---|---|
 | CRS, bounds, footprints, and local metric projections | {ref}`referencing` |
-| Reprojection, crop, clip, rasterization, and masking | {ref}`transformations` |
+| Reprojection, cropping, clipping, rasterization, and masking | {ref}`transformations` |
 | Proximity and metric buffering | {ref}`proximity` |
 | Match-reference arguments | {ref}`core-match-ref` |
 | Lazy and out-of-memory execution | {ref}`scalability-index` |

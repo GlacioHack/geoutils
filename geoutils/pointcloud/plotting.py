@@ -33,6 +33,7 @@ from geoutils._dispatch import (
 from geoutils.projtools import _get_bounds_projected
 from geoutils.vector.plotting import (
     _create_axes,
+    _create_colorbar_axes,
     _get_reference_bbox,
     _plot_geodataframe,
     _reduce_tick_label_overlap,
@@ -178,10 +179,10 @@ def _plot_pointcloud(
             ax0.set_aspect("equal")
         cax = None
         if add_cbar and column is not None:
-            colorbar = ax0.figure.colorbar(artist, ax=ax0, pad=0.02)
+            cax = _create_colorbar_axes(ax0)
+            colorbar = ax0.figure.colorbar(artist, cax=cax)
             if cbar_title is not None:
                 colorbar.set_label(cbar_title)
-            cax = colorbar.ax
     else:
         dataframe = display._dataset.compute() if is_dask_dataframe(display._dataset) else display._dataset
         cax = _plot_geodataframe(

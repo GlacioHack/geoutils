@@ -258,7 +258,7 @@ def profile_call(
 
     # A forced Dask profile must fail clearly when there is no worker cluster
     if use_dask and client is None:
-        distributed = import_optional("distributed", extra_name="benchmark")
+        distributed = import_optional("distributed")
         try:
             client = distributed.get_client()
         except ValueError as exc:

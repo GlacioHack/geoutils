@@ -577,7 +577,7 @@ def _dask_point_magnitude(
             columns=list(like._nongeo_columns),
             chunks=chunksize,
             downsample=getattr(like, "_downsample", 1),
-            as_type="geodataframe",
+            as_object_type="geodataframe",
         )
     else:
         dask_geopandas = import_optional("dask_geopandas")

@@ -561,6 +561,22 @@ class DataArrayPointCloudAccessor(PointCloudBase):
 # Dataset accessor
 
 
+def _pointcloud_array_to_dataset(points: xr.DataArray) -> xr.Dataset:
+    """Expose point attributes as Dataset variables with shared coordinates and CRS metadata."""
+
+    # Value attributes become separate variables while coordinates and lazy graphs stay shared
+    names = [name for name in points.pc.columns if name != points.name and name != "_geometry_z"]
+    dataset = points.rename({"x": "x_point", "y": "y_point"}).to_dataset().reset_coords(names)
+    dataset = dataset[[points.name, *names]]
+    for name in dataset.data_vars:
+        dataset[name].attrs["crs"] = points.attrs.get("crs")
+
+    # Copy point metadata and file encoding without loading the source arrays
+    dataset.attrs = points.attrs.copy()
+    dataset.encoding = points.encoding.copy()
+    return dataset
+
+
 def _point_variables(dataset: xr.Dataset) -> list[str]:
     """Identify value variables aligned on the Dataset's common point dimension."""
 
@@ -689,7 +705,7 @@ class DatasetPointCloudAccessor:
     coordinates or row selection would affect an unselected variable.
 
     A point variable is recognized as a 1D variable on the common point dimension with shared X/Y coordinates.
-    The ``variables`` property of the accessor lists all variables recognized as point values.
+    The ``compatible_variables`` property maps names to DataArrays for all variables recognized as point values.
     """
 
     def __init__(self, xarray_obj: xr.Dataset) -> None:
@@ -697,9 +713,14 @@ class DatasetPointCloudAccessor:
         self._obj = xarray_obj
 
     @property
-    def variables(self) -> list[str]:
-        """Names of aligned point value variables, in Dataset order."""
-        return _point_variables(self._obj)
+    def compatible_variables(self) -> Mapping[str, xr.DataArray]:
+        """
+        Compatible point variables as Xarray's mapping of names to DataArrays.
+
+        Use keys() to list their names in Dataset order. The mapping shares the original data without loading
+        file-backed values or computing Dask arrays.
+        """
+        return self._obj[_point_variables(self._obj)].data_vars
 
     def _wrap_output_point(
         self, operation: str, variables: Sequence[str] | None, /, *args: Any, **kwargs: Any
@@ -718,7 +739,7 @@ class DatasetPointCloudAccessor:
 
         # 1/ Check inputs, in particular their coordinates and CRS
         dataset = _prepare_point_dataset(self._obj)
-        selected = _select_dataset_variables(dataset, self.variables, variables)
+        selected = _select_dataset_variables(dataset, self.compatible_variables.keys(), variables)
         if operation == "subsample":
             mask = kwargs.pop("mask", None)
             random_state = kwargs.pop("random_state", None)
@@ -927,7 +948,7 @@ class DatasetPointCloudAccessor:
 
         # 1/ Checks to validate selection/arguments
         dataset = _prepare_point_dataset(self._obj)
-        selected = _select_dataset_variables(dataset, self.variables, variables)
+        selected = _select_dataset_variables(dataset, self.compatible_variables.keys(), variables)
 
         # 2/ We prepare point inputs and the destination grid for DataArray methods
 
@@ -988,7 +1009,7 @@ class DatasetPointCloudAccessor:
 
         # Validate every selected value before reading point arrays or sampling pairs
         dataset = _prepare_point_dataset(self._obj)
-        selected = _select_dataset_variables(dataset, self.variables, variables)
+        selected = _select_dataset_variables(dataset, self.compatible_variables.keys(), variables)
         if operation == "variogram" and any(dataset[name].dtype.kind not in "biuf" for name in selected):
             raise TypeError("Point variograms require numeric value variables.")
 
@@ -1006,7 +1027,7 @@ class DatasetPointCloudAccessor:
             point = support.pc.set_data_name(name)
 
             # Pair sampling reads only this variable and its spatial coordinates
-            point = point.drop_vars([other for other in self.variables if other != name])
+            point = point.drop_vars([other for other in self.compatible_variables if other != name])
             results[name] = getattr(point.pc, operation)(*args, **kwargs)
         return results
 
@@ -1040,7 +1061,7 @@ class DatasetPointCloudAccessor:
         :returns: Named statistics, a grouped table, or a grouped table and masks.
         """
         dataset = _prepare_point_dataset(self._obj)
-        selected = _select_dataset_variables(dataset, self.variables, variables)
+        selected = _select_dataset_variables(dataset, self.compatible_variables.keys(), variables)
         if "values" in kwargs:
             raise ValueError("Use 'variables' to select Dataset point values instead of 'values'.")
         support = _point_dataset_support(dataset, selected)
@@ -1055,7 +1076,7 @@ class DatasetPointCloudAccessor:
         :param kwargs: Options passed to the DataArray point writer.
         """
         dataset = _prepare_point_dataset(self._obj)
-        selected = _select_dataset_variables(dataset, self.variables, variables)
+        selected = _select_dataset_variables(dataset, self.compatible_variables.keys(), variables)
         support = _point_dataset_support(dataset[selected], selected)
         support.pc.to_file(filename, **kwargs)
 
@@ -1070,7 +1091,7 @@ class DatasetPointCloudAccessor:
         :param kwargs: Header and partition options.
         """
         dataset = _prepare_point_dataset(self._obj)
-        selected = _select_dataset_variables(dataset, self.variables, variables)
+        selected = _select_dataset_variables(dataset, self.compatible_variables.keys(), variables)
         support = _point_dataset_support(dataset[selected], selected)
         support.pc.to_las(filename, **kwargs)
 
@@ -1086,6 +1107,6 @@ class DatasetPointCloudAccessor:
         :param kwargs: Partition and compression options.
         """
         dataset = _prepare_point_dataset(self._obj)
-        selected = _select_dataset_variables(dataset, self.variables, variables)
+        selected = _select_dataset_variables(dataset, self.compatible_variables.keys(), variables)
         support = _point_dataset_support(dataset[selected], selected)
         support.pc.to_parquet(filename, **kwargs)

@@ -190,7 +190,7 @@ class VariogramModel:
             raise AssertionError("A base variogram model must define its range and partial sill.")
 
         # Pass parameters in the order expected by the selected SciKit-GStat model function
-        skgstat = import_optional("skgstat", package_name="scikit-gstat", extra_name="geostat")
+        skgstat = import_optional("skgstat", package_name="scikit-gstat")
         model_function = getattr(skgstat.models, self.model_name)
         arguments: list[float] = [self.effective_range, self.partial_sill]
         if self.model_name == "matern":
@@ -470,7 +470,7 @@ class Variogram:
         """
 
         # Import SciKit-GStat only for this direct coordinate-based estimate
-        skgstat = import_optional("skgstat", package_name="scikit-gstat", extra_name="geostat")
+        skgstat = import_optional("skgstat", package_name="scikit-gstat")
 
         # Put coordinates into one row per observation and check value length
         coordinates_array = np.asarray(coordinates, dtype=float)
@@ -644,7 +644,7 @@ class Variogram:
             estimator_function = estimator
             estimator_name = getattr(estimator, "__name__", "callable")
         else:
-            skgstat = import_optional("skgstat", package_name="scikit-gstat", extra_name="geostat")
+            skgstat = import_optional("skgstat", package_name="scikit-gstat")
             if not hasattr(skgstat.estimators, estimator):
                 raise ValueError(f"Unknown SciKit-GStat ``estimator`` {estimator!r}.")
             estimator_function = getattr(skgstat.estimators, estimator)
@@ -734,7 +734,7 @@ class Variogram:
         if np.count_nonzero(valid) < 2:
             raise ValueError("At least two finite empirical lag classes are required for fitting.")
 
-        skgstat = import_optional("skgstat", package_name="scikit-gstat", extra_name="geostat")
+        skgstat = import_optional("skgstat", package_name="scikit-gstat")
         parameter_counts = [3 if name in {"stable", "matern"} else 2 for name in model_names]
 
         def summed_model(distance: NDArrayNum, *parameters: float) -> NDArrayNum:
@@ -1240,7 +1240,7 @@ class Variogram:
         """
 
         # Import GSTools only for this conversion and require a fitted model
-        gstools = import_optional("gstools", extra_name="geostat")
+        gstools = import_optional("gstools")
         if self.model is None:
             raise ValueError("A fitted variogram model is required for conversion.")
         if dim <= 0:
@@ -1275,7 +1275,7 @@ class Variogram:
         """
 
         # Import GPyTorch only for this conversion and require a fitted model
-        gpytorch = import_optional("gpytorch", extra_name="gp")
+        gpytorch = import_optional("gpytorch")
         if self.model is None:
             raise ValueError("A fitted variogram model is required for conversion.")
         kernel, noise = _model_to_gpytorch(

@@ -1,7 +1,8 @@
 {% set name = objname.split('.')[-1] %}
 
-gdf.vct.{{ name }}{% if objtype == "method" %}(){% endif %} or Vector.{{ name }}{% if objtype == "method" %}(){% endif %}
-=================================================================================
+{% set title = 'gdf.vct.' ~ name ~ ('()' if objtype == 'method' else '') ~ ' or Vector.' ~ name ~ ('()' if objtype == 'method' else '') %}
+{{ title }}
+{{ '=' * (title|length) }}
 
 .. currentmodule:: geoutils
 

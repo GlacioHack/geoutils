@@ -385,7 +385,7 @@ def stats(
                 "The Flox backend requires ``subsample_per_group``=False, ``return_masks``=False, "
                 "``mp_config``=None and ``strategy``='auto'."
             )
-        import_optional("flox", extra_name="flox")
+        import_optional("flox")
 
         # Warn before spatial selection reads values from raster or point cloud containers
         spatial_inputs = [source, at, mask, *by.values(), *(values.values() if isinstance(values, Mapping) else [])]

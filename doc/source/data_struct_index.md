@@ -1,8 +1,8 @@
-(data-object-index)=
-# Geospatial data objects
+(data-struct-index)=
+# Geospatial data structures
 
 GeoUtils extends Xarray and GeoPandas through accessors and also provides dedicated GeoUtils objects. These pages
-describe the data structure for each geospatial type and the differences between its two interfaces.
+describe the data structures for each geospatial object type, and the differences between these interfaces.
 
 ```{toctree}
 :maxdepth: 2

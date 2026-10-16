@@ -37,7 +37,7 @@ from geoutils.pointcloud.dataframe import (
 )
 from geoutils.pointcloud.las import _write_laspy
 from geoutils.vector.pd_accessor import (
-    VectorAccessor,
+    GeoDataFrameVectorAccessor,
     _replace_geodataframe,
 )
 
@@ -48,7 +48,7 @@ def _register_dask_pointcloud_accessor() -> None:
     """
     Add the ``.pc`` property to Dask DataFrames when lazy point cloud support is first needed.
 
-    Pandas and Dask keep separate lists of dataframe accessors. The Pandas decorator on GeoPandasPointCloudAccessor
+    Pandas and Dask keep separate lists of dataframe accessors. The Pandas decorator on GeoDataFramePointCloudAccessor
     therefore makes ``.pc`` available only on Pandas and GeoPandas objects. This function adds the same accessor to
     Dask objects without importing the optional Dask DataFrame package during ordinary GeoUtils imports.
     """
@@ -60,7 +60,7 @@ def _register_dask_pointcloud_accessor() -> None:
         return
 
     # Import Dask only when a lazy point cloud is requested
-    # Attach GeoPandasPointCloudAccessor as its ``.pc`` property
+    # Attach GeoDataFramePointCloudAccessor as its ``.pc`` property
     # https://docs.dask.org/en/stable/dataframe-extend.html#accessors
     import_optional("dask")
     with warnings.catch_warnings():
@@ -68,7 +68,7 @@ def _register_dask_pointcloud_accessor() -> None:
         warnings.filterwarnings("ignore", message="registration of accessor.*", category=UserWarning)
         from dask.dataframe.accessor import register_dataframe_accessor
 
-        register_dataframe_accessor("pc")(GeoPandasPointCloudAccessor)
+        register_dataframe_accessor("pc")(GeoDataFramePointCloudAccessor)
 
     _DASK_ACCESSOR_REGISTERED = True
 
@@ -98,7 +98,7 @@ def _validate_point_partition(ds: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
 
 
 @pd.api.extensions.register_dataframe_accessor("pc")
-class GeoPandasPointCloudAccessor(GeometryPointCloudBase, VectorAccessor):  # type: ignore[misc]
+class GeoDataFramePointCloudAccessor(GeometryPointCloudBase, GeoDataFrameVectorAccessor):  # type: ignore[misc]
     """
     This class defines the GeoPandas dataframe accessor ``pc`` for point clouds.
 
@@ -109,7 +109,7 @@ class GeoPandasPointCloudAccessor(GeometryPointCloudBase, VectorAccessor):  # ty
     """
 
     _ACCESSOR_OUTPUT = True
-    _dataset = VectorAccessor._dataset
+    _dataset = GeoDataFrameVectorAccessor._dataset
 
     def __init__(self, pandas_obj: pd.DataFrame) -> None:
         """Validate the dataframe and infer the point-cloud data attribute."""

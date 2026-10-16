@@ -2,11 +2,11 @@
 From/to GeoPandas
 =================
 
-This example demonstrates using the :class:`vct <geoutils.VectorAccessor>` accessor on a :class:`geopandas.GeoDataFrame`.
+This example demonstrates using the :class:`vct <geoutils.GeoDataFrameVectorAccessor>` accessor on a :class:`geopandas.GeoDataFrame`.
 """
 
 # %%
-# GeoUtils vector methods are available directly on a :class:`geopandas.GeoDataFrame` through its ``vct`` accessor.
+# GeoUtils vector methods are available directly on a :class:`geopandas.GeoDataFrame` through its :class:`vct <geoutils.GeoDataFrameVectorAccessor>` accessor.
 
 import geopandas as gpd
 

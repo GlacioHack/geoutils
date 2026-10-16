@@ -13,13 +13,13 @@ kernelspec:
 (scalability-concept)=
 # Concept definitions
 
-This section describes scalability concepts that are important to grasp to efficiently manipulate geospatial objects.
+This section describes **scalability concepts** that are important to grasp to efficiently manipulate geospatial objects.
 
-Scalable execution relies on three complementary mechanisms:
+Scalable execution relies on **three complementary mechanisms**, detailed further below:
 
-- {ref}`Deferred I/O with implicit loading <core-lazy-load>`: Operations that update data-related metadata without loading the underlying array or geometries,
-- **Chunked execution:** Operations that process raster tiles or dataframe partitions separately to limit memory usage,
-- **Lazy execution:** Operations whose computation is deferred until explicitly requested.
+- **{ref}`core-lazy-load`**: Operations that update data-related metadata without loading the underlying array or geometries,
+- **{ref}`scalability-chunked-execution`**: Operations that process raster tiles or dataframe partitions separately to limit memory usage,
+- **{ref}`scalability-lazy-execution`**: Operations whose computation is deferred until explicitly requested.
 
 These mechanisms are often combined (e.g., Dask operations are always **chunked and lazy**) but are conceptually independent.
 
@@ -28,6 +28,60 @@ The above concepts only apply to operations that interact with the underlying **
 Naturally, all **metadata operations** (e.g., accessing {attr}`~RasterBase.crs`, {attr}`~RasterBase.bbox`, or {meth}`~RasterBase.info`) have no effect on the array, and therefore do not trigger any loading or scalable execution.
 ```
 
+(core-lazy-load)=
+## Deferred I/O and implicit loading
+
+**Deferred input/output** refers to operations that modify only **internal I/O metadata**, avoiding reading the data entirely and postponing loading.
+
+All three GeoUtils objects, {class}`~geoutils.Raster`, {class}`~geoutils.Vector` and
+{class}`~geoutils.PointCloud`, support **deferred I/O and implicit loading** when opened from files.
+Their constructors read metadata first; values and geometries are read when an operation needs them.
+The {attr}`~RasterBase.is_loaded` or {attr}`~VectorBase.is_loaded` property reports whether the data are in memory.
+
+For rasters, crop(), icrop(), copy(), and translate() can update an unloaded object without reading its pixels.
+These behave similarly to Xarray's {meth}`~xarray.DataArray.sel`, {meth}`~xarray.DataArray.copy`, or
+{meth}`~xarray.DataArray.assign_coords`. For vectors and point clouds, crop() stores a spatial selection that
+is applied when their geometries or values are read. The file format determines how efficiently those rows
+can be read; see {ref}`scalability-formats`.
+
+When using the Xarray {class}`rst <geoutils.DataArrayRasterAccessor>` accessor, this behavior follows the **native Xarray deferred I/O model**. The {class}`~geoutils.Raster` class implements the
+same behavior so that both APIs have consistent semantics.
+
+An important aspect of **deferred I/O** is that it works with both **in-memory** (NumPy) and **scalable backends** (Dask), allowing
+to extract parts of large files without any chunked or lazy considerations.
+
+```{code-cell}
+import geoutils as gu
+
+# We open the dataset without Dask backend (same behaviour with Raster class)
+filename_rast = gu.examples.get_path("exploradores_aster_dem")
+ds = gu.open_raster(filename_rast)
+
+# We crop the data
+ds_cropped = ds.rst.icrop((0, 0, 100, 100))
+
+# Neither input nor output raster are loaded yet
+print(f"Is input raster loaded after cropping (deferred I/O)? {ds.rst.is_loaded}")
+print(f"Is output raster loaded after cropping (deferred I/O)? {ds_cropped.rst.is_loaded}")
+```
+
+**Implicit loading** reads data into memory when requested: {attr}`~RasterBase.data` for a Raster,
+{attr}`~geoutils.Vector.gdf` for a Vector, or {attr}`~PointCloudBase.data` and {attr}`~geoutils.Vector.gdf`
+for a PointCloud. Ordinary in-memory operations that need these values or geometries also trigger loading.
+Metadata such as CRS and bounds remain available without loading the data.
+
+```{code-cell}
+# Is the above raster loaded?
+print(f"Is raster loaded before data operation? {ds.rst.is_loaded}")
+
+# We compute statistics, which loads the array
+ds.rst.stats()
+
+# The raster is now loaded
+print(f"Is raster loaded after data operation? {ds.rst.is_loaded}")
+```
+
+(scalability-chunked-execution)=
 ## Chunked execution
 
 **Chunked execution** refers to processing raster data **tile-by-tile** or vector and point data **partition-by-partition** instead of loading the full dataset into memory.
@@ -36,7 +90,7 @@ This enables **out-of-core execution**, allowing datasets larger than available 
 
 In GeoUtils, chunked execution is implemented through two backends:
 
-- **Dask**, used through the Xarray {class}`rst <geoutils.DataArrayRasterAccessor>` and GeoPandas {class}`vct <geoutils.VectorAccessor>` and {class}`pc <geoutils.GeoPandasPointCloudAccessor>` accessors,
+- **Dask**, used through the Xarray {class}`rst <geoutils.DataArrayRasterAccessor>` and GeoPandas {class}`vct <geoutils.GeoDataFrameVectorAccessor>` and {class}`pc <geoutils.GeoDataFramePointCloudAccessor>` accessors,
 - **Multiprocessing**, used through supported methods of the {class}`~geoutils.Raster`, {class}`~geoutils.Vector` and {class}`~geoutils.PointCloud` objects.
 
 Both backends read and process chunks separately, keeping peak memory usage proportional to the chunk size rather than the full dataset size.
@@ -64,13 +118,14 @@ print(f"Is input raster loaded after filtering? {rast.is_loaded}")
 print(f"Is output raster loaded after filtering? {rast_filt.is_loaded}")
 ```
 
+(scalability-lazy-execution)=
 ## Lazy execution
 
 Lazy execution refers to **deferring computation until results are explicitly requested**.
 
 In GeoUtils, lazy execution is available through the Xarray {class}`rst <geoutils.DataArrayRasterAccessor>` accessor with
-**Dask arrays**, and the GeoPandas {class}`vct <geoutils.VectorAccessor>` and
-{class}`pc <geoutils.GeoPandasPointCloudAccessor>` accessors with **Dask dataframes**.
+**Dask arrays**, and the GeoPandas {class}`vct <geoutils.GeoDataFrameVectorAccessor>` and
+{class}`pc <geoutils.GeoDataFramePointCloudAccessor>` accessors with **Dask dataframes**.
 
 Operations build a **Dask computation graph** instead of executing immediately. The computation is triggered only when required, for example when calling
 `compute()` directly or when writing results to disk. It is particularly useful when **chaining multiple operations**, because intermediate results do not need to be materialized or

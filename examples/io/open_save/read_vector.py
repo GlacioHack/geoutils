@@ -2,7 +2,7 @@
 Open/save a vector
 ==================
 
-This example demonstrates opening a vector with :func:`geoutils.open_vector` and saving it with the :class:`vct <geoutils.VectorAccessor>` accessor.
+This example demonstrates opening a vector with :func:`geoutils.open_vector` and saving it with the :class:`vct <geoutils.GeoDataFrameVectorAccessor>` accessor.
 """
 
 import geoutils as gu
@@ -30,6 +30,6 @@ vect.vct.info()
 vect.vct.plot(column="Area", cbar_title="Area (km²)")
 
 # %%
-# Finally, a vector is saved using :meth:`~geoutils.VectorAccessor.to_file`.
+# Finally, a vector is saved using :meth:`~geoutils.GeoDataFrameVectorAccessor.to_file`.
 
 vect.vct.to_file("myvector.gpkg")

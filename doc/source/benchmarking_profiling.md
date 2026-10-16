@@ -85,7 +85,7 @@ def raster_workflow(source_raster):
     left, bottom, right, top = source_raster.bbox
     cropped = source_raster.crop((left, bottom, (left + right) / 2, top))
     reprojected = cropped.reproject(crs=4326)
-    filtered = reprojected.filter("mean", size=3)
+    filtered = reprojected.filter("mean", window=3)
     return filtered.stats(["mean", "std", "nmad"])
 
 # The workflow and its four numerical operations are added to the collection

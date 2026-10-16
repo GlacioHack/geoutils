@@ -99,9 +99,9 @@ def prepare_estimator(estimator: str) -> None:
 
     # ASV records an unavailable optional package as a skipped case, and compilation stays outside timing
     try:
-        import_optional("skgstat", package_name="scikit-gstat", extra_name="geostat")
+        import_optional("skgstat", package_name="scikit-gstat")
     except ImportError as exc:
-        raise NotImplementedError("Install geoutils[geostat] to measure variogram estimators") from exc
+        raise NotImplementedError("Install geoutils[opt] to measure variogram estimators") from exc
     Variogram.from_pairs(prepare_variogram_pairs(64), estimator=estimator, n_lags=4)
 
 

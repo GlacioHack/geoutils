@@ -156,9 +156,9 @@ class TestPredictorsChunked:
         np.testing.assert_array_equal(np.asarray(lazy.compute()), expected.to_nanarray())
         np.testing.assert_array_equal(multiproc.to_nanarray(), expected.to_nanarray())
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_predict_magnitude__point_dask_mp_equal(
-        self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path
+        self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
     ) -> None:
         """Checks that Dask and MP point partitions predict the eager values in the same row order."""
 
@@ -177,7 +177,9 @@ class TestPredictorsChunked:
         # 2/ Same file creation/opening with MP/Dask
         source_path = tmp_path / "points.gpkg"
         points.to_file(source_path)
-        dask_points = gu.open_pointcloud(str(source_path), data_name=points.data_name, chunks=3, as_type=as_type)
+        dask_points = gu.open_pointcloud(
+            str(source_path), data_name=points.data_name, chunks=3, as_object_type=as_object_type
+        )
         file_points = gu.PointCloud(source_path, data_name=points.data_name)
         lazy = structure.predict_magnitude({"quality": "quality"}, like=dask_points)
         assert not dask_points.pc.is_loaded and not lazy.pc.is_loaded
@@ -189,7 +191,7 @@ class TestPredictorsChunked:
 
         # 3/ Exact equality across backends
         computed = lazy.compute()
-        values = computed.data if as_type == "dataarray" else computed[points.data_name]
+        values = computed.data if as_object_type == "dataarray" else computed[points.data_name]
         np.testing.assert_array_equal(values, expected.data)
         np.testing.assert_array_equal(multiproc.data, expected.data)
 
