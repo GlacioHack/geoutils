@@ -1,9 +1,9 @@
 (scalability-support)=
 # Supported operations
 
-GeoUtils supports **scalable execution for most of its raster and point cloud methods**, including nearly all **raster–point** and **raster–vector** interface operations. Support for **vector** accessors is partially supported through **Dask-GeoPandas**.
+GeoUtils supports **scalable execution for most of its operations**, nearly all for rasters and point clouds, and most for vectors. 
 
-Chunked implementations can run through either **Dask** (via the Xarray and Pandas accessors) or **Multiprocessing** (via GeoUtils objects such as {class}`~geoutils.Raster`).
+Chunked implementations can run through either **Dask** (via the Xarray and Pandas accessors) or **Multiprocessing** (via GeoUtils objects).
 
 The interfaces expose shared geospatial methods, and both chunked backends reuse their numerical calculations.
 Tests compare chunked and in-memory results, using numerical tolerances for floating point reductions.

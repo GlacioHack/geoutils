@@ -373,6 +373,7 @@ def _open_point_parquet(
         use_z=use_z,
     )
     result.attrs.update({key: value for key, value in metadata["attrs"].items() if key.startswith("dataframe_")})
+    result.attrs["row_group_sizes"] = [count for _, _, count in metadata["row_groups"]]
     if row_labels is not None:
         # Leave stored labels lazy without asking Xarray to create an eager Pandas index
         coordinates = xr.Coordinates({"point": ("point", row_labels)}, indexes={})
@@ -455,6 +456,7 @@ def _open_parquet_geodataframe(
 
     # Cache counts and extents from footers, so lazy metadata queries do not run row readers
     attrs = {key: metadata[key] for key in ("point_count", "crs", "bounds", "geometry_type")}
+    attrs["row_group_sizes"] = [count for _, _, count in metadata["row_groups"]]
     return _build_pointcloud_output(
         frame, data_name=active_column, as_dataframe=True, attrs=attrs, preserve_locations=True
     )

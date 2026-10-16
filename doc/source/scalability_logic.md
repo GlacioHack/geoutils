@@ -9,18 +9,19 @@ Below, we detail the logic behind our **chunked execution** implementations, bot
 
 ## Summary
 
-Several operations are easy to support for **chunked execution** as they directly reuse existing **Dask** methods:
-- The {meth}`~RasterBase.filter` function uses {func}`~dask.array.map_overlap` with a `depth` (overlap) half the `size` of the filter,
-- The {meth}`~RasterBase.proximity` function uses {func}`~dask.array.map_overlap` with a `max_distance` parameter,
-- Vector and point cloud cropping, clipping, reprojection and translation preserve or map GeoPandas partitions.
+Several operations are easy to support for **chunked execution** as they directly reuse **Dask** methods:
+- The {meth}`rst.filter() <RasterBase.filter>` function uses {func}`~dask.array.map_overlap` with a `depth` (overlap) half the `size` of the filter,
+- The {meth}`rst.proximity() <RasterBase.proximity>` function uses {func}`~dask.array.map_overlap` with a `max_distance` parameter,
+- The {meth}`vct.crop() <VectorBase.crop>`, {meth}`vct.clip() <VectorBase.clip>`, {meth}`vct.reproject() <VectorBase.reproject>` and {meth}`vct.translate() <VectorBase.translate>` functions use Dask-GeoPandas methods or {meth}`~dask.dataframe.DataFrame.map_partitions` to process GeoPandas partitions independently,
+- The {meth}`pc.crop() <geoutils.pointcloud.base.GeometryPointCloudBase.crop>`, {meth}`pc.clip() <geoutils.pointcloud.base.GeometryPointCloudBase.clip>`, {meth}`pc.reproject() <geoutils.pointcloud.base.GeometryPointCloudBase.reproject>` and {meth}`pc.translate() <geoutils.pointcloud.base.GeometryPointCloudBase.translate>` functions apply the same operations to point partitions.
 
-Other operations are more complex and require {ref}`specific logic described further below<specific-logic>` and summarized as:
-- The {meth}`~RasterBase.reproject` function **maps the intersection of projected source grid chunks for each destination chunk** (with potentially different CRS, resolution and bounds),
-- The {meth}`~RasterBase.polygonize` function implements **three chunk-boundary reconciliation strategies** with different considerations for connected-component labeling and stitching of geometries,
-- The {meth}`~VectorBase.rasterize` function performs a geometry subsetting then directly **maps rasterized output blocks** only utilizing these subset geometries,
-- The {meth}`~RasterBase.interp_at_points` function performs a **fast regular-grid mapping of point locations in raster chunks**, expanding raster chunks by a few pixels depending on the resampling method, then performing ordered concatenation of outputs,
-- The {meth}`~PointCloudBase.grid` function **maps point partitions to independent output raster chunks**.
-- The {meth}`~RasterBase.subsample`, co-sampling, pair sampling and statistics count or select data per tile or partition before combining bounded results,
+Other operations are more complex, requiring {ref}`specific logic described further below<specific-logic>`, in short:
+- The {meth}`rst.reproject() <RasterBase.reproject>` function **maps the intersection of projected source grid chunks for each destination chunk** (with potentially different CRS, resolution and bounds),
+- The {meth}`rst.polygonize() <RasterBase.polygonize>` function implements **three chunk-boundary reconciliation strategies** with different considerations for connected-component labeling and stitching of geometries,
+- The {meth}`vct.rasterize() <VectorBase.rasterize>` function performs a geometry subsetting then directly **maps rasterized output blocks** only utilizing these subset geometries,
+- The {meth}`rst.interp_at_points() <RasterBase.interp_at_points>` function performs a **fast regular-grid mapping of point locations in raster chunks**, expanding raster chunks by a few pixels depending on the resampling method, then performing ordered concatenation of outputs,
+- The {meth}`pc.grid() <PointCloudBase.grid>` function **maps point partitions to independent output raster chunks**.
+- The {meth}`rst.subsample() <RasterBase.subsample>`, co-sampling, pair sampling and statistics count or select data per tile or partition before combining bounded results,
 
 (specific-logic)=
 ## Logic of implementations

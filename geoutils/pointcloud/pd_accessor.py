@@ -220,6 +220,7 @@ class GeoDataFramePointCloudAccessor(GeometryPointCloudBase, GeoDataFrameVectorA
         scales: tuple[float, float, float] | None = None,
         chunks: int | None = None,
         mp_config: Any = None,
+        laz_chunk_size: int | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -233,6 +234,7 @@ class GeoDataFramePointCloudAccessor(GeometryPointCloudBase, GeoDataFrameVectorA
         :param chunks: Number of points per sequential write chunk. Dask inputs use their existing partitions.
         :param mp_config: Multiprocessing configuration for writing eager point-cloud chunks in workers. Not supported
             for Dask-backed point clouds.
+        :param laz_chunk_size: Number of points per compressed LAZ disk chunk. Requires Lazrs; None uses its default.
         :param kwargs: Additional attributes to set on the LasPy header.
         """
 
@@ -246,5 +248,6 @@ class GeoDataFramePointCloudAccessor(GeometryPointCloudBase, GeoDataFrameVectorA
             scales=scales,
             chunks=chunks,
             mp_config=mp_config,
+            laz_chunk_size=laz_chunk_size,
             **kwargs,
         )

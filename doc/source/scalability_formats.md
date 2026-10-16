@@ -16,28 +16,28 @@ kernelspec:
 GeoUtils supports several **geospatial file formats** for rasters, vectors and point clouds, including formats
 suited to **large datasets** and **cloud storage**.
 
-Note that these formats are inherently supported through packages such as
+Note that these formats are supported through other packages such as
 [Rasterio](https://rasterio.readthedocs.io/en/stable/), [Pyogrio](https://pyogrio.readthedocs.io/en/latest/),
 [PyArrow](https://arrow.apache.org/docs/python/), [LasPy](https://laspy.readthedocs.io/en/latest/) and
-[Zarr](https://zarr.readthedocs.io/en/stable/). Below, we simply examplify **how to use them through GeoUtils**.
-See {ref}`dependencies` for GeoUtils optional dependencies
-and [Xarray's installation guide](https://docs.xarray.dev/en/stable/getting-started-guide/installing.html#for-netcdf-and-io)
-for its optional file readers.
+[Zarr](https://zarr.readthedocs.io/en/stable/). Below, we simply **examplify how to use them through GeoUtils**.
 
-This page focuses on **how to choose a file format that fits your scalable analysis**, as a file format and its storage
-layout sometimes determine how much data must be read for an operation.
-These choices complement {ref}`chunked execution <scalability-usage>`, which limits memory during computation.
+First, we help {ref}`<scalability-format-choice` for your data, then explain how to perform
+{ref}`scalability-cloud`, and finally how to deal with format-dependent intricacies to 
+optimally perform {ref}`scalability-format-chunks`.
 
+(scalability-format-choice)=
 ## Choosing a file format
 
 For large data analysis, we recommend **COG** for rasters, **COPC** for LiDAR,
 **GeoParquet** for vectors and point cloud attributes, or **Zarr** for multidimensional datasets.
-Choose the format and its tile, row group or chunk layout to match the data selections used in your analysis.
 
-The table summarizes format capabilities.
-**Chunked I/O** means efficient block/partition reading for large files.
+The table below summarizes format capabilities.
+**Chunked I/O** means reading or writing in blocks/partitions, without loading the whole file.
 **Cloud reading** means efficient access and streaming of remote files.
-Formats marked "No" for cloud reading can still be opened remotely, but may require reading much more data.
+
+```{important}
+At present, LasPy (and thus GeoUtils) **supports only reading COPC files**, but not writing them.
+```
 
 ```{list-table}
 :widths: 2 1 1 4
@@ -121,23 +121,30 @@ Formats marked "No" for cloud reading can still be opened remotely, but may requ
 
 **Zarr is especially useful for large time series and datasets with many variables.** Its compressed chunks can
 be read and written independently on local disks or in cloud object storage, allowing Dask workers to process and
-save different parts of a dataset in parallel. This supports analysis of datasets larger than memory and avoids
-rewriting the full dataset when updating selected regions. See
-[Xarray's Zarr guide](https://docs.xarray.dev/en/stable/user-guide/io.html#zarr).
+save different parts of a dataset in parallel. See [Xarray's Zarr guide](https://docs.xarray.dev/en/stable/user-guide/io.html#zarr).
 
-Ordinary GeoTIFFs support [windowed I/O](https://rasterio.readthedocs.io/en/stable/topics/windowed-rw.html),
-and Shapefiles can be processed in feature batches; neither requires loading all values at once. For remote
-GeoTIFFs, [GDAL recommends tiles and overviews](https://gdal.org/en/stable/user/virtual_file_systems.html#network-cloud-friendliness-and-file-formats).
+**COGs support efficient spatial reads at different resolutions.** They organize tiles, overviews and
+metadata so readers can fetch the blocks needed for a spatial window or a coarser resolution. 
+Remote reads avoid downloading the full raster. See our {ref}`scalability-downsampling-overviews` example.
 
-**COPC can speed up spatial operations** by letting GeoUtils
-[read points from the area needed](https://laspy.readthedocs.io/en/latest/api/laspy.copc.html) instead of repeatedly
-scanning the file. Use `level` to select {ref}`levels of detail <scalability-downsampling-copc>`, or `downsample`
-to select a smaller point sample automatically. Both work with `chunks` for lazy reading.
+**COPC can speed up spatial operations** by letting GeoUtils read points from the area needed [through LasPy](https://laspy.readthedocs.io/en/latest/api/laspy.copc.html) instead of repeatedly
+scanning the file. They also store levels of detail, progressive subsamples of the point data equivalent to overviews. 
+Both work with chunked, lazy reading. See our {ref}`scalability-downsampling-copc` example.
 
-Writing COPC requires building its spatial index with a writer such as
-[PDAL](https://pdal.io/en/stable/stages/writers.copc.html); LasPy supports reading COPC, but does not write it.
+**GeoParquet is useful for vectors and point clouds with many attributes.** It lets readers
+load only selected column attributes, while row groups allow data to be processed in chunks. Compression 
+reduces storage and transfer sizes. See [PyArrow's Parquet guide](https://arrow.apache.org/docs/python/parquet).
 
-Below, we use a synthetic LiDAR survey and elevation raster, created in a temporary directory `data_dir`.
+(scalability-cloud)=
+## Reading from cloud storage
+
+To read a remote file, simply pass an **HTTPS URL** or an **S3 address** to {func}`~geoutils.open_raster`,
+{func}`~geoutils.open_pointcloud` or {func}`~geoutils.open_vector`, using the same options as for a local file.
+
+```{note}
+These executable examples reuse the **mock HTTP/S3 server from our tests**.
+Replace `server_url` in the HTTP example and `bucket_url` in the S3 example below with your own addresses.
+```
 
 ```{code-cell} ipython3
 :tags: [hide-input]
@@ -181,139 +188,266 @@ cloud.intensity = np.full(point_rows.size, 100, dtype="uint16")
 cloud.write(data_dir / "survey.laz")
 ```
 
-(scalability-point-reading)=
-## Reading selected point attributes
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show mock server preparation"
+:  code_prompt_hide: "Hide mock server preparation"
 
-By default, {func}`~geoutils.open_pointcloud` returns an **Xarray DataArray**. For LAS and native GeoParquet point
-encodings, values and coordinates are read directly into numerical arrays. Other vector formats are read through
-GeoPandas.
+import os
+import sys
+from contextlib import ExitStack
+from shutil import copyfile
 
-The `columns` argument selects which attributes to read from LAS or GeoParquet files. For example, we open the
-survey in chunks with classification alongside the main elevation values:
+import fsspec
+import geoutils as gu
+from pytest import MonkeyPatch
+
+sys.path.insert(0, str(Path("../..").resolve()))
+from tests.remote_helpers import mock_remote_files
+
+# Start the shared test server and restore its settings when the examples finish
+resources = ExitStack()
+settings = resources.enter_context(MonkeyPatch.context())
+remote = resources.enter_context(mock_remote_files(data_dir, settings, basic_auth=("demo", "geoutils")))
+server_port = remote.endpoint.rsplit(":", 1)[1]
+settings.setenv("GDAL_HTTP_HEADERS", "")
+settings.setitem(fsspec.config.conf, "http", {})
+
+# Prepare a COG and GeoParquet survey for network reads
+with gu.open_raster(str(data_dir / "elevation.tif")) as source:
+    source.rst.to_file(
+        str(remote.directory / "elevation.tif"), driver="COG", BLOCKSIZE=128, compress="deflate",
+    )
+copyfile(Path("_static/survey.copc.laz"), remote.directory / "survey.copc.laz")
+survey = gu.open_pointcloud(data_dir / "survey.laz", data_name="Z", columns=["classification"], chunks=1_000)
+survey.pc.to_parquet(data_dir / "survey.parquet", chunks=1_000, compression="zstd")
+survey.close()
+copyfile(data_dir / "survey.parquet", remote.directory / "survey.parquet")
+
+# Write a fresh GeoPackage so remote reads do not need SQLite journal files
+regions = gu.open_vector(gu.examples.get_path("everest_rgi_outlines"))
+regions.to_file(remote.directory / "regions.gpkg")
+
+# Copy files into the password-protected directory
+private_directory = remote.directory / "private"
+private_directory.mkdir()
+for name in ("elevation.tif", "survey.parquet"):
+    copyfile(remote.directory / name, private_directory / name)
+```
 
 ```{code-cell} ipython3
 import geoutils as gu
 
-point_path = data_dir / "survey.laz"
-ds_lidar = gu.open_pointcloud(point_path, data_name="Z", columns=["classification"], chunks=1_000)
-print("Point count:", ds_lidar.pc.point_count)
-print("Dask chunks:", ds_lidar.chunks)
-print("Attributes:", list(ds_lidar.pc.columns))
+# Server address, for example, "https://example.org/data"
+server_url = f"http://127.0.0.1:{server_port}/bucket"  
+
+# Open raster, point cloud or vector
+ds_remote = gu.open_raster(f"{server_url}/elevation.tif", chunks={"x": 256, "y": 256})
+points = gu.open_pointcloud(f"{server_url}/survey.copc.laz", chunks=10_000)
+features = gu.open_vector(f"{server_url}/regions.gpkg", chunks=100)
+
+# Print shape
+print("Raster shape:", ds_remote.rst.shape)
+print("COPC points:", points.pc.point_count)
+print("Vector partitions:", features.npartitions)
 ```
 
-With `columns="main"`, only the main attribute is read. Passing `"all"` reads every attribute, while a list reads
-the named attributes alongside the main values.
-
-The returned data structure can also be selected with `as_object_type="dataset"` for separate Xarray variables,
-or `"geodataframe"` for GeoPandas geometry operations. See {ref}`core-point-accessors` for a comparison.
-
-## Saving and reopening point clouds
-
-Point clouds can be saved to **GeoParquet** with {meth}`~PointCloudBase.to_parquet`. For lazy data, computation and
-writing happen **one row group at a time**, storing coordinates, CRS and the main attribute along with the selected
-values:
+With `chunks`, the data stays **lazy**. For example, to compute stats on a window only:
 
 ```{code-cell} ipython3
-:tags: [remove-cell]
-
-import xarray as xr
-
-xr.set_options(display_expand_attrs=False)
+window = ds_remote.rst.crop((501_280, 3_200, 501_920, 3_840))
+summary = window.rst.stats(["mean", "std"])
+print(summary)
 ```
 
+Raster and vector formats use GDAL through Rasterio and Pyogrio. LAS/LAZ/COPC and GeoParquet point clouds use
+[Fsspec](https://filesystem-spec.readthedocs.io/en/latest/) for remote access and
+[S3fs](https://s3fs.readthedocs.io/en/latest/) for S3, both {ref}`optional dependencies <dependencies>` of GeoUtils.
+For multidimensional Zarr and NetCDF datasets, follow
+[Xarray's cloud storage guide](https://docs.xarray.dev/en/stable/user-guide/io.html#cloud-storage).
+
+### Passwords and other credentials
+
+For **HTTPS with a username and password**, configure GDAL for rasters/vectors or Fsspec for LAS/LAZ/COPC and
+GeoParquet point clouds.
+
 ```{code-cell} ipython3
+import os
+
+import fsspec
+from aiohttp import encode_basic_auth
+
+username, password = "demo", "geoutils"
+private_url = f"{server_url}/private"
+authorization = encode_basic_auth(username, password)
+
+# Configure raster and vector reads through GDAL, and native point cloud reads through Fsspec
+os.environ["GDAL_HTTP_HEADERS"] = f"Authorization: {authorization}"
+fsspec.config.conf["http"] = {"headers": {"Authorization": authorization}}
+
+ds_private = gu.open_raster(f"{private_url}/elevation.tif", chunks={"x": 256, "y": 256})
+points_private = gu.open_pointcloud(f"{private_url}/survey.parquet", chunks=1_000)
+print("Private raster mean:", ds_private.rst.stats(["mean"])["mean"])
+print("Private point mean:", points_private.pc.stats(["mean"])["mean"])
+```
+
+See [GDAL's authentication options](https://gdal.org/en/stable/user/configoptions.html#networking-options) and
+[Fsspec's HTTP options](https://filesystem-spec.readthedocs.io/en/latest/_modules/fsspec/implementations/http.html)
+for other methods.
+
+For **private S3 buckets**, set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` (plus `AWS_SESSION_TOKEN` for
+temporary credentials).
+[GDAL](https://gdal.org/en/stable/user/virtual_file_systems.html#vsis3-aws-s3-files-random-access) and
+[S3fs](https://s3fs.readthedocs.io/en/latest/#credentials) also support AWS profiles and IAM roles.
+For **public S3 buckets**, enable anonymous reads:
+
+```{code-cell} ipython3
+bucket_url = "s3://bucket"
+os.environ["AWS_NO_SIGN_REQUEST"] = "YES"  # GDAL
+fsspec.config.conf.setdefault("s3", {})["anon"] = True  # Fsspec/S3fs
+points_public = gu.open_pointcloud(f"{bucket_url}/survey.copc.laz", level=0, chunks=10_000)
+print("Public S3 level 0 points:", points_public.pc.point_count)
+```
+
+Leave credentials configured until lazy reads finish. With distributed Dask, set them on **each worker**.
+
+(scalability-format-chunks)=
+## Reading and writing in chunks
+
+**Disk chunks are often overlooked**, while they are essential to efficient analysis.
+
+Indeed, **disk chunks need to align with compute chunks** we choose (through the `chunks=` arguments), and 
+be adapted to the nature of the analysis (spatial, temporal).
+
+Below, we show how to inspect files for their **disk chunk sizes**, then how to define **disk chunks** when writing, both for 
+the different file formats.
+
+(scalability-point-reading)=
+### LAS, LAZ and COPC
+
+We can inspect chunk sizes of LAZ/COPC when opening (LAS can read in batches but has no explicit disk chunks):
+
+```{code-cell} ipython3
+ds_laz = gu.open_pointcloud(data_dir / "survey.laz", data_name="Z", columns=["classification"], chunks=1_000)
+print("LAZ maximum points per chunk:", ds_laz.attrs["laz_chunk_size"])
+
+ds_copc = gu.open_pointcloud("_static/survey.copc.laz", chunks=10_000)
+print("COPC points per chunk (first five):", ds_copc.attrs["copc_chunk_sizes"][:5])
+```
+
+To write LAZ disk chunks, pass `laz_chunk_size` in {meth}`~geoutils.DataArrayPointCloudAccessor.to_las`
+(`chunks` controls processing batches):
+
+```{code-cell} ipython3
+laz_output = data_dir / "rechunked.laz"
+ds_laz.pc.to_las(laz_output, chunks=1_000, laz_chunk_size=2_000)
+with gu.open_pointcloud(laz_output, chunks=1_000) as written:
+    print("Written LAZ points per chunk:", written.attrs["laz_chunk_size"])
+```
+
+```{caution}
+Currently, LasPy (and thus GeoUtils) cannot write COPC files.
+```
+
+(scalability-format-parquet)=
+### GeoParquet
+
+Similarly, we can inspect GeoParquet disk chunk sizes (called **row groups**) on opening:
+
+```{code-cell} ipython3
+# Inspect row counts stored in the source file
 parquet_path = data_dir / "survey.parquet"
-ds_lidar.pc.to_parquet(parquet_path, chunks=1_000, compression="zstd")
-ds_saved = gu.open_pointcloud(parquet_path, columns="all", chunks=500, as_object_type="dataset")
-ds_saved
+with gu.open_pointcloud(parquet_path, chunks=1_000) as source_points:
+    print("Input row group sizes:", source_points.attrs["row_group_sizes"])
 ```
 
-A **row group** is the part of a Parquet file read at once. In the example above, `chunks=500` splits the arrays for
-computation, while the stored groups still contain up to 1,000 rows. Row groups should therefore be small enough to
-fit within a worker's memory. For more details, see
-[Arrow's Parquet documentation](https://arrow.apache.org/docs/python/parquet.html).
+To write disk chunks, we simply pass `chunks` sizes in {meth}`~geoutils.DataArrayPointCloudAccessor.to_parquet`:
 
-Passing `partitioned=True` writes the point cloud into **separate files** in a new directory, which can then be
-reopened directly:
+```{code-cell} ipython3
+# Write groups of 2,000 points and inspect the saved file
+parquet_output = data_dir / "rechunked.parquet"
+ds_laz.pc.to_parquet(parquet_output, chunks=2_000, compression="zstd")
+ds_saved = gu.open_pointcloud(parquet_output, columns="all", chunks=500, as_object_type="dataset")
+print("Written row group sizes:", ds_saved.attrs["row_group_sizes"])
+```
+
+And use `partitioned=True` to write **separate files** that reopen as one point cloud:
 
 ```{code-cell} ipython3
 parts_path = data_dir / "survey_parts"
-ds_lidar.pc.to_parquet(parts_path, chunks=1_000, partitioned=True)
+ds_laz.pc.to_parquet(parts_path, chunks=1_000, partitioned=True)
 ds_parts = gu.open_pointcloud(parts_path, chunks=1_000)
 print("Partition files:", len(list(parts_path.glob("*.parquet"))))
-print("Reopened points:", ds_parts.pc.point_count)
 ```
 
-```{code-cell} ipython3
-:tags: [remove-cell]
+(scalability-format-rasters)=
+### GeoTIFF and COG
 
-import pyarrow.parquet as pq
-
-# Check physical groups, lazy variables and preservation of all selected point rows
-metadata = pq.ParquetFile(parquet_path).metadata
-assert [metadata.row_group(i).num_rows for i in range(metadata.num_row_groups)] == [1000, 1000, 1000, 1000, 96]
-assert ds_saved["Z"].chunks == ((500,) * 8 + (96,),)
-assert ds_saved["Z"].pc.crs == ds_lidar.pc.crs == ds_parts.pc.crs
-assert not ds_saved["Z"]._in_memory and not ds_parts._in_memory
-np.testing.assert_array_equal(ds_saved["Z"].compute(), ds_lidar.compute())
-np.testing.assert_array_equal(ds_saved["classification"].compute(), ds_lidar.classification.compute())
-np.testing.assert_array_equal(ds_parts.compute(), ds_lidar.compute())
-```
-
-## Raster tiles and chunks
-
-For tiled rasters, reading a window requires reading the **tiles it intersects**, even if the window is smaller
-than one tile. We recommend using **Dask chunks that are multiples of the tile size**, and larger than
-the neighborhoods used by filters or interpolation.
-
-For example, we open a raster stored in tiles of 128 × 128 pixels with chunks of 256 × 256 pixels:
+For GeoTIFFs or COGs, chunks are called **blocks** in row/col pixels:
 
 ```{code-cell} ipython3
 raster_path = data_dir / "elevation.tif"
-with rio.open(raster_path) as source:
-    print("Disk tile shape:", source.block_shapes[0])
-ds = gu.open_raster(str(raster_path), chunks={"x": 256, "y": 256})
-print("Dask chunks:", ds.chunks)
+ds = gu.open_raster(str(raster_path))
+print("Input disk tiles (rows, columns):", ds.attrs["block_shape"])
 ```
 
-The {meth}`~RasterBase.to_file` method can write raster results in tiles. For efficient remote access, a
-**Cloud Optimized GeoTIFF (COG)** also arranges metadata and overviews for HTTP reading. Below, we write a tiled
-result, then convert it to a COG with the [GDAL COG driver](https://gdal.org/en/stable/drivers/raster/cog.html):
+To define write **chunks**, use `blockxsize` and `blockysize` for GeoTIFF, or `BLOCKSIZE` for COG:
 
 ```{code-cell} ipython3
-from rasterio.shutil import copy as copy_raster
-
 output_path = data_dir / "processed.tif"
-ds.rst.to_file(str(output_path), tiled=True, blockxsize=128, blockysize=128, compress="deflate", compute=True)
+ds.rst.to_file(str(output_path), tiled=True, blockxsize=256, blockysize=256, compress="deflate", compute=True)
+with gu.open_raster(str(output_path)) as written:
+    print("Written GeoTIFF disk tiles (rows, columns):", written.attrs["block_shape"])
+
 cog_path = data_dir / "elevation_cog.tif"
-copy_raster(output_path, cog_path, driver="COG", BLOCKSIZE=128, COMPRESS="DEFLATE")
-with rio.open(cog_path) as source:
-    print("Layout:", source.tags(ns="IMAGE_STRUCTURE")["LAYOUT"])
-    print("Overview factors:", source.overviews(1))
+ds.rst.to_file(str(cog_path), driver="COG", BLOCKSIZE=256, compress="deflate", compute=True)
+cog = gu.open_raster(str(cog_path))
+print("Written COG disk tiles (rows, columns):", cog.attrs["block_shape"])
 ```
 
 (scalability-array-formats)=
-## Zarr and NetCDF datasets
+### Zarr and NetCDF
 
-Open **Zarr** and **NetCDF** datasets with Xarray, then use GeoUtils' `rst` accessor on their raster variables.
-The examples below assume an `elevation` variable with `x`/`y` coordinates and a stored CRS. Use
-`decode_coords="all"` to restore georeferencing stored in a `grid_mapping` variable; if the CRS is missing, set it
-from the source information with `rio.write_crs()` before using spatial operations.
+For Zarr/NetCDFs, we inspect **disk chunk sizes along a given axis** (such as time, rows and columns):
 
-Xarray needs the [Zarr package](https://zarr.readthedocs.io/en/stable/) for Zarr and a backend such as
-[netCDF4](https://unidata.github.io/netcdf4-python/) for NetCDF4. Install these backends separately if needed.
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show Zarr and NetCDF preparation"
+:  code_prompt_hide: "Hide Zarr and NetCDF preparation"
 
-```python
+# Save the synthetic elevation raster with its CRS and spatial coordinates
+elevation = ds.rename("elevation").to_dataset()
+zarr_path = data_dir / "elevation.zarr"
+netcdf_path = data_dir / "elevation.nc"
+grid_mapping = elevation["elevation"].rio.grid_mapping
+elevation.to_zarr(zarr_path, mode="w", zarr_format=2,
+                  encoding={"elevation": {"chunks": (128, 128), "grid_mapping": grid_mapping}})
+elevation.to_netcdf(netcdf_path, engine="netcdf4",
+                    encoding={"elevation": {"chunksizes": (128, 128), "grid_mapping": grid_mapping}})
+```
+
+```{code-cell} ipython3
 import xarray as xr
 
-# Open rasters in chunks and calculate statistics through the GeoUtils accessor
-ds_zarr = xr.open_zarr("elevation.zarr", chunks={"x": 256, "y": 256}, decode_coords="all")
+# Inspect disk chunk sizes in both files
+ds_zarr = xr.open_zarr(zarr_path, chunks={"x": 256, "y": 256}, decode_coords="all")
 ds_netcdf = xr.open_dataset(
-    "elevation.nc", engine="netcdf4", chunks={"x": 256, "y": 256}, decode_coords="all",
+    netcdf_path, engine="netcdf4", chunks={"x": 256, "y": 256}, decode_coords="all",
 )
-print(ds_zarr["elevation"].rst.stats(["mean", "std"]))
+print("Zarr disk chunks:", ds_zarr["elevation"].rst.tags["disk_chunks"])
+print("NetCDF disk chunks:", ds_netcdf["elevation"].rst.tags["disk_chunks"])
+```
 
-# Specify NetCDF storage chunks and preserve the CRS reference
+To write to specific dis chunks, set `chunks` for Zarr or `chunksizes` for NetCDF4 in `encoding`:
+
+```{code-cell} ipython3
+# Specify storage chunks and preserve the CRS reference
+zarr_encoding = {
+    "elevation": {"chunks": (256, 256), "grid_mapping": ds_zarr["elevation"].rio.grid_mapping},
+}
+
 netcdf_encoding = {
     "elevation": {
         "chunksizes": (256, 256), "zlib": True,
@@ -321,114 +455,24 @@ netcdf_encoding = {
     },
 }
 
-# Write Zarr v2 and NetCDF4 results in chunks using Xarray's methods
-ds_zarr.to_zarr("result.zarr", mode="w", zarr_format=2)
-ds_netcdf.to_netcdf("result.nc", engine="netcdf4", encoding=netcdf_encoding)
-ds_zarr.close()
-ds_netcdf.close()
-```
+# Write Zarr and NetCDF4 results in chunks using Xarray
+ds_zarr.to_zarr(data_dir / "result.zarr", mode="w", zarr_format=2, encoding=zarr_encoding)
+ds_netcdf.to_netcdf(data_dir / "result.nc", engine="netcdf4", encoding=netcdf_encoding)
 
-The NetCDF example uses **NetCDF4**, which supports stored chunks and compression.
-For details on storage options and writing, see
-[Xarray's file format guide](https://docs.xarray.dev/en/stable/user-guide/io.html).
+# Reopen outputs to inspect their stored chunk sizes
+with xr.open_zarr(data_dir / "result.zarr", chunks={}, decode_coords="all") as written:
+    print("Written Zarr disk chunks:", written["elevation"].rst.tags["disk_chunks"])
+with xr.open_dataset(data_dir / "result.nc", engine="netcdf4", chunks={}, decode_coords="all") as written:
+    print("Written NetCDF disk chunks:", written["elevation"].rst.tags["disk_chunks"])
+```
 
 ```{code-cell} ipython3
 :tags: [remove-cell]
 
-# Close the local examples before removing their temporary files
-ds.close()
-ds_lidar.close()
-ds_saved.close()
-ds_parts.close()
+# Close arrays and stop the server before restoring configuration and deleting its files
+for array in (ds, cog, ds_zarr, ds_netcdf, ds_laz, ds_copc, ds_saved, ds_parts, ds_remote, window, ds_private, points,
+              points_private, points_public):
+    array.close()
+resources.close()
 files.cleanup()
 ```
-
-(scalability-cloud)=
-## Reading from cloud storage
-
-Pass an **HTTPS URL** or an **S3 address** directly to {func}`~geoutils.open_raster`,
-{func}`~geoutils.open_pointcloud` or {func}`~geoutils.open_vector`, using the same options as for a local file.
-Replace the example location below with your own dataset address:
-
-```python
-import geoutils as gu
-
-location = "https://example.org/data"  # Or "s3://my-bucket/data"
-ds = gu.open_raster(f"{location}/elevation.tif", chunks={"x": 256, "y": 256})
-points = gu.open_pointcloud(f"{location}/survey.copc.laz", level=range(3), chunks=100_000)
-features = gu.open_vector(f"{location}/regions.gpkg", chunks=10_000)
-```
-
-The point cloud call also accepts **LAS, LAZ and GeoParquet** files (or a directory of GeoParquet partitions);
-omit `level` for formats other than COPC. The vector call accepts formats supported by GDAL, such as GeoPackage
-and GeoJSON. These functions select the file reader automatically, so no separate download is needed.
-
-With `chunks`, the data stays **lazy** until a computation needs it. For example, select a spatial window before
-calculating raster statistics:
-
-```python
-window = ds.rst.crop((501_280, 3_200, 501_920, 3_840))
-print(window.rst.stats(["mean", "std"]))
-```
-
-Efficient partial reads require **HTTP range requests** and a suitable file layout, as summarized in the table above.
-Readers also fetch metadata and complete tiles, compressed point blocks or row groups, so the transferred data can
-exceed the selected values. {ref}`Downsampling and overviews <scalability-downsampling>` can further reduce reads.
-
-Raster and vector formats use GDAL through Rasterio and Pyogrio. Native LAS/COPC and point GeoParquet readers use
-[Fsspec](https://filesystem-spec.readthedocs.io/en/latest/): install `fsspec[http]` for HTTPS or
-[S3fs](https://s3fs.readthedocs.io/en/latest/) for S3. For multidimensional Zarr and NetCDF datasets, use Xarray
-as shown {ref}`above <scalability-array-formats>`; see its
-[cloud storage guide](https://docs.xarray.dev/en/stable/user-guide/io.html#cloud-storage) for remote access.
-
-### Passwords and other credentials
-
-Authentication follows the reader's configuration; the open functions do not share a `password` or `storage_options`
-argument. For an **HTTPS server using a username and password**, configure GDAL for rasters and vectors, or Fsspec
-for native point cloud files, before opening:
-
-```python
-import os
-from base64 import b64encode
-from getpass import getpass
-
-import fsspec
-
-username = input("Username: ")
-password = getpass("Password: ")
-
-# Encode HTTP Basic credentials for the Authorization header
-authorization = "Basic " + b64encode(f"{username}:{password}".encode()).decode("ascii")
-
-# Configure raster and vector reads through GDAL
-os.environ["GDAL_HTTP_HEADERS"] = f"Authorization: {authorization}"
-
-# Configure LAS/COPC and point GeoParquet reads through Fsspec
-fsspec.config.conf["http"] = {"headers": {"Authorization": authorization}}
-
-ds_private = gu.open_raster("https://example.org/private/elevation.tif", chunks={"x": 256, "y": 256})
-points_private = gu.open_pointcloud("https://example.org/private/survey.parquet", chunks=100_000)
-```
-
-For password-protected vector URLs, use `gu.open_vector("/vsicurl/https://example.org/private/regions.gpkg")`
-to send requests directly through GDAL, including authentication, instead of GeoPandas' initial URL check.
-See [GDAL's HTTP authentication options](https://gdal.org/en/stable/user/configoptions.html#networking-options)
-and [Fsspec's HTTP options](https://filesystem-spec.readthedocs.io/en/latest/_modules/fsspec/implementations/http.html)
-for other authentication methods. A **signed URL** can be passed directly, including its query string.
-
-For **private S3 storage**, both readers can use the standard `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and,
-for temporary credentials, `AWS_SESSION_TOKEN` environment variables. See
-[GDAL's S3 credentials](https://gdal.org/en/stable/user/virtual_file_systems.html#vsis3-aws-s3-files-random-access)
-and [S3fs credentials](https://s3fs.readthedocs.io/en/latest/#credentials) for profiles and IAM roles.
-For a public bucket, enable anonymous reads before opening:
-
-```python
-os.environ["AWS_NO_SIGN_REQUEST"] = "YES"  # GDAL
-fsspec.config.conf["s3"] = {"anon": True}  # Fsspec/S3fs
-points_public = gu.open_pointcloud("s3://my-public-bucket/survey.copc.laz", level=range(3), chunks=100_000)
-```
-
-Credentials must remain available until lazy reads finish. With distributed Dask, configure them on **each worker**;
-changes to `fsspec.config.conf` in the client process are not automatically applied to workers.
-For repeated reads of large datasets, run computations near the storage; see {ref}`scalability-usage` and
-[Dask's remote data guidance](https://docs.dask.org/en/stable/how-to/connect-to-remote-data.html).

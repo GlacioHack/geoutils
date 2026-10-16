@@ -535,16 +535,17 @@ class DataArrayPointCloudAccessor(PointCloudBase):
         else:
             self.to_geoutils()._dataset.to_file(filename, **kwargs)
 
-    def to_las(self, filename: str, **kwargs: Any) -> None:
+    def to_las(self, filename: str, *, laz_chunk_size: int | None = None, **kwargs: Any) -> None:
         """
         Write LAS/LAZ in numeric row partitions without constructing point geometries.
 
         :param filename: Destination LAS or LAZ file.
+        :param laz_chunk_size: Number of points per compressed LAZ disk chunk. Requires Lazrs; None uses its default.
         :param kwargs: Header and partition options passed to the array LAS writer.
         """
         from geoutils.pointcloud.las import _write_array_las
 
-        _write_array_las(self._dataset, filename, **kwargs)
+        _write_array_las(self._dataset, filename, laz_chunk_size=laz_chunk_size, **kwargs)
 
     def to_parquet(self, filename: str, **kwargs: Any) -> None:
         """
@@ -1080,7 +1081,14 @@ class DatasetPointCloudAccessor:
         support = _point_dataset_support(dataset[selected], selected)
         support.pc.to_file(filename, **kwargs)
 
-    def to_las(self, filename: str, *, variables: Sequence[str] | None = None, **kwargs: Any) -> None:
+    def to_las(
+        self,
+        filename: str,
+        *,
+        variables: Sequence[str] | None = None,
+        laz_chunk_size: int | None = None,
+        **kwargs: Any,
+    ) -> None:
         """
         Write points in the dataset to a LAS or LAZ file.
 
@@ -1088,12 +1096,13 @@ class DatasetPointCloudAccessor:
 
         :param filename: Destination LAS or LAZ file.
         :param variables: Point fields to write; None selects all aligned values. The first supplies LAS elevations.
+        :param laz_chunk_size: Number of points per compressed LAZ disk chunk. Requires Lazrs; None uses its default.
         :param kwargs: Header and partition options.
         """
         dataset = _prepare_point_dataset(self._obj)
         selected = _select_dataset_variables(dataset, self.compatible_variables.keys(), variables)
         support = _point_dataset_support(dataset[selected], selected)
-        support.pc.to_las(filename, **kwargs)
+        support.pc.to_las(filename, laz_chunk_size=laz_chunk_size, **kwargs)
 
     def to_parquet(self, filename: str, *, variables: Sequence[str] | None = None, **kwargs: Any) -> None:
         """

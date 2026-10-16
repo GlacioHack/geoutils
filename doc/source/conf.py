@@ -7,10 +7,18 @@ import os
 import sys
 
 # Allow conf.py to find the geoutils module
-sys.path.append(os.path.abspath("../.."))
-sys.path.append(os.path.abspath("../../geoutils/"))
-sys.path.append(os.path.abspath(".."))
-sys.path.insert(0, os.path.dirname(__file__))
+source_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(source_dir))
+sys.path.insert(0, project_root)
+sys.path.append(os.path.join(project_root, "geoutils"))
+sys.path.append(os.path.dirname(source_dir))
+sys.path.insert(0, source_dir)
+
+# Use this checkout in notebook kernels and other subprocesses as well
+python_paths = [project_root]
+if os.environ.get("PYTHONPATH"):
+    python_paths.append(os.environ["PYTHONPATH"])
+os.environ["PYTHONPATH"] = os.pathsep.join(python_paths)
 
 from sphinx_gallery.sorting import ExampleTitleSortKey, ExplicitOrder
 

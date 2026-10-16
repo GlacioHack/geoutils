@@ -19,7 +19,7 @@
 GeoUtils **can be seen primarily as an extension of [Xarray](https://github.com/pydata/xarray) and [GeoPandas](https://github.com/geopandas/geopandas)**, adding **higher-level analysis tools** at the interface of rasters, vectors and point clouds, from operations such as transformations (e.g., reprojection, point gridding, polygonization) to more advanced statistics (e.g., grouped stats, spatial correlation estimation, random fields). See the [full feature list](#features-list) further below.
 
 Primarily, GeoUtils adds **scalable implementations** to support chunked processing of datasets larger than memory, including lazy [Dask](https://docs.dask.org/en/stable/) support for most raster and point cloud operations and some vector operations.
-Operations rely directly on the Python statistical and geospatial stack (e.g., [Rasterio](https://github.com/rasterio/rasterio), [Pyproj](https://github.com/pyproj4/pyproj), [NumPy](https://github.com/numpy/numpy), [SciPy](https://github.com/scipy/scipy), [Numba](https://numba.readthedocs.io/en/stable/)), with **composable** methods and backends that can be easily customized while GeoUtils handles georeferencing and chunked execution. 
+Operations rely directly on the Python statistical and geospatial stack (e.g., [Rasterio](https://github.com/rasterio/rasterio), [Pyproj](https://github.com/pyproj4/pyproj), [NumPy](https://github.com/numpy/numpy), [SciPy](https://github.com/scipy/scipy), [Numba](https://numba.readthedocs.io/en/stable/)), with **composable** methods and backends that can be easily customized while GeoUtils handles georeferencing and chunked execution.
 GeoUtils strives to make these tools **accessible** through a shared interface across rasters, point clouds and vectors, with naming consistent with the [recent GDAL CLI overhaul](https://gdal.org/en/stable/programs/gdal.html).
 
 For example, a kriging interpolator can be reused for raster resampling or point gridding, and a weighted mean reducer for resampling, filtering or zonal statistics.
@@ -35,7 +35,7 @@ Accessors expose these operations directly on native Xarray and GeoPandas data s
 | Point cloud | Xarray `DataArray` or `Dataset`, or GeoPandas `GeoDataFrame` | `.pc` |
 
 GeoUtils also implements its own **`Raster`, `Vector` and `PointCloud` objects for Python beginners**, so users can manipulate geospatial data
-without first learning labeled arrays or dataframes. Internally, **operations are implemented independently of the data structures**, allowing to easily 
+without first learning labeled arrays or dataframes. Internally, **operations are implemented independently of the data structures**, allowing to easily
 add accessors to emerging data structures such as [GeoPolars](https://geopolars.org/latest/).
 
 If you are looking for an accessible Python package to write the Python equivalent of your [GDAL](https://gdal.org/) command lines, or of your

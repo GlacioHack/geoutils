@@ -137,6 +137,193 @@ class TestDataArrayRasterAccessor:
         np.testing.assert_array_equal(result.data, expected)
 
     @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
+    @pytest.mark.parametrize("downsample", [1, 2])
+    def test_open_raster__disk_chunk_metadata(
+        self, tmp_path: Path, as_object_type: Literal["dataarray", "dataset"], downsample: int
+    ) -> None:
+        """Checks that cached disk block shapes describe the source file and refresh after writing new tiles."""
+
+        # Write rectangular tiles so swapped row/column dimensions produce a different result
+        values = np.arange(2 * 64 * 64, dtype=np.float32).reshape(2, 64, 64)
+        filename = tmp_path / "source_tiles.tif"
+        gu.Raster.from_array(values, from_origin(0, 64, 1, 1), 32631).to_file(
+            filename, co_opts={"TILED": "YES", "BLOCKYSIZE": "16", "BLOCKXSIZE": "32"}
+        )
+
+        # Open metadata from the original file, including when returning a reduced grid
+        result = open_raster(str(filename), as_object_type=as_object_type, downsample=downsample)
+        variable = result["raster"] if as_object_type == "dataset" else result
+        raster = gu.Raster(filename, downsample=downsample)
+        for attrs in (result.attrs, variable.attrs, variable.rst.tags, raster.tags):
+            assert attrs["block_shape"] == (16, 32)
+        assert not variable.rst.is_loaded and not raster.is_loaded
+
+        # Convert through a memory file without replacing the cached source tile shapes
+        converted = raster.to_xarray()
+        assert converted.attrs["block_shape"] == (16, 32)
+        converted.close()
+
+        # Write different tiles and check reopening replaces the source's cached shapes
+        output = tmp_path / "new_tiles.tif"
+        variable.rst.to_file(str(output), tiled=True, blockysize=32, blockxsize=16)
+        reopened = open_raster(str(output))
+        assert reopened.attrs["block_shape"] == (32, 16)
+        assert gu.Raster(output).tags["block_shape"] == (32, 16)
+        reopened.close()
+        result.close()
+
+    @pytest.mark.parametrize("storage", ["netcdf", "zarr"])
+    def test_tags__disk_chunks(self, tmp_path: Path, storage: str) -> None:
+        """Checks that array storage chunks are cached in tags and refreshed after writing a new layout."""
+
+        # Create a georeferenced variable with metadata from an older disk layout
+        values = np.arange(32 * 64, dtype=np.float32).reshape(32, 64)
+        array = gu.Raster.from_array(values, from_origin(0, 32, 1, 1), 32631).to_xarray()
+        array = array.squeeze("band", drop=True).rename("height")
+        array.attrs["disk_chunks"] = (8, 8)
+        dataset = array.to_dataset()
+        encoding_key = "chunks" if storage == "zarr" else "chunksizes"
+        encoding = {"height": {encoding_key: (16, 32), "grid_mapping": array.rio.grid_mapping}}
+        filename = tmp_path / storage
+
+        # Write known disk chunks and reopen without Dask or pixel loading
+        if storage == "zarr":
+            import_optional("zarr")
+            dataset.to_zarr(filename, zarr_format=2, encoding=encoding)
+            opened = xr.open_zarr(filename, chunks=None, decode_coords="all")
+        else:
+            import_optional("netCDF4")
+            dataset.to_netcdf(filename, engine="netcdf4", encoding=encoding)
+            opened = xr.open_dataset(filename, engine="netcdf4", decode_coords="all")
+        variable = opened["height"]
+        assert variable.rst.tags["disk_chunks"] == (16, 32)
+        assert not variable.rst.is_loaded
+
+        # Rewrite with rectangular chunks in the opposite orientation, including the old cached tags
+        output = tmp_path / f"new_{storage}"
+        encoding["height"][encoding_key] = (32, 16)
+        if storage == "zarr":
+            opened.to_zarr(output, zarr_format=2, encoding=encoding)
+            rewritten = xr.open_zarr(output, chunks=None, decode_coords="all")
+        else:
+            opened.to_netcdf(output, engine="netcdf4", encoding=encoding)
+            rewritten = xr.open_dataset(output, engine="netcdf4", decode_coords="all")
+
+        # Check actual saved chunks replace the old tags and all pixel values remain unchanged
+        assert rewritten["height"].rst.tags["disk_chunks"] == (32, 16)
+        np.testing.assert_array_equal(rewritten["height"].values, values)
+        rewritten.close()
+        opened.close()
+        array.close()
+
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
+    @pytest.mark.parametrize("factors", [[], [2, 4]])
+    @pytest.mark.parametrize("resampling", [None, "average"])
+    def test_open_raster__overview_metadata(
+        self,
+        tmp_path: Path,
+        as_object_type: Literal["dataarray", "dataset"],
+        factors: list[int],
+        resampling: str | None,
+    ) -> None:
+        """Checks that file opening caches first-band overview factors and known resampling without loading pixels."""
+
+        # Write two bands so cached overview factors also describe a multi-band raster
+        values = np.arange(512, dtype=np.float32).reshape(2, 16, 16)
+        path = tmp_path / "overview_metadata.tif"
+        gu.Raster.from_array(values, from_origin(0, 16, 1, 1), 32631).to_file(path)
+        with rio.open(path, "r+") as source:
+            if factors:
+                source.build_overviews(factors, rio.enums.Resampling.average)
+            if resampling is not None:
+                source.update_tags(ns="rio_overview", resampling=resampling)
+
+        # Open both GeoUtils representations from the same source metadata
+        result = open_raster(str(path), as_object_type=as_object_type)
+        variable = result["raster"] if as_object_type == "dataset" else result
+        raster = gu.Raster(path)
+
+        # Check empty overview lists and unknown methods without inventing a resampling method
+        for attrs in (result.attrs, variable.attrs, variable.rst.tags, raster.tags):
+            assert attrs["overview_factors"] == factors
+            assert attrs["overview_selected_level"] == -1
+            assert attrs["overview_selected_factor"] == 1
+            if resampling is None:
+                assert "overview_resampling" not in attrs
+            else:
+                assert attrs["overview_resampling"] == resampling
+        assert not variable.rst.is_loaded and not raster.is_loaded
+
+        # Convert the Raster through its in-memory file without turning cached factors into strings
+        converted = raster.to_xarray()
+        assert converted.attrs["overview_factors"] == factors
+        if resampling is not None:
+            assert converted.attrs["overview_resampling"] == resampling
+        converted.close()
+
+        # Write tiles without overviews, then check reopening refreshes the cached source metadata
+        output_path = tmp_path / "exported.tif"
+        variable.rst.to_file(str(output_path), tiled=True, blockxsize=16, blockysize=16)
+        reopened = open_raster(str(output_path))
+        for attrs in (reopened.attrs, gu.Raster(output_path).tags):
+            assert attrs["overview_factors"] == []
+            assert attrs["overview_selected_level"] == -1
+            assert attrs["overview_selected_factor"] == 1
+            assert "overview_resampling" not in attrs
+        reopened.close()
+        result.close()
+
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
+    @pytest.mark.parametrize(
+        "options, selected_level, selected_factor",
+        [
+            ({}, -1, 1),
+            ({"overview_level": -1}, -1, 1),
+            ({"overview_level": 0}, 0, 2),
+            ({"overview_level": 1}, 1, 4),
+            ({"downsample": 1.3}, -1, 1),
+            ({"downsample": 3}, 0, 2),
+            ({"downsample": 6}, 1, 4),
+        ],
+    )
+    def test_open_raster__overview_selection_metadata(
+        self,
+        tmp_path: Path,
+        as_object_type: Literal["dataarray", "dataset"],
+        options: dict[str, Any],
+        selected_level: int,
+        selected_factor: int,
+    ) -> None:
+        """Checks that cached overview selection identifies the source grid used before any output resampling."""
+
+        # Write factor-2/4 overviews so automatic downsampling can select either level or the native grid
+        path = tmp_path / "selected_overview.tif"
+        values = np.arange(256, dtype=np.float32).reshape(16, 16)
+        gu.Raster.from_array(values, from_origin(0, 16, 1, 1), 32631).to_file(path)
+        with rio.open(path, "r+") as source:
+            source.build_overviews([2, 4], rio.enums.Resampling.average)
+
+        # Open the requested grid without loading its pixels
+        result = open_raster(str(path), as_object_type=as_object_type, **options)
+        variable = result["raster"] if as_object_type == "dataset" else result
+        assert not variable.rst.is_loaded
+
+        # Check source selection independently of the requested output spacing
+        for attrs in (result.attrs, variable.attrs):
+            assert attrs["overview_selected_level"] == selected_level
+            assert attrs["overview_selected_factor"] == selected_factor
+        if "overview_level" not in options:
+            raster = gu.Raster(path, downsample=options.get("downsample", 1))
+            assert not raster.is_loaded
+            assert raster.tags["overview_selected_level"] == selected_level
+            assert raster.tags["overview_selected_factor"] == selected_factor
+            converted = raster.to_xarray()
+            assert converted.attrs["overview_selected_level"] == selected_level
+            assert converted.attrs["overview_selected_factor"] == selected_factor
+            converted.close()
+        result.close()
+
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
     def test_open_raster__downsample(self, tmp_path: Path, as_object_type: Literal["dataarray", "dataset"]) -> None:
         """Checks that downsampling uses a suitable overview while keeping the requested output grid."""
 
@@ -157,6 +344,7 @@ class TestDataArrayRasterAccessor:
         result = open_raster(str(path), downsample=6, as_object_type=as_object_type)
         result = result["raster"] if as_object_type == "dataset" else result
         assert not result._in_memory
+        assert result.attrs["overview_factors"] == [2, 4]
         output = result.values
         expected = gu.Raster(path, downsample=6).data.data
 
@@ -179,6 +367,7 @@ class TestDataArrayRasterAccessor:
         # Check error is raised when combining exact overview selection with downsampling
         overview = open_raster(str(path), overview_level=0, as_object_type=as_object_type)
         overview = overview["raster"] if as_object_type == "dataset" else overview
+        assert overview.attrs["overview_factors"] == [2, 4]
         assert overview.rst.shape == (8, 8)
         assert overview.rst.transform == from_origin(0, 16, 2, 2)
         with pytest.raises(ValueError, match="downsample and overview_level cannot be used together"):
@@ -1410,6 +1599,78 @@ class TestDatasetRasterAccessor:
         np.testing.assert_array_equal(stored.y_point.data, actual.y_point.data)
         assert stored.Z.pc.crs == actual.Z.pc.crs
         assert lazy.image.chunks and lazy.Z.chunks and reopened.Z.chunks
+
+
+class TestRasterOpeningChunked:
+    """Test module for inspecting disk chunk metadata without loading Dask raster values."""
+
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
+    def test_open_raster__disk_chunk_metadata(
+        self, tmp_path: Path, as_object_type: Literal["dataarray", "dataset"]
+    ) -> None:
+        """Checks that disk tile metadata remains independent of computation chunks and matches eager opening."""
+        import_optional("dask")
+        from dask.callbacks import Callback
+
+        # Write 16/32 pixel disk tiles, then use chunks of 7/9 to split those tiles differently
+        values = np.arange(64 * 64, dtype=np.float32).reshape(64, 64)
+        filename = tmp_path / "tiles.tif"
+        gu.Raster.from_array(values, from_origin(0, 64, 1, 1), 32631).to_file(
+            filename, co_opts={"TILED": "YES", "BLOCKYSIZE": "16", "BLOCKXSIZE": "32"}
+        )
+        eager = open_raster(str(filename), as_object_type=as_object_type)
+
+        # Inspect disk shapes while preventing computation of raster pixels
+        with Callback(pretask=lambda *args: pytest.fail("Disk metadata must not compute raster values")):
+            lazy = open_raster(str(filename), chunks={"y": 7, "x": 9}, as_object_type=as_object_type)
+            variable = lazy["raster"] if as_object_type == "dataset" else lazy
+            assert lazy.attrs["block_shape"] == variable.attrs["block_shape"] == (16, 32)
+        assert not variable.rst.is_loaded
+
+        # Compare exact computed values and metadata with the same eager call
+        xr.testing.assert_identical(lazy.compute(scheduler="synchronous"), eager)
+        assert not variable.rst.is_loaded
+        lazy.close()
+        eager.close()
+
+    @pytest.mark.parametrize("storage", ["netcdf", "zarr"])
+    def test_tags__disk_chunks(self, tmp_path: Path, storage: str) -> None:
+        """Checks that inspecting stored array chunks stays lazy and computed values match eager opening."""
+        import_optional("dask")
+        from dask.callbacks import Callback
+
+        # Write 16/32 pixel disk chunks, then combine them into 32/64 pixel computation chunks
+        values = np.arange(32 * 64, dtype=np.float32).reshape(32, 64)
+        array = gu.Raster.from_array(values, from_origin(0, 32, 1, 1), 32631).to_xarray()
+        array = array.squeeze("band", drop=True).rename("height")
+        encoding_key = "chunks" if storage == "zarr" else "chunksizes"
+        encoding = {"height": {encoding_key: (16, 32), "grid_mapping": array.rio.grid_mapping}}
+        filename = tmp_path / storage
+        if storage == "zarr":
+            import_optional("zarr")
+            array.to_dataset().to_zarr(filename, zarr_format=2, encoding=encoding)
+            eager = xr.open_zarr(filename, chunks=None, decode_coords="all")
+        else:
+            import_optional("netCDF4")
+            array.to_dataset().to_netcdf(filename, engine="netcdf4", encoding=encoding)
+            eager = xr.open_dataset(filename, engine="netcdf4", decode_coords="all")
+
+        # Inspect physical chunk sizes without letting Dask read any pixels
+        with Callback(pretask=lambda *args: pytest.fail("Disk metadata must not compute array values")):
+            if storage == "zarr":
+                lazy = xr.open_zarr(filename, chunks={"y": 32, "x": 64}, decode_coords="all")
+            else:
+                lazy = xr.open_dataset(filename, engine="netcdf4", chunks={"y": 32, "x": 64}, decode_coords="all")
+            assert lazy["height"].rst.tags["disk_chunks"] == (16, 32)
+        assert not lazy["height"].rst.is_loaded
+
+        # Compare the computed result exactly with eager values and cached disk metadata
+        assert eager["height"].rst.tags["disk_chunks"] == (16, 32)
+        xr.testing.assert_identical(lazy.compute(scheduler="synchronous"), eager)
+        assert not lazy["height"].rst.is_loaded
+        lazy.close()
+        eager.close()
+        array.close()
 
 
 class TestDatasetRasterAccessorChunked:

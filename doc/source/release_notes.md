@@ -4,11 +4,11 @@ Below are the release notes for all minor versions and the historical roadmap to
 
 ## 0.3.0
 
-GeoUtils version 0.3 is the **third minor release** since the creation of the project, and essentially a pre-1.0 given that 
-most envisioned features are now both operational and fairly mature. 
+GeoUtils version 0.3 is the **third minor release** since the creation of the project, and essentially a pre-1.0 given that
+most envisioned features are now both operational and fairly mature.
 
-This release finally brings the scalability work developed along many years to the public API, and restructures the package to allow 
-operators and neighborhoods to be used consistently across operations. Sampling, statistics, filters and uncertainty features are expanded or added, with a large part  
+This release finally brings the scalability work developed along many years to the public API, and restructures the package to allow
+operators and neighborhoods to be used consistently across operations. Sampling, statistics, filters and uncertainty features are expanded or added, with a large part
 migrated and refactored from code developed in [xDEM](https://xdem.readthedocs.io/en/stable/).
 Together, these allow for more composability between operators, with experimental support for weights and uncertainty propagation.
 
@@ -37,7 +37,7 @@ The previous names still work but will be deprecated:
 - The `clip` functionality has been moved to its own function, with `crop()` only working on rectangular extents to ensure deferred I/O.
 
 Additionally, a few methods have changed default output type, such as `subsample` that now returns a point cloud object. Use `as_array` to
-return an array instead, as before. Finally, several methods do not accept the `inplace` argument anymore, such as `crop`, to ensure more 
+return an array instead, as before. Finally, several methods do not accept the `inplace` argument anymore, such as `crop`, to ensure more
 seamless Dask graph building through Xarray. Use `ds = ds.crop()` instead.
 
 ## 0.2.0

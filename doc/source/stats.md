@@ -21,7 +21,7 @@ Several types of operations are supported:
 - {ref}`stats-global-grouped` derive **distributional estimators by bins or categories**,
 - {ref}`stats-spatial` derives **spatial correlation estimators** as a function of distance.
 
-**Zonal statistics** are included as grouped statistics where vector features define the categories, 
+**Zonal statistics** are included as grouped statistics where vector features define the categories,
 with support for fractional polygon-raster intersections.
 
 Any custom estimator can be passed, with certain estimators listed below **optimized for

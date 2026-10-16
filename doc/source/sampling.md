@@ -209,7 +209,7 @@ returns a {class}`xarray.DataArray` or {class}`~geoutils.Raster`.
 {meth}`gdf.pc.pairsample() or PointCloud.pairsample() <PointCloudBase.pairsample>`
 
 Pair-sampling selects **pairs of valid locations and their spatial separation** without calculating every possible
-combination. 
+combination.
 
 The example below samples 750 pairs of raster cells, with a closer look on four pairs and their separation distance:
 
@@ -301,9 +301,9 @@ and distances. Distances use the CRS units.
 pairs
 ```
 
-The **default `sampling="loglag"` balances short and long separations by sampling uniformly with logarithmic distance**, 
+The **default `sampling="loglag"` balances short and long separations by sampling uniformly with logarithmic distance**,
 while `sampling="random_xy"` select endpoints at random X/Y coordinates that can undersample close or far pairs.
-Use `min_distance`, `max_distance` or `mask` to limit the location or distances of sampled pairs. 
+Use `min_distance`, `max_distance` or `mask` to limit the location or distances of sampled pairs.
 
 ```{code-cell} ipython3
 # Compare the log-lag sample above with uniformly selected endpoints

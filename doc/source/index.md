@@ -31,7 +31,7 @@ GeoUtils ``v0.3`` introduces Xarray/GeoPandas accessors and finalizes Dask suppo
 
 GeoUtils is built on top of core geospatial packages (Rasterio, Shapely, PyProj) and numerical packages
 (NumPy, SciPy, Numba) to provide **higher-level tools** for raster, vector and point
-cloud objects, from transformations (e.g., reprojection, polygonization, point gridding) to 
+cloud objects, from transformations (e.g., reprojection, polygonization, point gridding) to
 geostatistics (e.g., variography, random fields, kriging), and much more.
 
 It adds **scalable** implementation respecting lazy and chunked execution (Dask, multiprocessing) for all raster

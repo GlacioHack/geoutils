@@ -45,6 +45,7 @@ from geoutils.raster.base import RasterBase
 from geoutils.raster.transformation import (
     _open_downsampled_raster,
     _overview_level_for_downsample,
+    _raster_overview_metadata,
 )
 
 if TYPE_CHECKING:
@@ -104,6 +105,7 @@ def open_raster(
         raise ValueError("downsample and overview_level cannot be used together.")
 
     # Open the native grid directly, or expose an exact reduced grid through a lazy GDAL virtual raster
+    overview_level = kwargs.get("overview_level")
     if downsample == 1:
         ds = rioxr.open_rasterio(filename, masked=True, **kwargs)
     else:
@@ -121,6 +123,12 @@ def open_raster(
         nullcontext(filename) if isinstance(filename, rasterio.io.DatasetReaderBase) else rasterio.open(filename)
     )
     with source_context as source:
+        # Store overview metadata
+        overview_metadata = _raster_overview_metadata(source, overview_level)
+        disk_metadata = {"block_shape": tuple(source.block_shapes[0])}
+        ds.attrs.pop("overview_resampling", None)
+        ds.attrs.update(overview_metadata)
+        ds.attrs.update(disk_metadata)
         if source.rpcs is not None:
             ds.attrs["RPC"] = source.rpcs.to_gdal()
         if source.gcps[0] and source.rpcs is not None:
@@ -139,7 +147,10 @@ def open_raster(
     if data_name is not None:
         ds = ds.rename(data_name)
     if as_object_type == "dataset":
-        return ds.to_dataset(name=ds.name or "raster")
+        dataset = ds.to_dataset(name=ds.name or "raster")
+        dataset.attrs.update(overview_metadata)
+        dataset.attrs.update(disk_metadata)
+        return dataset
     return ds
 
 
@@ -183,6 +194,14 @@ class DataArrayRasterAccessor(RasterBase):
 
         # Base instantiation of Xarray accessor
         self._obj: xr.DataArray = xarray_obj
+
+        # Refresh array chunks, including after writing a different disk layout
+        if "chunksizes" in self._obj.encoding or "chunks" in self._obj.encoding:
+            disk_chunks = self._obj.encoding.get("chunksizes", self._obj.encoding.get("chunks"))
+            if disk_chunks is None:
+                self._obj.attrs.pop("disk_chunks", None)
+            else:
+                self._obj.attrs["disk_chunks"] = tuple(disk_chunks)
 
         # We are never returning a DataArray that is unmasked, so the nodata plays a different role than in Rioxarray
         # It is only used for file writing = always the encoded value if it exists

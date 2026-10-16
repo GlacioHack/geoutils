@@ -106,19 +106,34 @@ def open_pointcloud(
             raise ValueError("downsample and level cannot be used together.")
 
     # Plan COPC reads from hierarchy counts without loading point records
-    from geoutils.pointcloud.las import _is_laspy_supported, _load_laspy_metadata, _select_copc_nodes
+    from geoutils.pointcloud.las import (
+        _is_laspy_supported,
+        _load_laspy_metadata,
+        _read_copc_hierarchy,
+        _select_copc_nodes,
+    )
 
+    # Store levels, chunk sizes, and other relevant metadata in the object attributes
     copc_nodes = None
+    file_metadata: dict[str, Any] = {}
     source_count = None
-    if level is not None or downsample > 1:
-        if _is_laspy_supported(filename):
-            metadata = _load_laspy_metadata(filename)
-            if metadata.is_copc:
-                source_count = metadata.point_count
-                target_count = int(np.ceil(source_count / downsample)) if downsample > 1 else None
-                copc_nodes = _select_copc_nodes(str(filename), level, target_count)
-        if level is not None and copc_nodes is None:
-            raise ValueError("Argument 'level' is only supported for COPC files.")
+    if _is_laspy_supported(filename):
+        metadata = _load_laspy_metadata(filename)
+        file_metadata = {"point_record_size": metadata.point_record_size, "laz_chunk_size": metadata.laz_chunk_size}
+        if metadata.is_copc:
+            source_count = metadata.point_count
+            target_count = int(np.ceil(source_count / downsample)) if downsample > 1 else None
+            hierarchy = _read_copc_hierarchy(str(filename))
+            copc_nodes = _select_copc_nodes(str(filename), level, target_count, nodes=hierarchy)
+            file_metadata.update(
+                {
+                    "copc_levels": sorted({node.key.level for node in hierarchy}),
+                    "copc_selected_levels": sorted({node.key.level for node in copc_nodes}),
+                    "copc_chunk_sizes": [node.point_count for node in hierarchy],
+                }
+            )
+    if level is not None and copc_nodes is None:
+        raise ValueError("Argument 'level' is only supported for COPC files.")
 
     # 2/ Dispatch by request representation
     if as_object_type in ("dataarray", "dataset"):
@@ -136,6 +151,15 @@ def open_pointcloud(
                 lengths.append(min(chunks, node.point_count - offset))
         partition_lengths = tuple(lengths) or (0,)
     points = _downsample_open_pointcloud(points, downsample, source_count, partition_lengths)
+
+    # Cache hierarchy metadata on every representation without computing lazy point values
+    if file_metadata:
+        if isinstance(points, xr.DataArray):
+            points.attrs.update(file_metadata)
+        else:
+            attrs = _get_dataframe_attrs(points).copy()
+            attrs.update(file_metadata)
+            _set_dataframe_attrs(points, attrs)
 
     # 4/ Convert to a Xarray Dataset, if requested
     if as_object_type == "dataset":

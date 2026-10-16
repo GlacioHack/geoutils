@@ -16,17 +16,17 @@ kernelspec:
 
 GeoUtils supports several **data structures** to represent rasters, vectors and point clouds.
 
-First, it extends Xarray and GeoPandas objects with all of its operations by implementing **[accessors](https://docs.xarray.dev/en/latest/internals/extending-xarray.html)**, 
+First, it extends Xarray and GeoPandas objects with all of its operations by implementing **[accessors](https://docs.xarray.dev/en/latest/internals/extending-xarray.html)**,
 facilitating **interoperability** with other tools accessing these data structures.
 
 Second, it also implements dedicated {class}`~geoutils.Raster`, {class}`~geoutils.Vector` and
-{class}`~geoutils.PointCloud` **objects** aimed at **ease-of-use** for Python beginners, to 
+{class}`~geoutils.PointCloud` **objects** aimed at **ease-of-use** for Python beginners, to
 manipulate geospatial data without knowing how labeled N-D arrays or dataframes work.
 
-You can choose the structure that suits your workflow. **We recommend using the accessors** for more seamless use 
+You can choose the structure that suits your workflow. **We recommend using the accessors** for more seamless use
 with the rest of the Python ecosystem, in particular for Dask support.
 
-As the internal design of GeoUtils separates operations from data structures, it **makes it easy to add accessors** 
+As the internal design of GeoUtils separates operations from data structures, it **makes it easy to add accessors**
 to emerging structures such as [GeoPolars](https://geopolars.org/latest/) and [Xvec](https://xvec.readthedocs.io/en/stable/) as they become available.
 
 Below, we describe different aspects of these data structures:
@@ -49,7 +49,7 @@ GeoUtils currently implements the following **objects** and **accessors**:
 | Point cloud          | {class}`pc <geoutils.DataArrayPointCloudAccessor>` on {class}`xarray.DataArray`<br>{class}`pc <geoutils.GeoDataFramePointCloudAccessor>` on {class}`geopandas.GeoDataFrame` | {class}`~geoutils.PointCloud` |
 | Several point clouds | {class}`pc <geoutils.DatasetPointCloudAccessor>` on {class}`xarray.Dataset` | — |
 
-The advantages and drawbacks between these structures are mainly centered around scalable execution: accessors support **Dask**, while GeoUtils objects only support file-to-file **multiprocessing**. 
+The advantages and drawbacks between these structures are mainly centered around scalable execution: accessors support **Dask**, while GeoUtils objects only support file-to-file **multiprocessing**.
 Both include support for **chunked execution** on larger-than-memory datasets, but only Dask is **lazy**. See **Scalability's {ref}`scalability-concept` page** for more details on these concepts.
 
 Other than scalability, differences are small:
@@ -61,7 +61,7 @@ The major practical difference concerns the creation of these objects: use {func
 {func}`~geoutils.open_pointcloud` to open Xarray or GeoPandas objects with accessors. For GeoUtils objects, pass the
 file path to the {class}`~geoutils.Raster`, {class}`~geoutils.Vector` or {class}`~geoutils.PointCloud` constructors.
 
-Finally, by default, **an operation always returns an object with the same data structure**. An accessor operation will return an object type also fit for an accessor (Xarray, GeoPandas), while a GeoUtils object will return a GeoUtils object. 
+Finally, by default, **an operation always returns an object with the same data structure**. An accessor operation will return an object type also fit for an accessor (Xarray, GeoPandas), while a GeoUtils object will return a GeoUtils object.
 Object types should not be mixed together. When ambiguity exists for return types (e.g., for point clouds), you can set which object is returned within the function, or by default in our global {ref}`config`.
 
 
@@ -113,37 +113,37 @@ ds
 ```
 
 The {class}`rst <geoutils.DatasetRasterAccessor>` and {class}`pc <geoutils.DatasetPointCloudAccessor>` accessors
-automatically detect **compatible raster/point variables** in the {class}`~xarray.Dataset`, listed through {attr}`~geoutils.DatasetRasterAccessor.compatible_variables`, 
+automatically detect **compatible raster/point variables** in the {class}`~xarray.Dataset`, listed through {attr}`~geoutils.DatasetRasterAccessor.compatible_variables`,
 which corresponds to variables with the right shapes (2D or 3D for rasters, 1D for points) and spatial referencing:
 
 ```{code-cell} ipython3
 list(ds.rst.compatible_variables.keys()), list(ds.pc.compatible_variables.keys())
 ```
 
-**By default, operations will loop through every compatible variable**, but those can also be passed manually through the `variables`, 
+**By default, operations will loop through every compatible variable**, but those can also be passed manually through the `variables`,
 which is exposed for all functions with the {class}`rst <geoutils.DatasetRasterAccessor>` Dataset accessor.
 
 ```{code-cell} ipython3
 # Filtering runs through all variables by default
 ds_both_filtered = ds.rst.filter("mean", window=3)
 
-# Filtering runs only on "dem" 
+# Filtering runs only on "dem"
 ds_dem_filtered = ds.rst.filter("mean", window=3, variables=["dem"])
 ```
 
 ```{caution}
 :class: margin
 
-The {class}`~xarray.Dataset` accessors are recent and might evolve before the 1.0 release, but are likely to **support more diverse cases**, thus keeping backwards-compatibility. 
+The {class}`~xarray.Dataset` accessors are recent and might evolve before the 1.0 release, but are likely to **support more diverse cases**, thus keeping backwards-compatibility.
 ```
 
-**Operations with a raster or point output** (such as {ref}`transformations` or {ref}`filters`), return a 
-{class}`~xarray.Dataset` updated for each compatible variable. 
+**Operations with a raster or point output** (such as {ref}`transformations` or {ref}`filters`), return a
+{class}`~xarray.Dataset` updated for each compatible variable.
 
-**Operations with other outputs** return a dictionary of output for each variable, except for specific cases where those outputs can 
+**Operations with other outputs** return a dictionary of output for each variable, except for specific cases where those outputs can
 be concatenated as input, such as for grouped statistics with {meth}`~geoutils.DatasetRasterAccessor.stats`.
 
-As a {class}`~xarray.Dataset` can hold raster and point variables on independent dimensions, both 
+As a {class}`~xarray.Dataset` can hold raster and point variables on independent dimensions, both
 {class}`rst <geoutils.DatasetRasterAccessor>` and {class}`pc <geoutils.DatasetPointCloudAccessor>` can each act on their
 compatible variables.
 
@@ -167,15 +167,15 @@ ds.rst.icrop((0, 0, 2, 2), variables=["dem"])
 (core-point-accessors)=
 ## Xarray or GeoPandas for points?
 
-Both point accessors {class}`pc <geoutils.DataArrayPointCloudAccessor>` (for Xarray) and {class}`pc <geoutils.GeoDataFramePointCloudAccessor>` (for GeoPandas) expose the same operations, 
+Both point accessors {class}`pc <geoutils.DataArrayPointCloudAccessor>` (for Xarray) and {class}`pc <geoutils.GeoDataFramePointCloudAccessor>` (for GeoPandas) expose the same operations,
 and work on the same file formats.
 
-Their core difference lies in the fact that **GeoPandas operations have to systematically construct [Shapely point objects](https://shapely.readthedocs.io/en/stable/reference/shapely.Point.html)**, 
-even for operations in which this geometry is not utilized and could run on the original X/Y/Z coordinates instead (e.g. conversion from raster to points, 
+Their core difference lies in the fact that **GeoPandas operations have to systematically construct [Shapely point objects](https://shapely.readthedocs.io/en/stable/reference/shapely.Point.html)**,
+even for operations in which this geometry is not utilized and could run on the original X/Y/Z coordinates instead (e.g. conversion from raster to points,
 downsampling, cropping, gridding, etc).
 Our {ref}`benchmarking` shows that this can slow down operations on large point clouds.
 
-Therefore, we advise to use the **Xarray {class}`pc <geoutils.DataArrayPointCloudAccessor>` accessor for numerical analysis** that mostly manipulates values and coordinate arrays, 
+Therefore, we advise to use the **Xarray {class}`pc <geoutils.DataArrayPointCloudAccessor>` accessor for numerical analysis** that mostly manipulates values and coordinate arrays,
 and the **GeoPandas {class}`pc <geoutils.GeoDataFramePointCloudAccessor>` for geometric operations**, such as buffers and spatial joins.
 
 ```{note}
@@ -202,8 +202,8 @@ The Xarray option is faster!
 (core-geoutils-objects)=
 ## GeoUtils objects
 
-GeoUtils defines **its own geospatial objects**, created before the emergence of accessors. They associate values with geospatial 
-metadata, and preserve their geospatial type through many operations. 
+GeoUtils defines **its own geospatial objects**, created before the emergence of accessors. They associate values with geospatial
+metadata, and preserve their geospatial type through many operations.
 A {class}`~geoutils.Raster` stores a NumPy masked array, while {class}`~geoutils.Vector` and {class}`~geoutils.PointCloud` store GeoPandas
 dataframes, with a {class}`~geoutils.PointCloud`'s {attr}`~PointCloudBase.data_name` selecting its main numerical values.
 
@@ -232,7 +232,7 @@ Inheritance lets child classes use methods and attributes from their parent clas
 
 **Within GeoUtils**, `RasterBase` defines the geospatial methods shared by {class}`~geoutils.Raster` and the Xarray
 {class}`rst <geoutils.DataArrayRasterAccessor>` accessor. Both inherit from this base class, implementing
-the attributes, I/O and copying needed for their NumPy or Xarray data. 
+the attributes, I/O and copying needed for their NumPy or Xarray data.
 The {class}`rst <geoutils.DatasetRasterAccessor>` Dataset accessor delegates to the DataArray accessor for
 each compatible variable, as described in {ref}`core-datasets`. The same logic applies to vectors and point clouds.
 

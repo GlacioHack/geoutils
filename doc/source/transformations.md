@@ -693,7 +693,7 @@ Using `fractional=True` returns one layer per feature, `fractional_by="column"` 
 one layer per group; `fractional="union"` combines all features into one layer. Overlaps within a group count once,
 while different groups can overlap independently.
 
-See {ref}`core-coverage` for coverage semantics and {ref}`stats-fractional` for calculating zonal statistics directly, 
+See {ref}`core-coverage` for coverage semantics and {ref}`stats-fractional` for calculating zonal statistics directly,
 without storing fractional coverage rasters.
 
 ### Polygonize

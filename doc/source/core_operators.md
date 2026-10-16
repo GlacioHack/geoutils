@@ -20,7 +20,7 @@ allows the use of **consistent methods** across operations, including reducers i
 and both operator types for resampling in {ref}`transformations` on points or rasters (e.g., reprojection, gridding).
 
 GeoUtils sets **convenient default behavior matching GDAL/PDAL**,
-with a broader choice of methods (e.g., kriging, inverse-distance-weighting), neighborhood definitions, nodata 
+with a broader choice of methods (e.g., kriging, inverse-distance-weighting), neighborhood definitions, nodata
 propagation schemes, and numerical backends (Rasterio/GDAL, SciPy or Numba) for efficiency.
 
 For more **advanced use**, GeoUtils supports customizable operators, allowing users to vary method or backend without having to
@@ -146,8 +146,8 @@ See {ref}`core-weighting` for worked examples on real data across sampling and r
 
 For more advanced use, GeoUtils also exposes **customizable** {class}`~geoutils.operators.Interpolator`,
 {class}`~geoutils.operators.Reducer`, {class}`~geoutils.operators.GridNeighbours` and
-{class}`~geoutils.operators.PointNeighbours` objects. Those allow users to easily extend these operators with their own 
-methods/backend while reusing the geospatial machinery and chunked execution (Dask or multiprocessing) of an operation 
+{class}`~geoutils.operators.PointNeighbours` objects. Those allow users to easily extend these operators with their own
+methods/backend while reusing the geospatial machinery and chunked execution (Dask or multiprocessing) of an operation
 already implemented in GeoUtils.
 
 ### Configuring methods and neighborhoods

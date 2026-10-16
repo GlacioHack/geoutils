@@ -529,6 +529,7 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
         scales: tuple[float, float, float] | None = None,
         chunks: int | None = None,
         mp_config: MultiprocConfig | None = None,
+        laz_chunk_size: int | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -541,6 +542,7 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
         :param scales: Scales for X/Y/Z.
         :param chunks: Optional number of points per write chunk.
         :param mp_config: Optional multiprocessing configuration for chunked writing.
+        :param laz_chunk_size: Number of points per compressed LAZ disk chunk. Requires Lazrs; None uses its default.
         :param kwargs: Other keyword arguments to set the LAS file header (e.g., "offsets", "scales").
         """
 
@@ -554,6 +556,7 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
             scales=scales,
             chunks=chunks,
             mp_config=mp_config,
+            laz_chunk_size=laz_chunk_size,
             **kwargs,
         )
 

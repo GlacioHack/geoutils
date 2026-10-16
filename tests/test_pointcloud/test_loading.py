@@ -11,6 +11,8 @@ from geopandas.testing import assert_geodataframe_equal
 from rasterio.coords import BoundingBox
 
 import geoutils as gu
+from geoutils._misc import import_optional
+from geoutils.pointcloud.dataframe import _get_dataframe_attrs
 from geoutils.pointcloud.loading import (
     _concat_point_parts,
     _filter_points_by_bounds,
@@ -72,6 +74,44 @@ class TestPointCloudOpening:
         assert values.pc.crs == cloud.crs
         assert values.pc.point_count == 3
         assert values.pc.is_loaded
+
+    @pytest.mark.parametrize("suffix", ["las", "laz", "parquet", "parquet-partitioned"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
+    def test_open_pointcloud__disk_metadata(
+        self, tmp_path: Path, suffix: str, as_object_type: Literal["dataarray", "dataset", "geodataframe"]
+    ) -> None:
+        """Checks that opening exposes source record sizes, LAZ block limits and Parquet row group sizes."""
+
+        # Write seven points so groups of three have a shorter final group
+        cloud = gu.PointCloud.from_xyz(np.arange(7.0), np.zeros(7), np.arange(7.0), 32633, "Z")
+        filename = tmp_path / ("parts" if suffix == "parquet-partitioned" else f"points.{suffix}")
+        if suffix.startswith("parquet"):
+            cloud.to_parquet(filename, chunks=3, partitioned=suffix == "parquet-partitioned")
+        else:
+            cloud.to_las(filename)
+
+        # Open each representation from the same file metadata
+        points = gu.open_pointcloud(filename, as_object_type=as_object_type)
+        attrs = points.attrs
+        values = points["Z"] if as_object_type == "dataset" else points
+
+        # Compare disk metadata with the independent reader and the chosen output row groups
+        if suffix.startswith("parquet"):
+            assert attrs["row_group_sizes"] == [3, 3, 1]
+        else:
+            laspy = import_optional("laspy")
+            with laspy.open(filename) as source:
+                assert attrs["point_record_size"] == source.header.point_format.size
+                if suffix == "laz":
+                    lazrs = import_optional("lazrs")
+                    compression = lazrs.LazVlr(source.header.vlrs.get("LasZipVlr")[0].record_data)
+                    assert attrs["laz_chunk_size"] == compression.chunk_size()
+                else:
+                    assert attrs["laz_chunk_size"] is None
+        if as_object_type == "dataset":
+            assert values.attrs == attrs
+        assert values.pc.is_loaded
+        np.testing.assert_array_equal(values.pc.to_array(), cloud.to_array())
 
     @pytest.mark.parametrize("suffix", ["gpkg", "las", "parquet"])
     @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
@@ -174,9 +214,86 @@ class TestPointCloudOpening:
         np.testing.assert_array_equal(values.pc.to_array(), expected.to_array())
         np.testing.assert_array_equal(intensity, expected["intensity"])
 
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
+    @pytest.mark.parametrize(
+        "options, selected_levels",
+        [
+            ({}, [0, 1]),
+            ({"level": 0}, [0]),
+            ({"level": range(2)}, [0, 1]),
+            ({"level": 99}, []),
+            ({"downsample": 1_000_000}, [0]),
+        ],
+    )
+    def test_open_pointcloud__copc_metadata(
+        self,
+        copc_file: Path,
+        as_object_type: Literal["dataarray", "dataset", "geodataframe"],
+        options: dict[str, Any],
+        selected_levels: list[int],
+    ) -> None:
+        """Checks that COPC attributes distinguish all stored levels from those selected for reading."""
+
+        # Inspect every block in the small fixture's first hierarchy page without reading its points
+        laspy = import_optional("laspy")
+        with laspy.CopcReader.open(copc_file) as source:
+            blocks = sorted(source.root_page.entries.values(), key=lambda entry: entry.offset)
+            expected_sizes = [entry.point_count for entry in blocks if entry.point_count > 0]
+
+        # Open full, explicitly selected and automatically sampled levels from the two-level fixture
+        points = gu.open_pointcloud(copc_file, as_object_type=as_object_type, **options)
+
+        # Check metadata remains available even for an empty selection or a one-point sample
+        assert points.attrs["copc_levels"] == [0, 1]
+        assert points.attrs["copc_selected_levels"] == selected_levels
+        assert points.attrs["copc_chunk_sizes"] == expected_sizes
+        values = points["Z"] if as_object_type == "dataset" else points
+        assert values.pc.is_loaded
+        if as_object_type == "dataset":
+            assert values.attrs["copc_levels"] == [0, 1]
+            assert values.attrs["copc_selected_levels"] == selected_levels
+            assert values.attrs["copc_chunk_sizes"] == expected_sizes
+
 
 class TestPointCloudOpeningChunked:
     """Test module ``open_pointcloud()`` with chunked backends (Dask only)."""
+
+    @pytest.mark.parametrize("suffix", ["las", "laz", "parquet", "parquet-partitioned"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
+    def test_open_pointcloud__disk_metadata(
+        self, tmp_path: Path, suffix: str, as_object_type: Literal["dataarray", "dataset", "geodataframe"]
+    ) -> None:
+        """Checks that disk metadata stays available without computing point values and matches eager opening."""
+        import_optional("dask")
+        from dask.callbacks import Callback
+
+        # Write groups of three points; computation chunks of two split these disk groups differently
+        cloud = gu.PointCloud.from_xyz(np.arange(7.0), np.zeros(7), np.arange(7.0), 32633, "Z")
+        filename = tmp_path / ("parts" if suffix == "parquet-partitioned" else f"points.{suffix}")
+        if suffix.startswith("parquet"):
+            cloud.to_parquet(filename, chunks=3, partitioned=suffix == "parquet-partitioned")
+        else:
+            cloud.to_las(filename)
+        eager = gu.open_pointcloud(filename, as_object_type=as_object_type)
+
+        # Inspect metadata while preventing Dask from reading any point values
+        with Callback(pretask=lambda *args: pytest.fail("Disk metadata must not compute point values")):
+            lazy = gu.open_pointcloud(filename, chunks=2, as_object_type=as_object_type)
+            attrs = _get_dataframe_attrs(lazy) if as_object_type == "geodataframe" else lazy.attrs
+            keys = ["row_group_sizes"] if suffix.startswith("parquet") else ["point_record_size", "laz_chunk_size"]
+            for key in keys:
+                assert attrs[key] == eager.attrs[key]
+
+        # Check lazy loading and exact equality with the eager values and metadata
+        eager_values = eager["Z"] if as_object_type == "dataset" else eager
+        lazy_values = lazy["Z"] if as_object_type == "dataset" else lazy
+        assert eager_values.pc.is_loaded and not lazy_values.pc.is_loaded
+        computed = lazy.compute(scheduler="synchronous")
+        if as_object_type == "geodataframe":
+            assert_geodataframe_equal(computed, eager)
+        else:
+            xr.testing.assert_identical(computed, eager)
+        assert not lazy_values.pc.is_loaded
 
     @pytest.mark.parametrize("suffix", ["gpkg", "las", "parquet"])
     @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
@@ -272,6 +389,15 @@ class TestPointCloudOpeningChunked:
         assert eager_values.pc.is_loaded
         assert not lazy_values.pc.is_loaded
         assert lazy_values.pc.point_count == eager_values.pc.point_count
+        assert not read_offsets
+
+        # Check the cached level lists without decompressing any point groups
+        eager_attrs = eager.attrs if as_object_type != "geodataframe" else _get_dataframe_attrs(eager)
+        lazy_attrs = lazy.attrs if as_object_type != "geodataframe" else _get_dataframe_attrs(lazy)
+        assert lazy_attrs["copc_levels"] == eager_attrs["copc_levels"] == [0, 1]
+        assert lazy_attrs["copc_selected_levels"] == eager_attrs["copc_selected_levels"]
+        assert lazy_attrs["copc_chunk_sizes"] == eager_attrs["copc_chunk_sizes"]
+        assert sum(lazy_attrs["copc_chunk_sizes"]) == 100_003
         assert not read_offsets
 
         # Compute

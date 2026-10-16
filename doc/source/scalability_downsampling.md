@@ -166,18 +166,14 @@ variogram.to_dataframe().head()
 (scalability-downsampling-overviews)=
 ## Raster overviews
 
-GeoUtils **automatically reads suitable raster overviews**, including those in COGs, through
-[Rasterio](https://rasterio.readthedocs.io/en/stable/) when opening with `downsample`.
+GeoUtils **reads suitable raster overviews** in GeoTIFFs/COGs through [Rasterio](https://rasterio.readthedocs.io/en/stable/) when specifying an overview level, 
+or when opening with `downsample`,.
 
 [Overviews](https://rasterio.readthedocs.io/en/stable/topics/overviews.html) are coarser copies stored inside or beside a raster file, avoid reading and
 resampling the full-resolution data.
-GeoUtils chooses the coarsest overview whose reduction factor is at most `1.2 × downsample`.
-The selected overview is resampled to the requested grid if needed. If none is suitable, GeoUtils reads the original raster.
 
-To read a **specific stored overview** on its own grid, use `overview_level`, starting at `0` for the first one.
-The two arguments cannot be combined.
-
-Below, we create overviews reduced by factors of 2, 4 and 8 using average resampling:
+**To read a specific stored overview level** , use `overview_level`, starting at 0.
+Available overview levels and their resampling can be inspected from the raster attributes without loading the file.
 
 ```{code-cell} ipython3
 :tags: [hide-input]
@@ -201,19 +197,26 @@ with rio.open(overview_path, "r+") as source:
 ```
 
 ```{code-cell} ipython3
-with rio.open(overview_path) as source:
-    print("Stored factors:", source.overviews(1))
-
 # Level 1 selects the second overview, reduced by a factor of 4
 ds_overview = gu.open_raster(overview_path, overview_level=1, chunks={"x": 32, "y": 32})
+print("Stored factors:", ds_overview.attrs["overview_factors"])
+print("Overview resampling:", ds_overview.attrs["overview_resampling"])
+```
+
+**When opening with `downsample`**, GeoUtils automatically chooses the coarsest overview whose reduction factor is at most `1.2 × downsample`.
+The selected overview is then resampled exactly to the downsampling factor. Downsampling cannot be used together with `overview_level`.
+
+```{code-cell} ipython3
 # A requested factor of 3 instead defines its own 90 m grid
 ds_factor3 = gu.open_raster(overview_path, downsample=3, chunks={"x": 32, "y": 32})
+print("Overview factor selected for downsample=3:", ds_factor3.attrs["overview_selected_factor"])
 print("Stored overview pixels:", ds_overview.size)
 print("downsample=3 pixels:", ds_factor3.size)
 ```
 
-The values in an overview depend on the **resampling method used to create it**. See {ref}`scalability-formats`
-for using overviews to read remote files in the cloud.
+During downsampling, GeoUtils **stores which overview was selected** for future inspection.
+
+See {ref}`scalability-formats` for reading remote files in the cloud, including with overviews.
 
 ```{code-cell} ipython3
 :tags: [remove-cell]
@@ -235,25 +238,59 @@ files.cleanup()
 (scalability-downsampling-copc)=
 ## Point cloud levels of detail
 
-[**COPC**](https://copc.io/) stores points in an **octree**, a hierarchy of progressively smaller spatial cells.
-Its **levels of detail** serve a similar purpose to raster overviews, allowing a coarser view to be read without
-reading every point.
+GeoUtils **reads suitable levels of detail** in COPCs through [LasPy](https://laspy.readthedocs.io/en/latest/) when specifying a level of detail,
+or when opening with `downsample`.
 
-Use the `level` argument of {func}`~geoutils.open_pointcloud` to select **stored levels of detail**.
-Each point belongs to one level: level `0` holds a coarse sample, and higher levels add points.
-An integer selects only that level; a range combines several levels into one point cloud.
+[Levels of detail](https://copc.io/) are coarser point samples stored in a COPC's octree, a hierarchy of progressively smaller spatial cells,
+avoiding reading every point. They select original points, preserving their coordinates, values and attributes.
 
-For an existing `survey.copc.laz`, we can combine levels 0 through 2 or read level 3 alone:
+**To read a specific stored level of detail**, use `level`, starting at 0.
+An integer selects only that level, a range combines several levels into one point cloud, and all levels is equivalent to the full point cloud.
+Available levels of detail can be inspected from the point cloud attributes without loading the file.
 
-```python
-import geoutils as gu
+```{code-cell} ipython3
+:tags: [remove-cell]
 
-ds_coarse = gu.open_pointcloud("survey.copc.laz", level=range(3), chunks=100_000)
-ds_level3 = gu.open_pointcloud("survey.copc.laz", level=3, chunks=100_000)
+copc_path = Path("_static/survey.copc.laz")
 ```
 
-Passing `chunks` leaves the selected point data **lazy** until computation. Without `level`, all levels are combined,
-unless `downsample` selects them automatically. Explicit `level` selection cannot be combined with `downsample > 1`.
+```{code-cell} ipython3
+ds_coarse = gu.open_pointcloud(copc_path, level=0, chunks=10_000)
+ds_detail = gu.open_pointcloud(copc_path, level=range(2), chunks=10_000)
+print("Available levels:", ds_coarse.attrs["copc_levels"])
+print("Level 0 points:", ds_coarse.pc.point_count)
+print("Levels 0 and 1 points:", ds_detail.pc.point_count)
+```
 
-Levels of detail select **original points**, preserving their coordinates, values and attributes. The selected
-points remain irregularly spaced. See {ref}`scalability-formats` for remote COPC reading and optional dependencies.
+**When opening with `downsample`**, GeoUtils automatically selects levels from coarse to fine until enough points are available for the requested count.
+The selected points are then sampled exactly to the downsampling factor. Downsampling cannot be used together with `level`.
+
+```{code-cell} ipython3
+ds_copc_sample = gu.open_pointcloud(copc_path, downsample=5, chunks=10_000)
+print("Levels selected for downsample=5:", ds_copc_sample.attrs["copc_selected_levels"])
+print("Sampled points:", ds_copc_sample.pc.point_count)
+```
+
+As for raster overviews, during downsampling of point clouds, GeoUtils **stores which levels were selected**.
+
+See {ref}`scalability-formats` for reading remote files in the cloud, including with levels of detail.
+
+```{code-cell} ipython3
+:tags: [remove-cell]
+
+# Check that selecting more levels adds points and that the selected arrays stay lazy
+assert not ds_coarse.pc.is_loaded and not ds_detail.pc.is_loaded
+assert 0 < ds_coarse.pc.point_count < ds_detail.pc.point_count == 100_003
+assert ds_coarse.compute().size == ds_coarse.pc.point_count
+assert ds_detail.compute().size == ds_detail.pc.point_count
+
+# Check automatic downsampling uses only level 0 and samples it to the requested count
+assert not ds_copc_sample.pc.is_loaded
+assert ds_copc_sample.attrs["copc_levels"] == [0, 1]
+assert ds_copc_sample.attrs["copc_selected_levels"] == [0]
+assert ds_copc_sample.pc.point_count == int(np.ceil(ds_detail.pc.point_count / 5))
+assert ds_copc_sample.compute().size == ds_copc_sample.pc.point_count
+ds_coarse.close()
+ds_detail.close()
+ds_copc_sample.close()
+```

@@ -8,9 +8,10 @@ import struct
 import tempfile
 from contextlib import nullcontext
 from dataclasses import replace
+from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Literal
+from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -19,6 +20,7 @@ import xarray as xr
 
 import geoutils as gu
 import geoutils.pointcloud.las as las_module
+from geoutils._misc import import_optional
 from geoutils.multiproc import MultiprocConfig
 from geoutils.pointcloud.las import (
     _iter_laspy_spatial_chunks,
@@ -236,6 +238,63 @@ class TestLasPyIO:
 
         assert chunk_counts == [2, 4]
 
+    @pytest.mark.parametrize("as_object_type", ["pointcloud", "dataarray", "dataset", "geodataframe"])
+    @pytest.mark.parametrize("point_format", [3, 6])
+    @pytest.mark.parametrize("laz_chunk_size", [1, 3, 20])
+    def test_to_las__disk_chunks(
+        self, tmp_path: Path, as_object_type: str, point_format: int, laz_chunk_size: int
+    ) -> None:
+        """Checks that to_las() writes requested LAZ disk chunks for all representations."""
+
+        lazrs = import_optional("lazrs")
+
+        # Create points with uneven chunks and dtypes
+        reference = gu.PointCloud.from_xyz(np.arange(11.0), np.arange(11.0) + 1, np.arange(11.0), 32633, "Z")
+        reference["classification"] = np.arange(11, dtype=np.uint8)
+        reference["identifier"] = np.arange(11, dtype=np.uint64) + 2**63
+        array = reference.to_xarray()
+        representations: dict[str, Any] = {
+            "pointcloud": reference,
+            "geodataframe": reference.gdf,
+            "dataarray": array,
+            "dataset": array.to_dataset().reset_coords(["classification", "identifier"]),
+        }
+
+        # Write with different chunk sizes and formats
+        points = representations[as_object_type]
+        writer = points if as_object_type == "pointcloud" else points.pc
+        filename = tmp_path / "points.laz"
+        writer.to_las(filename, point_format=point_format, chunks=4, laz_chunk_size=laz_chunk_size)
+
+        # Read chunk sizes independently to check
+        with laspy.open(filename) as reader:
+            compression = lazrs.LazVlr(reader.header.vlrs.get("LasZipVlr")[0].record_data)
+            assert compression.chunk_size() == laz_chunk_size
+            with filename.open("rb") as stream:
+                stream.seek(reader.header.offset_to_point_data)
+                disk_chunks = lazrs.read_chunk_table(stream, compression)
+            assert len(disk_chunks) == (11 + laz_chunk_size - 1) // laz_chunk_size
+
+            # Check equality across compressed chunks
+            for start in (0, 2, 3, 4, 9):
+                reader.seek(start)
+                selected = reader.read_points(2)
+                np.testing.assert_array_equal(selected.z, np.arange(11.0)[start : start + 2])
+                np.testing.assert_array_equal(selected.identifier, reference["identifier"].values[start : start + 2])
+
+        # Reopen with GeoUtils and check exact equality
+        saved = gu.open_pointcloud(filename, columns=["classification", "identifier"])
+        assert saved.attrs["laz_chunk_size"] == laz_chunk_size
+        assert saved.pc.is_loaded
+        if as_object_type == "dataset":
+            assert all(variable.pc.is_loaded for variable in points.data_vars.values())
+        else:
+            assert writer.is_loaded
+        assert saved.pc.crs == reference.crs
+        np.testing.assert_array_equal(saved.pc.to_array(), reference.to_array())
+        np.testing.assert_array_equal(saved.classification, reference["classification"])
+        np.testing.assert_array_equal(saved.identifier, reference["identifier"])
+
     def test_to_las_chunked_pandas_and_multiproc(self) -> None:
         """Write in-memory point clouds by chunks."""
 
@@ -341,3 +400,114 @@ class TestLasPyIO:
         result = laspy.read(filename)
         np.testing.assert_array_equal(result.z, [10, 20])
         np.testing.assert_array_equal(result.intensity, [5, 6])
+
+    @pytest.mark.parametrize(
+        "as_object_type, backend",
+        [
+            ("dataarray", "dask"),
+            ("dataset", "dask"),
+            ("geodataframe", "dask"),
+            ("pointcloud", "multiproc"),
+            ("geodataframe", "multiproc"),
+        ],
+    )
+    def test_to_las__disk_chunks_chunked(
+        self,
+        tmp_path: Path,
+        as_object_type: Literal["pointcloud", "dataarray", "dataset", "geodataframe"],
+        backend: Literal["dask", "multiproc"],
+    ) -> None:
+        """Checks that Dask and multiprocessing writes use specified LAZ disk chunks and match eager writing."""
+
+        import_optional("lazrs")
+
+        # We write uneven chunked point cloud with multiple dtypes
+        reference = gu.PointCloud.from_xyz(np.arange(11.0), np.arange(11.0) + 1, np.arange(11.0), 32633, "Z")
+        reference["classification"] = np.arange(11, dtype=np.uint8)
+        reference["identifier"] = np.arange(11, dtype=np.uint64) + 2**63
+        reference["intensity"] = np.arange(11, dtype=np.uint16)
+        columns = ["classification", "identifier", "intensity"]
+
+        # Open eager and chunked
+        if as_object_type == "pointcloud":
+            eager_writer = chunked_writer = reference
+            eager_accessors = chunked_accessors = [reference]
+        else:
+            filename = tmp_path / "source.las"
+            reference.to_las(filename)
+            eager = gu.open_pointcloud(filename, columns=columns, as_object_type=as_object_type)
+            chunked = gu.open_pointcloud(
+                filename, columns=columns, as_object_type=as_object_type, chunks=4 if backend == "dask" else None
+            )
+            eager_writer, chunked_writer = eager.pc, chunked.pc
+            eager_variables = list(eager.data_vars.values()) if as_object_type == "dataset" else [eager]
+            chunked_variables = list(chunked.data_vars.values()) if as_object_type == "dataset" else [chunked]
+            eager_accessors = [variable.pc for variable in eager_variables]
+            chunked_accessors = [variable.pc for variable in chunked_variables]
+        expected_loaded = backend == "multiproc"
+        assert all(accessor.is_loaded for accessor in eager_accessors)
+        assert all(accessor.is_loaded == expected_loaded for accessor in chunked_accessors)
+
+        # Write eagerly and with Dask/MP
+        eager_filename = tmp_path / "eager.laz"
+        chunked_filename = tmp_path / "chunked.laz"
+        eager_writer.to_las(eager_filename, chunks=4, laz_chunk_size=3)
+        if backend == "dask":
+            chunked_writer.to_las(chunked_filename, chunks=4, laz_chunk_size=3)
+        else:
+            chunked_writer.to_las(chunked_filename, mp_config=MultiprocConfig(chunks=4), laz_chunk_size=3)
+        assert all(accessor.is_loaded == expected_loaded for accessor in chunked_accessors)
+
+        # Check exact equality and chunk size metadata
+        saved = gu.open_pointcloud(chunked_filename, columns=columns, chunks=4)
+        expected = gu.open_pointcloud(eager_filename, columns=columns)
+        assert not saved.pc.is_loaded and expected.pc.is_loaded
+        assert saved.attrs["laz_chunk_size"] == expected.attrs["laz_chunk_size"] == 3
+        xr.testing.assert_identical(saved.compute(), expected)
+        np.testing.assert_array_equal(expected.pc.to_array(), reference.to_array())
+        assert all(accessor.is_loaded == expected_loaded for accessor in chunked_accessors)
+        assert not saved.pc.is_loaded
+
+
+class TestLasErrors:
+    """Test module for errors/warnings for LAS/LAZ/COPC functions."""
+
+    @pytest.mark.parametrize("as_object_type", ["pointcloud", "dataarray"])
+    @pytest.mark.parametrize("laz_chunk_size", [0, -1, True, 1.5, "3", 0xFFFFFFFF, 2**32])
+    def test_to_las__error_invalid_disk_chunks(self, tmp_path: Path, as_object_type: str, laz_chunk_size: Any) -> None:
+        """Checks an error is raised for invalid LAZ disk chunk sizes."""
+
+        cloud = gu.PointCloud.from_xyz([0.0], [1.0], [2.0], 32633, "Z")
+        writer = cloud if as_object_type == "pointcloud" else cloud.to_xarray().pc
+        filename = tmp_path / "points.laz"
+        filename.write_bytes(b"Existing output")
+
+        with pytest.raises(ValueError, match="laz_chunk_size.*integer between"):
+            writer.to_las(filename, laz_chunk_size=laz_chunk_size)
+        assert filename.read_bytes() == b"Existing output"
+
+    @pytest.mark.parametrize("as_object_type", ["pointcloud", "dataarray"])
+    @pytest.mark.parametrize("suffix", ["las", "copc.laz"])
+    def test_to_las__error_disk_chunks_other_formats(self, tmp_path: Path, as_object_type: str, suffix: str) -> None:
+        """Checks an error is raised for LAZ disk chunk options on LAS or COPC."""
+
+        cloud = gu.PointCloud.from_xyz([0.0], [1.0], [2.0], 32633, "Z")
+        writer = cloud if as_object_type == "pointcloud" else cloud.to_xarray().pc
+        filename = tmp_path / f"points.{suffix}"
+
+        with pytest.raises(ValueError, match="laz_chunk_size.*only supported for LAZ"):
+            writer.to_las(filename, laz_chunk_size=3)
+        assert not filename.exists()
+
+    @pytest.mark.skipif(find_spec("lazrs") is not None, reason="Only runs when lazrs is installed")
+    def test_to_las__error_disk_chunks_missing_lazrs(self, tmp_path: Path) -> None:
+        """Checks an error is raised for a missing Lazrs dependency before output is overwritten."""
+
+        points = gu.DataArrayPointCloudAccessor.from_xyz([0.0], [1.0], [2.0], 32633)
+        filename = tmp_path / "points.laz"
+        filename.write_bytes(b"Existing output")
+
+        # Check we fail before LasPy can open or truncate the destination
+        with pytest.raises(ImportError, match="lazrs"):
+            points.pc.to_las(filename, laz_chunk_size=3)
+        assert filename.read_bytes() == b"Existing output"

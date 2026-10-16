@@ -67,6 +67,7 @@ dependencies:
   - myst-nb
   - numpydoc
   - typing-extensions
+  - zarr
 
   - pip:
       - -e ./

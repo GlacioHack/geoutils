@@ -1,7 +1,7 @@
 (scalability-index)=
 # Scalability
 
-The following sections explain how to work efficiently with large geospatial datasets through **chunked execution** with Dask and 
+The following sections explain how to work efficiently with large geospatial datasets through **chunked execution** with Dask and
 multiprocessing, **downsampling** to reduce data before or during an operation, considering **file formats and cloud storage**.
 
 

@@ -17,7 +17,7 @@ GeoUtils implements **filtering capabilities for both rasters and point clouds**
 
 All support **scalable execution** on large datasets and **geospatial awareness** to define filter distances and skip invalid values.
 
-Filters are not limited to smoothing data or removing outliers (e.g. Gaussian or median filters). They can perform any 
+Filters are not limited to smoothing data or removing outliers (e.g. Gaussian or median filters). They can perform any
 computation on a window (for rasters) or neighborhood (for points), such as deriving a **local derivative** or a **local autocorrelation index**.
 
 ```{seealso}

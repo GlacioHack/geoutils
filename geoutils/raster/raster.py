@@ -59,7 +59,12 @@ from geoutils.raster.satimg import (
     decode_sensor_metadata,
     parse_and_convert_metadata_from_filename,
 )
-from geoutils.raster.transformation import _crop_window, _open_downsampled_raster
+from geoutils.raster.transformation import (
+    _crop_window,
+    _open_downsampled_raster,
+    _overview_level_for_downsample,
+    _raster_overview_metadata,
+)
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
 try:
@@ -443,12 +448,18 @@ class Raster(RasterBase):
                 self._driver = ds.driver
                 self._tags.update(ds.tags())
                 self._profile = ds.profile
+                self._tags["block_shape"] = tuple(ds.block_shapes[0])
 
                 # For tags saved from sensor metadata, convert from string to practical type (datetime, etc)
                 converted_tags = decode_sensor_metadata(self.tags)
                 self._tags.update(converted_tags)
                 # Add image structure in tags
                 self._tags.update(ds.tags(ns="IMAGE_STRUCTURE"))
+
+                # Cache source overview metadata before closing the file
+                overview_level = _overview_level_for_downsample(ds, downsample) if downsample > 1 else None
+                self._tags.pop("overview_resampling", None)
+                self._tags.update(_raster_overview_metadata(ds, overview_level))
 
                 self._area_or_point = self.tags.get("AREA_OR_POINT", None)
 
@@ -2280,6 +2291,19 @@ class Raster(RasterBase):
             updated_raster = self
 
         ds = rioxarray.open_rasterio(updated_raster.to_rio_dataset(), masked=True)
+        if "block_shape" in self.tags:
+            ds.attrs["block_shape"] = copy.deepcopy(self.tags["block_shape"])
+
+        # We export overview metadata
+        for key in (
+            "overview_factors",
+            "overview_resampling",
+            "overview_selected_level",
+            "overview_selected_factor",
+        ):
+            if key in self.tags:
+                ds.attrs[key] = copy.deepcopy(self.tags[key])
+
         # When reading as masked, the nodata is not written to the dataset so we do it manually
         ds.rio.set_nodata(self.nodata)
         if self.rpcs is not None:

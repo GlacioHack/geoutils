@@ -16,10 +16,10 @@ kernelspec:
 GeoUtils links to existing **numerical interfaces** to facilitate raster and point cloud arithmetic.
 
 Xarray and GeoPandas provide **Python operators** and **NumPy function support** directly on their objects.
-GeoUtils implements its own interfaces for {class}`~geoutils.Raster` and {class}`~geoutils.PointCloud`, handling 
+GeoUtils implements its own interfaces for {class}`~geoutils.Raster` and {class}`~geoutils.PointCloud`, handling
 **NumPy's masked arrays** so calculations respect invalid pixels.
 
-The following sections demonstrate how to perform basic arithmetic, comparing {ref}`Python operators <core-py-ops>` and 
+The following sections demonstrate how to perform basic arithmetic, comparing {ref}`Python operators <core-py-ops>` and
 {ref}`NumPy functions and reductions <core-array-funcs>` across GeoUtils objects,
 {class}`~xarray.DataArray` and {class}`~pandas.Series`.
 
@@ -87,7 +87,7 @@ With another Raster, its shape, {attr}`~RasterBase.crs` and {attr}`~RasterBase.t
 With a NumPy array, its shape must match. The result is a Raster, with masked values propagated.
 Dtypes follow [NumPy's promotion rules](https://numpy.org/doc/stable/reference/arrays.promotion.html).
 
-The same is true for a {class}`~geoutils.PointCloud`. However, different object types cannot perform arithmetic directly with each other. 
+The same is true for a {class}`~geoutils.PointCloud`. However, different object types cannot perform arithmetic directly with each other.
 To do so, first reconcile them to the same object type (i.e. spatial support) either at high-level through {ref}`sampling-cosample` or directly with {ref}`transformations`.
 
 We create the same small raster with both a {class}`~geoutils.Raster` and {class}`~xarray.DataArray`, using `float32` so Xarray can
@@ -326,7 +326,7 @@ the Raster, or a masked-array function to {attr}`~RasterBase.data`. With a {clas
 ```{note}
 :class: margin
 
-Masked-array NumPy functions such as `np.ma.median` are not recognized when applied directly to a Raster, 
+Masked-array NumPy functions such as `np.ma.median` are not recognized when applied directly to a Raster,
 because no interface is yet exposed in NumPy. Apply them to {attr}`~RasterBase.data` instead.
 ```
 
@@ -359,5 +359,5 @@ height_missing = pc_missing.gdf["height"]
 np.nanmedian(pc_missing), points_missing.median(skipna=True), height_missing.median(skipna=True)
 ```
 
-More generally to compute global or grouped statistics while respecting nodata, sampling multiple datasets at co-located areas, 
+More generally to compute global or grouped statistics while respecting nodata, sampling multiple datasets at co-located areas,
 while maintaining laziness and chunked execution on large datasets, use the **{ref}`stats` functionalities**.
