@@ -54,6 +54,7 @@ from geoutils.pointcloud.las import (
     _point_partition_size,
     _write_laspy,
 )
+from geoutils.pointcloud.parquet import _is_parquet_supported
 from geoutils.vector.transformation import _apply_crop_filters, _crop_read_bbox
 from geoutils.vector.vector import Vector
 
@@ -259,10 +260,7 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
                 self._feature_count = metadata.point_count
                 self._geometry_type = "Point"
                 self._ds = None
-            elif isinstance(filename_or_dataset, (str, pathlib.Path)) and (
-                pathlib.Path(filename_or_dataset).suffix.lower() == ".parquet"
-                or pathlib.Path(filename_or_dataset).is_dir()
-            ):
+            elif isinstance(filename_or_dataset, (str, pathlib.Path)) and _is_parquet_supported(filename_or_dataset):
                 from geoutils.pointcloud.parquet import _point_parquet_metadata
 
                 parquet_metadata = _point_parquet_metadata(filename_or_dataset)
@@ -352,9 +350,7 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
         # Overriding method in Vector in case dataset is not loaded
         if self.is_loaded:
             return super().columns
-        if self.name is not None and (
-            pathlib.Path(self.name).suffix.lower() == ".parquet" or pathlib.Path(self.name).is_dir()
-        ):
+        if self.name is not None and _is_parquet_supported(self.name):
             return self._columns
         if self._is_las:
             # Return columns on disk (adding a placeholder geometry to replace X/Y)
@@ -397,7 +393,7 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
                 "Cannot load as filename is not set anymore. Did you manually update the filename attribute?"
             )
 
-        if pathlib.Path(self.name).suffix.lower() == ".parquet" or pathlib.Path(self.name).is_dir():
+        if _is_parquet_supported(self.name):
             from geoutils.pointcloud.parquet import _open_point_parquet
 
             points = _open_point_parquet(self.name, data_name=self.data_name, columns="all")
