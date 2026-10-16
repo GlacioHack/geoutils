@@ -228,7 +228,7 @@ object, or {ref}`feature-overview` for operations shared across data types.
 (core-inheritance)=
 ## Inheritance
 
-Inheritance is practical to naturally pass down parent methods and attributes to child classes.
+Inheritance lets child classes use methods and attributes from their parent classes.
 
 **Within GeoUtils**, `RasterBase` defines the geospatial methods shared by {class}`~geoutils.Raster` and the Xarray
 {class}`rst <geoutils.DataArrayRasterAccessor>` accessor. Both inherit from this base class, implementing
@@ -275,11 +275,11 @@ digraph dem_inheritance {
 The `dem` accessor and {class}`~xdem.DEM` class notably re-implements all methods of [gdalDEM](https://gdal.org/programs/gdaldem.html) to derive topographic attributes
 (hillshade, slope, aspect, etc), and much more.
 
-If you are DEM-enthusiastic, **[check-out our sister package xDEM](https://xdem.readthedocs.io/) on elevation data analysis.**
+If you are a DEM enthusiast, **[check out xDEM](https://xdem.readthedocs.io/) for elevation data analysis.**
 ```
 
-Many types of geospatial data can be viewed as a subclass of rasters or point clouds, which have more attributes and require their own methods:
+Many types of geospatial data extend rasters or point clouds with additional attributes and methods:
 **spectral images**, **velocity fields**, **phase difference maps**, etc...
 
-If you are interested to build your own subclass of a GeoUtils object or accessor: you can take example from xDEM, 
-and don't hesitate to reach out on our GitHub!
+If you are interested in building your own subclass of a GeoUtils object or accessor, follow xDEM's example.
+Don't hesitate to [reach out on GitHub](https://github.com/GlacioHack/geoutils)!

@@ -17,8 +17,8 @@ GeoUtils implements **filtering capabilities for both rasters and point clouds**
 
 All support **scalable execution** on large datasets and **geospatial awareness** to define filter distances and skip invalid values.
 
-Filters are not limited to methods aimed at smoothing data or removing outliers (e.g. Gaussian or median), but can be any computation on a
-window (for rasters) or neighborhood (for points), such as deriving a **local derivative** or a **local autocorrelation index**.
+Filters are not limited to smoothing data or removing outliers (e.g. Gaussian or median filters). They can perform any 
+computation on a window (for rasters) or neighborhood (for points), such as deriving a **local derivative** or a **local autocorrelation index**.
 
 ```{seealso}
 To derive **terrain attributes** on elevation data, which are also a type of filter, see [xDEM's implementations](https://xdem.readthedocs.io/en/stable/terrain.html) based on peer-reviewed studies.

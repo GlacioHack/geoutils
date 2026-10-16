@@ -46,8 +46,8 @@ In GeoUtils, **these higher-level operations are tested to ensure robustness and
 ```
 
 The package functionalities can be called either from the {class}`rst <geoutils.DataArrayRasterAccessor>`,
-{class}`vct <geoutils.GeoDataFrameVectorAccessor>` and {class}`pc <geoutils.DataArrayPointCloudAccessor>` accessors (Xarray or GeoPandas for points) or from the
-{class}`~geoutils.Raster`, {class}`~geoutils.Vector` and {class}`~geoutils.PointCloud` classes.
+{class}`vct <geoutils.GeoDataFrameVectorAccessor>`, and {class}`pc <geoutils.DataArrayPointCloudAccessor>` accessors (Xarray or GeoPandas for points) or from the
+{class}`~geoutils.Raster`, {class}`~geoutils.Vector`, and {class}`~geoutils.PointCloud` classes.
 Below, in just a few lines, we open raster, vector and point cloud files, crop the raster to the vector extent,
 re-assign raster values around a buffer of the vector, sample values, calculate statistics, and finally plot and
 save the raster result!
@@ -72,7 +72,7 @@ one compatible with the data type derived during operations.
 import geoutils as gu
 import numpy as np
 
-# Example files: paths to raster, vector and point cloud files
+# Example files: paths to raster, vector, and point cloud files
 filename_rast = gu.examples.get_path("everest_landsat_b4")
 filename_vect = gu.examples.get_path("everest_rgi_outlines")
 filename_pc = gu.examples.get_path("coromandel_lidar")

@@ -97,7 +97,7 @@ can help define a 3D CRS.
 {attr}`gdf.vct.bbox or Vector.bbox <VectorBase.bbox>`<br>
 {attr}`gdf.pc.bbox or PointCloud.bbox <geoutils.pointcloud.base.GeometryPointCloudBase.bbox>`
 
-Bounding boxes define the spatial extent of geospatial data through the "left", "right", "bottom" and "top"
+Bounding boxes define the spatial extent of geospatial data through the "left", "right", "bottom", and "top"
 coordinates. GeoUtils represents them with {class}`rasterio.coords.BoundingBox` objects.
 
 ```{code-cell} ipython3

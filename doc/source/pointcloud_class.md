@@ -82,8 +82,8 @@ pc = geoutils.PointCloud(filename_dem, data_name="Z")
 pc
 ```
 
-See {ref}`core-downsampling` to reduce point cloud density when opening or plotting, including how GeoUtils selects
-deterministic point samples.
+See {ref}`core-downsampling` for details on reducing point cloud density when opening or plotting,
+including how GeoUtils selects deterministic point samples.
 
 ### Opening native arrays or dataframes
 

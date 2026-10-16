@@ -20,7 +20,7 @@ In GeoUtils, georeferenced rasters are exposed through two interfaces:
 - The {class}`~geoutils.Raster`.
 
 For new workflows, we **recommend using the {class}`rst <geoutils.DataArrayRasterAccessor>` accessor**, and using either only accessors or only GeoUtils objects.
-While their behaviour is almost entirely similar, there are some differences that are summarized directly below.
+Their behaviour is largely similar, with the main differences summarized below.
 
 ## Accessor {class}`rst <geoutils.DataArrayRasterAccessor>` versus {class}`~geoutils.Raster`
 
@@ -99,8 +99,8 @@ rast = gu.Raster(filename_rast)
 rast
 ```
 
-See {ref}`core-downsampling` to reduce raster resolution when opening or plotting, including how GeoUtils handles
-stored file overviews through GDAL.
+See {ref}`core-downsampling` for details on reducing raster resolution when opening or plotting, including how
+GeoUtils handles stored file overviews through GDAL.
 
 Detailed information on the **raster** is printed using {func}`~geoutils.Raster.info`, along with basic statistics using `stats=True`:
 

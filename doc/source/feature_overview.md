@@ -3,7 +3,7 @@
 
 GeoUtils provides a unified API for manipulating **raster**, **vector**, and **point cloud** data, and provides **scalable CPU execution** for most raster and point cloud operations, as well as some vector operations, through Dask or multiprocessing.
 
-As many of our numerical operations rely on NumPy, SciPy or Numba, those are planned to be linked to their **GPU counterparts** (CuPy and Numba CUDA) in the future.
+As many of our numerical operations rely on NumPy, SciPy, or Numba, those are planned to be linked to their **GPU counterparts** (CuPy and Numba CUDA) in the future.
 
 The **{ref}`summary tables<tables-overview>` directly below** list the core features of GeoUtils and their scalability.
 
@@ -15,14 +15,14 @@ For **performance comparisons**, see the {ref}`benchmarking-performance` page.
 
 ## Summary
 
-GeoUtils exposes a **consistent API across raster, vector and point cloud objects** where possible (similar in spirit to the recent [GDAL CLI overhaul](https://gdal.org/en/stable/programs/index.html)). Many operations also support convenient **match-reference arguments** (e.g., matching a grid for reprojection or rasterization, bounds for cropping, or point coordinates for interpolation). See the {ref}`core-match-ref` page for details.
+GeoUtils exposes a **consistent API across raster, vector, and point cloud objects** wherever possible (similar in spirit to the recent [GDAL CLI overhaul](https://gdal.org/en/stable/programs/index.html)). Many operations also support convenient **reference matching** (e.g., matching a grid for reprojection or rasterization, bounds for cropping, or point coordinates for interpolation). See the {ref}`core-match-ref` page for details.
 
 At its core, GeoUtils provides two interchangeable ways to work with geospatial data:
 
 - **Accessors** that extend existing Xarray or GeoPandas structures ({class}`rst <geoutils.DataArrayRasterAccessor>` for rasters, {class}`pc <geoutils.GeoDataFramePointCloudAccessor>` for point clouds, and {class}`vct <geoutils.GeoDataFrameVectorAccessor>` for vectors),
-- **GeoUtils objects** {class}`~geoutils.Raster`, {class}`~geoutils.PointCloud`, {class}`~geoutils.Vector`.
+- **GeoUtils objects** {class}`~geoutils.Raster`, {class}`~geoutils.PointCloud`, and {class}`~geoutils.Vector`.
 
-All raster and point cloud operations support **scalable execution** using [Dask](https://www.dask.org/) or multiprocessing, allowing large datasets to be processed **chunk-by-chunk without loading the full array into memory**. Some vector operations also support scalable execution, although vector inputs are often less limiting.
+All raster and point cloud operations support **scalable execution** using [Dask](https://www.dask.org/) or multiprocessing, allowing large datasets to be processed **chunk-by-chunk without loading the full array into memory**. Some vector operations also support scalable execution, although memory is often less limiting for vector data.
 
 Additionally, some numerical routines of GeoUtils provide **multiple computational backends** (e.g., SciPy or Numba implementations).
 

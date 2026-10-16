@@ -81,7 +81,7 @@ for value_type in (gu.Raster, gu.PointCloud, xr.DataArray, pd.DataFrame, pd.Seri
 
 Arithmetic operators ({func}`+<operator.add>`, {func}`-<operator.sub>`, {func}`/<operator.truediv>`, {func}`//<operator.floordiv>`, {func}`*<operator.mul>`,
 {func}`**<operator.pow>`, {func}`%<operator.mod>`) can be used on a {class}`~geoutils.Raster` in combination with any other {class}`~geoutils.Raster`,
-{class}`~numpy.ndarray` or number.
+{class}`~numpy.ndarray`, or number.
 
 With another Raster, its shape, {attr}`~RasterBase.crs` and {attr}`~RasterBase.transform` must match.
 With a NumPy array, its shape must match. The result is a Raster, with masked values propagated.
@@ -295,7 +295,7 @@ np.sin(pc), np.sin(points), np.sin(height)
 ### Array functions
 
 GeoUtils also supports NumPy array functions, including reductions such as {func}`~numpy.mean`,
-{func}`~numpy.count_nonzero` and {func}`~numpy.nanmax`. Functions preserving the original shape return a {class}`~geoutils.Raster`
+{func}`~numpy.count_nonzero`, and {func}`~numpy.nanmax`. Functions preserving the original shape return a {class}`~geoutils.Raster`
 or {class}`~geoutils.PointCloud`, others return scalars or arrays.
 
 With a {class}`~xarray.DataArray`, use native methods and dimension names instead of axis numbers:
