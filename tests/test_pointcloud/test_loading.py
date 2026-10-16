@@ -108,7 +108,7 @@ class TestPointCloudOpening:
         level: int | range,
         data_name: str,
     ) -> None:
-        """Checks that COPC level of details can be selected properly through open_pointcloud, comparing to LasPy."""
+        """Checks that COPC levels of detail selected with open_pointcloud() match LasPy."""
 
         # We query the same levels with LasPy as a reference
         laspy = pytest.importorskip("laspy")
@@ -141,7 +141,7 @@ class TestPointCloudOpening:
     def test_open_pointcloud__copc_downsample(
         self, copc_file: Path, as_type: Literal["dataarray", "dataset", "geodataframe"], downsample: float
     ) -> None:
-        """Checks that downsampling with COPC automatically use levels of details."""
+        """Checks that COPC downsampling selects levels of detail automatically."""
 
         # Build a reference with LasPy level read directly + subsampling
         laspy = pytest.importorskip("laspy")
@@ -237,7 +237,7 @@ class TestPointCloudOpeningChunked:
         options: dict[str, Any],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Checks that COPC lazy reading works properly, including with levels of details/downsampling."""
+        """Checks that COPC reads stay lazy with level selection or downsampling."""
 
         dask = pytest.importorskip("dask")
         if as_type == "geodataframe":
@@ -248,7 +248,7 @@ class TestPointCloudOpeningChunked:
         eager = gu.open_pointcloud(copc_file, columns="all", as_type=as_type, **options)
         fetch_nodes = laspy.CopcReader._fetch_and_decompress_points_of_nodes
 
-        # Below we'll record node offsets to check which levels of details are read
+        # Below we'll record node offsets to check which levels are read
         read_offsets = []
 
         def record_reads(reader: object, nodes: list[Any]) -> object:
@@ -330,7 +330,7 @@ class TestPointCloudOpeningErrors:
 
         # Create an invalid filename (should not matter, arguments are checked before opening)
         filename = tmp_path / "absent.copc.laz"
-        # Check invalid depths fail before file access
+        # Check invalid levels fail before file access
         with pytest.raises(ValueError, match="Argument 'level'"):
             gu.open_pointcloud(filename, level=level)  # type: ignore[arg-type]
 

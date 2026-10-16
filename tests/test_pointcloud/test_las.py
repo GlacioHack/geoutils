@@ -137,8 +137,8 @@ class TestLasPyIO:
         from laspy.copc import HierarchyPage
 
         # Create a small COPC index, which locates groups of points (nodes) without reading them
-        # We pack entries as (depth, voxel X/Y/Z, byte offset, byte size, point count), as in a real file
-        # Store one depth 1 node in a separate page, linked from the root page by a point count of -1
+        # We pack entries as (level, voxel X/Y/Z, byte offset, byte size, point count), as in a real file
+        # Store one level 1 node in a separate page, linked from the root page by a point count of -1
         child_bytes = struct.pack("<iiiiQii", 1, 0, 0, 0, 10, 8, 3)
         root_bytes = b"".join(
             [
@@ -158,13 +158,13 @@ class TestLasPyIO:
         )
         monkeypatch.setattr(las_module, "_open_las_reader", lambda filename, **kwargs: nullcontext(reader))
 
-        # Run both selection modes: request one depth or gather enough points for downsampling
-        # Automatic selection adds whole depths from the root until it reaches the target
+        # Run both selection modes: request one level or gather enough points for downsampling
+        # Automatic selection adds whole levels from the root until it reaches the target
         explicit = _select_copc_nodes("hierarchy.copc.laz", level=1, target_count=None)
         automatic = _select_copc_nodes("hierarchy.copc.laz", level=None, target_count=6)
 
         # Check nodes are sorted by file offset, including the node reached through the separate page
-        # Depth 1 has 8 points: adding the root gives 10, so depth 2 is unnecessary for a target of 6
+        # Level 1 has 8 points: adding the root gives 10, so level 2 is unnecessary for a target of 6
         assert [(node.offset, node.point_count) for node in explicit] == [(10, 3), (40, 5)]
         assert [(node.offset, node.point_count) for node in automatic] == [(10, 3), (20, 2), (40, 5)]
 

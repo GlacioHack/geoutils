@@ -327,15 +327,15 @@ def _select_copc_nodes(filename: str, level: int | range | None, target_count: i
     """
     Select COPC point groups (nodes) in file order without reading their data.
 
-    The index lists each group's detail level, file position and point count. Select requested levels,
-    or add levels from the coarsest until there are at least target_count points.
+    Each point belongs to one level of detail. Level 0 is a coarse sample; higher levels add points.
+    Select requested levels, or add levels from the coarsest until there are at least target_count points.
     Index format: https://copc.io/#hierarchy-page
     Level selection: https://laspy.readthedocs.io/en/latest/api/laspy.copc.html#laspy.copc.CopcReader.query.
     """
     import_optional("laspy")
     from laspy.copc import HierarchyPage
 
-    # Treat an integer as one detail level
+    # Treat an integer as one level
     if isinstance(level, (int, np.integer)):
         level = range(int(level), int(level) + 1)
 
@@ -356,19 +356,19 @@ def _select_copc_nodes(filename: str, level: int | range | None, target_count: i
         if sum(entry.point_count for entry in entries) != reader.header.point_count:
             raise ValueError("COPC hierarchy point count does not match the LAS header.")
 
-    # Count points by detail level for downsampling
+    # Count points by level for downsampling
     if level is None and target_count is not None:
         counts_by_level: dict[int, int] = {}
         for entry in entries:
-            depth = entry.key.level
-            counts_by_level[depth] = counts_by_level.get(depth, 0) + entry.point_count
+            node_level = entry.key.level
+            counts_by_level[node_level] = counts_by_level.get(node_level, 0) + entry.point_count
 
         # Add levels from coarse to fine until enough points are available
         cumulative_count = 0
-        for depth in sorted(counts_by_level):
-            cumulative_count += counts_by_level[depth]
+        for selected_level in sorted(counts_by_level):
+            cumulative_count += counts_by_level[selected_level]
             if cumulative_count >= target_count:
-                level = range(depth + 1)
+                level = range(selected_level + 1)
                 break
 
     # Sort by file position to match LasPy's point order
@@ -388,7 +388,7 @@ def _read_las_records(
     https://github.com/laspy/laspy/blob/master/laspy/copc.py
     """
 
-    # Read LAS rows; an empty read supplies the data types
+    # Read LAS rows
     if copc_nodes is None or count == 0:
         with _open_las_reader(filename) as reader:
             crs = reader.header.parse_crs(prefer_wkt=False)
@@ -441,7 +441,7 @@ def _open_las_array(
         raise ValueError(f"Point data column {data_name!r} does not exist.")
     selected = _resolve_las_columns(columns, data_name, metadata.columns)
 
-    # Include all COPC levels by default and count the selected points
+    # Select all levels by default for one complete point cloud
     if metadata.is_copc and copc_nodes is None:
         copc_nodes = _select_copc_nodes(filename, level=None, target_count=None)
     point_count = metadata.point_count if copc_nodes is None else sum(node.point_count for node in copc_nodes)
@@ -537,7 +537,7 @@ def _open_las_geodataframe(
         available_columns=metadata.columns,
     )
 
-    # Include all COPC levels by default and count the selected points
+    # Select all levels by default for one complete point cloud
     if metadata.is_copc and copc_nodes is None:
         copc_nodes = _select_copc_nodes(filename, level=None, target_count=None)
     point_count = metadata.point_count if copc_nodes is None else sum(node.point_count for node in copc_nodes)

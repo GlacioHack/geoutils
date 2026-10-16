@@ -12,7 +12,7 @@ import pytest
 @pytest.fixture(scope="module")
 def copc_file(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """
-    Write a COPC file with two levels of details and an integer column for tests.
+    Write a COPC file with two levels of detail and an integer column for tests.
 
     We have to use PDAL as LasPy does not yet support COPC writing.
 
@@ -24,7 +24,7 @@ def copc_file(tmp_path_factory: pytest.TempPathFactory) -> Path:
     pytest.importorskip("lazrs")
     pdal = pytest.importorskip("pdal")
 
-    # We create enough points for multiple levels of details
+    # We create enough points for multiple levels of detail
     point_numbers = np.arange(100_003)
     grid_width = 317
     points = np.zeros(point_numbers.size, dtype=[("X", "f8"), ("Y", "f8"), ("Z", "f8"), ("Intensity", "u2")])

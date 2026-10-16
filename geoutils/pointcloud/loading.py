@@ -64,12 +64,13 @@ def open_pointcloud(
 
     Passing ``chunks`` opens the point data lazily using Dask arrays (Xarray objects) or Dask-GeoPandas (Pandas
     object). Use ``downsample`` to  select a deterministic random sample. For example, ``downsample=2`` returns
-    half the points, rounded up. For COPC, the coarsest cumulative levels containing enough points are read first,
-    then sampled to the requested count. Other formats sample the full point cloud.
+    half the points, rounded up. For COPC, we select levels from coarse to fine until they contain enough points,
+    then sample those points to the requested count. Other formats sample the full point cloud.
 
-    Use ``level`` to select COPC octree depths explicitly, following LasPy: an integer selects one depth and a
-    range selects several. For example, ``level=range(3)`` reads depths 0 through 2. Smaller depths contain coarser
-    samples. Like raster ``overview_level``, explicit levels cannot be combined with ``downsample > 1``.
+    Use ``level`` to select COPC levels of detail, following LasPy. Each point belongs to one level:
+    level 0 holds a coarse sample, and higher levels add points. Selected levels are combined into one point cloud.
+    An integer selects only that level; ``level=range(3)`` combines levels 0 through 2. Explicit levels cannot
+    be combined with ``downsample > 1``.
 
     :param filename: Point file or directory of GeoParquet partitions.
     :param data_name: Attribute containing point values. Defaults to Z for LAS, the saved active attribute for
@@ -80,7 +81,7 @@ def open_pointcloud(
         groups. None loads the point data eagerly.
     :param downsample: Factor reducing the point count to ceil(N / downsample), with a deterministic random sample.
     :param as_type: Returned representation: dataarray (the default), dataset, or geodataframe.
-    :param level: COPC octree depth or range of depths to read. None selects all depths unless downsample is used.
+    :param level: COPC level of detail, or a range of levels. None combines all levels unless downsample is used.
     :returns: A DataArray with active values and auxiliary coordinates, a Dataset with separate value variables,
         or a GeoDataFrame.
     """
@@ -99,7 +100,7 @@ def open_pointcloud(
             )
         if not valid_level:
             raise ValueError(
-                "Argument 'level' must be a non-negative integer or a non-empty increasing range of depths."
+                "Argument 'level' must be a non-negative integer or a non-empty increasing range of levels."
             )
         if downsample > 1:
             raise ValueError("downsample and level cannot be used together.")

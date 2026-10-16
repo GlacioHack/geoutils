@@ -1151,9 +1151,9 @@ def remote_native_points(request: pytest.FixtureRequest, remote_files: RemoteFil
     suffix = request.param
     if suffix == "gpkg":
         return request.getfixturevalue("remote_points")
-    if suffix == "copc-depths":
-        # Copy a COPC file with two depths
-        filename = remote_files.directory / "depths.copc.laz"
+    if suffix == "copc-levels":
+        # Copy a COPC file with two levels
+        filename = remote_files.directory / "levels.copc.laz"
         shutil.copyfile(request.getfixturevalue("copc_file"), filename)
         return filename.name
 
@@ -1198,9 +1198,9 @@ _REMOTE_POINT_OPEN_CASES = [
     pytest.param(suffix, data_name, {}, id=suffix) for suffix, data_name in _REMOTE_POINT_FILES
 ] + [
     pytest.param("parquet-partitioned", None, {}, id="parquet-partitioned"),
-    pytest.param("copc-depths", None, {"level": 0}, id="copc-root"),
-    pytest.param("copc-depths", None, {"level": range(2)}, id="copc-levels"),
-    pytest.param("copc-depths", None, {"downsample": 4.5}, id="copc-downsample"),
+    pytest.param("copc-levels", None, {"level": 0}, id="copc-root"),
+    pytest.param("copc-levels", None, {"level": range(2)}, id="copc-levels"),
+    pytest.param("copc-levels", None, {"downsample": 4.5}, id="copc-downsample"),
 ]
 _REMOTE_POINT_READERS = [
     pytest.param(gu.PointCloud, {}, id="pointcloud"),
@@ -1392,7 +1392,7 @@ class TestPointCloudRemoteChunked:
 
         copc_selection = bool(options)
         if copc_selection:
-            # Open remote chunks on COPC (bigger based on fixture example, for levels of details)
+            # Open remote COPC chunks for level selection (larger to match the fixture)
             chunks = 7001
         else:
             # Open local/remote with chunks (smaller for other files)
