@@ -78,46 +78,6 @@ pc = geoutils.PointCloud(filename_dem, data_name="Z")
 pc
 ```
 
-### Remote files
-
-Pass an HTTP URL or an S3 URI to {func}`~geoutils.open_pointcloud` or {class}`~geoutils.PointCloud` to read remote
-LAS, LAZ, COPC and GeoParquet files. Install `geoutils[cloud]` for the optional HTTP and S3 clients. GeoParquet also
-requires `geoutils[parquet]`, and LAS/LAZ requires LasPy with a decompression backend for compressed files.
-
-```python
-points = geoutils.open_pointcloud("s3://my-bucket/points.copc.laz", downsample=10, chunks=100_000)
-```
-
-Native readers use [fsspec's buffered range reads](https://filesystem-spec.readthedocs.io/en/latest/features.html#file-buffering-and-random-access)
-and [backend configuration](https://filesystem-spec.readthedocs.io/en/latest/config.html) for credentials and endpoint
-options. HTTP query strings are passed through unchanged, including signed URLs. With `chunks`, workers open their
-own streams when computing the result. COPC depth selection and automatic downsampling work through the same URLs;
-S3 GeoParquet datasets may also contain multiple files under one prefix.
-
-### COPC levels of detail
-
-[COPC files](https://copc.io/) store points at several octree depths. Smaller depths contain coarser samples. Pass `level` to
-{func}`~geoutils.open_pointcloud` to select depths using
-[LasPy's conventions](https://laspy.readthedocs.io/en/latest/api/laspy.copc.html): an integer selects one depth,
-and a range selects several. For example:
-
-```python
-# Read the root sample
-points = geoutils.open_pointcloud("points.copc.laz", level=0)
-
-# Read all points stored at depths 0 through 2
-points = geoutils.open_pointcloud("points.copc.laz", level=range(3), chunks=100_000)
-```
-
-With `downsample`, GeoUtils reads hierarchy counts to choose the coarsest cumulative depths containing at least
-`ceil(N / downsample)` points, where `N` is the original file's point count. It then takes a deterministic random
-sample of those points to reach that count.
-This mirrors automatic raster overview selection: stored reduced data supplies the requested output size.
-
-Explicit `level` and `downsample > 1` cannot be combined. Depth selection works for DataArray, Dataset and
-GeoDataFrame output. With `chunks`, opening reads metadata only; selected point records load when the result is
-computed. Ordinary LAS and LAZ files use the existing random sampling and do not accept `level`.
-
 ## Create from arrays or tuples
 
 A {class}`~geoutils.PointCloud` is created from three 1D arrays, from a Nx3 or 3xN array, or from an iterable of 3-tuples by calling the class
