@@ -15,9 +15,7 @@ from geoutils.sampling.subsampling import (
     _subsample_numpy,
 )
 
-# -----------------------------------------------------------------------------
 # Example data
-# -----------------------------------------------------------------------------
 
 ARR = np.array(
     [
@@ -41,9 +39,7 @@ SEED = 7
 DISPLAY_K = 5
 EXAMPLE_CHUNK = (0, 1)  # Top-right chunk
 
-# -----------------------------------------------------------------------------
 # Styling
-# -----------------------------------------------------------------------------
 
 NEUTRAL = "#333333"
 PIXEL_GRID = "0.80"
@@ -58,9 +54,7 @@ TOPK_COLOR = "#4C78A8"
 SEQUENTIAL_COLOR = "#F58518"
 
 
-# -----------------------------------------------------------------------------
 # Helpers for subsampling and valid values per chunk
-# -----------------------------------------------------------------------------
 
 
 def _first_valid_gids_in_chunk(arr: np.ndarray, chunk_loc: tuple[int, int], n: int = 5) -> np.ndarray:
@@ -110,9 +104,7 @@ def _topk_choice_with_keys(arr: np.ndarray, k: int, seed: int) -> tuple[np.ndarr
     return valids[sel].astype(np.int64), keys[sel]
 
 
-# -----------------------------------------------------------------------------
 # Plot helpers
-# -----------------------------------------------------------------------------
 
 
 def _setup_axis(ax: plt.Axes, *, xlim: tuple[float, float], ylim: tuple[float, float], equal: bool = True) -> None:
@@ -625,11 +617,6 @@ def _lowest_key_example_gids(example_gids: np.ndarray, *, seed: int, n_low: int 
     return example_gids[sel].astype(np.int64)
 
 
-# -----------------------------------------------------------------------------
-# Main figure
-# -----------------------------------------------------------------------------
-
-
 def make_chunked_subsample_diagram() -> tuple[plt.Figure, np.ndarray]:
     """Build a 3-panel schematic for chunked subsampling."""
 
@@ -649,7 +636,7 @@ def make_chunked_subsample_diagram() -> tuple[plt.Figure, np.ndarray]:
     total_valids = int(np.count_nonzero(~get_mask_from_array(ARR)))
     k = _get_subsample_size_from_user_input(USER_SUBSAMPLE, total_valids)
 
-    # Use package subsampling function for both strategies
+    # Use the same sample size and seed for both strategies
     sequential_gids_rc = _subsample_numpy(
         ARR,
         subsample=USER_SUBSAMPLE,
@@ -668,13 +655,13 @@ def make_chunked_subsample_diagram() -> tuple[plt.Figure, np.ndarray]:
     )
     topk_gids = np.ravel_multi_index(topk_gids_rc, ARR.shape).astype(np.int64)
 
-    # Keys only for labeling the topk panel
+    # Recreate keys for the labels; selected points come from the calls above
     topk_gids_for_keys, topk_keys = _topk_choice_with_keys(ARR, k, SEED)
 
     r0, r1, c0, c1 = _chunk_bounds(*EXAMPLE_CHUNK)
     example_count = int(np.count_nonzero(~get_mask_from_array(ARR[r0:r1, c0:c1])))
 
-    # Top panel
+    # Input values and valid counts per chunk
     _draw_raster_cells(ax_top, ARR)
     _draw_pixel_grid(ax_top, nrows=NROWS, ncols=NCOLS)
     _draw_chunk_boundaries(ax_top, nrows=NROWS, ncols=NCOLS)
@@ -777,7 +764,7 @@ def make_chunked_subsample_diagram() -> tuple[plt.Figure, np.ndarray]:
     _add_visual_legend(ax_top)
     _setup_axis(ax_top, xlim=(-0.5, NCOLS + 2.8), ylim=(-0.5, NROWS + 0.5))
 
-    # Bottom left: topk
+    # Top-k sample
     _draw_raster_cells(ax_bl, ARR)
     _draw_pixel_grid(ax_bl, nrows=NROWS, ncols=NCOLS)
     _draw_chunk_boundaries(ax_bl, nrows=NROWS, ncols=NCOLS)
@@ -820,7 +807,7 @@ def make_chunked_subsample_diagram() -> tuple[plt.Figure, np.ndarray]:
 
     _setup_axis(ax_bl, xlim=(-0.5, NCOLS + 0.5), ylim=(-0.5, NROWS + 0.5))
 
-    # Bottom right: sequential
+    # Sequential sample
     _draw_raster_cells(ax_br, ARR)
     _draw_pixel_grid(ax_br, nrows=NROWS, ncols=NCOLS)
     _draw_chunk_boundaries(ax_br, nrows=NROWS, ncols=NCOLS)

@@ -971,6 +971,8 @@ def _filter(
             transform=source_raster.transform,
             max_cells=max(4096, 4 * int(np.prod(source_raster.shape))),
         )
+        if engine == "numba" and (kernel is None or not _can_reduce_arrays(method)):
+            raise ValueError("The Numba filter backend does not support this reducer or window.")
         kwargs.update(
             neighborhood=neighborhood,
             kernel=kernel,

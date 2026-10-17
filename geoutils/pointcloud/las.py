@@ -74,6 +74,8 @@ class LasMetadata:
     bounds: BoundingBox
     columns: pd.Index
     is_copc: bool
+    point_record_size: int
+    laz_chunk_size: int | None
 
 
 def _is_laspy_supported(filename: str | pathlib.Path) -> bool:
@@ -277,7 +279,25 @@ def _load_laspy_metadata(filename: str | pathlib.Path) -> LasMetadata:
         columns = pd.Index(columns_names)
         is_copc = any(isinstance(vlr, CopcInfoVlr) for vlr in f.header.vlrs)
 
-    return LasMetadata(crs=crs, point_count=point_count, bounds=bounds, columns=columns, is_copc=is_copc)
+        # LASzip stores the block point count in bytes 12–15; 0xFFFFFFFF means variable block sizes
+        # Read the compression record directly so metadata inspection does not require a particular LAZ backend
+        point_record_size = f.header.point_format.size
+        laz_chunk_size = None
+        if f.header.are_points_compressed:
+            compression_data = f.header.vlrs.get("LasZipVlr")[0].record_data
+            block_size = int.from_bytes(compression_data[12:16], "little")
+            if block_size not in (0, 0xFFFFFFFF):
+                laz_chunk_size = block_size
+
+    return LasMetadata(
+        crs=crs,
+        point_count=point_count,
+        bounds=bounds,
+        columns=columns,
+        is_copc=is_copc,
+        point_record_size=point_record_size,
+        laz_chunk_size=laz_chunk_size,
+    )
 
 
 def _load_laspy_data(
@@ -323,21 +343,10 @@ def _load_laspy_data_slice(
 ################################
 
 
-def _select_copc_nodes(filename: str, level: int | range | None, target_count: int | None) -> list[Entry]:
-    """
-    Select COPC point groups (nodes) in file order without reading their data.
-
-    The index lists each group's detail level, file position and point count. Select requested levels,
-    or add levels from the coarsest until there are at least target_count points.
-    Index format: https://copc.io/#hierarchy-page
-    Level selection: https://laspy.readthedocs.io/en/latest/api/laspy.copc.html#laspy.copc.CopcReader.query.
-    """
+def _read_copc_hierarchy(filename: str) -> list[Entry]:
+    """Read every COPC hierarchy page and return populated point groups in file order without reading points."""
     import_optional("laspy")
     from laspy.copc import HierarchyPage
-
-    # Treat an integer as one detail level
-    if isinstance(level, (int, np.integer)):
-        level = range(int(level), int(level) + 1)
 
     # Read every index page to find point counts and file positions
     entries: list[Entry] = []
@@ -356,23 +365,46 @@ def _select_copc_nodes(filename: str, level: int | range | None, target_count: i
         if sum(entry.point_count for entry in entries) != reader.header.point_count:
             raise ValueError("COPC hierarchy point count does not match the LAS header.")
 
-    # Count points by detail level for downsampling
+    # Sort by file position to match LasPy's point order
+    entries.sort(key=lambda entry: entry.offset)
+    return entries
+
+
+def _select_copc_nodes(
+    filename: str, level: int | range | None, target_count: int | None, *, nodes: list[Entry] | None = None
+) -> list[Entry]:
+    """
+    Select COPC point groups (nodes) in file order without reading their data.
+
+    Each point belongs to one level of detail. Level 0 is a coarse sample; higher levels add points.
+    Select requested levels, or add levels from the coarsest until there are at least target_count points.
+    Index format: https://copc.io/#hierarchy-page
+    Level selection: https://laspy.readthedocs.io/en/latest/api/laspy.copc.html#laspy.copc.CopcReader.query.
+
+    Pass nodes from _read_copc_hierarchy() to inspect available levels and select groups from the same index read.
+    """
+    # Treat an integer as one level
+    if isinstance(level, (int, np.integer)):
+        level = range(int(level), int(level) + 1)
+
+    # Reuse a supplied hierarchy so level metadata and selection share one index read
+    entries = _read_copc_hierarchy(filename) if nodes is None else nodes
+
+    # Count points by level for downsampling
     if level is None and target_count is not None:
         counts_by_level: dict[int, int] = {}
         for entry in entries:
-            depth = entry.key.level
-            counts_by_level[depth] = counts_by_level.get(depth, 0) + entry.point_count
+            node_level = entry.key.level
+            counts_by_level[node_level] = counts_by_level.get(node_level, 0) + entry.point_count
 
         # Add levels from coarse to fine until enough points are available
         cumulative_count = 0
-        for depth in sorted(counts_by_level):
-            cumulative_count += counts_by_level[depth]
+        for selected_level in sorted(counts_by_level):
+            cumulative_count += counts_by_level[selected_level]
             if cumulative_count >= target_count:
-                level = range(depth + 1)
+                level = range(selected_level + 1)
                 break
 
-    # Sort by file position to match LasPy's point order
-    entries.sort(key=lambda entry: entry.offset)
     if level is None:
         return entries
     return [entry for entry in entries if entry.key.level in level]
@@ -388,7 +420,7 @@ def _read_las_records(
     https://github.com/laspy/laspy/blob/master/laspy/copc.py
     """
 
-    # Read LAS rows; an empty read supplies the data types
+    # Read LAS rows
     if copc_nodes is None or count == 0:
         with _open_las_reader(filename) as reader:
             crs = reader.header.parse_crs(prefer_wkt=False)
@@ -441,7 +473,7 @@ def _open_las_array(
         raise ValueError(f"Point data column {data_name!r} does not exist.")
     selected = _resolve_las_columns(columns, data_name, metadata.columns)
 
-    # Include all COPC levels by default and count the selected points
+    # Select all levels by default for one complete point cloud
     if metadata.is_copc and copc_nodes is None:
         copc_nodes = _select_copc_nodes(filename, level=None, target_count=None)
     point_count = metadata.point_count if copc_nodes is None else sum(node.point_count for node in copc_nodes)
@@ -537,7 +569,7 @@ def _open_las_geodataframe(
         available_columns=metadata.columns,
     )
 
-    # Include all COPC levels by default and count the selected points
+    # Select all levels by default for one complete point cloud
     if metadata.is_copc and copc_nodes is None:
         copc_nodes = _select_copc_nodes(filename, level=None, target_count=None)
     point_count = metadata.point_count if copc_nodes is None else sum(node.point_count for node in copc_nodes)
@@ -1028,12 +1060,58 @@ def _check_las_attributes(dataframe: gpd.GeoDataFrame, data_name: str | None, en
             raise ValueError(f"LAS output cannot preserve the values in column {column!r} with its dimension type.")
 
 
+class _LazChunkBackend:
+    """Configure LasPy's Lazrs writer with a chosen number of points per disk chunk."""
+
+    def __init__(self, chunk_size: int) -> None:
+        """Store the validated number of points per compressed chunk."""
+        self.chunk_size = chunk_size
+
+    def is_available(self) -> bool:
+        """Report whether LasPy can use the Lazrs compressor."""
+        laspy = import_optional("laspy")
+        return bool(laspy.LazBackend.LazrsParallel.is_available())
+
+    def create_writer(self, destination: Any, header: Any) -> Any:
+        """Set the LASzip chunk size before LasPy writes the header or starts compression."""
+        laspy = import_optional("laspy")
+        lazrs = import_optional("lazrs")
+        writer = laspy.LazBackend.LazrsParallel.create_writer(destination, header)
+
+        # LASzip stores the point count per chunk as a little-endian integer in bytes 12–15
+        # Both the saved metadata and the compressor must receive the same updated record
+        compression_data = bytearray(writer.vlr.record_data())
+        compression_data[12:16] = self.chunk_size.to_bytes(4, "little")
+        writer.vlr = lazrs.LazVlr(bytes(compression_data))
+        return writer
+
+
+def _get_laz_write_backend(filename: str | pathlib.Path, laz_chunk_size: int | None) -> Any:
+    """Validate an optional LAZ disk chunk size and select its compressor before opening the output."""
+
+    if laz_chunk_size is None:
+        return None
+    if (
+        isinstance(laz_chunk_size, bool)
+        or not isinstance(laz_chunk_size, (int, np.integer))
+        or not 0 < laz_chunk_size < 0xFFFFFFFF
+    ):
+        raise ValueError("Argument 'laz_chunk_size' must be an integer between 1 and 4294967294.")
+    if _path_suffix(filename) != ".laz" or os.fspath(filename).lower().endswith(".copc.laz"):
+        raise ValueError("Argument 'laz_chunk_size' is only supported for LAZ output, not LAS or COPC.")
+
+    # Custom disk chunks use Lazrs; ordinary writes retain LasPy's default backend selection
+    import_optional("lazrs")
+    return _LazChunkBackend(int(laz_chunk_size))
+
+
 def _write_laspy_partitions(
     filename: str | pathlib.Path,
     partitions: Iterable[gpd.GeoDataFrame | pd.DataFrame],
     data_name: str | None,
     header: Any,
     check_attributes: bool = False,
+    laz_chunk_size: int | None = None,
 ) -> None:
     """Append eager dataframe partitions from any backend to one LAS/LAZ stream."""
 
@@ -1042,7 +1120,8 @@ def _write_laspy_partitions(
     # Open one output stream and append each non-empty dataframe partition
     write_header = header.copy()
     write_header.partial_reset()
-    with laspy.open(filename, mode="w", header=write_header) as writer:
+    backend = _get_laz_write_backend(filename, laz_chunk_size)
+    with laspy.open(filename, mode="w", header=write_header, laz_backend=backend) as writer:
         for part in partitions:
             if len(part) == 0:
                 continue
@@ -1088,6 +1167,7 @@ def _write_array_las(
     filename: str,
     *,
     chunks: int | None = None,
+    laz_chunk_size: int | None = None,
     version: Any = None,
     point_format: Any = None,
     offsets: Any = None,
@@ -1098,6 +1178,7 @@ def _write_array_las(
     from geoutils.pointcloud.writing import _array_partitions
 
     laspy = import_optional("laspy")
+    backend = _get_laz_write_backend(filename, laz_chunk_size)
     header = laspy.LasHeader(version=version, point_format=point_format)
     if scales is not None:
         header.scales = np.asarray(scales)
@@ -1125,7 +1206,7 @@ def _write_array_las(
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".geoutils-las-", dir=destination.parent) as directory:
         output = pathlib.Path(directory) / destination.name
-        with laspy.open(output, mode="w", header=header) as writer:
+        with laspy.open(output, mode="w", header=header, laz_backend=backend) as writer:
             for partition in _array_partitions(points, chunks):
                 records = laspy.ScaleAwarePointRecord.zeros(partition.size, header=header)
                 x, y, values = partition.pc.to_xyz()
@@ -1152,6 +1233,7 @@ def _write_laspy_dataframe(
     data_name: str | None,
     header: Any,
     chunks: int | None = None,
+    laz_chunk_size: int | None = None,
 ) -> None:
     """Feed an eager dataframe, optionally split into row partitions, to the common writer."""
 
@@ -1160,6 +1242,7 @@ def _write_laspy_dataframe(
         partitions=_iter_dataframe_partitions(pc=pc, partition_size=chunks),
         data_name=data_name,
         header=header,
+        laz_chunk_size=laz_chunk_size,
     )
 
 
@@ -1168,6 +1251,7 @@ def _write_laspy_dask_dataframe(
     pc: Any,
     data_name: str | None,
     header: Any,
+    laz_chunk_size: int | None = None,
 ) -> None:
     """Compute a Dask DataFrame partition by partition and feed the common writer."""
 
@@ -1187,6 +1271,7 @@ def _write_laspy_dask_dataframe(
         partitions=partitions(),
         data_name=data_name,
         header=header,
+        laz_chunk_size=laz_chunk_size,
     )
 
 
@@ -1240,6 +1325,7 @@ def _stitch_laspy_files(
     partition_filenames: Iterable[str | pathlib.Path],
     header: Any,
     chunk_size: int,
+    laz_chunk_size: int | None = None,
 ) -> None:
     """Stream partition files into the final LAS/LAZ output."""
 
@@ -1248,7 +1334,8 @@ def _stitch_laspy_files(
     # Stream temporary point records into one output without loading whole files
     write_header = header.copy()
     write_header.partial_reset()
-    with laspy.open(filename, mode="w", header=write_header) as writer:
+    backend = _get_laz_write_backend(filename, laz_chunk_size)
+    with laspy.open(filename, mode="w", header=write_header, laz_backend=backend) as writer:
         for partition_filename in partition_filenames:
             with laspy.open(partition_filename) as reader:
                 for points in reader.chunk_iterator(chunk_size):
@@ -1263,6 +1350,7 @@ def _write_laspy_multiproc_partitions(
     chunk_size: int,
     cluster: Any,
     check_attributes: bool = False,
+    laz_chunk_size: int | None = None,
 ) -> None:
     """
     Write dataframe partitions in workers, then stitch them in their supplied order.
@@ -1291,6 +1379,7 @@ def _write_laspy_multiproc_partitions(
             partition_filenames=written_paths,
             header=header,
             chunk_size=chunk_size,
+            laz_chunk_size=laz_chunk_size,
         )
 
 
@@ -1386,6 +1475,7 @@ def _write_laspy(
     scales: tuple[float, float, float] | None = None,
     chunks: int | None = None,
     mp_config: MultiprocConfig | None = None,
+    laz_chunk_size: int | None = None,
     **kwargs: Any,
 ) -> None:
     """
@@ -1418,7 +1508,9 @@ def _write_laspy(
 
     # Select one partition producer while sharing header creation and record conversion
     if is_dask_dataframe(pc):
-        _write_laspy_dask_dataframe(filename=filename, pc=pc, data_name=data_name, header=header)
+        _write_laspy_dask_dataframe(
+            filename=filename, pc=pc, data_name=data_name, header=header, laz_chunk_size=laz_chunk_size
+        )
         return
 
     if mp_config is not None:
@@ -1429,6 +1521,7 @@ def _write_laspy(
             header=header,
             chunk_size=_point_partition_size(mp_config),
             cluster=mp_config.cluster,
+            laz_chunk_size=laz_chunk_size,
         )
         return
 
@@ -1438,4 +1531,5 @@ def _write_laspy(
         data_name=data_name,
         header=header,
         chunks=chunks,
+        laz_chunk_size=laz_chunk_size,
     )

@@ -1,7 +1,8 @@
 {% set name = objname.split('.')[-1] %}
 
-Raster.{{ name }}{% if objtype == "method" %}(){% endif %} or ds.rst.{{ name }}{% if objtype == "method" %}(){% endif %}
-=======================================================================
+{% set title = 'ds.rst.' ~ name ~ ('()' if objtype == 'method' else '') ~ ' or Raster.' ~ name ~ ('()' if objtype == 'method' else '') %}
+{{ title }}
+{{ '=' * (title|length) }}
 
 .. currentmodule:: geoutils
 

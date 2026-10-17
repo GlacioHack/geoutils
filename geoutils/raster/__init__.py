@@ -18,6 +18,7 @@
 
 from geoutils.raster.array import *  # noqa
 from geoutils.raster.base import RasterBase  # noqa
+from geoutils.raster.constructors import from_array  # noqa
 from geoutils.raster.multiraster import *  # noqa
 
 # To-be-deprecated
@@ -33,4 +34,4 @@ from geoutils.raster.xr_accessor import DataArrayRasterAccessor  # noqa isort:sk
 from geoutils.raster.xr_accessor import DatasetRasterAccessor  # noqa isort:skip
 
 
-__all__ = ["Raster", "DataArrayRasterAccessor", "DatasetRasterAccessor", "RasterType", "open_raster"]
+__all__ = ["Raster", "DataArrayRasterAccessor", "DatasetRasterAccessor", "RasterType", "open_raster", "from_array"]

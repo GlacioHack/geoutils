@@ -24,7 +24,8 @@ from __future__ import annotations
 
 import threading
 import warnings
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
@@ -44,6 +45,7 @@ from geoutils.raster.base import RasterBase
 from geoutils.raster.transformation import (
     _open_downsampled_raster,
     _overview_level_for_downsample,
+    _raster_overview_metadata,
 )
 
 if TYPE_CHECKING:
@@ -58,7 +60,7 @@ def open_raster(
     is_mask: bool = False,
     downsample: Number = 1,
     *,
-    as_type: Literal["dataarray", "dataset"] = "dataarray",
+    as_object_type: Literal["dataarray", "dataset"] = "dataarray",
     data_name: str | None = None,
     **kwargs: Any,
 ) -> xr.DataArray | xr.Dataset:
@@ -76,7 +78,7 @@ def open_raster(
     To open an overview (reduced copy) already stored in the file, pass ``overview_level`` through ``kwargs`` passed
     to Rioxarray. Level 0 selects the first stored overview, level 1 the second, and so on. The returned array uses
     that overview's shape and resolution. See Rioxarray's `Cloud Optimized GeoTIFF example
-    <https://corteva.github.io/rioxarray/stable/examples/COG.html>`_.
+    <https://vylor.github.io/rioxarray/stable/examples/COG.html>`_.
 
     Overviews are also used automatically with ``downsample``: GeoUtils reads the closest suitable overview and
     resamples it to the requested factor, or reads the original raster if no suitable overview exists. ``downsample``
@@ -88,7 +90,7 @@ def open_raster(
     :param is_mask: Whether to return the raster values as booleans.
     :param downsample: Downsampling factor (e.g., 2 selects one out of two pixels for every row/column). Rows or
         columns that do not fill a complete interval are omitted. Default 1 keeps the native resolution.
-    :param as_type: Returned representation: dataarray (the default) or dataset. A Dataset contains one raster
+    :param as_object_type: Returned representation: dataarray (the default) or dataset. A Dataset contains one raster
         variable, with multiple bands on its band dimension.
     :param data_name: Name of the DataArray or Dataset variable. Defaults to the source array name, or raster for
         an unnamed array returned as a Dataset.
@@ -97,12 +99,13 @@ def open_raster(
     """
 
     downsample = _validate_downsample(downsample)
-    if as_type not in ("dataarray", "dataset"):
-        raise ValueError("Argument 'as_type' must be 'dataarray' or 'dataset'.")
+    if as_object_type not in ("dataarray", "dataset"):
+        raise ValueError("Argument 'as_object_type' must be 'dataarray' or 'dataset'.")
     if downsample > 1 and kwargs.get("overview_level") is not None:
         raise ValueError("downsample and overview_level cannot be used together.")
 
     # Open the native grid directly, or expose an exact reduced grid through a lazy GDAL virtual raster
+    overview_level = kwargs.get("overview_level")
     if downsample == 1:
         ds = rioxr.open_rasterio(filename, masked=True, **kwargs)
     else:
@@ -116,7 +119,16 @@ def open_raster(
                 ds = rioxr.open_rasterio(vrt, masked=True, **kwargs)
 
     # Store RPCs consistently across Rioxarray versions
-    with rasterio.open(filename) as source:
+    source_context = (
+        nullcontext(filename) if isinstance(filename, rasterio.io.DatasetReaderBase) else rasterio.open(filename)
+    )
+    with source_context as source:
+        # Store overview metadata
+        overview_metadata = _raster_overview_metadata(source, overview_level)
+        disk_metadata = {"block_shape": tuple(source.block_shapes[0])}
+        ds.attrs.pop("overview_resampling", None)
+        ds.attrs.update(overview_metadata)
+        ds.attrs.update(disk_metadata)
         if source.rpcs is not None:
             ds.attrs["RPC"] = source.rpcs.to_gdal()
         if source.gcps[0] and source.rpcs is not None:
@@ -134,8 +146,11 @@ def open_raster(
     # Name the raster and wrap its coordinates and lazy data in one Dataset variable when requested
     if data_name is not None:
         ds = ds.rename(data_name)
-    if as_type == "dataset":
-        return ds.to_dataset(name=ds.name or "raster")
+    if as_object_type == "dataset":
+        dataset = ds.to_dataset(name=ds.name or "raster")
+        dataset.attrs.update(overview_metadata)
+        dataset.attrs.update(disk_metadata)
+        return dataset
     return ds
 
 
@@ -179,6 +194,14 @@ class DataArrayRasterAccessor(RasterBase):
 
         # Base instantiation of Xarray accessor
         self._obj: xr.DataArray = xarray_obj
+
+        # Refresh array chunks, including after writing a different disk layout
+        if "chunksizes" in self._obj.encoding or "chunks" in self._obj.encoding:
+            disk_chunks = self._obj.encoding.get("chunksizes", self._obj.encoding.get("chunks"))
+            if disk_chunks is None:
+                self._obj.attrs.pop("disk_chunks", None)
+            else:
+                self._obj.attrs["disk_chunks"] = tuple(disk_chunks)
 
         # We are never returning a DataArray that is unmasked, so the nodata plays a different role than in Rioxarray
         # It is only used for file writing = always the encoded value if it exists
@@ -605,7 +628,7 @@ class DatasetRasterAccessor:
     affect an unselected variable.
 
     A raster variable is recognized as a numeric 2D or 3D variable with two spatial dimensions and a CRS.
-    The ``variables`` property of the accessor lists all variables recognized as rasters.
+    The ``compatible_variables`` property maps names to DataArrays for all variables recognized as rasters.
     """
 
     def __init__(self, xarray_obj: xr.Dataset) -> None:
@@ -613,9 +636,14 @@ class DatasetRasterAccessor:
         self._obj = xarray_obj
 
     @property
-    def variables(self) -> list[str]:
-        """Names of compatible raster value variables, in Dataset order."""
-        return _raster_variables(self._obj)
+    def compatible_variables(self) -> Mapping[str, xr.DataArray]:
+        """
+        Compatible raster variables as Xarray's mapping of names to DataArrays.
+
+        Use keys() to list their names in Dataset order. The mapping shares the original data without loading
+        file-backed values or computing Dask arrays.
+        """
+        return self._obj[_raster_variables(self._obj)].data_vars
 
     def to_file(self, *args: Any, **kwargs: Any) -> Any:
         """
@@ -647,7 +675,7 @@ class DatasetRasterAccessor:
         """
 
         # 1/ Checks to validate selection/arguments
-        selected = _select_dataset_variables(self._obj, self.variables, variables)
+        selected = _select_dataset_variables(self._obj, self.compatible_variables.keys(), variables)
         if kwargs.get("inplace"):
             raise ValueError("Dataset raster operations return a new Dataset; inplace=True is unsupported.")
         if kwargs.get("as_array"):
@@ -848,7 +876,7 @@ class DatasetRasterAccessor:
         from geoutils.pointcloud.xr_accessor import DataArrayPointCloudAccessor
 
         # 1/ Checks to validate selection/arguments
-        selected = _select_dataset_variables(self._obj, self.variables, variables)
+        selected = _select_dataset_variables(self._obj, self.compatible_variables.keys(), variables)
         if kwargs.pop("as_array", False):
             raise ValueError("Dataset point sampling returns a Dataset; omit as_array=True.")
 
@@ -861,7 +889,7 @@ class DatasetRasterAccessor:
             from geoutils.pointcloud.xr_accessor import _point_dataset_support
 
             # Represent shared point coordinates, CRS and auxiliary values on one DataArray
-            points = _point_dataset_support(points, points.pc.variables)
+            points = _point_dataset_support(points, list(points.pc.compatible_variables.keys()))
         elif not isinstance(points, xr.DataArray):
             interface = _get_pointcloud_interface(points)
             if interface is not None:
@@ -979,7 +1007,7 @@ class DatasetRasterAccessor:
         """
 
         # 1/ Checks to validate selection/arguments
-        selected = _select_dataset_variables(self._obj, self.variables, variables)
+        selected = _select_dataset_variables(self._obj, self.compatible_variables.keys(), variables)
 
         # 2/ We prepare raster arguments and calculation options
 
@@ -1033,7 +1061,7 @@ class DatasetRasterAccessor:
         :returns: Named statistics, a grouped table, or a grouped table and masks.
         """
 
-        selected = _select_dataset_variables(self._obj, self.variables, variables)
+        selected = _select_dataset_variables(self._obj, self.compatible_variables.keys(), variables)
         if "values" in kwargs:
             raise ValueError("Use 'variables' to select Dataset raster values instead of 'values'.")
         if "by" in kwargs and kwargs["by"] is not None:

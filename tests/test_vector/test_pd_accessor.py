@@ -311,7 +311,7 @@ class TestVectorAccessor:
         temp_dir = tempfile.TemporaryDirectory()
         temp_file = os.path.join(temp_dir.name, "points.gpkg")
         points.to_file(temp_file)
-        dask_points = gu.open_pointcloud(temp_file, data_name="id", chunks=2, as_type="geodataframe")
+        dask_points = gu.open_pointcloud(temp_file, data_name="id", chunks=2, as_object_type="geodataframe")
 
         # Compare lazy point-cloud output with the eager mask
         expected = vector.vct.create_mask(points=points)

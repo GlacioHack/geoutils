@@ -28,9 +28,21 @@ import geoutils as gu
 gu.config["shift_area_or_point"] = False
 ```
 
+Or choose the return type for all newly created point clouds (e.g. in
+{meth}`to_pointcloud() <RasterBase.to_pointcloud>` and
+{meth}`interp_at_points() <RasterBase.interp_at_points>`):
+
+```{code-cell}
+gu.config["pointcloud_return_type"] = "geodataframe"
+```
+
+The default is `"dataarray"`. Use `"dataset"` for an Xarray Dataset, or `"geodataframe"` for GeoPandas.
+Override it for one conversion with `ds.rst.to_pointcloud(pointcloud_return_type="dataarray")`.
+
 ## Default configuration file
 
-Below is the full default configuration file, which is updated by changes in configuration during a session.
+Below is the default configuration file. Changes to `gu.config` apply only to the current Python session,
+they do not modify this file.
 
 ```{literalinclude} ../../geoutils/config.ini
 :class: full-width

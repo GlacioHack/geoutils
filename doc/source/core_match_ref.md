@@ -1,103 +1,59 @@
 (core-match-ref)=
-# Match-reference functionality
+# Match-reference operations
 
-Match-reference functionalities lie at the core of GeoUtils' focus to provide accessible and intuitive tools for end-user geospatial analysis.
+GeoUtils exposes convenient **match-reference** options across most of its operations.
+
+Its objective is ease-of-use, by avoiding requiring volatile metadata extraction from users, potentially triggering unintended loading.
 
 ## What is match-reference ?
 
 Match-reference means to **match** the georeferencing of a dataset to that of another **reference** dataset.
 
-## Why the need for match-reference?
-
-End-users of geospatial tools largely focus on analyzing their data. To this end, they first **need to reconcile data sources**, often provided **in different
-projections, resolutions, and bounds**. This is generally performed by matching all dataset to a certain reference.
-
-Such functionalities are not always available from lower-level packages, in order to keep geoinformatics flexible for more diverse uses. This
-**breaks the principle of least knowledge**, however, for which a user should not need to understand more information than just what is required to run an
-operation.
-
-**GeoUtils allows for match-reference for nearly all geospatial handling operations**, with consistent behaviour across functionalities for intuitive use.
-
-## Matching with a {class}`~geoutils.Raster` or a {class}`~geoutils.Vector` reference
-
-The rules of using match-reference with {class}`Rasters<geoutils.Raster>` or {class}`Vectors<geoutils.Vector>` are always the same:
-
- - If the **reference** passed is a {class}`~geoutils.Vector`, it can enforce a matching of its {attr}`~geoutils.Vector.bbox` and/or of its {attr}`~geoutils.Vector.crs` (its only two
-   georeferencing attributes),
- - If the **reference** is a {class}`~geoutils.Raster`, it can also enforce a matching of any aspect of its {attr}`~geoutils.Raster.transform` (i.e, its
-   {attr}`~geoutils.Raster.res`, {attr}`~geoutils.Raster.bbox` or {attr}`~geoutils.Raster.shape`) and/or of its {attr}`~geoutils.Raster.crs`.
-
-Which of these attributes are eventually used to enforce the matching **depends entirely on the nature of the operation**, which are listed below.
-
-## Geospatial handling rules for match-reference
-
-Geospatial handling methods all support match-reference, and **always enforce the same georeferencing attributes** for either {class}`~geoutils.Raster`
-or {class}`~geoutils.Vector`:
-
-```{list-table}
-   :widths: 30 30 30
-   :header-rows: 1
-
-   * - **Operation**
-     - Enforced on {class}`~geoutils.Raster`
-     - Enforced on {class}`~geoutils.Vector`
-   * - {func}`~geoutils.Raster.reproject`
-     - {attr}`~geoutils.Raster.transform` and {attr}`~geoutils.Raster.crs`
-     - {attr}`~geoutils.Vector.bbox`<sup>1</sup> and {attr}`~geoutils.Vector.crs`
-   * - {func}`~geoutils.Raster.crop`
-     - {attr}`~geoutils.Vector.bbox`
-     - {attr}`~geoutils.Raster.bbox`
-
+```{important}
+A match-reference argument can be **any object** implementing the georeferencing attributes needed by the operation:
+{attr}`~RasterBase.bbox`, {attr}`~RasterBase.crs` and/or {attr}`~RasterBase.transform`.
+Matching a complete raster grid also requires {attr}`~RasterBase.shape` and an affine transform.
 ```
 
-<sup>1</sup>Because a {class}`~geoutils.Vector` only possesses the {attr}`~geoutils.Vector.bbox` attribute of a {class}`~geoutils.Raster`'s {attr}`~geoutils.Raster.transform`.
-
-
-## Other operations supporting match-reference
-
-There are **other geospatial operation that also support match-reference arguments**. Unlike the geospatial handling methods described above, these do not aim
-at modifying the georeferencing of {class}`Rasters<geoutils.Raster>` or {class}`Vectors<geoutils.Vector>`. Instead, they simply require the georeferencing metadata.
-
-### From vector to raster
-
-The {func}`~geoutils.Vector.rasterize` operation to convert from {class}`~geoutils.Vector` to {class}`~geoutils.Raster` accepts a {class}`~geoutils.Raster` to define the
-grid and georeferencing. The behaviour is similar for {func}`~geoutils.Vector.create_mask`, that directly relies on {func}`~geoutils.Vector.rasterize` to
-rasterize directly into a boolean {class}`~geoutils.Raster`.
-
-In addition, the {func}`~geoutils.Vector.proximity` operation to compute proximity distances from the vector also relies on a
-{func}`~geoutils.Vector.rasterize`, and therefore also accepts a {class}`~geoutils.Raster` as reference.
-
-Therefore, the behaviour is consistent for all {class}`~geoutils.Vector` methods that can be passed a {class}`~geoutils.Raster`:
-
-```{list-table}
-   :widths: 50 50
-   :header-rows: 1
-
-   * - **Operation on {class}`~geoutils.Vector`**
-     - **Behaviour**
-   * - {func}`~geoutils.Vector.rasterize`
-     - Gridding with {attr}`~geoutils.Raster.transform` and {attr}`~geoutils.Raster.crs`
-   * - {func}`~geoutils.Vector.create_mask`
-     - Gridding with {attr}`~geoutils.Raster.transform` and {attr}`~geoutils.Raster.crs`
-   * - {func}`~geoutils.Vector.proximity`
-     - Gridding with {attr}`~geoutils.Raster.transform` and {attr}`~geoutils.Raster.crs`
+```{eval-rst}
+.. plot:: diagrams/diagram_match_ref.py
+    :width: 100%
+    :alt: A source raster and reference produce a reprojected raster matching the reference grid, or a crop using the source grid within the reference bounding box.
 ```
 
-### And inversely
+Reprojection to a raster reference matches its **CRS and grid** (pixel size, alignment and bounding box). Cropping uses the
+reference **bounding box**, preserving the source CRS and pixel size. Here the crop bounding box aligns with source cells;
+otherwise its edges are rounded to the source grid.
 
-However, in the case of {class}`~geoutils.Raster` methods that yield a {class}`~geoutils.Vector` or {class}`~geoutils.Raster`, a reference is rarely needed.
-This is because this reference is derived directly from the input {class}`~geoutils.Raster` itself, harnessing the object-based structure of GeoUtils.
+## Matching with a raster, vector or point cloud
 
-The user can always {func}`~geoutils.Vector.crop` or {func}`~geoutils.Vector.reproject` the output afterwards, if desired.
+A vector or point cloud reference provides **a bounding box and CRS**. A raster reference also provides a **grid**:
+its pixel size, alignment and shape.
 
-```{list-table}
-   :widths: 50 50
-   :header-rows: 1
+**The same reference information serves the same purpose across object types.** Reprojection uses the reference CRS,
+spatial selection uses its bounding box or geometry, and operations creating a raster grid can use its transform and shape.
+An operation can use several of these together, as raster reprojection does with CRS and grid.
 
-   * - **Operation on {class}`~geoutils.Raster`**
-     - **Behaviour**
-   * - {func}`~geoutils.Raster.polygonize`
-     - Using `.self` ({class}`~geoutils.Raster`) as reference for {attr}`~geoutils.Raster.transform` and {attr}`~geoutils.Raster.crs`
-   * - {func}`~geoutils.Raster.proximity`
-     - Using `.self` ({class}`~geoutils.Raster`) as reference for {attr}`~geoutils.Raster.transform` and {attr}`~geoutils.Raster.crs`
-```
+
+| Reference information | Operations using it |
+|---|---|
+| **CRS** | {meth}`raster.reproject() <RasterBase.reproject>`, {meth}`vector.reproject() <VectorBase.reproject>`, {meth}`point_cloud.reproject() <geoutils.pointcloud.base.GeometryPointCloudBase.reproject>` |
+| **Bounding box and CRS** | {meth}`raster.crop() <RasterBase.crop>`, {meth}`vector.crop() <VectorBase.crop>`, {meth}`point_cloud.crop() <geoutils.pointcloud.base.GeometryPointCloudBase.crop>`; {meth}`raster.plot() <RasterBase.plot>`, {meth}`vector.plot() <VectorBase.plot>`, {meth}`point_cloud.plot() <geoutils.pointcloud.base.GeometryPointCloudBase.plot>`; {meth}`raster.intersection() <RasterBase.intersection>` for the overlap bounding box |
+| **Geometry or footprint**, projected into the source CRS | {meth}`raster.clip() <RasterBase.clip>`, {meth}`vector.clip() <VectorBase.clip>`, {meth}`point_cloud.clip() <geoutils.pointcloud.base.GeometryPointCloudBase.clip>` |
+| **Raster grid** (CRS, transform and shape) | {meth}`raster.reproject() <RasterBase.reproject>`, {meth}`raster.krige() <RasterBase.krige>`; {meth}`vector.rasterize() <VectorBase.rasterize>`, {meth}`vector.create_mask() <VectorBase.create_mask>`, {meth}`vector.proximity() <VectorBase.proximity>`; {meth}`point_cloud.grid() <PointCloudBase.grid>`, {meth}`point_cloud.krige() <PointCloudBase.krige>` |
+| **Point locations** (X/Y, projected into the source CRS) | {meth}`raster.resample_at_points() <RasterBase.resample_at_points>`, {meth}`raster.interp_at_points() <RasterBase.interp_at_points>`, {meth}`raster.reduce_at_points() <RasterBase.reduce_at_points>`; {meth}`vector.create_mask() <VectorBase.create_mask>` with a point cloud reference |
+
+When a reference supplies only a bounding box and CRS, rasterization and point gridding need `res` or `shape` to define the
+grid. Raster reprojection instead estimates resolution from the source unless `res` or `grid_size` is given.
+For point cloud gridding, reproject() the points first if their CRS differs from the reference.
+
+Cropping selects existing cells, features or points using the reference bounding box, without changing their geometry.
+Clipping follows the exact geometry boundary. Vector cropping selects whole intersecting features by default.
+Raster intersection() aligns the overlap bounding box with the source grid by default (`match_ref=True`).
+
+{func}`~geoutils.raster.stack_rasters` and {func}`~geoutils.raster.merge_rasters` use the reference **CRS and resolution**.
+Their `reference` is a GeoUtils raster or input index (default: first input); the output bounding box covers the inputs' union unless
+`use_ref_bounds=True` requests the reference bounding box.
+
+Outputs derived from a raster often need no external reference: {meth}`~RasterBase.polygonize` and {meth}`~RasterBase.proximity`
+inherit source georeferencing, and raster krige() uses the source grid unless a `ref` is supplied.

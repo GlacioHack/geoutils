@@ -31,6 +31,7 @@ import xarray as xr
 from pyproj import CRS
 from rasterio.coords import BoundingBox
 
+from geoutils._config import config
 from geoutils._dispatch import is_dask_dataframe
 from geoutils._misc import _deprecate_keyword, _validate_downsample
 from geoutils._typing import Number
@@ -53,7 +54,7 @@ def open_pointcloud(
     chunks: int | None = None,
     downsample: Number = 1,
     *,
-    as_type: Literal["dataarray", "dataset", "geodataframe"] = "dataarray",
+    as_object_type: Literal["dataarray", "dataset", "geodataframe"] | None = None,
     level: int | range | None = None,
 ) -> xr.DataArray | xr.Dataset | gpd.GeoDataFrame | Any:
     """
@@ -64,12 +65,13 @@ def open_pointcloud(
 
     Passing ``chunks`` opens the point data lazily using Dask arrays (Xarray objects) or Dask-GeoPandas (Pandas
     object). Use ``downsample`` to  select a deterministic random sample. For example, ``downsample=2`` returns
-    half the points, rounded up. For COPC, the coarsest cumulative levels containing enough points are read first,
-    then sampled to the requested count. Other formats sample the full point cloud.
+    half the points, rounded up. For COPC, we select levels from coarse to fine until they contain enough points,
+    then sample those points to the requested count. Other formats sample the full point cloud.
 
-    Use ``level`` to select COPC octree depths explicitly, following LasPy: an integer selects one depth and a
-    range selects several. For example, ``level=range(3)`` reads depths 0 through 2. Smaller depths contain coarser
-    samples. Like raster ``overview_level``, explicit levels cannot be combined with ``downsample > 1``.
+    Use ``level`` to select COPC levels of detail, following LasPy. Each point belongs to one level:
+    level 0 holds a coarse sample, and higher levels add points. Selected levels are combined into one point cloud.
+    An integer selects only that level; ``level=range(3)`` combines levels 0 through 2. Explicit levels cannot
+    be combined with ``downsample > 1``.
 
     :param filename: Point file or directory of GeoParquet partitions.
     :param data_name: Attribute containing point values. Defaults to Z for LAS, the saved active attribute for
@@ -79,17 +81,20 @@ def open_pointcloud(
     :param chunks: Points per Dask chunk or partition. GeoParquet GeoDataFrame partitions follow the stored row
         groups. None loads the point data eagerly.
     :param downsample: Factor reducing the point count to ceil(N / downsample), with a deterministic random sample.
-    :param as_type: Returned representation: dataarray (the default), dataset, or geodataframe.
-    :param level: COPC octree depth or range of depths to read. None selects all depths unless downsample is used.
+    :param as_object_type: Returned representation: dataarray, dataset, or geodataframe. None uses
+        config["pointcloud_return_type"], which defaults to dataarray.
+    :param level: COPC level of detail, or a range of levels. None combines all levels unless downsample is used.
     :returns: A DataArray with active values and auxiliary coordinates, a Dataset with separate value variables,
         or a GeoDataFrame.
     """
     # 1/ Input checks
+    if as_object_type is None:
+        as_object_type = config["pointcloud_return_type"]
     downsample = _validate_downsample(downsample)
     if chunks is not None and (isinstance(chunks, bool) or not isinstance(chunks, int) or chunks <= 0):
         raise ValueError("Argument 'chunks' must be a strictly positive integer.")
-    if as_type not in ("dataarray", "dataset", "geodataframe"):
-        raise ValueError("Argument 'as_type' must be 'dataarray', 'dataset' or 'geodataframe'.")
+    if as_object_type not in ("dataarray", "dataset", "geodataframe"):
+        raise ValueError("Argument 'as_object_type' must be 'dataarray', 'dataset' or 'geodataframe'.")
     if level is not None:
         if isinstance(level, range):
             valid_level = level.start >= 0 and level.step > 0 and len(level) > 0
@@ -99,35 +104,50 @@ def open_pointcloud(
             )
         if not valid_level:
             raise ValueError(
-                "Argument 'level' must be a non-negative integer or a non-empty increasing range of depths."
+                "Argument 'level' must be a non-negative integer or a non-empty increasing range of levels."
             )
         if downsample > 1:
             raise ValueError("downsample and level cannot be used together.")
 
     # Plan COPC reads from hierarchy counts without loading point records
-    from geoutils.pointcloud.las import _is_laspy_supported, _load_laspy_metadata, _select_copc_nodes
+    from geoutils.pointcloud.las import (
+        _is_laspy_supported,
+        _load_laspy_metadata,
+        _read_copc_hierarchy,
+        _select_copc_nodes,
+    )
 
+    # Store levels, chunk sizes, and other relevant metadata in the object attributes
     copc_nodes = None
+    file_metadata: dict[str, Any] = {}
     source_count = None
-    if level is not None or downsample > 1:
-        if _is_laspy_supported(filename):
-            metadata = _load_laspy_metadata(filename)
-            if metadata.is_copc:
-                source_count = metadata.point_count
-                target_count = int(np.ceil(source_count / downsample)) if downsample > 1 else None
-                copc_nodes = _select_copc_nodes(str(filename), level, target_count)
-        if level is not None and copc_nodes is None:
-            raise ValueError("Argument 'level' is only supported for COPC files.")
+    if _is_laspy_supported(filename):
+        metadata = _load_laspy_metadata(filename)
+        file_metadata = {"point_record_size": metadata.point_record_size, "laz_chunk_size": metadata.laz_chunk_size}
+        if metadata.is_copc:
+            source_count = metadata.point_count
+            target_count = int(np.ceil(source_count / downsample)) if downsample > 1 else None
+            hierarchy = _read_copc_hierarchy(str(filename))
+            copc_nodes = _select_copc_nodes(str(filename), level, target_count, nodes=hierarchy)
+            file_metadata.update(
+                {
+                    "copc_levels": sorted({node.key.level for node in hierarchy}),
+                    "copc_selected_levels": sorted({node.key.level for node in copc_nodes}),
+                    "copc_chunk_sizes": [node.point_count for node in hierarchy],
+                }
+            )
+    if level is not None and copc_nodes is None:
+        raise ValueError("Argument 'level' is only supported for COPC files.")
 
     # 2/ Dispatch by request representation
-    if as_type in ("dataarray", "dataset"):
+    if as_object_type in ("dataarray", "dataset"):
         points = _open_pointcloud_array(str(filename), data_name, columns, chunks, copc_nodes)
     else:
         points = _open_pointcloud_geodataframe(str(filename), data_name, columns, chunks, copc_nodes)
 
     # 3/ Downsample, if requested
     partition_lengths = None
-    if as_type == "geodataframe" and chunks is not None and copc_nodes is not None:
+    if as_object_type == "geodataframe" and chunks is not None and copc_nodes is not None:
         # Count the dataframe partitions formed by splitting each compressed node
         lengths = []
         for node in copc_nodes:
@@ -136,17 +156,20 @@ def open_pointcloud(
         partition_lengths = tuple(lengths) or (0,)
     points = _downsample_open_pointcloud(points, downsample, source_count, partition_lengths)
 
+    # Cache hierarchy metadata on every representation without computing lazy point values
+    if file_metadata:
+        if isinstance(points, xr.DataArray):
+            points.attrs.update(file_metadata)
+        else:
+            attrs = _get_dataframe_attrs(points).copy()
+            attrs.update(file_metadata)
+            _set_dataframe_attrs(points, attrs)
+
     # 4/ Convert to a Xarray Dataset, if requested
-    if as_type == "dataset":
-        # Value attributes become separate variables while coordinates and lazy graphs stay shared
-        names = [name for name in points.pc.columns if name != points.name and name != "_geometry_z"]
-        dataset = points.rename({"x": "x_point", "y": "y_point"}).to_dataset().reset_coords(names)
-        dataset = dataset[[points.name, *names]]
-        for name in dataset.data_vars:
-            dataset[name].attrs["crs"] = points.attrs.get("crs")
-        dataset.attrs = points.attrs.copy()
-        dataset.encoding = points.encoding.copy()
-        return dataset
+    if as_object_type == "dataset":
+        from geoutils.pointcloud.xr_accessor import _pointcloud_array_to_dataset
+
+        return _pointcloud_array_to_dataset(points)
     return points
 
 

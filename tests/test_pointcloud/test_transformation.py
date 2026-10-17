@@ -87,8 +87,10 @@ class TestTransformationChunked:
     )
     clip_geometry = Polygon([(0, 0), (10, 0), (0, 10)])
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
-    def test_clip__chunked_backends_equal(self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path) -> None:
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
+    def test_clip__chunked_backends_equal(
+        self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
+    ) -> None:
         """Checks that Dask and multiprocessing clip() select the same points as an in-memory call."""
 
         dgpd = pytest.importorskip("dask_geopandas")
@@ -100,7 +102,7 @@ class TestTransformationChunked:
         # Clip the same points in memory, with Dask and with two worker processes
         expected = gu.PointCloud(self.clip_points, data_name="intensity").clip(self.clip_geometry).gdf
         expected = expected.sort_values("row_id").reset_index(drop=True)
-        lazy = gu.open_pointcloud(str(filename), data_name="intensity", chunks=4, as_type=as_type)
+        lazy = gu.open_pointcloud(str(filename), data_name="intensity", chunks=4, as_object_type=as_object_type)
         multiproc = gu.PointCloud(filename, data_name="intensity")
         lazy_result = lazy.pc.clip(self.clip_geometry)
         with MpCluster({"nb_workers": 2}) as cluster:
@@ -108,7 +110,7 @@ class TestTransformationChunked:
             multiproc_result = multiproc.clip(self.clip_geometry, mp_config=config)
 
         # Check that Dask and file results have the expected types and remain unloaded
-        assert isinstance(lazy_result, xr.DataArray if as_type == "dataarray" else dgpd.GeoDataFrame)
+        assert isinstance(lazy_result, xr.DataArray if as_object_type == "dataarray" else dgpd.GeoDataFrame)
         assert not lazy.pc.is_loaded and not lazy_result.pc.is_loaded
         assert isinstance(multiproc_result, gu.PointCloud)
         assert not multiproc.is_loaded and not multiproc_result.is_loaded
@@ -127,8 +129,8 @@ class TestTransformationChunked:
         assert not multiproc.is_loaded
         assert not lazy.pc.is_loaded and not lazy_result.pc.is_loaded
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
-    def test_clip__dask_las_loading_laziness(self, as_type: Literal["dataarray", "geodataframe"]) -> None:
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
+    def test_clip__dask_las_loading_laziness(self, as_object_type: Literal["dataarray", "geodataframe"]) -> None:
         """Checks that clip() keeps a LAS-backed Dask GeoDataFrame lazy and matches eager point selection."""
 
         pytest.importorskip("laspy")
@@ -144,17 +146,17 @@ class TestTransformationChunked:
         assert not eager.is_loaded
 
         # Build one clipping task per LAS partition (100 points) without running any Dask task
-        lazy = gu.open_pointcloud(filename, chunks=100, as_type=as_type)
+        lazy = gu.open_pointcloud(filename, chunks=100, as_object_type=as_object_type)
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(args[0])):
             lazy_result = lazy.pc.clip(geometry)
         # Array outputs resolve the selected row positions before constructing known dimensions
-        if as_type == "geodataframe":
+        if as_object_type == "geodataframe":
             assert tasks == []
         else:
             assert tasks
-        assert isinstance(lazy_result, xr.DataArray if as_type == "dataarray" else dgpd.GeoDataFrame)
-        if as_type == "geodataframe":
+        assert isinstance(lazy_result, xr.DataArray if as_object_type == "dataarray" else dgpd.GeoDataFrame)
+        if as_object_type == "geodataframe":
             assert lazy_result.npartitions == lazy.npartitions
         assert lazy_result.pc.data_name == lazy.pc.data_name == "Z"
         assert not lazy.pc.is_loaded and not lazy_result.pc.is_loaded
@@ -214,9 +216,9 @@ class TestTransformationChunked:
 
     @pytest.mark.parametrize("chunks", [4, 6])
     @pytest.mark.parametrize("loaded", [False, True])
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_reproject__chunked_backends_equal(
-        self, as_type: Literal["dataarray", "geodataframe"], chunks: int, loaded: bool, tmp_path: Path
+        self, as_object_type: Literal["dataarray", "geodataframe"], chunks: int, loaded: bool, tmp_path: Path
     ) -> None:
         """
         Checks that eager, Dask and multiprocessing reprojection return the same rows and metadata.
@@ -233,7 +235,7 @@ class TestTransformationChunked:
         source = gu.PointCloud(self.points.copy(), data_name="intensity")
         accessor = self.points.copy()
         accessor.pc.set_data_name("intensity")
-        lazy = gu.open_pointcloud(str(filename), data_name="intensity", chunks=chunks, as_type=as_type)
+        lazy = gu.open_pointcloud(str(filename), data_name="intensity", chunks=chunks, as_object_type=as_object_type)
         multiproc = gu.PointCloud(filename, data_name="intensity")
         if loaded:
             multiproc.load()
@@ -256,7 +258,7 @@ class TestTransformationChunked:
         assert isinstance(eager_result, gu.PointCloud) and eager_result.is_loaded
         assert isinstance(accessor_result, gpd.GeoDataFrame)
         assert (
-            isinstance(lazy_result, xr.DataArray if as_type == "dataarray" else dgpd.GeoDataFrame)
+            isinstance(lazy_result, xr.DataArray if as_object_type == "dataarray" else dgpd.GeoDataFrame)
             and not lazy_result.pc.is_loaded
         )
         assert isinstance(multiproc_result, gu.PointCloud) and not multiproc_result.is_loaded
@@ -498,9 +500,9 @@ class TestReprojectErrors:
         assert eager.reproject(crs=32632, inplace=True) is None
         assert_geodataframe_equal(eager.gdf, expected)
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_reproject__error_dask_with_multiprocessing(
-        self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path
+        self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
     ) -> None:
         """Checks that Dask + multiprocessing is rejected before any Dask partition runs."""
 
@@ -510,7 +512,7 @@ class TestReprojectErrors:
         # Open the file as a Dask dataframe split into several row partitions
         filename = tmp_path / "source.gpkg"
         self.points.to_file(filename, index=False)
-        source = gu.open_pointcloud(str(filename), data_name="intensity", chunks=4, as_type=as_type)
+        source = gu.open_pointcloud(str(filename), data_name="intensity", chunks=4, as_object_type=as_object_type)
         outfile = tmp_path / "projected.gpkg"
         configuration = MultiprocConfig(chunks=4, outfile=str(outfile))
 

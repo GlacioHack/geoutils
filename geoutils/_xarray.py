@@ -20,7 +20,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 
 import xarray as xr
 from pyproj import CRS
@@ -32,7 +32,7 @@ from geoutils._misc import import_optional
 
 
 def _select_dataset_variables(
-    dataset: xr.Dataset, compatible: Sequence[str], variables: Sequence[str] | None
+    dataset: xr.Dataset, compatible: Collection[str], variables: Sequence[str] | None
 ) -> list[str]:
     """Select compatible value variables and raise proper errors otherwise."""
 

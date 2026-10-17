@@ -74,7 +74,7 @@ def load_multiple_rasters(
         output_rst.append(rst)
 
         # Get bound in reference CRS
-        bound = rst.get_bounds_projected(ref_crs)
+        bound = rst.get_bbox_projected(ref_crs)
         bounds.append(bound)
 
     # Second get the intersection of all raster bounds
@@ -165,7 +165,7 @@ def stack(
         dst_bounds = reference_raster.bbox
     else:
         dst_bounds = merge_bounds(
-            [raster.get_bounds_projected(out_crs=reference_raster.crs) for raster in rasters],
+            [raster.get_bbox_projected(out_crs=reference_raster.crs) for raster in rasters],
             resolution=reference_raster.res[0],
             return_rio_bbox=True,
         )

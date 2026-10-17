@@ -1,7 +1,7 @@
 (benchmarking-performance)=
 # Performance
 
-GeoUtils benchmarks its functionalities to measure **RAM and wall time**, check **lazy and out-of-core behaviour** with
+GeoUtils benchmarks its functionalities to measure **execution time and memory usage**, check **lazy and out-of-core behaviour** with
 Dask and Multiprocessing, track **improvements or regressions over time**, and compare different **execution modes** and
 **calculation engines** against the [**GDAL CLI**](https://gdal.org/en/stable/programs/index.html). Chunked operations
 also compare strategies used to coordinate selections or reconcile results across chunks.
@@ -11,7 +11,7 @@ The benchmarks use GeoUtils' profiling tool described in {ref}`profiling`, which
 ## Improvements or regressions over time
 
 The [**GeoUtils benchmark webpage**](https://glaciohack.github.io/geoutils/) provides performance of core functionalities and their changes with commit history.
-It relies on [Airspeed Velocity (ASV)](https://asv.readthedocs.io/) to record fixed performance measurements for each commit and publish them.
+It relies on [Airspeed Velocity (ASV)](https://asv.readthedocs.io/) to record reproducible performance measurements for each commit and publish them.
 
 ## Comparison across execution modes, engines and external CLI tools
 
@@ -43,7 +43,7 @@ Four reference graphics summarize the core results:
 :::{figure} https://glaciohack.github.io/geoutils/documentation/time_relative_to_gdal.svg
 :alt: End-to-end GeoUtils execution-mode time relative to GDAL for five raster operations
 
-End-to-end time on the largest raster size shared by every execution mode and the GDAL CLI. GDAL is the reference at one.
+Execution time on the largest raster size shared by every execution mode and the GDAL CLI. GDAL is the reference.
 :::
 
 :::{figure} https://glaciohack.github.io/geoutils/documentation/memory_increase_by_operation.svg
@@ -71,9 +71,9 @@ These graphics show the latest complete CI benchmark and may be newer than this 
 
 ## Test suite for scalable execution and large datasets
 
-Every GeoUtils operation advertised as {ref}`chunked or lazy <scalability-support>` is tested
-on all supported Python versions and operating systems for its respect of Dask laziness, deferred I/O, and loading behaviour,
-while yielding **exactly** the same output as in-memory operations.
+Every GeoUtils operation listed as {ref}`chunked or lazy <scalability-support>` is tested
+on all supported Python versions and operating systems to ensure its respect of Dask laziness, deferred I/O, and loading behaviour,
+while yielding **exactly** the same output as in-memory operations, within numerical tolerances.
 
-In addition, GeoUtils also includes large data tests running on the latest Python and Ubuntu,
+In addition, GeoUtils also includes large data tests running on latest Python and Ubuntu releases,
 verifying that these operations use less memory than loading the full raster would require, while yielding a correct result.

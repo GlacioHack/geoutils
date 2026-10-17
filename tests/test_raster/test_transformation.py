@@ -164,7 +164,7 @@ class TestTransformation:
             r_cropped3 = r.crop(r_cropped_reproj)
 
         # Original CRS bounds can be deformed during transformation, but result should be equivalent to this
-        r_cropped4 = r.crop(bbox=r_cropped_reproj.get_bounds_projected(out_crs=r.crs))
+        r_cropped4 = r.crop(bbox=r_cropped_reproj.get_bbox_projected(out_crs=r.crs))
         assert r_cropped3.raster_equal(r_cropped4)
 
         # -- Test with inplace=True -- #
@@ -219,7 +219,7 @@ class TestTransformation:
 
         # Second, we check that bound reprojection is done automatically if the CRS differ
         r_cropped2 = r.crop(outlines)
-        r_cropped2_bbox_reproj = r.crop(bbox=outlines.get_bounds_projected(out_crs=r.crs))
+        r_cropped2_bbox_reproj = r.crop(bbox=outlines.get_bbox_projected(out_crs=r.crs))
         assert list(r_cropped2.bounds) == list(r_cropped2_bbox_reproj.bounds)
 
         # -- Test crop works as expected even if transform has been modified, e.g. through downsampling -- #
@@ -2537,7 +2537,7 @@ class TestReprojectionErrors:
         # Identical grids still validate the reducer configuration before any early return
         raster = gu.Raster.from_array(np.ones((4, 4)), rio.transform.from_origin(0, 4, 1, 1), crs=32631)
         with pytest.raises(ValueError, match="PointNeighbours applies to point sources"):
-            raster.reproject(raster, resampling=Mean(neighborhood=PointNeighbours(k=3)))
+            raster.reproject(raster, resampling=Mean(neighborhood=PointNeighbours(max_points=3)))
 
     @pytest.mark.parametrize("operator_type", [Nearest, Linear])
     def test_reproject__warn_regular_offsets(self, operator_type: type[Interpolator]) -> None:

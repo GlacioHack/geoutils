@@ -325,7 +325,7 @@ class TestErrorStructureEstimationChunked:
 
     # Vary point representations only for Dask inputs that actually contain points
     @pytest.mark.parametrize(
-        ("backend", "input_type", "as_type"),
+        ("backend", "input_type", "as_object_type"),
         [
             ("dask", "raster", "dataarray"),
             ("dask", "point", "dataarray"),
@@ -363,7 +363,7 @@ class TestErrorStructureEstimationChunked:
     )
     def test_estimate__chunked_inputs_and_components_match_eager(
         self,
-        as_type: Literal["dataarray", "geodataframe"],
+        as_object_type: Literal["dataarray", "geodataframe"],
         pointcloud_file: Any,
         backend: str,
         input_type: str,
@@ -462,7 +462,7 @@ class TestErrorStructureEstimationChunked:
                     data_name=chunked_source_column,
                     columns="all",
                     chunks=chunked_source_chunks,
-                    as_type=as_type,
+                    as_object_type=as_object_type,
                 )
                 source_interface = chunked_source.pc
 
@@ -479,7 +479,7 @@ class TestErrorStructureEstimationChunked:
                     data_name=chunked_other_column,
                     columns="all",
                     chunks=chunked_other_chunks,
-                    as_type=as_type,
+                    as_object_type=as_object_type,
                 )
 
                 input_states.append((chunked_other.pc, "point"))

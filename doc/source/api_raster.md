@@ -10,8 +10,13 @@ Below is the full class description specific to {class}`~geoutils.Raster`:
 ```{eval-rst}
 .. currentmodule:: geoutils
 
+.. py:class:: Raster
+    :no-typesetting:
+
 .. autoclass:: Raster
     :members:
     :inherited-members:
     :undoc-members: false
+    :no-index:
     :show-inheritance:
+```

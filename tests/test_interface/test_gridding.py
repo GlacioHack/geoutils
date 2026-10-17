@@ -38,7 +38,7 @@ from tests.operator_helpers import LocalMeanInterpolator, PropagatingLocalMeanIn
 class TwoNearestMeanInterpolator(Interpolator):
     """Predict a value from the two nearest point observations."""
 
-    default_neighborhood = PointNeighbours(k=2)
+    default_neighborhood = PointNeighbours(max_points=2)
 
     def __init__(self) -> None:
         """Start with no irregular-source batches evaluated."""
@@ -591,7 +591,7 @@ class TestGriddingOperators:
         usual = points.grid(ref=reference, resampling=operator, nodata_handling="ignore")
         nearest_two = points.grid(
             ref=reference,
-            resampling=LocalMeanInterpolator(neighborhood=PointNeighbours(k=2)),
+            resampling=LocalMeanInterpolator(neighborhood=PointNeighbours(max_points=2)),
             nodata_handling="ignore",
         )
         within_five = points.grid(
@@ -604,7 +604,7 @@ class TestGriddingOperators:
         assert within_five.to_nanarray()[0, 0] == 2
         assert operator.default_neighborhood is None
 
-    @pytest.mark.parametrize("neighborhood", [PointNeighbours(k=2), PointNeighbours(radius=2)])
+    @pytest.mark.parametrize("neighborhood", [PointNeighbours(max_points=2), PointNeighbours(radius=2)])
     def test_grid__reducer_point_neighbours(self, neighborhood: PointNeighbours) -> None:
         """Checks that a reducer's point count or radius selects values and uncertainty inputs for grid()."""
 
@@ -662,7 +662,7 @@ class TestGriddingOperators:
             transform=rio.transform.from_origin(0, 0, 1, 1),
             crs=32631,
         )
-        operator = InverseDistance(neighborhood=PointNeighbours(k=2, radius=0))
+        operator = InverseDistance(neighborhood=PointNeighbours(max_points=2, radius=0))
         errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
 
         # Both zero-distance values receive half the weight, including in analytical variance
@@ -686,7 +686,7 @@ class TestGriddingOperators:
             crs=32631,
         )
 
-        # A thirty-pixel radius includes all points; k=2 uses only the two nearest ones
+        # A thirty-pixel radius includes all points; max_points=2 uses only the two nearest ones
         full_radius = points.grid(
             ref=reference,
             resampling=InverseDistance(),
@@ -695,7 +695,7 @@ class TestGriddingOperators:
         )
         nearest_two = points.grid(
             ref=reference,
-            resampling=InverseDistance(neighborhood=PointNeighbours(k=2)),
+            resampling=InverseDistance(neighborhood=PointNeighbours(max_points=2)),
             dist_nodata_pixel=30,
             nodata_handling="ignore",
         )
@@ -849,12 +849,12 @@ class TestGridChunked:
             "stdev",
             "average_distance",
             "average_distance_pts",
-            Mean(neighborhood=PointNeighbours(k=2)),
+            Mean(neighborhood=PointNeighbours(max_points=2)),
         ],
     )
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_grid__chunked_backends_equal(
-        self, as_type: Literal["dataarray", "geodataframe"], resampling: GriddingMethod, tmp_path: Path
+        self, as_object_type: Literal["dataarray", "geodataframe"], resampling: GriddingMethod, tmp_path: Path
     ) -> None:
         """
         Test that grid returns exactly the same output for:
@@ -875,7 +875,7 @@ class TestGridChunked:
         pointcloud = PointCloud(self.points, data_name="z")
         point_accessor = self.points.copy()
         point_accessor.pc.set_data_name("z")
-        dask_points = gu.open_pointcloud(str(point_file), data_name="z", chunks=3, as_type=as_type)
+        dask_points = gu.open_pointcloud(str(point_file), data_name="z", chunks=3, as_object_type=as_object_type)
         multiproc_points = PointCloud(point_file, data_name="z")
 
         assert pointcloud.is_loaded
@@ -924,10 +924,10 @@ class TestGridChunked:
 
     @pytest.mark.parametrize("point_dask", [False, True], ids=["point-eager", "point-dask"])
     @pytest.mark.parametrize("raster_dask", [False, True], ids=["raster-eager", "raster-dask"])
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_grid__point_raster_input_combinations(
         self,
-        as_type: Literal["dataarray", "geodataframe"],
+        as_object_type: Literal["dataarray", "geodataframe"],
         point_dask: bool,
         raster_dask: bool,
         tmp_path: Path,
@@ -952,7 +952,7 @@ class TestGridChunked:
 
         # Select each input independently to cover all four eager and Dask combinations
         points = (
-            gu.open_pointcloud(str(point_file), data_name="z", chunks=3, as_type=as_type)
+            gu.open_pointcloud(str(point_file), data_name="z", chunks=3, as_object_type=as_object_type)
             if point_dask
             else PointCloud(self.points, data_name="z")
         )
@@ -997,9 +997,9 @@ class TestGridChunked:
         assert expected.raster_equal(computed_output, warn_failure_reason=True, strict_masked=False)
 
     @pytest.mark.parametrize("resampling", ["nearest", "idw", "mean"])
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_grid__numba_chunked_backends(
-        self, as_type: Literal["dataarray", "geodataframe"], resampling: GriddingMethod, tmp_path: Path
+        self, as_object_type: Literal["dataarray", "geodataframe"], resampling: GriddingMethod, tmp_path: Path
     ) -> None:
         """Ensure the Numba calculation engine is identical across eager, Dask and Multiprocessing backends."""
 
@@ -1017,7 +1017,7 @@ class TestGridChunked:
 
         # Compare both chunked outputs with one complete eager calculation
         expected = PointCloud(self.points, data_name="z").grid(**kwargs)
-        dask_points = gu.open_pointcloud(str(point_file), data_name="z", chunks=3, as_type=as_type)
+        dask_points = gu.open_pointcloud(str(point_file), data_name="z", chunks=3, as_object_type=as_object_type)
         dask_output = dask_points.pc.grid(**kwargs, chunksizes=(2, 1))
         multiproc_points = PointCloud(point_file, data_name="z")
         multiproc_output = multiproc_points.grid(
@@ -1033,10 +1033,10 @@ class TestGridChunked:
         ("nodata_handling", "resampling"),
         [("propagate", "mean"), (2, "mean"), ("nearest", "idw"), ("ignore", "mean")],
     )
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_grid__nodata_propagation_chunked_backends(
         self,
-        as_type: Literal["dataarray", "geodataframe"],
+        as_object_type: Literal["dataarray", "geodataframe"],
         tmp_path: Path,
         nodata_handling: NodataChoice,
         resampling: GriddingMethod,
@@ -1057,7 +1057,7 @@ class TestGridChunked:
 
         # Compare the same nodata rule before and after splitting either input or output
         expected = PointCloud(points, data_name="z").grid(**kwargs)
-        dask_points = gu.open_pointcloud(str(point_file), data_name="z", chunks=3, as_type=as_type)
+        dask_points = gu.open_pointcloud(str(point_file), data_name="z", chunks=3, as_object_type=as_object_type)
         dask_output = dask_points.pc.grid(**kwargs, chunksizes=(2, 2))
         multiproc_points = PointCloud(point_file, data_name="z")
         multiproc_output = multiproc_points.grid(
@@ -1069,8 +1069,10 @@ class TestGridChunked:
         assert not dask_points.pc.is_loaded
         assert not multiproc_points.is_loaded
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
-    def test_grid__empty_dask_partitions(self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path) -> None:
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
+    def test_grid__empty_dask_partitions(
+        self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
+    ) -> None:
         """Checks that chunked gridding returns empty Dask partitions when points are unreachable."""
 
         # We create 5 points into partitions of 2/2/1
@@ -1081,7 +1083,7 @@ class TestGridChunked:
         )
         filename = tmp_path / "distant-points.gpkg"
         points.to_file(filename, index=False)
-        source = gu.open_pointcloud(str(filename), data_name="z", chunks=2, as_type=as_type)
+        source = gu.open_pointcloud(str(filename), data_name="z", chunks=2, as_object_type=as_object_type)
 
         # We define a grid destination that is beyond the 1-pixel radius of every source point
         reference = Raster.from_array(np.zeros((3, 4)), rio.transform.from_origin(100, 3, 1, 1), crs=32631)
@@ -1097,16 +1099,16 @@ class TestGridChunked:
         np.testing.assert_array_equal(np.asarray(computed), expected.to_nanarray())
         assert not source.pc.is_loaded
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_grid__dask_multiprocessing_error(
-        self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path
+        self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
     ) -> None:
         """Reject two schedulers for one gridding operation before evaluating point partitions."""
 
         # A Dask point source already owns task scheduling and cannot use Multiprocessing
         point_file = tmp_path / "points.gpkg"
         self.points.to_file(point_file)
-        points = gu.open_pointcloud(str(point_file), data_name="z", chunks=3, as_type=as_type)
+        points = gu.open_pointcloud(str(point_file), data_name="z", chunks=3, as_object_type=as_object_type)
         with pytest.raises(ValueError, match="Cannot use Multiprocessing and Dask simultaneously"):
             points.pc.grid(
                 grid_coords=self.grid_coords,
@@ -1163,9 +1165,9 @@ class TestGriddingOperatorsChunked:
         # Computing the grid must agree with the complete eager point search
         np.testing.assert_array_equal(np.asarray(lazy_result.compute()), expected.to_nanarray())
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_grid__custom_reducer_chunk_invariance(
-        self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path
+        self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
     ) -> None:
         """Checks that a custom reducer receives the same neighbors with eager, Dask and multiprocessing grids."""
 
@@ -1185,7 +1187,7 @@ class TestGriddingOperatorsChunked:
 
         # Evaluate one complete grid and two grids whose output cells are split independently
         expected = gu.PointCloud(points, data_name="value").grid(**options)
-        dask_points = gu.open_pointcloud(str(point_file), data_name="value", chunks=3, as_type=as_type)
+        dask_points = gu.open_pointcloud(str(point_file), data_name="value", chunks=3, as_object_type=as_object_type)
         dask_result = dask_points.pc.grid(**options, chunksizes=(1, 2))
         assert hasattr(dask_points, "compute")
         assert hasattr(dask_result.data, "compute")
@@ -1220,7 +1222,7 @@ class TestPointNeighbourMethodsChunked:
         # An uneven final chunk checks that the point search uses the complete source at each boundary
         points = gu.PointCloud.from_xyz([0, 1, 3, 6], [0, 0, 1, 2], [1, 3, 7, 11], crs=32631)
         reference = gu.Raster.from_array(np.zeros((4, 5)), rio.transform.from_origin(0, 4, 1, 1), crs=32631)
-        operator = operator_type(neighborhood=PointNeighbours(k=2, radius=4))
+        operator = operator_type(neighborhood=PointNeighbours(max_points=2, radius=4))
         options: dict[str, Any] = {"resampling": operator, "engine": engine, "nodata_handling": "ignore"}
         expected = points.grid(ref=reference, **options)
 

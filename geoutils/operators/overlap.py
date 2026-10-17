@@ -398,7 +398,7 @@ def _run_exactextract(
     """
 
     # The classes below inherit from ExactExtract classes, so we define them after this optional import
-    import_optional("exactextract", extra_name="exactextract")
+    import_optional("exactextract")
     from exactextract import exact_extract
     from exactextract.feature import Feature, FeatureSource
     from exactextract.raster import NumPyRasterSource, RasterSource
@@ -803,7 +803,7 @@ def _grid_intersection_fractions(
     exactextract_compatible = transform.b == 0 and transform.d == 0 and transform.a > 0 and transform.e < 0
     exactextract_available = find_spec("exactextract") is not None
     if backend == "exactextract" and not exactextract_available:
-        import_optional("exactextract", extra_name="exactextract")
+        import_optional("exactextract")
     use_exactextract = exactextract_compatible and exactextract_available and backend != "shapely"
     if use_exactextract:
         return _grid_intersection_fractions_exactextract(geometry_array, transform, shape, usable=usable)

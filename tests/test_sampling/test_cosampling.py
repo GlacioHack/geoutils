@@ -639,9 +639,9 @@ class TestCosampleChunked:
     """Test module for cosample() with Dask and Multiproc backends: loading behavior and exact equality with eager."""
 
     @pytest.mark.parametrize("auxiliary_type", ["numpy", "dask", "column"])
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_cosample__dask_point_auxiliaries_on_raster(
-        self, as_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, auxiliary_type: str
+        self, as_object_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, auxiliary_type: str
     ) -> None:
         """Checks that lazy point gridding assigns array or column auxiliaries to the correct raster pixels."""
 
@@ -667,7 +667,7 @@ class TestCosampleChunked:
             data_name=lazy_points_column,
             columns="all",
             chunks=lazy_points_chunks,
-            as_type=as_type,
+            as_object_type=as_object_type,
         )
 
         target = raster.to_xarray().chunk({"y": 2, "x": 3})
@@ -699,9 +699,9 @@ class TestCosampleChunked:
 
     @pytest.mark.parametrize("chunks", [(7, 11), (12, 17), (256, 256)])
     @pytest.mark.parametrize("caller", ["raster", "points"])
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_cosample__dask_gridding_chunks(
-        self, as_type: Literal["dataarray", "geodataframe"], chunks: tuple[int, int], caller: str, tmp_path: Path
+        self, as_object_type: Literal["dataarray", "geodataframe"], chunks: tuple[int, int], caller: str, tmp_path: Path
     ) -> None:
         """Checks that Dask point gridding returns the same seeded sample as eager gridding for each chunk size."""
 
@@ -716,7 +716,9 @@ class TestCosampleChunked:
         # Four partitions include a shorter final partition of 88 points
         point_file = tmp_path / "observations.gpkg"
         points.to_file(point_file)
-        lazy_points = gu.open_pointcloud(str(point_file), data_name=points.data_name, chunks=101, as_type=as_type)
+        lazy_points = gu.open_pointcloud(
+            str(point_file), data_name=points.data_name, chunks=101, as_object_type=as_object_type
+        )
 
         # Grid lazy point data with three tile sizes and both public calling objects
         source, other = (lazy_raster.rst, lazy_points) if caller == "raster" else (lazy_points.pc, lazy_raster)
@@ -1052,9 +1054,9 @@ class TestCosampleChunked:
         assert tuple(result.tags["long_name"]) == ("self", "other", "scaled", "raw")
 
     @pytest.mark.parametrize("lazy", [False, True])
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_cosample__no_replacement_after_interpolation(
-        self, as_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, lazy: bool
+        self, as_object_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, lazy: bool
     ) -> None:
         """Checks that points rejected during interpolation are not replaced in the sample."""
 
@@ -1091,14 +1093,18 @@ class TestCosampleChunked:
                 _register_dask_pointcloud_accessor()
                 source_filename, source_chunks, source_column = pointcloud_file(points, 3)
                 source = gu.open_pointcloud(
-                    source_filename, data_name=source_column, columns="all", chunks=source_chunks, as_type=as_type
+                    source_filename,
+                    data_name=source_column,
+                    columns="all",
+                    chunks=source_chunks,
+                    as_object_type=as_object_type,
                 )
                 other = raster.to_xarray().chunk({"y": 6, "x": 6})
             result = source.pc.cosample(other, resample_method="slinear", **options)
             if lazy:
                 assert not source.pc.is_loaded
             output = result.compute() if lazy else result
-            if as_type == "dataarray" and lazy:
+            if as_object_type == "dataarray" and lazy:
                 output = output.pc.to_geoutils().gdf
         finally:
             gu.config["interpolation_nodata_handling"] = default_handling
@@ -1165,10 +1171,10 @@ class TestCosampleChunked:
 
     @pytest.mark.parametrize("subsample", [1, 8, 0.3])
     @pytest.mark.parametrize("mask_type", ["array", "raster", "vector"])
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_cosample__dask_point_partitions(
         self,
-        as_type: Literal["dataarray", "geodataframe"],
+        as_object_type: Literal["dataarray", "geodataframe"],
         pointcloud_file: Any,
         subsample: int | float,
         mask_type: str,
@@ -1222,7 +1228,7 @@ class TestCosampleChunked:
                 data_name=lazy_first_column,
                 columns="all",
                 chunks=lazy_first_chunks,
-                as_type=as_type,
+                as_object_type=as_object_type,
             )
             lazy_second_filename, lazy_second_chunks, lazy_second_column = pointcloud_file(second, partitions + 1)
             lazy_second = gu.open_pointcloud(
@@ -1230,7 +1236,7 @@ class TestCosampleChunked:
                 data_name=lazy_second_column,
                 columns="all",
                 chunks=lazy_second_chunks,
-                as_type=as_type,
+                as_object_type=as_object_type,
             )
             lazy_raster = raster.to_xarray().chunk({"y": partitions + 1, "x": 4})
             lazy_auxiliary = da.from_array(auxiliary, chunks=7)
@@ -1248,12 +1254,12 @@ class TestCosampleChunked:
             )
 
             # 3/ Check that the output remains partitioned and its metadata is unchanged before comparing values
-            assert isinstance(result, xr.DataArray if as_type == "dataarray" else dgpd.GeoDataFrame)
+            assert isinstance(result, xr.DataArray if as_object_type == "dataarray" else dgpd.GeoDataFrame)
             assert not result.pc.is_loaded
             assert result.pc.data_name == "self"
             assert not lazy_first.pc.is_loaded
             output = result.compute()
-            if as_type == "dataarray":
+            if as_object_type == "dataarray":
                 output = output.pc.to_geoutils().gdf
             assert list(output.columns) == ["self", "other", "grid", "scaled", "geometry"]
             assert np.array_equal(output.index.to_numpy(), expected.index.to_numpy())
@@ -1263,10 +1269,10 @@ class TestCosampleChunked:
             assert output.crs == expected.crs
 
     @pytest.mark.parametrize("subsample", [1, 8])
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_cosample__dask_points_defer_value_interpolation(
         self,
-        as_type: Literal["dataarray", "geodataframe"],
+        as_object_type: Literal["dataarray", "geodataframe"],
         pointcloud_file: Any,
         subsample: int,
         monkeypatch: pytest.MonkeyPatch,
@@ -1294,7 +1300,7 @@ class TestCosampleChunked:
             data_name=lazy_points_column,
             columns="all",
             chunks=lazy_points_chunks,
-            as_type=as_type,
+            as_object_type=as_object_type,
         )
         lazy_raster = raster.to_xarray().chunk({"y": 4, "x": 5})
 
@@ -1312,17 +1318,17 @@ class TestCosampleChunked:
 
         monkeypatch.setattr(resampling, "_interp_points_base", track_interpolation)
         result = lazy_points.pc.cosample(lazy_raster, **options)
-        assert isinstance(result, xr.DataArray if as_type == "dataarray" else dgpd.GeoDataFrame)
+        assert isinstance(result, xr.DataArray if as_object_type == "dataarray" else dgpd.GeoDataFrame)
         assert not result.pc.is_loaded
         assert result.pc.data_name == "self"
-        if as_type == "geodataframe":
+        if as_object_type == "geodataframe":
             assert result.pc.bounds is None
         assert lazy_points.pc.data_name == points.pc.data_name
         assert calls and all(calls)
 
         # 3/ Compute values only on request, preserving the eager labels, coordinates and selected values
         output = result.compute()
-        if as_type == "dataarray":
+        if as_object_type == "dataarray":
             output = output.pc.to_geoutils().gdf
         assert any(not validity_only for validity_only in calls)
         assert np.array_equal(output.index.to_numpy(), expected.index.to_numpy())
@@ -1335,9 +1341,9 @@ class TestCosampleChunked:
 
     @pytest.mark.parametrize("lazy_input", ["raster", "points"])
     @pytest.mark.parametrize("caller", ["raster", "points"])
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_cosample__mixed_eager_and_dask_inputs(
-        self, as_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, lazy_input: str, caller: str
+        self, as_object_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, lazy_input: str, caller: str
     ) -> None:
         """Checks that eager and Dask raster and point inputs can be used together."""
 
@@ -1363,7 +1369,7 @@ class TestCosampleChunked:
                 data_name=point_input_column,
                 columns="all",
                 chunks=point_input_chunks,
-                as_type=as_type,
+                as_object_type=as_object_type,
             )
         source, other = (raster_input.rst, point_input) if caller == "raster" else (point_input.pc, raster_input)
         result = source.cosample(other, resample_method="nearest")
@@ -1381,7 +1387,7 @@ class TestCosampleChunked:
         else:
             assert not point_input.pc.is_loaded and not result.pc.is_loaded
         output = result.compute() if lazy_input == "points" else result
-        if as_type == "dataarray" and lazy_input == "points":
+        if as_object_type == "dataarray" and lazy_input == "points":
             output = output.pc.to_geoutils().gdf
         assert_geodataframe_equal(output, expected)
         raster_column, point_column = ("self", "other") if caller == "raster" else ("other", "self")

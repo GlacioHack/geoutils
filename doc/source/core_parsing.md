@@ -14,11 +14,17 @@ kernelspec:
 
 # Sensor metadata parsing
 
-GeoUtils functionalities for remote sensing users interested in parsing metadata from space- or airborne imagery.
+GeoUtils contains **basic functionalities to parse sensor metadata** from space- or airborne imagery.
+
+Those rely only on filenames, parsing basic metadata such as date of acquisition, tile name, or product name.
+
+```{seealso}
+For more exhaustive support working with remote sensing data, we refer to packages such as [EOReader](https://eoreader.readthedocs.io/stable/) or [SatPy](https://github.com/pytroll/satpy).
+```
 
 ## Parsing metadata at raster instantiation
 
-A {class}`~geoutils.Raster` can be instantiated while trying to parse metadata usint the ``parse_sensor_metadata`` argument.
+A {class}`~geoutils.Raster` can parse metadata when instantiated with the ``parse_sensor_metadata`` argument.
 
 ```{code-cell} ipython3
 import geoutils as gu
@@ -35,7 +41,7 @@ filename_landsat = gu.examples.get_path("everest_landsat_b4")
 rast_landsat = gu.Raster(filename_landsat, parse_sensor_metadata=True, silent=False)
 ```
 
-The metadata is then stored in the {attr}`~geoutils.Raster.tags` attribute of the raster.
+The metadata is then stored in the {attr}`~RasterBase.tags` attribute of the raster.
 
 ```{code-cell} ipython3
 rast_aster.tags
@@ -55,8 +61,3 @@ Right now are supported:
  - SRTM,
  - TanDEM-X, and
  - NASADEM.
-
-```{important}
-Sensor metadata parsing is still in development. We hope to add the ability to parse from
-auxiliary files in the future (such as [here](https://github.com/jlandmann/glaciersat/blob/master/glaciersat/core/imagery.py)).
-```

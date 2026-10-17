@@ -2,7 +2,7 @@
 Mask from a vector
 ==================
 
-This example demonstrates the creation of a mask from a vector using :func:`geoutils.Vector.create_mask`.
+This example demonstrates the creation of a mask from a vector using :meth:`~geoutils.vector.base.VectorBase.create_mask`.
 """
 
 # %%
@@ -13,38 +13,38 @@ import geoutils as gu
 
 filename_rast = gu.examples.get_path("everest_landsat_b4")
 filename_vect = gu.examples.get_path("everest_rgi_outlines")
-rast = gu.Raster(filename_rast)
-vect = gu.Vector(filename_vect)
+rast = gu.open_raster(filename_rast)
+vect = gu.open_vector(filename_vect)
 
 # %%
 # Let's plot the raster and vector.
-rast.plot(cmap="Purples")
-vect.plot(ref=rast, fc="none", ec="k", lw=2)
+rast.rst.plot(cmap="Purples")
+vect.vct.plot(ref=rast, fc="none", ec="k", lw=2)
 
 # %%
 # **First option:** using the raster as a reference to match, we create a mask for the vector in any projection and georeferenced grid. We simply have to pass
-# the :class:`~geoutils.Raster` as single argument to :func:`~geoutils.Vector.rasterize`. See :ref:`core-match-ref` for more details.
+# the raster as single argument to :meth:`~geoutils.vector.base.VectorBase.rasterize`. See :ref:`core-match-ref` for more details.
 
-vect_rasterized = vect.create_mask(rast)
-vect_rasterized.plot(ax="new")
+vect_rasterized = vect.vct.create_mask(rast)
+vect_rasterized.rst.plot(ax="new")
 
 # %%
 # .. note::
-#         This is equivalent to using :func:`~geoutils.Vector.rasterize` with ``in_value=1`` and ``out_value=0`` and
-#         will return a boolean :class:`~geoutils.Raster`.
+#         This is equivalent to using :meth:`~geoutils.vector.base.VectorBase.rasterize` with ``in_value=1`` and ``out_value=0`` and
+#         will return a boolean :class:`xarray.DataArray`.
 
 vect_rasterized
 
 # %%
-# **Second option:** we can pass any georeferencing parameter to :func:`~geoutils.Vector.create_mask`. Any unpassed attribute will be deduced from the
-# :class:`~geoutils.Vector` itself, except from the :attr:`~geoutils.Raster.shape` to rasterize that will default to 1000 x 1000.
+# **Second option:** we can pass any georeferencing parameter to :meth:`~geoutils.vector.base.VectorBase.create_mask`. Any unpassed attribute will be deduced from the
+# vector itself, except from the raster shape that will default to 1000 x 1000.
 
 
-# vect_rasterized = vect.create_mask(res=500)
-# vect_rasterized.plot()
+# vect_rasterized = vect.vct.create_mask(res=500)
+# vect_rasterized.rst.plot()
 
 # %%
 # .. important::
-#      The :attr:`~geoutils.Raster.shape` or the :attr:`~geoutils.Raster.res` are the only unknown arguments to rasterize a :class:`~geoutils.Vector`,
+#      The raster shape or resolution are the only unknown arguments to rasterize a vector,
 #      one or the other can be passed.
 #

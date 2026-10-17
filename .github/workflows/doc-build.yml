@@ -7,9 +7,13 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
 
 jobs:
   doc:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -25,3 +29,21 @@ jobs:
         run: |
           cd doc
           sphinx-build -T -b html source/ build/
+
+  linkcheck:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
+      - name: Install project with documentation dependencies
+        run: uv pip install --system -e ".[doc,opt]"
+      - name: Check external links
+        run: |
+          cd doc
+          sphinx-build -T -D nb_execution_mode=off -b linkcheck source/ build/linkcheck/

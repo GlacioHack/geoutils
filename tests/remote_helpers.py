@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import multiprocessing
+from base64 import b64encode
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from multiprocessing.connection import Connection
 from pathlib import Path
@@ -29,7 +31,12 @@ class RemoteFiles:
         return [tuple(json.loads(line)) for line in self.request_log.read_text().splitlines()]
 
 
-def _serve_files(directory: Path, request_log: Path, connection: Connection) -> None:
+def _serve_files(
+    directory: Path,
+    request_log: Path,
+    connection: Connection,
+    basic_auth: tuple[str, str] | None = None,
+) -> None:
     """
     Run the mock server in a separate process so it can answer requests while GDAL reads files.
 
@@ -51,6 +58,12 @@ def _serve_files(directory: Path, request_log: Path, connection: Connection) -> 
         required_token = directory / "required-token"
         if required_token.is_file() and request.query.get("token") != required_token.read_text():
             raise web.HTTPForbidden()
+
+        # Require matching credentials for private files when authentication is enabled
+        if basic_auth is not None and request.path.startswith("/bucket/private/"):
+            authorization = "Basic " + b64encode(":".join(basic_auth).encode()).decode("ascii")
+            if request.headers.get("Authorization") != authorization:
+                raise web.HTTPUnauthorized(headers={"WWW-Authenticate": 'Basic realm="GeoUtils example"'})
 
         # List matching files so readers can find datasets split across several files
         # Response fields follow https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html
@@ -104,21 +117,23 @@ def _serve_files(directory: Path, request_log: Path, connection: Connection) -> 
         connection.close()
 
 
-@pytest.fixture
-def remote_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[RemoteFiles]:
+@contextmanager
+def mock_remote_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, basic_auth: tuple[str, str] | None = None
+) -> Iterator[RemoteFiles]:
     """
-    Mock remote storage for tests using temporary local files.
+    Start the local HTTP/S3 server used by tests and documentation.
 
-    To use this fixture and remote_url() in a test:
-    - Write inputs under remote_files.directory,
-    - Open them with remote_url("example.tif"),
-    - Inspect remote_files.requests to check which reads were made.
+    Write files into the returned directory and read them through its HTTP address or s3://bucket.
+    When basic_auth is supplied, files in the private subdirectory require those credentials over HTTP.
+    The server stops when this context exits; monkeypatch restores reader settings when its context exits.
 
-    The fixture configures readers to use the mock server and stops it after the test.
-
-    A real local server tests file reads made by GDAL as well as Python libraries.
-    This follows GDAL's S3 tests: https://github.com/OSGeo/gdal/blob/master/autotest/gcore/vsis3.py
+    :param tmp_path: Existing temporary directory in which to create the bucket and request log.
+    :param monkeypatch: Pytest settings manager belonging to the test or an explicit MonkeyPatch.context().
+    :param basic_auth: Optional username and password for the private subdirectory.
+    :returns: The directory, server address and request history available inside the context.
     """
+
     # Skip these tests if an optional library needed for remote reads is missing
     pytest.importorskip("aiohttp")
     fsspec = pytest.importorskip("fsspec")
@@ -133,7 +148,9 @@ def remote_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Re
     # Give each test its own server address to avoid interference between tests
     context = multiprocessing.get_context("spawn")
     connection, child_connection = context.Pipe()
-    process = context.Process(target=_serve_files, args=(tmp_path, request_log, child_connection), daemon=True)
+    process = context.Process(
+        target=_serve_files, args=(tmp_path, request_log, child_connection, basic_auth), daemon=True
+    )
     process.start()
     child_connection.close()
     try:
@@ -171,6 +188,25 @@ def remote_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Re
             process.terminate()
             process.join(timeout=5)
         connection.close()
+
+
+@pytest.fixture
+def remote_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[RemoteFiles]:
+    """
+    Mock remote storage for tests using temporary local files.
+
+    To use this fixture and remote_url() in a test:
+    - Write inputs under remote_files.directory,
+    - Open them with remote_url("example.tif"),
+    - Inspect remote_files.requests to check which reads were made.
+
+    The fixture configures readers to use the mock server and stops it after the test.
+
+    A real local server tests file reads made by GDAL as well as Python libraries.
+    This follows GDAL's S3 tests: https://github.com/OSGeo/gdal/blob/master/autotest/gcore/vsis3.py
+    """
+    with mock_remote_files(tmp_path, monkeypatch) as files:
+        yield files
 
 
 @pytest.fixture(params=["http", "s3"])

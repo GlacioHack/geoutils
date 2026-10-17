@@ -701,7 +701,7 @@ def _propagate_spatial_method(
             kwargs.update(dtype=np.float64, nodata_propagation="ignore")
             operation, name = source.reproject, "reproject"
         else:
-            kwargs.update(dist_nodata_pixel=0, nodata_handling="ignore")
+            kwargs.update(radius=0, nodata_handling="ignore")
             operation, name = source.grid, "grid"
     if kwargs.get("inplace") or kwargs.get("return_interpolator"):
         raise ValueError("Spatial propagation requires returned values, without inplace or returned interpolators.")

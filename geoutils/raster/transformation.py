@@ -148,10 +148,29 @@ except ImportError:
 #####################################
 
 
+def _raster_overview_metadata(source: rio.io.DatasetReader, overview_level: int | None = None) -> dict[str, Any]:
+    """Read available overview metadata."""
+
+    factors = source.overviews(1)
+    selected_level = -1 if overview_level is None else int(overview_level)
+    selected_factor = factors[selected_level] if selected_level >= 0 else 1
+    metadata: dict[str, Any] = {
+        "overview_factors": factors,
+        "overview_selected_level": selected_level,
+        "overview_selected_factor": selected_factor,
+    }
+
+    # Include creation method only if it exists
+    resampling = source.tags(ns="rio_overview").get("resampling")
+    if resampling is not None:
+        metadata["overview_resampling"] = resampling
+    return metadata
+
+
 def _overview_level_for_downsample(source: rio.io.DatasetReader, downsample: float) -> int | None:
     """Return the closest suitable stored overview level for a downsampling factor."""
 
-    # Match GDAL's nearest-neighbor overview selection by allowing up to 20% oversampling
+    # Match GDAL nearest-neighbor overview selection by allowing up to 20% oversampling
     overview_level = None
     for level, overview_factor in enumerate(source.overviews(1)):
         if overview_factor > downsample * 1.2:

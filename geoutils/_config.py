@@ -86,6 +86,14 @@ def validate_nodata_handling(nodata_handling: bool | str | int) -> str | int:
     )
 
 
+def validate_pointcloud_return_type(value: Any) -> str:
+    """Validate the default representation of newly created point clouds."""
+    choices = ("dataarray", "dataset", "geodataframe")
+    if isinstance(value, str) and value.lower() in choices:
+        return value.lower()
+    raise ValueError(f"'{value}' is not a valid pointcloud_return_type. Use one of {choices}.")
+
+
 # Map the parameter names with a validating function to check user input
 _validators = {
     "shift_area_or_point": validate_bool,
@@ -93,6 +101,7 @@ _validators = {
     "reprojection_method": validate_reprojection_method,
     "interpolation_method": validate_interpolation_method,
     "interpolation_nodata_handling": validate_nodata_handling,
+    "pointcloud_return_type": validate_pointcloud_return_type,
 }
 
 

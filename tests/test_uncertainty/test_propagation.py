@@ -520,7 +520,7 @@ class TestSpatialPropagation:
             )
             assert np.issubdtype(points.data.dtype, np.integer)
             spatial_method: Callable[..., Any] = points.grid
-            kwargs: dict[str, Any] = {"ref": reference, "resampling": Mean(PointNeighbours(k=4))}
+            kwargs: dict[str, Any] = {"ref": reference, "resampling": Mean(PointNeighbours(max_points=4))}
         elif operation == "resample_at_points":
             neighborhood = GridNeighbours(offsets=((0, 0), (0, 1), (1, 0), (1, 1)))
             spatial_method = raster.resample_at_points
@@ -593,7 +593,7 @@ class TestSpatialPropagation:
         if operation == "grid":
             x, y = np.meshgrid(np.arange(3) + 0.5, 2.5 - np.arange(3))
             points = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), values.ravel(), crs=32632)
-            operator = operator_type(neighborhood=PointNeighbours(k=9))
+            operator = operator_type(neighborhood=PointNeighbours(max_points=9))
             spatial_method = points.grid
             kwargs: dict[str, Any] = {"ref": reference, "resampling": operator, "dist_nodata_pixel": 0}
         else:

@@ -13,9 +13,7 @@ from shapely.geometry import Polygon, box
 
 from geoutils.interface.rasterization import _rasterio_rasterize_burn
 
-# -----------------------------------------------------------------------------
 # Example raster grid, chunks, and vector geometries
-# -----------------------------------------------------------------------------
 
 NROWS = 8
 NCOLS = 10
@@ -43,9 +41,7 @@ POLYGONS = [
 POLY_VALUES = np.array([1, 2, 3], dtype=np.uint8)
 
 
-# -----------------------------------------------------------------------------
 # Geometry helpers
-# -----------------------------------------------------------------------------
 
 
 def _data_point_to_fig(fig: plt.Figure, ax: plt.Axes, x_data: float, y_data: float) -> tuple[float, float]:
@@ -120,20 +116,16 @@ def build_rasterized_chunk(
     )
 
 
-# -----------------------------------------------------------------------------
 # Plot helpers
-# -----------------------------------------------------------------------------
 
 
 def draw_pixel_grid(ax: plt.Axes, *, nrows: int, ncols: int, extend: float = 1.0) -> None:
     """Draw thin pixel grid, extended slightly outside the plotted raster."""
     segments: list[np.ndarray] = []
 
-    # Vertical pixel lines
     for x in range(ncols + 1):
         segments.append(np.array([[x, -extend], [x, nrows + extend]], dtype=float))
 
-    # Horizontal pixel lines
     for y in range(nrows + 1):
         segments.append(np.array([[-extend, y], [ncols + extend, y]], dtype=float))
 
@@ -154,7 +146,6 @@ def draw_chunk_boundaries(ax: plt.Axes, *, extend: float = 1.0) -> None:
     row_starts = np.concatenate([[0], np.cumsum(CHUNK_ROWS)])
     col_starts = np.concatenate([[0], np.cumsum(CHUNK_COLS)])
 
-    # Draw all vertical chunk boundaries, including outside ones
     for x in col_starts:
         ax.plot(
             [x, x],
@@ -166,7 +157,7 @@ def draw_chunk_boundaries(ax: plt.Axes, *, extend: float = 1.0) -> None:
             clip_on=False,
         )
 
-    # Draw all horizontal chunk boundaries, including outside ones
+    # Flip row indexes because plot Y coordinates increase upward
     for y_idx in row_starts:
         y = NROWS - y_idx
         ax.plot(
@@ -395,7 +386,6 @@ def add_visual_legend(fig: plt.Figure) -> None:
     x = 0.10
     dx = 0.18
 
-    # Pixel grid
     fig.add_artist(
         Line2D(
             [x, x + 0.03],
@@ -408,7 +398,6 @@ def add_visual_legend(fig: plt.Figure) -> None:
     )
     fig.text(x + 0.038, y, "Pixel grid", transform=fig.transFigure, va="center", fontsize=10)
 
-    # Chunk boundary
     x += dx
     fig.add_artist(
         Line2D(
@@ -421,7 +410,6 @@ def add_visual_legend(fig: plt.Figure) -> None:
     )
     fig.text(x + 0.038, y, "Chunk grid", transform=fig.transFigure, va="center", fontsize=10)
 
-    # Queried chunk
     x += dx
     rect = Rectangle(
         (x, y - 0.010),
@@ -436,7 +424,6 @@ def add_visual_legend(fig: plt.Figure) -> None:
     fig.add_artist(rect)
     fig.text(x + 0.038, y, "Queried chunk", transform=fig.transFigure, va="center", fontsize=10)
 
-    # Candidate geometry
     x += dx
     poly = MplPolygon(
         np.array(
@@ -481,7 +468,6 @@ def add_between_panel_arrows(
     nrows, ncols = chunk_result_shape
     c2 = (0.5 * ncols, 0.5 * nrows)
 
-    # Panel 1 to Panel 2
     arr01 = ConnectionPatch(
         xyA=c01,
         coordsA=ax0.transData,
@@ -499,7 +485,6 @@ def add_between_panel_arrows(
     )
     fig.add_artist(arr01)
 
-    # Panel 2 to Panel 3
     arr12 = ConnectionPatch(
         xyA=c12,
         coordsA=ax1.transData,
@@ -516,11 +501,6 @@ def add_between_panel_arrows(
         clip_on=False,
     )
     fig.add_artist(arr12)
-
-
-# -----------------------------------------------------------------------------
-# Main figure
-# -----------------------------------------------------------------------------
 
 
 def make_chunked_rasterize_diagram() -> tuple[plt.Figure, np.ndarray]:
@@ -551,7 +531,7 @@ def make_chunked_rasterize_diagram() -> tuple[plt.Figure, np.ndarray]:
         "Each chunk rasterizes only its candidate\ngeometries, or exits early if none intersect",
     ]
 
-    # Panel 1
+    # Full raster grid and source polygons
     draw_pixel_grid(ax0, nrows=NROWS, ncols=NCOLS)
     draw_chunk_boundaries(ax0)
     draw_polygons(ax0, POLYGONS)
@@ -581,7 +561,7 @@ def make_chunked_rasterize_diagram() -> tuple[plt.Figure, np.ndarray]:
     )
     setup_axis(ax0, nrows=NROWS, ncols=NCOLS, pad=1.2)
 
-    # Panel 2
+    # Geometries intersecting the selected chunk
     draw_pixel_grid(ax1, nrows=NROWS, ncols=NCOLS)
     draw_chunk_boundaries(ax1)
     draw_polygons(ax1, POLYGONS, candidate_mask=candidate_mask)
@@ -611,7 +591,7 @@ def make_chunked_rasterize_diagram() -> tuple[plt.Figure, np.ndarray]:
     )
     setup_axis(ax1, nrows=NROWS, ncols=NCOLS, pad=1.2)
 
-    # Panel 3
+    # Result for the selected chunk
     draw_chunk_result(ax2, chunk_result)
     ax2.text(
         0.5,
@@ -642,7 +622,7 @@ def make_chunked_rasterize_diagram() -> tuple[plt.Figure, np.ndarray]:
 
     fig.subplots_adjust(left=0.02, right=0.98, top=0.96, bottom=0.1)
 
-    # Finalize transforms before placing arrows
+    # Resolve axes positions before placing arrows
     fig.canvas.draw()
 
     # Horizontal chunk boundary in panels 1 and 2
@@ -655,7 +635,6 @@ def make_chunked_rasterize_diagram() -> tuple[plt.Figure, np.ndarray]:
     pos1 = ax1.get_position()
     pos2 = ax2.get_position()
 
-    # Arrow 1: panel 1 to panel 2
     _, y0 = _data_point_to_fig(fig, ax0, NCOLS / 2, y_chunk_boundary)
     _, y1 = _data_point_to_fig(fig, ax1, NCOLS / 2, y_chunk_boundary)
     y01 = 0.5 * (y0 + y1)
@@ -675,7 +654,6 @@ def make_chunked_rasterize_diagram() -> tuple[plt.Figure, np.ndarray]:
     )
     fig.add_artist(arrow01)
 
-    # Arrow 2: panel 2 to panel 3
     _, y1b = _data_point_to_fig(fig, ax1, NCOLS / 2, y_chunk_boundary)
     _, y2 = _data_point_to_fig(fig, ax2, chunk_result.shape[1] / 2, y_chunk_result)
     y12 = 0.5 * (y1b + y2)

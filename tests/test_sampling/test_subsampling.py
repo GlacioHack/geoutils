@@ -19,7 +19,6 @@ from shapely.geometry import box
 
 import geoutils as gu
 from geoutils import open_raster
-from geoutils._dispatch import is_dask_dataframe
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
 from geoutils.multiproc.cluster import MpCluster
@@ -882,10 +881,10 @@ class TestPointSubsampleChunked:
     @pytest.mark.parametrize("subsample", [1, 5, 0.25, 0.001])
     @pytest.mark.parametrize("return_indices", [False, True])
     @pytest.mark.parametrize("mask_form", ["none", "array", "dask", "vector"])
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_subsample__lazy_point_values(
         self,
-        as_type: Literal["dataarray", "geodataframe"],
+        as_object_type: Literal["dataarray", "geodataframe"],
         pointcloud_file: Any,
         subsample: int | float,
         return_indices: bool,
@@ -907,7 +906,7 @@ class TestPointSubsampleChunked:
         _register_dask_pointcloud_accessor()
         lazy_filename, lazy_chunks, lazy_column = pointcloud_file(dataframe, 6)
         lazy = gu.open_pointcloud(
-            lazy_filename, data_name=lazy_column, columns="all", chunks=lazy_chunks, as_type=as_type
+            lazy_filename, data_name=lazy_column, columns="all", chunks=lazy_chunks, as_object_type=as_object_type
         )
         assert not lazy.pc.is_loaded
 
@@ -1127,9 +1126,12 @@ class TestPointSubsampleChunked:
         else:
             assert isinstance(result, np.memmap)
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_subsample__point_topk_cutoff_and_force_memory(
-        self, as_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, monkeypatch: pytest.MonkeyPatch
+        self,
+        as_object_type: Literal["dataarray", "geodataframe"],
+        pointcloud_file: Any,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Checks that large lazy point samples use cutoff search unless memory output is forced."""
 
@@ -1143,7 +1145,7 @@ class TestPointSubsampleChunked:
         _register_dask_pointcloud_accessor()
         lazy_filename, lazy_chunks, lazy_column = pointcloud_file(points.gdf, 6)
         lazy = gu.open_pointcloud(
-            lazy_filename, data_name=lazy_column, columns="all", chunks=lazy_chunks, as_type=as_type
+            lazy_filename, data_name=lazy_column, columns="all", chunks=lazy_chunks, as_object_type=as_object_type
         )
 
         # Record the automatic cutoff search while preserving its result
@@ -1176,9 +1178,9 @@ class TestPointSubsampleChunked:
         assert cutoff_calls == [1]
         np.testing.assert_array_equal(result, expected)
         np.testing.assert_array_equal(forced, expected)
-        assert isinstance(forced_points, xr.DataArray if as_type == "dataarray" else gpd.GeoDataFrame)
+        assert isinstance(forced_points, xr.DataArray if as_object_type == "dataarray" else gpd.GeoDataFrame)
         assert forced_points.pc.is_loaded
-        if as_type == "dataarray":
+        if as_object_type == "dataarray":
             forced_points = forced_points.pc.to_geoutils().gdf
         gpd.testing.assert_geodataframe_equal(
             forced_points,
@@ -1188,9 +1190,13 @@ class TestPointSubsampleChunked:
 
     @pytest.mark.parametrize("lazy", [False, True])
     @pytest.mark.parametrize("tiny_fraction", [False, True])
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_subsample__point_empty_masks(
-        self, as_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, lazy: bool, tiny_fraction: bool
+        self,
+        as_object_type: Literal["dataarray", "geodataframe"],
+        pointcloud_file: Any,
+        lazy: bool,
+        tiny_fraction: bool,
     ) -> None:
         """Checks that empty point populations and fractions rounded to zero return empty values and positions."""
 
@@ -1219,7 +1225,11 @@ class TestPointSubsampleChunked:
             _register_dask_pointcloud_accessor()
             source_filename, source_chunks, source_column = pointcloud_file(points.gdf, 2)
             source = gu.open_pointcloud(
-                source_filename, data_name=source_column, columns="all", chunks=source_chunks, as_type=as_type
+                source_filename,
+                data_name=source_column,
+                columns="all",
+                chunks=source_chunks,
+                as_object_type=as_object_type,
             ).pc
             assert not source.is_loaded
 
@@ -1309,17 +1319,17 @@ class TestRasterSubsample:
         np.testing.assert_array_equal(points.gdf.geometry.x, [0.5, 1.5, 0.5, 1.5])
         np.testing.assert_array_equal(points.gdf.geometry.y, [1.5, 1.5, 0.5, 0.5])
 
-    def test_subsample__accessor_returns_geodataframe(self) -> None:
-        """Checks that an eager raster accessor returns a GeoDataFrame by default."""
+    def test_subsample__accessor_returns_dataarray(self) -> None:
+        """Checks that an eager raster accessor returns a DataArray by default."""
 
         # Create an accessor with two bands to check both its output type and default band selection
         values = np.arange(16).reshape((2, 2, 4))
         accessor = gu.DataArrayRasterAccessor.from_array(values, rio.transform.from_origin(0, 2, 1, 1), 32633)
 
-        # Sample through the accessor and keep every band in the dataframe
+        # Sample through the accessor and keep every band in the point cloud
         sampled = accessor.rst.subsample(5, random_state=42)
-        assert isinstance(sampled, gpd.GeoDataFrame)
-        assert list(sampled.columns) == ["b1", "b2", "geometry"]
+        assert isinstance(sampled, xr.DataArray)
+        assert list(sampled.pc.columns) == ["b1", "b2"]
 
     @pytest.mark.parametrize(
         "mask_form",
@@ -1453,8 +1463,9 @@ class TestRasterSubsampleChunked:
             source = open_raster(str(source_file), chunks={"x": 8, "y": 8})
             source_data = source.data
             result = source.rst.subsample(65, random_state=42)
-            assert is_dask_dataframe(result) and cutoff_calls == [1]
-            computed_values = result.compute()["b1"].to_numpy()
+            assert isinstance(result, xr.DataArray) and cutoff_calls == [1]
+            assert not result.pc.is_loaded
+            computed_values = result.compute().data
             assert source.data is source_data and not source._in_memory
         else:
             source = gu.Raster(source_file)
@@ -1504,8 +1515,8 @@ class TestRasterSubsampleChunked:
         if backend == "dask":
             source = open_raster(str(source_file), chunks={"x": 4, "y": 3})
             result = source.rst.subsample(17, random_state=42, force_output_to_memory=True)
-            actual = result
-            assert isinstance(result, gpd.GeoDataFrame) and not is_dask_dataframe(result)
+            assert isinstance(result, xr.DataArray) and result.pc.is_loaded
+            actual = result.pc.to_geoutils().gdf
             assert not source._in_memory
         else:
             source = gu.Raster(source_file)
@@ -1841,8 +1852,8 @@ class TestRasterSubsampleChunked:
             assert isinstance(result, np.ndarray)
             assert result.shape == (0,)
         elif backend == "dask":
-            assert is_dask_dataframe(result)
-            assert result.compute().empty
+            assert isinstance(result, xr.DataArray) and not result.pc.is_loaded
+            assert result.compute().size == 0
         else:
             assert not result.is_loaded
             assert result.point_count == 0
@@ -1944,10 +1955,10 @@ class TestSubsampleErrors:
 
     @pytest.mark.parametrize("source_kind", ["point", "raster"])
     @pytest.mark.parametrize("as_array", [False, True])
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_subsample__error_multiproc_with_dask(
         self,
-        as_type: Literal["dataarray", "geodataframe"],
+        as_object_type: Literal["dataarray", "geodataframe"],
         pointcloud_file: Any,
         source_kind: str,
         as_array: bool,
@@ -1967,7 +1978,11 @@ class TestSubsampleErrors:
             register_accessor()
             source_filename, source_chunks, source_column = pointcloud_file(points.gdf, 6)
             source = gu.open_pointcloud(
-                source_filename, data_name=source_column, columns="all", chunks=source_chunks, as_type=as_type
+                source_filename,
+                data_name=source_column,
+                columns="all",
+                chunks=source_chunks,
+                as_object_type=as_object_type,
             ).pc
             chunks: int | tuple[int, int] = 7
         else:

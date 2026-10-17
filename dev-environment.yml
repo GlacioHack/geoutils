@@ -34,6 +34,7 @@ dependencies:
   - plotly # For profiler
   - numba # For filters and point cloud gridding
   - dask # For out-of-memory operations
+  - distributed # For distributed Dask execution and profiling
   - dask-geopandas # For out-of-memory vector/point operations
   - flox # For grouped statistics
   - exactextract>=0.3 # For fast exact polygon-cell coverage
@@ -66,6 +67,7 @@ dependencies:
   - myst-nb
   - numpydoc
   - typing-extensions
+  - zarr
 
   - pip:
       - -e ./

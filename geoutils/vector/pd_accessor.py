@@ -50,9 +50,9 @@ def _register_dask_vector_accessor() -> None:
     """
     Add the ``.vct`` property to Dask DataFrames when lazy vector support is first needed.
 
-    The Pandas decorator on VectorAccessor does not affect Dask DataFrames because Dask keeps its own accessor list.
-    Registering here gives lazy GeoDataFrames the same GeoUtils vector API while keeping Dask DataFrame optional until
-    a caller requests chunked vector data.
+    The Pandas decorator on GeoDataFrameVectorAccessor does not affect Dask DataFrames because Dask keeps its own
+    accessor list. Registering here gives lazy GeoDataFrames the same GeoUtils vector API while keeping Dask DataFrame
+    optional until a caller requests chunked vector data.
     """
 
     global _DASK_ACCESSOR_REGISTERED
@@ -61,14 +61,14 @@ def _register_dask_vector_accessor() -> None:
     if _DASK_ACCESSOR_REGISTERED:
         return
 
-    # Import Dask only when a lazy vector is requested, then attach VectorAccessor as its ``.vct`` property
+    # Import Dask only when a lazy vector is requested, then attach GeoDataFrameVectorAccessor as its ``.vct`` property
     import_optional("dask")
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=FutureWarning, module="dask.dataframe")
         warnings.filterwarnings("ignore", message="registration of accessor.*", category=UserWarning)
         from dask.dataframe.accessor import register_dataframe_accessor
 
-        register_dataframe_accessor("vct")(VectorAccessor)
+        register_dataframe_accessor("vct")(GeoDataFrameVectorAccessor)
 
     _DASK_ACCESSOR_REGISTERED = True
 
@@ -111,7 +111,7 @@ def open_vector(filename: str, chunks: int | None = None, **kwargs: Any) -> gpd.
 
 
 @pd.api.extensions.register_dataframe_accessor("vct")
-class VectorAccessor(VectorBase):
+class GeoDataFrameVectorAccessor(VectorBase):
     """
     Pandas accessor ``vct`` for GeoPandas GeoDataFrames.
 

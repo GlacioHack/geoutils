@@ -13,8 +13,8 @@ kernelspec:
 (profiling)=
 # Profiling
 
-GeoUtils has a **built-in profiling tool to measure time and memory** used by a function on your own data and hardware.
-The same measurements support the controlled comparisons presented in {ref}`benchmarking-performance`.
+GeoUtils has a **built-in profiling tool to measure execution time and memory usage** of a function with your own data and hardware.
+The same measurements support the comparisons presented in {ref}`benchmarking-performance`.
 
 ```{note}
 The profiling functionalities rely on [psutil](https://psutil.readthedocs.io/en/latest/) and [plotly](https://plotly.com/) as optional dependencies. You can install them manually or with ``pip install geoutils[opt]``
@@ -85,7 +85,7 @@ def raster_workflow(source_raster):
     left, bottom, right, top = source_raster.bbox
     cropped = source_raster.crop((left, bottom, (left + right) / 2, top))
     reprojected = cropped.reproject(crs=4326)
-    filtered = reprojected.filter("mean", size=3)
+    filtered = reprojected.filter("mean", window=3)
     return filtered.stats(["mean", "std", "nmad"])
 
 # The workflow and its four numerical operations are added to the collection

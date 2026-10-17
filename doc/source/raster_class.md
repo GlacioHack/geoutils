@@ -19,7 +19,8 @@ In GeoUtils, georeferenced rasters are exposed through two interfaces:
 - The Xarray {class}`rst <geoutils.DataArrayRasterAccessor>` accessor for a {class}`xarray.DataArray`,
 - The {class}`~geoutils.Raster`.
 
-We recommend using **only one object type or the other**. While their behaviour is almost entirely similar, there are some differences that are summarized directly below.
+For new workflows, we **recommend using the {class}`rst <geoutils.DataArrayRasterAccessor>` accessor**, and using either only accessors or only GeoUtils objects.
+Their behaviour is largely similar, with the main differences summarized below.
 
 ## Accessor {class}`rst <geoutils.DataArrayRasterAccessor>` versus {class}`~geoutils.Raster`
 
@@ -69,18 +70,19 @@ multi-band raster!
 ```
 
 Finally, the remaining attributes are only relevant when instantiating from an **on-disk** file: {attr}`~geoutils.Raster.name`, {attr}`~geoutils.Raster.driver`,
-{attr}`~geoutils.Raster.count_on_disk`, {attr}`~geoutils.Raster.bands_on_disk`, {attr}`~geoutils.Raster.is_loaded` and {attr}`~geoutils.Raster.is_modified`.
+and {attr}`~geoutils.Raster.is_loaded`.
 
 
 ```{note}
-The {attr}`~geoutils.Raster.count` and {attr}`~geoutils.Raster.bands` attributes always exist, while {attr}`~geoutils.Raster.count_on_disk` and
-{attr}`~geoutils.Raster.bands_on_disk` only refers to the number of bands on the **on-disk** dataset, if it exists.
-
-For example, {attr}`~geoutils.Raster.count` and {attr}`~geoutils.Raster.count_on_disk` will differ when a single band is loaded from a
-3-band **on-disk** file, by passing a single index to the `bands` argument in **raster** or {func}`~geoutils.Raster.load`.
+The {attr}`~geoutils.Raster.count` and {attr}`~geoutils.Raster.bands` describe the selected bands.
+For example, loading one band from a 3-band file by passing a single index to `bands` gives a count of 1.
 ```
 
 The complete list of **raster** attributes with description is available in {ref}`dedicated sections of the API<api-raster-attrs>`.
+
+The {attr}`~RasterBase.area_or_point` attribute records whether a value represents an area sample (`"Area"`), a
+point sample (`"Point"`), or an unspecified interpretation (`None`). See {ref}`pixel-interpretation` for its effect
+on coordinates and raster–point operations.
 
 ## Open and save
 
@@ -96,6 +98,9 @@ filename_rast = gu.examples.get_path("exploradores_aster_dem")
 rast = gu.Raster(filename_rast)
 rast
 ```
+
+See {ref}`core-downsampling` for details on reducing raster resolution when opening or plotting, including how
+GeoUtils handles stored file overviews through GDAL.
 
 Detailed information on the **raster** is printed using {func}`~geoutils.Raster.info`, along with basic statistics using `stats=True`:
 
@@ -170,11 +175,12 @@ rast.to_nanarray()
 ```
 
 ```{important}
-Getting a {class}`~numpy.ndarray` filled with {class}`~numpy.nan` will automatically cast the {class}`dtype<numpy.dtype>` to {class}`numpy.float32`. This
-might result in larger memory usage than in the original **raster** (if of {class}`int` type).
+An integer Raster is cast to {class}`numpy.float32` by default so the output can represent missing values as NaNs.
+Use `floating_dtype` to select another floating type. This can increase memory usage; floating rasters preserve
+their data type.
 
-Thanks to the {ref}`core-array-funcs`, **NumPy functions applied directly to a **raster** will respect {class}`~geoutils.Raster.nodata`
-values** as well as if computing with the {class}`~numpy.ma.MaskedArray` or an unmasked {class}`~numpy.ndarray` filled with {class}`~numpy.nan`.
+Thanks to the {ref}`core-array-funcs`, **NumPy functions applied directly to a raster respect nodata values**,
+as when computing with its {class}`~numpy.ma.MaskedArray` or an array filled with NaNs.
 
 Additionally, the **raster** will automatically cast between different {class}`dtype<numpy.dtype>`, and possibly re-define missing
 {class}`nodatas<geoutils.Raster.nodata>`.
@@ -191,8 +197,7 @@ A **raster** can be applied any pythonic arithmetic operation ({func}`+<operator
 ```
 
 A **raster** can also be applied any pythonic logical comparison operation ({func}`==<operator.eq>`, {func}` != <operator.ne>`, {func}`>=<operator.ge>`, {func}`><operator.gt>`, {func}`<=<operator.le>`,
-{func}`<<operator.lt>`) with another **raster**, {class}`~numpy.ndarray` or number. It will cast to a raster mask, i.e. a boolean {class}
-`~geoutils.Raster`.
+{func}`<<operator.lt>`) with another **raster**, {class}`~numpy.ndarray` or number. It returns a boolean {class}`~geoutils.Raster` mask.
 
 ```{code-cell} ipython3
 # What raster pixels are less than 100?
@@ -221,234 +226,29 @@ np.isclose(rast, rast+0.05, atol=0.1)
 
 See {ref}`core-array-funcs` for more details.
 
-## Reproject
-
-Reprojecting a **raster** is done through the {func}`~geoutils.Raster.reproject` function, which enforces new {attr}`~geoutils.Raster.transform`
-and/or
-{class}`~geoutils.Raster.crs`.
-
-```{important}
-As with all geospatial handling methods, the {func}`~geoutils.Raster.reproject` function can be passed a **raster** or
-{class}`~geoutils.Vector` as a reference to match. In that case, no other argument is necessary.
-
-A **raster** reference will enforce to match its {attr}`~geoutils.Raster.transform` and {class}`~geoutils.Raster.crs`.
-A {class}`~geoutils.Vector` reference will enforce to match its {attr}`~geoutils.Vector.bbox` and {class}`~geoutils.Vector.crs`.
-
-See {ref}`core-match-ref` for more details.
-```
-
-The {func}`~geoutils.Raster.reproject` function can also be passed any individual arguments such as `dst_bounds`, to enforce specific georeferencing
-attributes. For more details, see the {ref}`specific section and function descriptions in the API<api-geo-handle>`.
-
-```{code-cell} ipython3
-# Original bounds and resolution
-print(rast.res)
-print(rast.bbox)
-```
-
-```{code-cell} ipython3
-# Reproject to smaller bounds and higher resolution
-rast_reproj = rast.reproject(
-    res=0.1,
-    bounds={"left": 0, "bottom": 0, "right": 0.75, "top": 0.75},
-    resampling="cubic")
-rast_reproj
-```
-
-```{code-cell} ipython3
-# New bounds and resolution
-print(rast_reproj.res)
-print(rast_reproj.bounds)
-```
-
-```{note}
-In GeoUtils, `"bilinear"` is the default resampling method. A simple {class}`str` matching the naming of a {class}`rasterio.enums.Resampling` method can be
-passed.
-
-Resampling methods are listed in **[the dedicated section of Rasterio's API](https://rasterio.readthedocs.io/en/latest/api/rasterio.enums.html#rasterio.enums.Resampling)**.
-```
-
-[//]: # (```{note})
-
-[//]: # (Reprojecting a **raster** can be done out-of-memory in multiprocessing by passing a)
-
-[//]: # ({class}`~geoutils.raster.MultiprocConfig` parameter to the {func}`~geoutils.Raster.reproject` function.)
-
-[//]: # (In this case, the reprojected raster is saved on disk under the specify path in {class}`~geoutils.raster.MultiprocConfig` &#40;or a temporary file&#41; and the raster metadata are loaded from the file.)
-
-[//]: # (```)
-
-[//]: # ()
-[//]: # (```{code-cell} ipython3)
-
-[//]: # (# Same example out-of-memory)
-
-[//]: # (from geoutils.raster import MultiprocConfig, ClusterGenerator)
-
-[//]: # (cluster = ClusterGenerator&#40;"multi", nb_workers=4&#41;)
-
-[//]: # (mp_config = MultiprocConfig&#40;chunks=200, cluster=None&#41;  # Pass a cluster to perform reprojection in multiprocessing)
-
-[//]: # (rast_reproj = rast.reproject&#40;)
-
-[//]: # (    res=0.1,)
-
-[//]: # (    bounds={"left": 0, "bottom": 0, "right": 0.75, "top": 0.75},)
-
-[//]: # (    resampling="cubic",)
-
-[//]: # (    multiproc_config=mp_config&#41;)
-
-[//]: # (rast_reproj)
-
-[//]: # (```)
-
-## Crop and clip
-
-Cropping a **raster** is done through the {func}`~geoutils.Raster.crop` function, which selects the rows and columns
-within new {attr}`~geoutils.Raster.bbox` without modifying their values.
-Additionally, you can use the {func}`~geoutils.Raster.icrop` method to crop the raster using pixel coordinates instead of geographic bounds.
-Both cropping methods can be used before loading the raster's data into memory. This optimization can prevent loading unnecessary parts of the data, which is particularly useful when working with large rasters.
-
-```{important}
-As with all geospatial handling methods, the {func}`~geoutils.Raster.crop` function can be passed only a **raster** or {class}`~geoutils.Vector`
-as a reference to match. In that case, no other argument is necessary.
-
-See {ref}`core-match-ref` for more details.
-```
-
-The {func}`~geoutils.Raster.crop` function can also be passed a {class}`list` or {class}`tuple` of bounds (`xmin`, `ymin`, `xmax`, `ymax`). By default,
-{func}`~geoutils.Raster.crop` returns a new Raster.
-The {func}`~geoutils.Raster.icrop` function accepts only a bounding box in pixel coordinates (colmin, rowmin, colmax, rowmax) and crop the raster accordingly.
-By default, {func}`~geoutils.Raster.crop` and {func}`~geoutils.Raster.icrop` return a new Raster unless the inplace parameter is set to True, in which case the cropping operation is performed directly on the original raster object.
-For more details, see the {ref}`specific section and function descriptions in the API<api-geo-handle>`.
-
-```{code-cell} ipython3
-# Crop raster to smaller bounds
-rast_crop = rast.crop(bbox=(0.3, 0.3, 1, 1))
-print(rast_crop.bounds)
-```
-
-```{code-cell} ipython3
-# Crop raster using pixel coordinates
-rast_icrop = rast.icrop(bbox=(2, 2, 6, 6))
-print(rast_icrop.bounds)
-```
-
-Use {func}`~geoutils.Raster.clip` to apply an exact geometry while keeping the raster grid and extent. Cells inside
-the geometry keep their values and cells outside it become nodata. Set `all_touched=True` to keep every cell touched
-by the geometry instead of selecting cells by their centers.
-
-```{code-cell} ipython3
-from shapely.geometry import Polygon
-
-# Mask cells outside a triangular geometry spanning the raster
-left, bottom, right, top = rast.bbox
-triangle = Polygon([(left, bottom), (right, bottom), (left, top)])
-rast_clip = rast.clip(triangle)
-```
-
-## Polygonize
-
-Polygonizing a **raster** is done through the {func}`~geoutils.Raster.polygonize` function, which converts target pixels into a multi-polygon
-{class}`~geoutils.Vector`.
-
-```{note}
-For a boolean **raster**, {func}`~geoutils.Raster.polygonize` implicitly targets `True` values and thus does not require target pixels.
-```
-
-```{code-cell} ipython3
-# Polygonize all values lower than 100
-vect_lt_100 = (rast < 100).polygonize()
-vect_lt_100
-```
-
-## Proximity
-
-Computing proximity from a **raster** is done through by the {func}`~geoutils.Raster.proximity` function, which computes the closest distance
-to any target pixels in the **raster**.
-
-```{note}
-For a boolean **raster**, {func}`~geoutils.Raster.proximity` implicitly targets `True` values and thus does not require target pixels.
-```
-
-```{code-cell} ipython3
-# Compute proximity from mask for all values lower than 100
-prox_lt_100 = (rast < 100).proximity()
-prox_lt_100
-```
-
-Optionally, instead of target pixel values, a {class}`~geoutils.Vector` can be passed to compute the proximity from the geometry.
-
-```{code-cell} ipython3
-# Compute proximity from mask for all values lower than 100
-prox_lt_100_from_vect = rast.proximity(vector=vect_lt_100)
-prox_lt_100_from_vect
-```
-
-## Interpolate or reduce at points
-
-Interpolating or extracting **raster** values at specific points can be done through:
-- the {func}`~geoutils.Raster.reduce_at_points` function, that applies a reductor function ({func}`numpy.ma.mean` by default) to a surrounding window for each coordinate, or
-- the {func}`~geoutils.Raster.interp_at_points` function, that interpolates the **raster**'s regular grid to each coordinate using a resampling algorithm.
-
-```{code-cell} ipython3
-# Extract median value in a 3 x 3 pixel window
-rast_reproj.reduce_at_points((0.5, 0.5), window=3, reducer_function=np.ma.median)
-```
-
-```{code-cell} ipython3
-# Interpolate coordinate value with quintic algorithm
-rast_reproj.interp_at_points((0.5, 0.5), method="quintic")
-```
-
-```{note}
-Both {func}`~geoutils.Raster.reduce_at_points` and {func}`~geoutils.Raster.interp_at_points` can be passed a single coordinate as {class}`floats<float>`, or a
-{class}`list` of coordinates.
-```
-
 ## Export
 
 A **raster** can be exported to different formats, to facilitate inter-compatibility with different packages and code versions.
 
 Those include exporting to:
-- a {class}`xarray.Dataset` with {class}`~geoutils.Raster.to_xarray`,
-- a {class}`rasterio.io.DatasetReader` with {class}`~geoutils.Raster.to_rio_dataset`,
-- a {class}`numpy.ndarray` or {class}`geoutils.Vector` as a point cloud with {class}`~geoutils.Raster.to_pointcloud`.
+- a {class}`xarray.DataArray` with {meth}`~geoutils.Raster.to_xarray`,
+- a {class}`rasterio.io.DatasetReader` with {meth}`~geoutils.Raster.to_rio_dataset`,
+- a {class}`~geoutils.PointCloud` or an array of coordinates and values (`as_array=True`) with {meth}`~geoutils.Raster.to_pointcloud`.
 
 ```{code-cell} ipython3
 # Export to rasterio dataset-reader through a memoryfile
-rast_reproj.to_rio_dataset()
+rast.to_rio_dataset()
 ```
 
 ```{code-cell} ipython3
 # Export to geopandas dataframe
-rast_reproj.to_pointcloud()
+rast.to_pointcloud()
 ```
 
 ```{code-cell} ipython3
 # Export to xarray data array
-rast_reproj.to_xarray()
+rast.to_xarray()
 ```
-
-## Statistics
-
-Statistics of a raster, optionally subsetting to an inlier mask, can be computed using {func}`~geoutils.Raster.stats`.
-
-```{code-cell} ipython3
-# Get mean, max and STD of the raster
-rast.stats(["mean", "max", "std"])
-```
-
-A raster can also be quickly subsampled using {func}`~geoutils.Raster.subsample`, which can consider only valid values, and return either a point cloud or an
-array:
-
-```{code-cell} ipython3
-# Get 500 random points
-pc_sub = rast.subsample(500)
-```
-
-See {ref}`stats` for more details.
 
 (mask-type)=
 # The georeferenced raster mask (boolean **raster**)
@@ -585,3 +385,18 @@ target pixels. It outputs a **raster** of the distances to the input mask.
 # Proximity to mask
 mask.proximity()
 ```
+
+## Related features
+
+For more details on features applicable to rasters, refer to the following pages!
+
+| Topic                                                                | Documentation |
+|----------------------------------------------------------------------|---|
+| Metadata, CRS, bounds, footprints, and coordinates                   | {ref}`referencing` |
+| Reprojection, cropping, clipping, raster–vector, and raster–point operations | {ref}`transformations` |
+| Distance to raster values or vector geometries                       | {ref}`proximity` |
+| Built-in and custom window filters                                   | {ref}`filters` |
+| Subsampling, co-sampling, and pair sampling                          | {ref}`sampling` |
+| Global, grouped, and spatial statistics                              | {ref}`stats` |
+| Lazy and out-of-memory execution                                     | {ref}`scalability-index` |
+| Complete method and attribute listing                                | {ref}`raster-api` |

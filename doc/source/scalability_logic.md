@@ -9,16 +9,35 @@ Below, we detail the logic behind our **chunked execution** implementations, bot
 
 ## Summary
 
-Several operations are easy to support for **chunked execution** as they directly reuse existing **Dask** methods:
-- The {meth}`~geoutils.Raster.filter` function uses {func}`~dask.array.map_overlap` with a `depth` (overlap) half the `size` of the filter,
-- The {meth}`~geoutils.Raster.proximity` function uses {func}`~dask.array.map_overlap` with a `max_distance` parameter.
+Several operations are easy to support for **chunked execution** as they directly reuse **Dask** methods:
+- The {meth}`rst.filter() <RasterBase.filter>` function uses {func}`~dask.array.map_overlap` with a `depth` (overlap) half the `size` of the filter,
+- The {meth}`rst.proximity() <RasterBase.proximity>` function uses {func}`~dask.array.map_overlap` with a `max_distance` parameter,
+- The {meth}`vct.crop() <VectorBase.crop>`, {meth}`vct.clip() <VectorBase.clip>`, {meth}`vct.reproject() <VectorBase.reproject>` and {meth}`vct.translate() <VectorBase.translate>` functions use Dask-GeoPandas methods or {meth}`~dask.dataframe.DataFrame.map_partitions` to process GeoPandas partitions independently,
+- The {meth}`pc.crop() <geoutils.pointcloud.base.GeometryPointCloudBase.crop>`, {meth}`pc.clip() <geoutils.pointcloud.base.GeometryPointCloudBase.clip>`, {meth}`pc.reproject() <geoutils.pointcloud.base.GeometryPointCloudBase.reproject>` and {meth}`pc.translate() <geoutils.pointcloud.base.GeometryPointCloudBase.translate>` functions apply the same operations to point partitions.
 
-Other operations are more complex and require {ref}`specific logic described further below<specific-logic>` and summarized as:
-- The {meth}`~geoutils.Raster.reproject` function **maps the intersection of projected source grid chunks for each destination chunk** (with potentially different CRS, resolution and bounds), and defines default output chunksizes based on resolution change to avoid unexpected memory blowup,
-- The {meth}`~geoutils.Raster.polygonize` function polygonizes implements **three chunk-boundary reconciliation strategies** with different considerations for connected-component labeling and stitching of geometries,
-- The {meth}`~geoutils.Vector.rasterize` function performs a geometry subsetting then directly **maps rasterized output blocks** only utilizing these subset geometries.
-- The {meth}`~geoutils.Raster.interp_at_points` function performs a **fast regular-grid mapping at point locations in raster chunks**, expanding raster chunks by a few pixels depending on the resampling method, then performing ordered concatenation of outputs,
-- The {meth}`~geoutils.Raster.subsample` function performs an initial chunk-by-chunk sum of valid values to define the requested sample size, then samples values per chunk through **reproducible chunk-invariant seeding** (default) or **faster chunk-dependent seeding**.
+Other operations are more complex, requiring {ref}`specific logic described further below<specific-logic>`, in short:
+- The {meth}`rst.reproject() <RasterBase.reproject>` function **maps the intersection of projected source grid chunks for each destination chunk** (with potentially different CRS, resolution and bounds),
+- The {meth}`rst.polygonize() <RasterBase.polygonize>` function implements **three chunk-boundary reconciliation strategies** with different considerations for connected-component labeling and stitching of geometries,
+- The {meth}`vct.rasterize() <VectorBase.rasterize>` function performs a geometry subsetting then directly **maps rasterized output blocks** only utilizing these subset geometries,
+- The {meth}`rst.resample_at_points() <RasterBase.resample_at_points>` function performs a **fast equal-grid mapping of point locations in raster chunks**, expanding raster chunks by a few pixels depending on the resampling method, then performing ordered concatenation of outputs,
+- The {meth}`pc.grid() <PointCloudBase.grid>` function **maps point partitions to independent output raster chunks**,
+- The {meth}`pc.filter() <PointCloudBase.filter>` function **maps each target partition to nearby points across source partitions**, expanding its bounds by the search radius before reducing point neighborhoods independently,
+- The {meth}`rst/pc.subsample() <RasterBase.subsample>` functions **counts valid values** per chunk, then uses **deterministic keys (top-k)** to select a random sample,
+- The {meth}`rst/pc.pairsample() <RasterBase.pairsample>` functions **build candidate pairs in bounded batches**, reusing first endpoints from a few raster chunks and applying offsets to find second endpoints (multiple strategies), then concatenates accepted pairs,
+- The {meth}`rst/pc.random_field() <RasterBase.random_field>` functions **evaluate one shared random model at the coordinates of each chunk**, using common global seeds.
+
+Many operations then rely on others for their core chunked support:
+- The {meth}`vct.create_mask() <VectorBase.create_mask>` function relies on chunked {meth}`vct.rasterize() <VectorBase.rasterize>`,
+- The {meth}`rst.clip() <RasterBase.clip>` function relies on chunked {meth}`vct.create_mask() <VectorBase.create_mask>`, then **applies the mask independently to each raster chunk**,
+- The {meth}`vct.proximity() <VectorBase.proximity>` function combines chunked {meth}`vct.create_mask() <VectorBase.create_mask>` with the overlap calculation of {meth}`rst.proximity() <RasterBase.proximity>`,
+- The {meth}`rst.interp_at_points() <RasterBase.interp_at_points>` and {meth}`rst.reduce_at_points() <RasterBase.reduce_at_points>` functions use the same **mapping of points to raster chunks** as {meth}`rst.resample_at_points() <RasterBase.resample_at_points>`, with overlap covering the interpolation or reduction neighborhood,
+- The {meth}`rst.to_pointcloud() <RasterBase.to_pointcloud>` function relies on chunked {meth}`rst.subsample() <RasterBase.subsample>`, assembling selected cell coordinates and values into point rows per chunk,
+- The {meth}`rst/pc.cosample() <RasterBase.cosample>` function then relies on chunked {meth}`vct.create_mask() <VectorBase.create_mask>`, {meth}`rst.reproject() <RasterBase.reproject>` and {meth}`rst/pc.subsample() <RasterBase.subsample>`, with some additional chunked indexing logic,
+- The {meth}`rst/pc.variogram() <RasterBase.variogram>` function relies on chunked {meth}`rst/pc.pairsample() <RasterBase.pairsample>`, followed by **chunked reduction per distance bin of variogram estimators** relying partially on Flox,
+- The {meth}`rst.stack() <RasterBase.stack>` and {meth}`rst.merge() <RasterBase.merge>` functions rely on chunked {meth}`rst.reproject() <RasterBase.reproject>`, followed by simple chunked concatenation and reduction with direct Dask support,
+- The {meth}`rst/pc.stats() <RasterBase.stats>` function relies on chunked {meth}`rst/pc.cosample() <RasterBase.cosample>`, fractional {meth}`vct.rasterize() <VectorBase.rasterize>` to compare on the same support with fractional coverage, followed by **grouped chunked reductions** based on Flox,
+- The {meth}`rst/pc.estimate_error_structure() <RasterBase.estimate_error_structure>` functions combine chunked {meth}`rst/pc.cosample() <RasterBase.cosample>`, {meth}`rst/pc.stats() <RasterBase.stats>` and {meth}`rst/pc.variogram() <RasterBase.variogram>`, with **error standardization per chunk** between magnitude and correlation estimation,
+- The {meth}`rst/pc.plot() <RasterBase.plot>` functions rely on chunked {meth}`rst.reproject() <RasterBase.reproject>` or {meth}`pc.subsample() <PointCloudBase.subsample>` to **reduce data to the display size** before plotting.
 
 (specific-logic)=
 ## Logic of implementations
@@ -35,13 +54,16 @@ The diagram below illustrates this mapping procedure, with a new CRS and a downs
 ```
 
 
-During reprojection, destination chunks are **expanded by 3 pixels** to ensure adequate resampling at chunk boundaries. As a result of this and deformations, the number of source chunks used at once in memory is therefore **always 4-9**.
+The source mapping buffers destination bounds by **two output pixels** and includes neighboring source chunks.
+Configured operator neighborhoods can require a wider source margin. The number of source chunks read together
+depends on the projection, resolution change, chunk sizes and neighborhood.
 
-Unlike most chunked operations, **reprojection does not preserve identical input and output chunk sizes**. When the resolution changes, maintaining the same chunk size would cause the number of intersecting source chunks to scale approximately with **the square of the downsampling factor** (because reprojection operates in two spatial dimensions). For example, a downsampling factor of 2 would cause four times more source chunks to be accessed per destination chunk, which would quickly increase memory usage during coarse reprojection.
+With Dask, output chunks default to the source's spatial chunk sizes in pixels. A coarser output pixel covers more
+source pixels, so downsampling can increase memory per output chunk. For example, doubling both pixel dimensions
+makes an output chunk cover about four times the source area. Choose smaller source chunks before reprojection
+when that increase would exceed available memory. Multiprocessing uses `mp_config.chunks` for the output tiles.
 
-To prevent this, GeoUtils automatically **scales the output chunk size according to the resolution change**, keeping the number of source chunks involved in each operation bounded.
-
-Finally, note that **chunked reprojection with GCPs or RCPs is currently not supported**.
+Chunked reprojection supports both affine grids and GCP/RPC transformation models.
 
 ### Chunked polygonization
 
@@ -125,5 +147,5 @@ The diagram below illustrates the workflow:
 Subsampling proceeds in **two stages**. First, GeoUtils performs a lightweight pass that counts the number of **valid pixels in each chunk**. These counts are summed to determine the final subsample size requested by the user, which may be specified either as a **fraction of valid pixels** or as an **absolute number**. This pass is inexpensive because it only requires scanning chunk masks and does not materialize the valid-value array.
 
 Once the target sample size is known, pixels are selected using one of two strategies:
-- With **`topk` (default, chunk-invariant)** sampling, each valid pixel is assigned a deterministic pseudo-random key derived from the random seed and its global linear index (row + col * number of rows). The **k smallest keys** are selected globally. Because the key depends only on the pixel index and the seed, the resulting subsample is **independent of chunk layout** and reproducible with any chunking or fully in-memory raster.
+- With **`topk` (default, chunk-invariant)** sampling, each valid pixel is assigned a deterministic pseudo-random key derived from the random seed and its global linear index (row * number of columns + col). The **k smallest keys** are selected globally. Because the key depends only on the pixel index and the seed, the resulting subsample is **independent of chunk layout** and reproducible with any chunking or fully in-memory raster.
 - With **`sequential` (chunk-dependent)** sampling, pixels are drawn from the **flattened sequence of valid values encountered during chunk traversal**. This strategy is typically **faster** because it avoids computing deterministic keys, but the result **depends on the chunk structure and valid-value ordering**.

@@ -25,9 +25,9 @@ from geoutils._config import config  # noqa
 
 from geoutils.raster import Raster, open_raster  # noqa isort:skip
 from geoutils.raster import DataArrayRasterAccessor, DatasetRasterAccessor  # noqa isort:skip
-from geoutils.vector import Vector, VectorAccessor, open_vector  # noqa isort:skip
+from geoutils.vector import Vector, GeoDataFrameVectorAccessor, open_vector  # noqa isort:skip
 from geoutils.pointcloud import PointCloud, open_pointcloud  # noqa isort:skip
-from geoutils.pointcloud import GeoPandasPointCloudAccessor  # noqa isort:skip
+from geoutils.pointcloud import GeoDataFramePointCloudAccessor  # noqa isort:skip
 from geoutils.pointcloud import DataArrayPointCloudAccessor, DatasetPointCloudAccessor  # noqa isort:skip
 from geoutils.stats.variography import Variogram  # noqa isort:skip
 from geoutils import uncertainty  # noqa isort:skip

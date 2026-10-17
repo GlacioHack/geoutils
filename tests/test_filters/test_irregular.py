@@ -67,8 +67,18 @@ class TestPointCloudFilter:
         for result in (filtered, leave_one_out, lower_quartile):
             assert_geodataframe_equal(result.gdf.drop(columns="height"), expected_attributes)
 
-    def test_filter__nearest_limit(self) -> None:
-        """Checks that k selects the requested number of nearest observations when no radius is given."""
+    @pytest.mark.parametrize("as_object_type", ["geoutils", "geodataframe", "dataarray", "dataset"])
+    @pytest.mark.parametrize(
+        "radius,expected",
+        [(None, [5.0, 5.0, 25.0]), (5.0, [5.0, 5.0, 25.0]), (1.1, [5.0, 5.0, 40.0])],
+    )
+    def test_filter__nearest_limit(
+        self,
+        as_object_type: Literal["geoutils", "geodataframe", "dataarray", "dataset"],
+        radius: float | None,
+        expected: list[float],
+    ) -> None:
+        """Checks that max_points limits nearest observations across point interfaces, with or without a radius."""
 
         # Synthetic points with unequal spacing to avoid nearest ties
         frame = gpd.GeoDataFrame(
@@ -78,11 +88,25 @@ class TestPointCloudFilter:
         )
         points = gu.PointCloud(frame, data_name="height")
 
-        # Select only 2 nearest
-        filtered = points.filter(method="mean", radius=None, k=2)
+        # Convert the same measurements to each public point interface
+        source: Any
+        if as_object_type == "geoutils":
+            source = points
+        elif as_object_type == "geodataframe":
+            source = frame.pc
+            source.set_data_name("height")
+        else:
+            array = points.to_xarray()
+            source = array.pc if as_object_type == "dataarray" else array.to_dataset().pc
 
-        # Check first/middle and middle/last pair means
-        np.testing.assert_array_equal(filtered.data, [5.0, 5.0, 25.0])
+        # Average at most two nearest observations within the optional radius
+        filtered = source.filter(method="mean", radius=radius, max_points=2)
+
+        # Check pair means, or the isolated final point when the radius excludes its neighbors
+        if isinstance(filtered, xr.Dataset):
+            filtered = filtered["height"]
+        values = filtered.data if isinstance(filtered, gu.PointCloud) else filtered.pc.data
+        np.testing.assert_array_equal(values, expected)
 
     def test_filter__missing_neigh_min_points(self) -> None:
         """Checks that handling of missing neighbours, and respect of minimum valid points for reducers."""
@@ -107,13 +131,13 @@ class TestPointCloudFilter:
 
         # Synthetic point cloud and neighborhood
         points = gu.PointCloud.from_xyz(np.array([0.0, 1.0, 4.0]), np.zeros(3), np.array([0.0, 10.0, 40.0]), crs=32631)
-        neighborhood = PointNeighbours(k=2, radius=None)
+        neighborhood = PointNeighbours(max_points=2, radius=None)
         operator = Mean(neighborhood=neighborhood)
 
-        # Different inputs to verify we can override the neighborhood with radius/k
+        # Different inputs to verify we can override the neighborhood with radius/max_points
         configured = points.filter(operator)
         limited = points.filter(operator, radius=0.5)
-        unlimited = points.filter(operator, k=None, radius=5)
+        unlimited = points.filter(operator, max_points=None, radius=5)
 
         # Check output
         np.testing.assert_array_equal(configured.data, [5, 5, 25])
@@ -133,7 +157,7 @@ class TestPointCloudFilter:
         points = gu.PointCloud(frame, data_name="height")
 
         # Check mean is both is indeed used
-        filtered = points.filter(method="mean", radius=0, k=2)
+        filtered = points.filter(method="mean", radius=0, max_points=2)
         np.testing.assert_array_equal(filtered.data, [3.0, 3.0])
 
     def test_filter__z_geometry(self) -> None:
@@ -189,12 +213,12 @@ class TestPointCloudFilterChunked:
         crs=32632,
     )
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_filter__chunked_backends_equal(
-        self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path
+        self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
     ) -> None:
         """
-        Checks that filtering with Dask/MP stays lazy and matches eager results.
+        Checks that filtering with max_points=2 stays lazy with Dask/MP and matches eager results.
         """
 
         dgpd = pytest.importorskip("dask_geopandas")
@@ -205,17 +229,17 @@ class TestPointCloudFilterChunked:
         output_filename = tmp_path / "filter_output.gpkg"
         self.points.to_file(source_filename, index=False)
         expected = gu.PointCloud(self.points, data_name="height").filter(
-            method="median", radius=1.1, include_self=False
+            method="median", radius=1.1, max_points=2, include_self=False
         )
 
         # Read in partitions
-        lazy = gu.open_pointcloud(str(source_filename), data_name="height", chunks=2, as_type=as_type)
+        lazy = gu.open_pointcloud(str(source_filename), data_name="height", chunks=2, as_object_type=as_object_type)
         source = gu.PointCloud(source_filename, data_name="height")
 
         # Dask: build filter graph and record executed tasks
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(args[0])):
-            dask_filtered = lazy.pc.filter(method="median", radius=1.1, include_self=False, batch_size=2)
+            dask_filtered = lazy.pc.filter(method="median", radius=1.1, max_points=2, include_self=False, batch_size=2)
 
         # MP: filter with two workers, then join rows in input order
         with MpCluster({"nb_workers": 2}) as cluster:
@@ -224,11 +248,13 @@ class TestPointCloudFilterChunked:
                 outfile=str(output_filename),
                 cluster=cluster,
             )
-            mp_filtered = source.filter(method="median", radius=1.1, include_self=False, mp_config=configuration)
+            mp_filtered = source.filter(
+                method="median", radius=1.1, max_points=2, include_self=False, mp_config=configuration
+            )
 
         # We check zero executed tasks, lazy inputs/outputs and point metadata
         assert tasks == []
-        assert isinstance(dask_filtered, xr.DataArray if as_type == "dataarray" else dgpd.GeoDataFrame)
+        assert isinstance(dask_filtered, xr.DataArray if as_object_type == "dataarray" else dgpd.GeoDataFrame)
         assert not lazy.pc.is_loaded and not dask_filtered.pc.is_loaded
         assert dask_filtered.pc.data_name == "height"
         assert dask_filtered.pc.point_count == len(self.points)
@@ -241,7 +267,7 @@ class TestPointCloudFilterChunked:
         # Finally, compare exactly equal outputs
         expected_rows = expected.gdf.reset_index(drop=True)
         dask_rows = (
-            dask_filtered.compute().pc.to_geoutils().gdf if as_type == "dataarray" else dask_filtered.compute()
+            dask_filtered.compute().pc.to_geoutils().gdf if as_object_type == "dataarray" else dask_filtered.compute()
         ).reset_index(drop=True)
         mp_rows = mp_filtered.gdf.reset_index(drop=True)
         assert_geodataframe_equal(dask_rows, expected_rows, check_dtype=False)
@@ -249,8 +275,10 @@ class TestPointCloudFilterChunked:
         assert not lazy.pc.is_loaded and not dask_filtered.pc.is_loaded
         assert not source.is_loaded
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
-    def test_filter__dask_z_geometry(self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path) -> None:
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
+    def test_filter__dask_z_geometry(
+        self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
+    ) -> None:
         """Checks that Dask filtering updates geometry Z across partitions and matches eager values."""
 
         dgpd = pytest.importorskip("dask_geopandas")
@@ -265,16 +293,16 @@ class TestPointCloudFilterChunked:
         )
         source_filename = tmp_path / "filter_source_3d.gpkg"
         frame.to_file(source_filename, index=False)
-        lazy = gu.open_pointcloud(str(source_filename), data_name=None, chunks=2, as_type=as_type)
+        lazy = gu.open_pointcloud(str(source_filename), data_name=None, chunks=2, as_object_type=as_object_type)
 
         # We filter the same for eager/lazy
         expected = gu.PointCloud(frame, data_name=None).filter(method="mean", radius=1.1)
         filtered = lazy.pc.filter(method="mean", radius=1.1)
 
         # We check the output stays lazy with Z as data
-        assert isinstance(filtered, xr.DataArray if as_type == "dataarray" else dgpd.GeoDataFrame)
+        assert isinstance(filtered, xr.DataArray if as_object_type == "dataarray" else dgpd.GeoDataFrame)
         assert not lazy.pc.is_loaded and not filtered.pc.is_loaded
-        assert filtered.pc.data_name == ("z" if as_type == "dataarray" else None)
+        assert filtered.pc.data_name == ("z" if as_object_type == "dataarray" else None)
         assert filtered.pc.point_count == len(frame)
 
         # And check each Z mean and original point attributes after computing

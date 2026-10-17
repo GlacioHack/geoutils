@@ -21,7 +21,7 @@ from shapely.geometry import box
 import geoutils as gu
 from geoutils import PointCloud, Raster, Vector
 from geoutils.vector.base import VectorBase
-from geoutils.vector.pd_accessor import VectorAccessor
+from geoutils.vector.pd_accessor import GeoDataFrameVectorAccessor
 from tests.accessor_helpers import assert_output_equal
 from tests.remote_helpers import RemoteFiles
 
@@ -160,7 +160,7 @@ class TestClassVsAccessorConsistency:
             },
         ),
         ("buffer_metric", {"buffer_size": 1}),
-        ("get_bounds_projected", {"out_crs": CRS.from_epsg(4326)}),
+        ("get_bbox_projected", {"out_crs": CRS.from_epsg(4326)}),
         ("get_footprint_projected", {"out_crs": CRS.from_epsg(4326)}),
         ("get_metric_crs", {"local_crs_type": "universal"}),
         ("buffer_without_overlap", {"buffer_size": 1, "metric": False}),
@@ -286,7 +286,7 @@ class TestClassVsAccessorConsistency:
         """Test class method output exactly the same objects."""
 
         output_vector = getattr(Vector, method)(**kwargs)
-        output_ds = getattr(VectorAccessor, method)(**kwargs)
+        output_ds = getattr(GeoDataFrameVectorAccessor, method)(**kwargs)
 
         assert_output_equal(output_vector, output_ds)
 

@@ -53,7 +53,7 @@ class TestPointParquet:
         assert file.metadata.num_row_groups == (1 if partitioned else 3)
 
         # Reopen to verify exact equality (through GeoPandas reader)
-        reopened = gu.open_pointcloud(str(filename), as_type="dataarray", columns="all")
+        reopened = gu.open_pointcloud(str(filename), as_object_type="dataarray", columns="all")
         xr.testing.assert_identical(reopened, points)
         frame = gpd.read_parquet(filename)
         np.testing.assert_array_equal(frame.geometry.x, points.coords["x"])
@@ -96,7 +96,7 @@ class TestPointParquet:
         frame.to_parquet(filename)
 
         # Compare extracted arrays and CRS with the original geometry points
-        points = gu.open_pointcloud(str(filename), data_name="z", as_type="dataarray", columns="all")
+        points = gu.open_pointcloud(str(filename), data_name="z", as_object_type="dataarray", columns="all")
         np.testing.assert_array_equal(points.pc.to_array(), frame.pc.to_array())
         assert points.pc.crs == frame.crs
 
@@ -117,21 +117,21 @@ class TestPointParquet:
 
         # Write and reopen every attribute, check for equality
         points.pc.to_parquet(str(filename))
-        reopened = gu.open_pointcloud(str(filename), as_type="dataarray", columns="all")
+        reopened = gu.open_pointcloud(str(filename), as_object_type="dataarray", columns="all")
         xr.testing.assert_identical(reopened, points)
 
 
 class TestPointParquetChunked:
     """Test for GeoParquet I/O in chunks (Dask and multiprocessing)."""
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_open_pointcloud__select_auxiliary(
-        self, tmp_path: Path, as_type: Literal["dataarray", "geodataframe"]
+        self, tmp_path: Path, as_object_type: Literal["dataarray", "geodataframe"]
     ) -> None:
         """Checks that selecting an auxiliary attribute leaves the original geometry elevations unchanged."""
         pytest.importorskip("pyarrow")
         pytest.importorskip("dask")
-        if as_type == "geodataframe":
+        if as_object_type == "geodataframe":
             pytest.importorskip("dask_geopandas")
 
         # We create + write points with attribute IDs different from default Z elevation
@@ -148,14 +148,14 @@ class TestPointParquetChunked:
         points.pc.to_parquet(str(filename), chunks=2)
 
         # Open eager and lazy
-        eager = gu.open_pointcloud(filename, data_name="id", as_type=as_type)
-        reopened = gu.open_pointcloud(filename, data_name="id", chunks=2, as_type=as_type)
+        eager = gu.open_pointcloud(filename, data_name="id", as_object_type=as_object_type)
+        reopened = gu.open_pointcloud(filename, data_name="id", chunks=2, as_object_type=as_object_type)
 
         # Check laziness and exactly equality
         assert eager.pc.is_loaded
         assert not reopened.pc.is_loaded
         actual = reopened.compute()
-        if as_type == "dataarray":
+        if as_object_type == "dataarray":
             xr.testing.assert_identical(actual, eager)
         else:
             assert_geodataframe_equal(actual, eager)
@@ -168,11 +168,11 @@ class TestPointParquetChunked:
     @pytest.mark.parametrize("writer", ["geopandas", "dataarray", "dataset"])
     @pytest.mark.parametrize("index_name", [None, "point_id", "z"])
     @pytest.mark.parametrize("data_name", ["z", "intensity"])
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_open_pointcloud__row_labels(
         self,
         tmp_path: Path,
-        as_type: Literal["dataarray", "geodataframe"],
+        as_object_type: Literal["dataarray", "geodataframe"],
         writer: str,
         index_name: str | None,
         data_name: str,
@@ -181,7 +181,7 @@ class TestPointParquetChunked:
 
         pytest.importorskip("pyarrow")
         pytest.importorskip("dask")
-        if as_type == "geodataframe":
+        if as_object_type == "geodataframe":
             pytest.importorskip("dask_geopandas")
         import dask
 
@@ -199,11 +199,11 @@ class TestPointParquetChunked:
                 points = points.rename({"x": "x_point", "y": "y_point"}).to_dataset()
                 points.attrs["dataframe_index_name"] = points.z.attrs.pop("dataframe_index_name")
             points.pc.to_parquet(filename, chunks=2)
-        eager = gu.open_pointcloud(filename, data_name=data_name, as_type=as_type)
+        eager = gu.open_pointcloud(filename, data_name=data_name, as_object_type=as_object_type)
 
         # We open and check laziness/exact equality
         with dask.callbacks.Callback(pretask=lambda *args: pytest.fail("Opening must read only metadata")):
-            lazy = gu.open_pointcloud(filename, data_name=data_name, chunks=2, as_type=as_type)
+            lazy = gu.open_pointcloud(filename, data_name=data_name, chunks=2, as_object_type=as_object_type)
             assert not lazy.pc.is_loaded
             assert lazy.pc.point_count == len(frame)
         computed = lazy.compute()
@@ -214,21 +214,21 @@ class TestPointParquetChunked:
         assert not lazy.pc.is_loaded
 
     @pytest.mark.parametrize("partitioned", [False, True])
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     @pytest.mark.parametrize("use_z", [False, True])
     @pytest.mark.parametrize("columns", ["main", "all"])
     def test_open_pointcloud__loading_laziness(
         self,
         tmp_path: Path,
         partitioned: bool,
-        as_type: Literal["dataarray", "geodataframe"],
+        as_object_type: Literal["dataarray", "geodataframe"],
         use_z: bool,
         columns: Literal["main", "all"],
     ) -> None:
         """Checks that GeoParquet reads are lazy and match eager exactly."""
         pytest.importorskip("pyarrow")
         pytest.importorskip("dask")
-        if as_type == "geodataframe":
+        if as_object_type == "geodataframe":
             pytest.importorskip("dask_geopandas")
         import dask
 
@@ -243,37 +243,39 @@ class TestPointParquetChunked:
         )
         source = tmp_path / "source.parquet"
         points.pc.to_parquet(source, chunks=4)
-        lazy = gu.open_pointcloud(source, columns="all", chunks=4, as_type=as_type)
+        lazy = gu.open_pointcloud(source, columns="all", chunks=4, as_object_type=as_object_type)
         filename = tmp_path / "points.parquet"
         lazy.pc.to_parquet(str(filename), chunks=5, partitioned=partitioned)
 
         # 2/ Reopen
         assert not lazy.pc.is_loaded
         with dask.callbacks.Callback(pretask=lambda *args: pytest.fail("Opening Parquet must read only metadata")):
-            reopened = gu.open_pointcloud(str(filename), columns=columns, as_type=as_type, chunks=3)
+            reopened = gu.open_pointcloud(str(filename), columns=columns, as_object_type=as_object_type, chunks=3)
             assert reopened.pc.point_count == 13
             assert not reopened.pc.is_loaded
-            assert (bool(reopened.attrs.get("geometry_z")) if as_type == "dataarray" else reopened.pc._has_z) == use_z
+            assert (
+                bool(reopened.attrs.get("geometry_z")) if as_object_type == "dataarray" else reopened.pc._has_z
+            ) == use_z
             assert ("id" in reopened.pc.columns) == (columns == "all")
-        eager = gu.open_pointcloud(filename, columns=columns, as_type=as_type)
+        eager = gu.open_pointcloud(filename, columns=columns, as_object_type=as_object_type)
 
         # 3/ Compare exact equality and laziness
         computed = reopened.compute()
-        if as_type == "dataarray":
+        if as_object_type == "dataarray":
             xr.testing.assert_identical(computed, eager)
         else:
             assert_geodataframe_equal(computed, eager)
         assert computed.pc.to_geoutils().geometry.has_z.all() == use_z
         if columns == "all":
             np.testing.assert_array_equal(
-                computed.coords["id"] if as_type == "dataarray" else computed["id"], points.coords["id"]
+                computed.coords["id"] if as_object_type == "dataarray" else computed["id"], points.coords["id"]
             )
         assert not reopened.pc.is_loaded
         assert not lazy.pc.is_loaded
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_write_parquet_row_groups__formats(
-        self, tmp_path: Path, as_type: Literal["dataarray", "geodataframe"]
+        self, tmp_path: Path, as_object_type: Literal["dataarray", "geodataframe"]
     ) -> None:
         """Checks that both DataArrays and GeoDataFrame partitions write ordered GeoParquet row groups properly."""
         pytest.importorskip("pyarrow")
@@ -286,7 +288,7 @@ class TestPointParquetChunked:
             np.arange(11.0), np.arange(11.0) + 1, np.arange(11, dtype=np.float32), 32633, data_name="height"
         )
         cloud.gdf["id"] = np.arange(11, dtype=np.uint64) + 2**63
-        source = cloud.to_xarray() if as_type == "dataarray" else cloud.gdf
+        source = cloud.to_xarray() if as_object_type == "dataarray" else cloud.gdf
         filename = tmp_path / "row-groups.parquet"
         partitions = (source[start : start + 4] for start in range(0, 11, 4))
         _write_parquet_row_groups(partitions, filename, data_name=cloud.data_name)
@@ -317,7 +319,7 @@ class TestPointParquetErrors:
         filename = tmp_path / "polygon.parquet"
         gpd.GeoDataFrame({"value": [1]}, geometry=[box(0, 0, 1, 1)], crs=32633).to_parquet(filename)
         with pytest.raises(ValueError, match="point geometries"):
-            gu.open_pointcloud(str(filename), as_type="dataarray")
+            gu.open_pointcloud(str(filename), as_object_type="dataarray")
 
     @pytest.mark.parametrize("difference", ["crs", "dtype", "geometry_z"])
     def test_open_pointcloud__error_mismatched_partitions(self, tmp_path: Path, difference: str) -> None:
@@ -339,7 +341,7 @@ class TestPointParquetErrors:
 
         # Check error is raised
         with pytest.raises(ValueError, match="matching coordinate systems, schemas and attributes"):
-            gu.open_pointcloud(str(tmp_path), as_type="dataarray", chunks=1)
+            gu.open_pointcloud(str(tmp_path), as_object_type="dataarray", chunks=1)
 
     def test_to_parquet__error_existing_partition(self, tmp_path: Path) -> None:
         """Checks an error is raised before overwriting an existing partitioned dataset."""
