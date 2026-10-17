@@ -19,7 +19,6 @@ from shapely.geometry import box
 
 import geoutils as gu
 from geoutils import open_raster
-from geoutils._dispatch import is_dask_dataframe
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
 from geoutils.multiproc.cluster import MpCluster
@@ -1320,17 +1319,17 @@ class TestRasterSubsample:
         np.testing.assert_array_equal(points.gdf.geometry.x, [0.5, 1.5, 0.5, 1.5])
         np.testing.assert_array_equal(points.gdf.geometry.y, [1.5, 1.5, 0.5, 0.5])
 
-    def test_subsample__accessor_returns_geodataframe(self) -> None:
-        """Checks that an eager raster accessor returns a GeoDataFrame by default."""
+    def test_subsample__accessor_returns_dataarray(self) -> None:
+        """Checks that an eager raster accessor returns a DataArray by default."""
 
         # Create an accessor with two bands to check both its output type and default band selection
         values = np.arange(16).reshape((2, 2, 4))
         accessor = gu.DataArrayRasterAccessor.from_array(values, rio.transform.from_origin(0, 2, 1, 1), 32633)
 
-        # Sample through the accessor and keep every band in the dataframe
+        # Sample through the accessor and keep every band in the point cloud
         sampled = accessor.rst.subsample(5, random_state=42)
-        assert isinstance(sampled, gpd.GeoDataFrame)
-        assert list(sampled.columns) == ["b1", "b2", "geometry"]
+        assert isinstance(sampled, xr.DataArray)
+        assert list(sampled.pc.columns) == ["b1", "b2"]
 
     @pytest.mark.parametrize(
         "mask_form",
@@ -1464,8 +1463,9 @@ class TestRasterSubsampleChunked:
             source = open_raster(str(source_file), chunks={"x": 8, "y": 8})
             source_data = source.data
             result = source.rst.subsample(65, random_state=42)
-            assert is_dask_dataframe(result) and cutoff_calls == [1]
-            computed_values = result.compute()["b1"].to_numpy()
+            assert isinstance(result, xr.DataArray) and cutoff_calls == [1]
+            assert not result.pc.is_loaded
+            computed_values = result.compute().data
             assert source.data is source_data and not source._in_memory
         else:
             source = gu.Raster(source_file)
@@ -1515,8 +1515,8 @@ class TestRasterSubsampleChunked:
         if backend == "dask":
             source = open_raster(str(source_file), chunks={"x": 4, "y": 3})
             result = source.rst.subsample(17, random_state=42, force_output_to_memory=True)
-            actual = result
-            assert isinstance(result, gpd.GeoDataFrame) and not is_dask_dataframe(result)
+            assert isinstance(result, xr.DataArray) and result.pc.is_loaded
+            actual = result.pc.to_geoutils().gdf
             assert not source._in_memory
         else:
             source = gu.Raster(source_file)
@@ -1852,8 +1852,8 @@ class TestRasterSubsampleChunked:
             assert isinstance(result, np.ndarray)
             assert result.shape == (0,)
         elif backend == "dask":
-            assert is_dask_dataframe(result)
-            assert result.compute().empty
+            assert isinstance(result, xr.DataArray) and not result.pc.is_loaded
+            assert result.compute().size == 0
         else:
             assert not result.is_loaded
             assert result.point_count == 0

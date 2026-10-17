@@ -88,7 +88,7 @@ sub_ds = ds_reproj.rst.subsample(
 sub_ds
 ```
 
-The output point dataframe is again lazy. Calling `compute()` returns an in-memory GeoDataFrame:
+The output point cloud is again lazy. Calling `compute()` returns an in-memory DataArray:
 ```{code-cell} python
 sub_ds.compute()
 ```

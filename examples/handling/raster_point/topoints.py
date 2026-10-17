@@ -20,12 +20,12 @@ rast = rast.rst.crop([rast.rst.bbox.left, rast.rst.bbox.bottom, rast.rst.bbox.le
 rast.rst.plot(cmap="terrain")
 
 # %%
-# We convert the raster to points. By default, this returns a vector with column geometry burned.
+# We convert the raster to points, returned as a DataArray with X/Y coordinates by default.
 
 pc = rast.rst.to_pointcloud()
 pc
 
 # %%
-# We plot the point vector.
+# We plot the point cloud.
 
-pc.pc.plot(ax="new", cmap="terrain", legend=True)
+pc.pc.plot(ax="new", cmap="terrain")

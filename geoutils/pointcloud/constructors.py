@@ -9,6 +9,7 @@ import geopandas as gpd
 import pandas as pd
 import xarray as xr
 
+from geoutils._config import config
 from geoutils._dispatch import is_dask_array
 from geoutils.pointcloud.dataframe import _build_pointcloud_output
 
@@ -22,7 +23,7 @@ def from_xyz(
     use_z: bool = False,
     *,
     auxiliary: Mapping[str, Any] | None = None,
-    as_object_type: Literal["dataarray", "dataset", "geodataframe"] = "dataarray",
+    as_object_type: Literal["dataarray", "dataset", "geodataframe"] | None = None,
 ) -> xr.DataArray | xr.Dataset | gpd.GeoDataFrame | Any:
     """
     Create a point cloud from separate X, Y and value arrays.
@@ -37,13 +38,16 @@ def from_xyz(
     :param data_name: Name of the point values, defaulting to z.
     :param use_z: Also use the point values as geometric elevations. GeoDataFrames store them in 3D geometry.
     :param auxiliary: Additional named arrays with one value per point.
-    :param as_object_type: Returned representation: dataarray (the default), dataset, or geodataframe.
+    :param as_object_type: Returned representation: dataarray, dataset, or geodataframe. None uses
+        config["pointcloud_return_type"], which defaults to dataarray.
     :returns: A DataArray with auxiliary coordinates, a Dataset with separate value variables, or a GeoDataFrame.
         Dask inputs remain lazy in every representation.
     """
     from geoutils.pointcloud.xr_accessor import DataArrayPointCloudAccessor, _pointcloud_array_to_dataset
 
     # Validate the requested output before preparing its coordinates and attributes
+    if as_object_type is None:
+        as_object_type = config["pointcloud_return_type"]
     if as_object_type not in ("dataarray", "dataset", "geodataframe"):
         raise ValueError("Argument 'as_object_type' must be 'dataarray', 'dataset' or 'geodataframe'.")
     points = DataArrayPointCloudAccessor.from_xyz(x, y, z, crs, data_name, use_z, auxiliary=auxiliary)

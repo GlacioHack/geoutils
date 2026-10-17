@@ -586,13 +586,13 @@ class TestDataArrayRasterAccessor:
         assert isinstance(vector, gpd.GeoDataFrame)
         assert vector.vct.to_geoutils().vector_equal(gu.Vector(vector))
 
-        # Raster-to-point operations return GeoDataFrames with point-cloud metadata
+        # Raster-to-point operations return DataArrays with point cloud metadata
         pointcloud = ds.rst.to_pointcloud(skip_nodata=False)
-        assert isinstance(pointcloud, gpd.GeoDataFrame)
+        assert isinstance(pointcloud, xr.DataArray)
         assert pointcloud.pc.data_name == "b1"
 
         interpolated = ds.rst.interp_at_points((np.array([0.5]), np.array([1.5])), method="nearest")
-        assert isinstance(interpolated, gpd.GeoDataFrame)
+        assert isinstance(interpolated, xr.DataArray)
         assert interpolated.pc.data_name == "z"
 
         # Geometric footprint helpers also retain the vector accessor

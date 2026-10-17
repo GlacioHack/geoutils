@@ -554,7 +554,7 @@ class TestArrayVsGeometryConsistency:
 
         # Synthetic raster data for cosampling (upper-left grid nodes)
         raster = gu.Raster.from_array(np.arange(12, dtype=np.float32).reshape(3, 4), from_origin(0, 3, 1, 1), 32633)
-        points = raster.to_pointcloud(backend="xarray", force_pixel_offset="ul")
+        points = raster.to_pointcloud(pointcloud_return_type="dataarray", force_pixel_offset="ul")
         expected = points.rename("self").assign_coords(other=points.variable)
 
         # Equal cosampling output

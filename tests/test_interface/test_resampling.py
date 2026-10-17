@@ -1720,7 +1720,7 @@ class TestReductionChunked:
         computed = result.compute()
         if lazy_points:
             assert not targets.pc.is_loaded
-        if not as_array and lazy_points and as_object_type == "dataarray":
+        if not as_array and isinstance(computed, xr.DataArray):
             computed = computed.pc.to_geoutils().gdf
         np.testing.assert_array_equal(computed if as_array else computed["z"], expected)
         if not as_array:

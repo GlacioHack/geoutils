@@ -31,6 +31,7 @@ import xarray as xr
 from pyproj import CRS
 from rasterio.coords import BoundingBox
 
+from geoutils._config import config
 from geoutils._dispatch import is_dask_dataframe
 from geoutils._misc import _deprecate_keyword, _validate_downsample
 from geoutils._typing import Number
@@ -53,7 +54,7 @@ def open_pointcloud(
     chunks: int | None = None,
     downsample: Number = 1,
     *,
-    as_object_type: Literal["dataarray", "dataset", "geodataframe"] = "dataarray",
+    as_object_type: Literal["dataarray", "dataset", "geodataframe"] | None = None,
     level: int | range | None = None,
 ) -> xr.DataArray | xr.Dataset | gpd.GeoDataFrame | Any:
     """
@@ -80,12 +81,15 @@ def open_pointcloud(
     :param chunks: Points per Dask chunk or partition. GeoParquet GeoDataFrame partitions follow the stored row
         groups. None loads the point data eagerly.
     :param downsample: Factor reducing the point count to ceil(N / downsample), with a deterministic random sample.
-    :param as_object_type: Returned representation: dataarray (the default), dataset, or geodataframe.
+    :param as_object_type: Returned representation: dataarray, dataset, or geodataframe. None uses
+        config["pointcloud_return_type"], which defaults to dataarray.
     :param level: COPC level of detail, or a range of levels. None combines all levels unless downsample is used.
     :returns: A DataArray with active values and auxiliary coordinates, a Dataset with separate value variables,
         or a GeoDataFrame.
     """
     # 1/ Input checks
+    if as_object_type is None:
+        as_object_type = config["pointcloud_return_type"]
     downsample = _validate_downsample(downsample)
     if chunks is not None and (isinstance(chunks, bool) or not isinstance(chunks, int) or chunks <= 0):
         raise ValueError("Argument 'chunks' must be a strictly positive integer.")

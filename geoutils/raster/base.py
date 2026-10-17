@@ -38,6 +38,7 @@ from typing import (
     overload,
 )
 
+import geopandas as gpd
 import numpy as np
 import rasterio as rio
 import xarray as xr
@@ -221,13 +222,42 @@ class RasterBase(ABC):
             rpcs=raster.rpcs,
         )
 
-    def _cast_pointcloud_output(self, pointcloud: Any) -> Any:
+    def _resolve_pointcloud_output_type(
+        self, pointcloud_return_type: Literal["dataarray", "dataset", "geodataframe"] | None = None
+    ) -> Literal["dataarray", "dataset", "geodataframe"]:
+        """Choose a new point cloud representation, giving an explicit type priority over configuration."""
+
+        # An explicit return type overrides the session default
+        if pointcloud_return_type is not None:
+            if pointcloud_return_type not in ("dataarray", "dataset", "geodataframe"):
+                raise ValueError("Argument 'pointcloud_return_type' must be 'dataarray', 'dataset' or 'geodataframe'.")
+            return pointcloud_return_type
+
+        # GeoUtils objects return PointCloud objects unless a representation is explicitly requested
+        if self._is_xr:
+            return config["pointcloud_return_type"]
+        return "geodataframe"
+
+    def _cast_pointcloud_output(
+        self,
+        pointcloud: Any,
+        *,
+        pointcloud_return_type: Literal["dataarray", "dataset", "geodataframe"] | None = None,
+    ) -> Any:
         """Return an accessor-backed point cloud when this raster is accessor-backed."""
+
+        # Numeric point outputs already carry coordinates and auxiliary values without geometries
+        if pointcloud_return_type == "dataset":
+            from geoutils.pointcloud.xr_accessor import _pointcloud_array_to_dataset
+
+            return _pointcloud_array_to_dataset(pointcloud)
+        if pointcloud_return_type == "dataarray":
+            return pointcloud
 
         if is_dask_dataframe(pointcloud):
             return pointcloud
 
-        if self._is_xr:
+        if self._is_xr or pointcloud_return_type == "geodataframe":
             ds = pointcloud._dataset
             ds.attrs["data_name"] = pointcloud.data_name
             return ds
@@ -2774,7 +2804,7 @@ class RasterBase(ABC):
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
         mp_config: MultiprocConfig | None = None,
         force_output_to_memory: bool = False,
-        backend: Literal["xarray"],
+        pointcloud_return_type: Literal["dataarray"],
     ) -> xr.DataArray: ...
 
     @overload
@@ -2792,8 +2822,8 @@ class RasterBase(ABC):
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
         mp_config: MultiprocConfig | None = None,
         force_output_to_memory: bool = False,
-        backend: Literal["geopandas"] = "geopandas",
-    ) -> PointCloud: ...
+        pointcloud_return_type: Literal["geodataframe"],
+    ) -> gpd.GeoDataFrame: ...
 
     @overload
     def to_pointcloud(
@@ -2810,7 +2840,7 @@ class RasterBase(ABC):
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
         mp_config: MultiprocConfig | None = None,
         force_output_to_memory: bool = False,
-        backend: Literal["geopandas", "xarray"] = "geopandas",
+        pointcloud_return_type: Literal["dataarray", "dataset", "geodataframe"] | None = None,
     ) -> NDArrayNum: ...
 
     @overload
@@ -2828,8 +2858,8 @@ class RasterBase(ABC):
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
         mp_config: MultiprocConfig | None = None,
         force_output_to_memory: bool = False,
-        backend: Literal["geopandas", "xarray"] = "geopandas",
-    ) -> NDArrayNum | PointCloud | xr.DataArray: ...
+        pointcloud_return_type: Literal["dataarray", "dataset", "geodataframe"] | None = None,
+    ) -> NDArrayNum | PointCloud | xr.DataArray | xr.Dataset | gpd.GeoDataFrame: ...
 
     @_deprecate_keyword("data_column_name", "data_name")
     def to_pointcloud(
@@ -2845,7 +2875,7 @@ class RasterBase(ABC):
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
         mp_config: MultiprocConfig | None = None,
         force_output_to_memory: bool = False,
-        backend: Literal["geopandas", "xarray"] = "geopandas",
+        pointcloud_return_type: Literal["dataarray", "dataset", "geodataframe"] | None = None,
     ) -> Any:
         """
         Convert raster cells to a point cloud, optionally selecting a random subsample.
@@ -2874,13 +2904,13 @@ class RasterBase(ABC):
 
         :raises ValueError: If the sample count or fraction is poorly formatted.
 
-        :param backend: Geometry-backed GeoPandas points or Xarray points with numeric coordinates.
+        :param pointcloud_return_type: Returned representation: dataarray, dataset, or geodataframe. None uses
+            config["pointcloud_return_type"] for accessors, or returns a PointCloud for GeoUtils objects.
         :returns: A point cloud, or array of the shape (N, 2 + count) where N is the sample count.
         """
 
-        if backend not in ("geopandas", "xarray"):
-            raise ValueError("Point cloud backend must be 'geopandas' or 'xarray'.")
-        if backend == "xarray" and mp_config is not None:
+        output_type = self._resolve_pointcloud_output_type(pointcloud_return_type)
+        if not self._is_xr and output_type != "geodataframe" and mp_config is not None:
             raise ValueError("Xarray point output uses Dask chunks rather than mp_config.")
         output = _raster_to_pointcloud(
             source_raster=self,
@@ -2890,15 +2920,15 @@ class RasterBase(ABC):
             auxiliary_column_names=auxiliary_column_names,
             subsample=subsample,
             skip_nodata=skip_nodata,
-            as_array="xarray" if backend == "xarray" and not as_array else as_array,
+            as_array="xarray" if output_type != "geodataframe" and not as_array else as_array,
             random_state=random_state,
             force_pixel_offset=force_pixel_offset,
             mp_config=mp_config,
             force_output_to_memory=force_output_to_memory,
         )
-        if as_array or backend == "xarray":
+        if as_array or (not self._is_xr and pointcloud_return_type is None):
             return output
-        return self._cast_pointcloud_output(output)
+        return self._cast_pointcloud_output(output, pointcloud_return_type=output_type)
 
     @classmethod
     @_deprecate_keyword("data_column_name", "data_name")
@@ -3030,7 +3060,7 @@ class RasterBase(ABC):
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
         force_output_to_memory: bool = False,
         mp_config: MultiprocConfig | None = None,
-        backend: Literal["xarray"],
+        pointcloud_return_type: Literal["dataarray"],
     ) -> xr.DataArray: ...
 
     @overload
@@ -3048,8 +3078,8 @@ class RasterBase(ABC):
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
         force_output_to_memory: bool = False,
         mp_config: MultiprocConfig | None = None,
-        backend: Literal["geopandas"] = "geopandas",
-    ) -> PointCloud: ...
+        pointcloud_return_type: Literal["geodataframe"],
+    ) -> gpd.GeoDataFrame: ...
 
     @overload
     def subsample(
@@ -3066,7 +3096,7 @@ class RasterBase(ABC):
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
         force_output_to_memory: bool = False,
         mp_config: MultiprocConfig | None = None,
-        backend: Literal["geopandas", "xarray"] = "geopandas",
+        pointcloud_return_type: Literal["dataarray", "dataset", "geodataframe"] | None = None,
     ) -> NDArrayNum: ...
 
     @overload
@@ -3084,7 +3114,7 @@ class RasterBase(ABC):
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
         force_output_to_memory: bool = False,
         mp_config: MultiprocConfig | None = None,
-        backend: Literal["geopandas", "xarray"] = "geopandas",
+        pointcloud_return_type: Literal["dataarray", "dataset", "geodataframe"] | None = None,
     ) -> tuple[NDArrayNum, ...]: ...
 
     @overload
@@ -3102,8 +3132,8 @@ class RasterBase(ABC):
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
         force_output_to_memory: bool = False,
         mp_config: MultiprocConfig | None = None,
-        backend: Literal["geopandas", "xarray"] = "geopandas",
-    ) -> NDArrayNum | tuple[NDArrayNum, ...] | PointCloud | xr.DataArray: ...
+        pointcloud_return_type: Literal["dataarray", "dataset", "geodataframe"] | None = None,
+    ) -> NDArrayNum | tuple[NDArrayNum, ...] | PointCloud | xr.DataArray | xr.Dataset | gpd.GeoDataFrame: ...
 
     @profiler.profile("geoutils.raster.base.subsample", memprof=True)
     def subsample(
@@ -3120,7 +3150,7 @@ class RasterBase(ABC):
         force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
         force_output_to_memory: bool = False,
         mp_config: MultiprocConfig | None = None,
-        backend: Literal["geopandas", "xarray"] = "geopandas",
+        pointcloud_return_type: Literal["dataarray", "dataset", "geodataframe"] | None = None,
     ) -> Any:
         """
         Randomly sample raster cells without replacement.
@@ -3129,9 +3159,9 @@ class RasterBase(ABC):
         are applied to every requested band, so values and point coordinates remain aligned. Auxiliary band nodata
         alone does not remove a point.
 
-        Raster inputs return a PointCloud by default. Xarray accessor inputs return a GeoDataFrame, and Dask-backed
-        accessors return a lazy Dask GeoDataFrame. With ``as_array=True``, return values from one band or their source
-        row and column positions.
+        Raster inputs return a PointCloud by default. Xarray accessor outputs follow config["pointcloud_return_type"],
+        which defaults to a DataArray. Dask outputs stay lazy. With ``as_array=True``, return values from one band
+        or their source row and column positions.
 
         :param subsample: Fraction of eligible cells to extract when at most 1, otherwise the maximum cell count.
         :param bands: Bands to return. By default, point output includes every band and array output includes band one.
@@ -3149,13 +3179,13 @@ class RasterBase(ABC):
         :param mp_config: Worker, tile, and output settings for multiprocessing. Point output uses GeoPackage, LAS or
             LAZ; LAS/LAZ stores the first selected band as elevation. Large array output uses NumPy format.
 
-        :param backend: Geometry-backed GeoPandas points or Xarray points with numeric coordinates.
+        :param pointcloud_return_type: Returned representation: dataarray, dataset, or geodataframe. None uses
+            config["pointcloud_return_type"] for accessors, or returns a PointCloud for GeoUtils objects.
         :returns: Point output with one row per sampled cell, one-dimensional sampled values, or row/column positions.
         """
 
-        if backend not in ("geopandas", "xarray"):
-            raise ValueError("Point cloud backend must be 'geopandas' or 'xarray'.")
-        if backend == "xarray" and mp_config is not None and not as_array:
+        output_type = self._resolve_pointcloud_output_type(pointcloud_return_type)
+        if not self._is_xr and output_type != "geodataframe" and mp_config is not None and not as_array:
             raise ValueError("Xarray point output uses Dask chunks rather than mp_config.")
         if as_array:
             if bands is None:
@@ -3212,14 +3242,16 @@ class RasterBase(ABC):
             auxiliary_data_bands=selected_bands[1:],
             auxiliary_column_names=column_names[1:],
             skip_nodata=skip_nodata,
-            as_array="xarray" if backend == "xarray" else False,
+            as_array="xarray" if output_type != "geodataframe" else False,
             random_state=random_state,
             force_pixel_offset=force_pixel_offset,
             mp_config=mp_config,
             force_output_to_memory=force_output_to_memory,
             rename_default_data_name=False,
         )
-        return output if backend == "xarray" else self._cast_pointcloud_output(output)
+        if not self._is_xr and pointcloud_return_type is None:
+            return output
+        return self._cast_pointcloud_output(output, pointcloud_return_type=output_type)
 
     def estimate_error_structure(
         self,

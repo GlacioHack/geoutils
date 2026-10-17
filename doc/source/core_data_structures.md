@@ -180,6 +180,7 @@ and the **GeoPandas {class}`pc <geoutils.GeoDataFramePointCloudAccessor>` for ge
 
 ```{note}
 Using {func}`~geoutils.open_pointcloud` returns a {class}`~xarray.DataArray` by default, and a {class}`~geopandas.GeoDataFrame` with `as_object_type="geodataframe"`.
+Set `gu.config["pointcloud_return_type"]` to choose a session default; see {ref}`config`.
 ```
 
 For example, below we **time both ways** of opening a LAZ point cloud:

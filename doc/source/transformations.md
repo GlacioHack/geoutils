@@ -867,7 +867,7 @@ ds_from_points = ds.rst.from_pointcloud_regular(points, transform=ds.rst.transfo
 
 f, ax = plt.subplots(1, 2)
 ax[0].set_title("Regular subsampled\npoint cloud")
-points.pc.plot(ref=ds, ax=ax[0], cmap="terrain", legend=True, cbar_title="Elevation (m)", markersize=2)
+points.pc.plot(ref=ds, ax=ax[0], cmap="terrain", cbar_title="Elevation (m)", markersize=2)
 ax[1].set_title("Raster from\npoint cloud")
 ds_from_points.rst.plot(ax=ax[1], cmap="terrain", cbar_title="Elevation (m)")
 _ = ax[1].set_yticklabels([])
