@@ -123,7 +123,7 @@ GeoUtils supports the following raster and point filters. See {ref}`transformati
 for illustrations of supported reducers.
 
 ```{seealso}
-Refer to {ref}`core-operators` for more details and customization of reducers and neighborhoods.
+Refer to {ref}`core-operators` for more details on reducers and neighborhoods.
 ```
 
 | Method | Description                                           | Raster | Point |

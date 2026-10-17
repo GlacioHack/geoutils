@@ -166,7 +166,7 @@ variogram.to_dataframe().head()
 (scalability-downsampling-overviews)=
 ## Raster overviews
 
-GeoUtils **reads suitable raster overviews** in GeoTIFFs/COGs through [Rasterio](https://rasterio.readthedocs.io/en/stable/) when specifying an overview level, 
+GeoUtils **reads suitable raster overviews** in GeoTIFFs/COGs through [Rasterio](https://rasterio.readthedocs.io/en/stable/) when specifying an overview level,
 or when opening with `downsample`,.
 
 [Overviews](https://rasterio.readthedocs.io/en/stable/topics/overviews.html) are coarser copies stored inside or beside a raster file, avoid reading and
@@ -216,7 +216,7 @@ print("downsample=3 pixels:", ds_factor3.size)
 
 During downsampling, GeoUtils **stores which overview was selected** for future inspection.
 
-See {ref}`scalability-formats` for reading remote files in the cloud, including with overviews.
+See {ref}`scalability-formats` for reading remote raster files in the cloud, including with overviews.
 
 ```{code-cell} ipython3
 :tags: [remove-cell]
@@ -273,7 +273,7 @@ print("Sampled points:", ds_copc_sample.pc.point_count)
 
 As for raster overviews, during downsampling of point clouds, GeoUtils **stores which levels were selected**.
 
-See {ref}`scalability-formats` for reading remote files in the cloud, including with levels of detail.
+See {ref}`scalability-formats` for reading remote point cloud files in the cloud, including with levels of detail.
 
 ```{code-cell} ipython3
 :tags: [remove-cell]

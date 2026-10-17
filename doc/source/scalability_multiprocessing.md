@@ -11,21 +11,21 @@ kernelspec:
   name: geoutils
 ---
 (multiprocessing)=
-
 # Multiprocessing configuration
 
-GeoUtils implements logics from Python's [multiprocessing library](https://docs.python.org/3/library/multiprocessing.html) library
-to process raster, vector and point cloud data in chunks without loading the entire dataset into memory when working with **GeoUtils objects**
+GeoUtils implements logic from Python's [multiprocessing library](https://docs.python.org/3/library/multiprocessing.html) library to process raster, vector and point cloud data
+in chunks without loading the entire dataset into memory **when working with **GeoUtils objects**.
 ({class}`~geoutils.Raster`, {class}`~geoutils.Vector` and {class}`~geoutils.PointCloud`),
 
+```{important}
 When using the {class}`rst <geoutils.DataArrayRasterAccessor>`, {class}`vct <geoutils.GeoDataFrameVectorAccessor>` and {class}`pc <geoutils.GeoDataFramePointCloudAccessor>` **accessors**, use Dask instead.
+```
 
-See {ref}`scalability-usage` for the main Dask and Multiprocessing workflows, {ref}`scalability-concept` for the
-execution model, and {ref}`scalability-support` for the operations supported by each backend.
+Below, we show how to configure multiprocessing for chunked execution on various cases.
 
 ## Using {class}`~geoutils.multiproc.MultiprocConfig`
 
-{class}`~geoutils.multiproc.MultiprocConfig` defines chunk processing settings, such as chunks, output file, driver,
+{class}`~geoutils.multiproc.MultiprocConfig` defines processing settings, such as chunk sizes, output file, driver,
 and computing cluster. Pass it as `mp_config` to a supported method to trigger out-of-memory execution.
 
 ### Raster example
@@ -44,17 +44,16 @@ rast_reprojected = rast.reproject(res=rast.res[0] * 2, mp_config=raster_config)
 rast_reprojected
 ```
 
-- **`chunks=200`**: The raster is divided into 200x200 pixel blocks.
-
 By default, chunks are processed sequentially. The output is returned as an unloaded
 {class}`~geoutils.Raster`, allowing another chunked operation to follow without loading its values.
-When `outfile` is omitted, it is saved to a temporary file available through `rast_reprojected.name` until the file
+
+An `outfile` can be specified. If not, the file is saved to a temporary file available until the file
 is deleted or the system cleans its temporary directory.
 
 ### Adding parallel workers
 
 To process chunks in parallel, pass a {class}`~geoutils.multiproc.MpCluster` using
-{class}`~geoutils.multiproc.ClusterGenerator`:
+{class}`~geoutils.multiproc.ClusterGenerator`, with your desired number of workers:
 
 ```{code-cell} ipython3
 from geoutils.multiproc import ClusterGenerator

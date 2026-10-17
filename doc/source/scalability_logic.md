@@ -19,9 +19,25 @@ Other operations are more complex, requiring {ref}`specific logic described furt
 - The {meth}`rst.reproject() <RasterBase.reproject>` function **maps the intersection of projected source grid chunks for each destination chunk** (with potentially different CRS, resolution and bounds),
 - The {meth}`rst.polygonize() <RasterBase.polygonize>` function implements **three chunk-boundary reconciliation strategies** with different considerations for connected-component labeling and stitching of geometries,
 - The {meth}`vct.rasterize() <VectorBase.rasterize>` function performs a geometry subsetting then directly **maps rasterized output blocks** only utilizing these subset geometries,
-- The {meth}`rst.interp_at_points() <RasterBase.interp_at_points>` function performs a **fast regular-grid mapping of point locations in raster chunks**, expanding raster chunks by a few pixels depending on the resampling method, then performing ordered concatenation of outputs,
-- The {meth}`pc.grid() <PointCloudBase.grid>` function **maps point partitions to independent output raster chunks**.
-- The {meth}`rst.subsample() <RasterBase.subsample>`, co-sampling, pair sampling and statistics count or select data per tile or partition before combining bounded results,
+- The {meth}`rst.resample_at_points() <RasterBase.resample_at_points>` function performs a **fast equal-grid mapping of point locations in raster chunks**, expanding raster chunks by a few pixels depending on the resampling method, then performing ordered concatenation of outputs,
+- The {meth}`pc.grid() <PointCloudBase.grid>` function **maps point partitions to independent output raster chunks**,
+- The {meth}`pc.filter() <PointCloudBase.filter>` function **maps each target partition to nearby points across source partitions**, expanding its bounds by the search radius before reducing point neighborhoods independently,
+- The {meth}`rst/pc.subsample() <RasterBase.subsample>` functions **counts valid values** per chunk, then uses **deterministic keys (top-k)** to select a random sample,
+- The {meth}`rst/pc.pairsample() <RasterBase.pairsample>` functions **build candidate pairs in bounded batches**, reusing first endpoints from a few raster chunks and applying offsets to find second endpoints (multiple strategies), then concatenates accepted pairs,
+- The {meth}`rst/pc.random_field() <RasterBase.random_field>` functions **evaluate one shared random model at the coordinates of each chunk**, using common global seeds.
+
+Many operations then rely on others for their core chunked support:
+- The {meth}`vct.create_mask() <VectorBase.create_mask>` function relies on chunked {meth}`vct.rasterize() <VectorBase.rasterize>`,
+- The {meth}`rst.clip() <RasterBase.clip>` function relies on chunked {meth}`vct.create_mask() <VectorBase.create_mask>`, then **applies the mask independently to each raster chunk**,
+- The {meth}`vct.proximity() <VectorBase.proximity>` function combines chunked {meth}`vct.create_mask() <VectorBase.create_mask>` with the overlap calculation of {meth}`rst.proximity() <RasterBase.proximity>`,
+- The {meth}`rst.interp_at_points() <RasterBase.interp_at_points>` and {meth}`rst.reduce_at_points() <RasterBase.reduce_at_points>` functions use the same **mapping of points to raster chunks** as {meth}`rst.resample_at_points() <RasterBase.resample_at_points>`, with overlap covering the interpolation or reduction neighborhood,
+- The {meth}`rst.to_pointcloud() <RasterBase.to_pointcloud>` function relies on chunked {meth}`rst.subsample() <RasterBase.subsample>`, assembling selected cell coordinates and values into point rows per chunk,
+- The {meth}`rst/pc.cosample() <RasterBase.cosample>` function then relies on chunked {meth}`vct.create_mask() <VectorBase.create_mask>`, {meth}`rst.reproject() <RasterBase.reproject>` and {meth}`rst/pc.subsample() <RasterBase.subsample>`, with some additional chunked indexing logic,
+- The {meth}`rst/pc.variogram() <RasterBase.variogram>` function relies on chunked {meth}`rst/pc.pairsample() <RasterBase.pairsample>`, followed by **chunked reduction per distance bin of variogram estimators** relying partially on Flox,
+- The {meth}`rst.stack() <RasterBase.stack>` and {meth}`rst.merge() <RasterBase.merge>` functions rely on chunked {meth}`rst.reproject() <RasterBase.reproject>`, followed by simple chunked concatenation and reduction with direct Dask support,
+- The {meth}`rst/pc.stats() <RasterBase.stats>` function relies on chunked {meth}`rst/pc.cosample() <RasterBase.cosample>`, fractional {meth}`vct.rasterize() <VectorBase.rasterize>` to compare on the same support with fractional coverage, followed by **grouped chunked reductions** based on Flox,
+- The {meth}`rst/pc.estimate_error_structure() <RasterBase.estimate_error_structure>` functions combine chunked {meth}`rst/pc.cosample() <RasterBase.cosample>`, {meth}`rst/pc.stats() <RasterBase.stats>` and {meth}`rst/pc.variogram() <RasterBase.variogram>`, with **error standardization per chunk** between magnitude and correlation estimation,
+- The {meth}`rst/pc.plot() <RasterBase.plot>` functions rely on chunked {meth}`rst.reproject() <RasterBase.reproject>` or {meth}`pc.subsample() <PointCloudBase.subsample>` to **reduce data to the display size** before plotting.
 
 (specific-logic)=
 ## Logic of implementations
@@ -47,7 +63,7 @@ source pixels, so downsampling can increase memory per output chunk. For example
 makes an output chunk cover about four times the source area. Choose smaller source chunks before reprojection
 when that increase would exceed available memory. Multiprocessing uses `mp_config.chunks` for the output tiles.
 
-Chunked reprojection requires an affine source grid; **GCP/RPC transformation models are not supported**.
+Chunked reprojection supports both affine grids and GCP/RPC transformation models.
 
 ### Chunked polygonization
 

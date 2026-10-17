@@ -332,7 +332,7 @@ directly on the GeoDataFrame.
 
 ```{eval-rst}
 .. minigallery:: geoutils.Vector geoutils.GeoDataFrameVectorAccessor
-      :add-heading:
+      :add-heading: Examples using vectors
 ```
 
 ### Opening a file
@@ -486,7 +486,7 @@ Native Xarray and GeoPandas methods remain available directly on their objects.
 
 ```{eval-rst}
 .. minigallery:: geoutils.PointCloud geoutils.GeoDataFramePointCloudAccessor
-      :add-heading:
+      :add-heading: Examples using point clouds
 ```
 
 See the {ref}`point cloud guide <point-cloud>` for their data and {ref}`scalability-usage` for execution options.

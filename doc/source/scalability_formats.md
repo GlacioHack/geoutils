@@ -21,8 +21,8 @@ Note that these formats are supported through other packages such as
 [PyArrow](https://arrow.apache.org/docs/python/), [LasPy](https://laspy.readthedocs.io/en/latest/) and
 [Zarr](https://zarr.readthedocs.io/en/stable/). Below, we simply **examplify how to use them through GeoUtils**.
 
-First, we help {ref}`<scalability-format-choice` for your data, then explain how to perform
-{ref}`scalability-cloud`, and finally how to deal with format-dependent intricacies to 
+First, we help {ref}`scalability-format-choice` for your data, then explain how to perform
+{ref}`scalability-cloud`, and finally how to deal with format-dependent intricacies to
 optimally perform {ref}`scalability-format-chunks`.
 
 (scalability-format-choice)=
@@ -124,15 +124,15 @@ be read and written independently on local disks or in cloud object storage, all
 save different parts of a dataset in parallel. See [Xarray's Zarr guide](https://docs.xarray.dev/en/stable/user-guide/io.html#zarr).
 
 **COGs support efficient spatial reads at different resolutions.** They organize tiles, overviews and
-metadata so readers can fetch the blocks needed for a spatial window or a coarser resolution. 
+metadata so readers can fetch the blocks needed for a spatial window or a coarser resolution.
 Remote reads avoid downloading the full raster. See our {ref}`scalability-downsampling-overviews` example.
 
 **COPC can speed up spatial operations** by letting GeoUtils read points from the area needed [through LasPy](https://laspy.readthedocs.io/en/latest/api/laspy.copc.html) instead of repeatedly
-scanning the file. They also store levels of detail, progressive subsamples of the point data equivalent to overviews. 
+scanning the file. They also store levels of detail, progressive subsamples of the point data equivalent to overviews.
 Both work with chunked, lazy reading. See our {ref}`scalability-downsampling-copc` example.
 
 **GeoParquet is useful for vectors and point clouds with many attributes.** It lets readers
-load only selected column attributes, while row groups allow data to be processed in chunks. Compression 
+load only selected column attributes, while row groups allow data to be processed in chunks. Compression
 reduces storage and transfer sizes. See [PyArrow's Parquet guide](https://arrow.apache.org/docs/python/parquet).
 
 (scalability-cloud)=
@@ -240,7 +240,7 @@ for name in ("elevation.tif", "survey.parquet"):
 import geoutils as gu
 
 # Server address, for example, "https://example.org/data"
-server_url = f"http://127.0.0.1:{server_port}/bucket"  
+server_url = f"http://127.0.0.1:{server_port}/bucket"
 
 # Open raster, point cloud or vector
 ds_remote = gu.open_raster(f"{server_url}/elevation.tif", chunks={"x": 256, "y": 256})
@@ -317,10 +317,10 @@ Leave credentials configured until lazy reads finish. With distributed Dask, set
 
 **Disk chunks are often overlooked**, while they are essential to efficient analysis.
 
-Indeed, **disk chunks need to align with compute chunks** we choose (through the `chunks=` arguments), and 
+Indeed, **disk chunks need to align with compute chunks** we choose (through the `chunks=` arguments), and
 be adapted to the nature of the analysis (spatial, temporal).
 
-Below, we show how to inspect files for their **disk chunk sizes**, then how to define **disk chunks** when writing, both for 
+Below, we show how to inspect files for their **disk chunk sizes**, then how to define **disk chunks** when writing, both for
 the different file formats.
 
 (scalability-point-reading)=

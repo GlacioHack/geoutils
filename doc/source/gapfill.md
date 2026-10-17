@@ -10,5 +10,4 @@ Use `resampling="idw"` (default) for inverse-distance interpolation, or `"neares
 The result preserves the raster grid and georeferencing.
 
 This method processes a **complete raster grid in memory**. Crop to the area of interest before filling gaps
-when the full grid is too large. See {ref}`filters-gap-filling` for an example and {ref}`scalability-support`
-for execution limits.
+when the full grid is too large. See {ref}`scalability-support` for execution limits.

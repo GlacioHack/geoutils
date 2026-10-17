@@ -156,21 +156,13 @@ This backend is convenient when working directly with {class}`~geoutils.Raster` 
 
 ## Good practices with chunked and lazy operations
 
-- Reduce data to the detail your analysis or figure needs. See {ref}`scalability-downsampling` for opening smaller
-  datasets, limiting plotting data and using raster overviews. Eager point cloud downsampling happens after reading
-  the file, so use `chunks` when the initial read must also stay partitioned and lazy.
-- If **memory** is the limiting factor for you, use a **single-threaded scheduler** through Dask (`dask.config.set(scheduler='single-threaded')`) or sequential chunk processing through Multiprocessing (default cluster),
-- If **speed** is the limiting factor for you, use **parallelized processes** through Dask (see [Dask scheduler configuration](https://docs.dask.org/en/stable/scheduler-overview.html#scheduler-overview)) or Multiprocessing (see our Cluster configuration),
+- **Downsample or use file overviews** when opening/plotting/analyzing data (see {ref}`scalability-downsampling` on how to do this in GeoUtils),
 - Choose chunk sizes large enough to reduce scheduling overhead, but **small enough to fit comfortably in memory**,
-- Check that your data files have **on-disk chunksizes** (otherwise loads everything) and use a multiple of it for optimal **in-memory chunking**,
-- Keep chunk sizes **consistent across operations** to avoid unnecessary rechunking,
+- Check that your data files have **disk chunksizes** (otherwise loads everything) and use a multiple of it for optimal **in-memory chunking** (see {ref}`scalability-formats` to handle disk chunks in GeoUtils),
+- If **memory** is the limiting factor for you, use a **single-threaded scheduler** through Dask (`dask.config.set(scheduler='single-threaded')`) or sequential chunk processing through multiprocessing (default cluster),
+- If **speed** is the limiting factor for you, use **parallelized processes** through Dask (see [Dask scheduler configuration](https://docs.dask.org/en/stable/scheduler-overview.html#scheduler-overview)) or through a {ref}`multiprocessing cluster<multiprocessing>`,
 - Insert **breakpoints** (for example by writing intermediate results to disk) to prevent building overly large Dask graphs.
-- Keep in mind that operations with a "bounded" result, such as statistics and plotting, reduce large inputs by reading in chunks but have to return their statistics summary or display data eagerly.
 
-- For more guidance on chunk sizing and performance, see the [Dask array best practices](https://docs.dask.org/en/stable/array-best-practices.html).
+For more guidance on chunk sizing and performance, see the [Dask array best practices](https://docs.dask.org/en/stable/array-best-practices.html).
 
 The full description of supported methods is available on the {ref}`scalability-support` page.
-
-Storage layout also determines how much data is read for a chunk. See {ref}`scalability-formats` for choosing
-between GeoPackage, LAS/LAZ/COPC and GeoParquet, matching raster chunks to disk tiles, and reading remote data or
-processing it on cloud machines.
