@@ -151,9 +151,13 @@ Refer to {ref}`core-operators` for more details on reducers and neighborhoods.
 
 ### Nodata propagation
 
-Filters can **use the available values around gaps** or **propagate missing values to the output**.
-Below, we give an example of both behaviors by applying a mean filter to a DEM with gaps:
+Filters can **customize how they handle missing values**. By default, we ignore them, but they can also be propagated.
 
+The following example covers both behaviors by applying a mean filter to a DEM with gaps:
+
+```{seealso}
+See {ref}`core-nodata` for more common nodata propagation rules across the package.
+```
 ```{code-cell} ipython3
 import numpy as np
 from geoutils.operators.reducer import Mean
@@ -193,19 +197,13 @@ for axis, raster, title in zip(
 plt.tight_layout()
 ```
 
-Gray areas show missing values.
-
-```{tip}
-To **calculate values at missing raster pixels**, set `preserve_nodata=False`.
-See {ref}`core-nodata` for more on nodata propagation in raster and point filters.
-```
 
 ### Custom point reducers
 
-A {ref}`custom reducer <core-custom-operators>` lets you **define a calculation on neighboring values**,
+You can define a {ref}`custom reducer <core-custom-operators>` to **customize the calculation on neighboring values**,
 while GeoUtils handles their selection and missing data.
 
-Below, we define a **trimmed mean**, which discards the lowest and highest values before averaging.
+Below, we show how define a **custom trimmed mean**, which discards the lowest and highest values before averaging.
 We apply it to a point cloud with a few added outliers to illustrate how it reduces their influence:
 
 ```{code-cell} ipython3
@@ -213,19 +211,20 @@ from geoutils.operators import LocalData, Reducer
 
 
 class TrimmedMean(Reducer):
-    """Average neighboring values after discarding one minimum and one maximum."""
+    """Custom trimmed mean reducer."""
 
+    # We define the minimum values required, below that a NaN is returned
     minimum_inputs = 3
-
+    
+    # The custom reducer simply needs to implement "reduce", which receives a local data object
     def reduce(self, data: LocalData) -> float:
-        """Calculate the trimmed mean from valid values in one neighborhood."""
-        # Remove the two extreme values without sorting the neighborhood
+        # Remove the two extreme values
         values = data.values
         trimmed_sum = np.sum(values) - np.min(values) - np.max(values)
         return float(trimmed_sum / (values.size - 2))
 
 
-# Add a few positive outliers to a copy of the sampled elevations
+# Add some outliers to the input raster
 noisy_values = np.array(points.pc.data, dtype=float, copy=True)
 noisy_values[::100] += 2000
 noisy_points = points.pc.copy(new_array=noisy_values)
@@ -255,21 +254,6 @@ trimmed_points.pc.plot(
 )
 _ = ax[1].set_yticklabels([])
 plt.tight_layout()
-```
-
-The same reducer also supports **lazy, chunked execution with Dask**:
-
-```{code-cell} ipython3
-# Split the points into chunks of 500 and build a lazy filtering calculation
-chunked_points = noisy_points.pc.to_xarray().chunk({"point": 500})
-lazy_trimmed = chunked_points.pc.filter(
-    TrimmedMean(), radius=1000, max_points=20, batch_size=256
-)
-```
-
-```{tip}
-Use a **finite radius** for chunked point filters so each chunk can read its surrounding neighbors.
-See {ref}`scalability-support` for details on chunked execution.
 ```
 
 ### Custom raster functions
@@ -306,9 +290,4 @@ ax[1].set_title("Terrain slope")
 ds_slope.rst.plot(ax=ax[1], cmap="magma", cbar_title="Slope (°)", vmin=0, vmax=60)
 _ = ax[1].set_yticklabels([])
 plt.tight_layout()
-```
-
-```{tip}
-When filtering in chunks, include the **neighboring pixels needed by your function** in `window`.
-Here, the gradient uses one pixel on either side, so `window=3` is sufficient.
 ```

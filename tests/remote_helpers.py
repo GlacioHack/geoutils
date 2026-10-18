@@ -165,6 +165,8 @@ def mock_remote_files(
             "AWS_HTTPS": "NO",
             "AWS_VIRTUAL_HOSTING": "FALSE",
             "AWS_NO_SIGN_REQUEST": "YES",
+            # Discard cached S3 contents on close because tests reuse the same bucket paths
+            "CPL_VSIL_CURL_NON_CACHED": "/vsis3/bucket/",
             "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
             "GDAL_HTTP_TIMEOUT": "5",
             "GDAL_HTTP_MAX_RETRY": "0",

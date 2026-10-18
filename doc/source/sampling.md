@@ -64,7 +64,9 @@ glaciers = gu.open_vector(gu.examples.get_path("exploradores_rgi_outlines"))
 Subsampling selects **a subset of locations without replacement**, by default including only valid values.
 
 A subsample size between 0 and 1 selects a fraction of the data, a larger value sets the maximum number of samples.
-By default, the result is a point cloud that keeps the values, coordinates and CRS.
+By default, the result is a point cloud.
+
+For example, we subsample points in a raster:
 
 ```{code-cell} ipython3
 # Select 2000 valid raster cells as a point cloud
@@ -94,8 +96,6 @@ axes[1].set_yticklabels([])
 plt.tight_layout()
 ```
 
-
-
 (sampling-cosample)=
 ## Co-sampling
 
@@ -105,8 +105,19 @@ plt.tight_layout()
 Co-sampling selects **two datasets at common valid locations**, accounting for their spatial extents, nodata and
 optional masks.
 
-Raster–point comparisons return a point cloud by default, keeping only point locations supported by both inputs.
-Use `subsample` to select part of that common support.
+The **support** on which the datasets are sampled can be specified with `at`.
+
+```{important}
+If inputs are not aligned in CRS, or differ in type, cosampling will automatically resample them at the common support, respecting 
+their chunks. 
+For a **raster-point comparison**, use `raster_point_mode` to specify if you want the point input to be gridded, 
+or the raster input to be resampled at points. By default, raster-raster comparisons return the raster from which the function is called, while raster–point return 
+the support of the point cloud.
+```
+
+Below, we cosample a point and a raster, with a vector **mask** to further reduce the locations, and a **subsample** to further 
+reduce the output.
+
 
 ```{code-cell} ipython3
 :tags: [hide-cell]
@@ -114,30 +125,29 @@ Use `subsample` to select part of that common support.
 :  code_prompt_show: "Show the code for creating the example point cloud"
 :  code_prompt_hide: "Hide the code for creating the example point cloud"
 
-# Create a random point cloud extending beyond every side of the raster
+# Create a narrow diagonal swath extending past the raster's left and right edges
 rng = np.random.default_rng(42)
 raster_width = ds.rst.bbox.right - ds.rst.bbox.left
 raster_height = ds.rst.bbox.top - ds.rst.bbox.bottom
-x_points = rng.uniform(ds.rst.bbox.left - raster_width / 4, ds.rst.bbox.right + raster_width / 4, 2000)
-y_points = rng.uniform(ds.rst.bbox.bottom - raster_height / 4, ds.rst.bbox.top + raster_height / 4, 2000)
+x_scaled = np.linspace(-0.15, 1.15, 800)
+y_scaled = 0.2 + 0.6 * x_scaled + rng.uniform(-0.04, 0.04, x_scaled.size)
+x_points = ds.rst.bbox.left + x_scaled * raster_width
+y_points = ds.rst.bbox.bottom + y_scaled * raster_height
 
 # Give the points a smooth synthetic elevation field with small random variations
-x_scaled = (x_points - ds.rst.bbox.left) / raster_width
-y_scaled = (y_points - ds.rst.bbox.bottom) / raster_height
-point_elevation = 1800 + 900 * y_scaled + 500 * np.sin(2 * np.pi * x_scaled) + rng.normal(0, 100, 2000)
-random_points = gu.pointcloud.from_xyz(
+point_elevation = 1800 + 900 * y_scaled + 500 * np.sin(2 * np.pi * x_scaled) + rng.normal(0, 100, x_scaled.size)
+swath_points = gu.pointcloud.from_xyz(
     x_points,
     y_points,
     point_elevation,
     crs=ds.rst.crs,
     data_name="elevation",
-    as_object_type="geodataframe",
 )
 ```
 
 ```{code-cell} ipython3
 # Keep finite values shared by the raster and points inside the glacier outlines
-paired = ds.rst.cosample(random_points, mask=glaciers)
+paired = ds.rst.cosample(swath_points, mask=glaciers, subsample=100, random_state=42)
 ```
 
 ```{code-cell} ipython3
@@ -149,15 +159,15 @@ paired = ds.rst.cosample(random_points, mask=glaciers)
 from matplotlib.lines import Line2D
 fig, axes = plt.subplots(1, 3, figsize=(12, 4))
 ds.rst.plot(ax=axes[0], cmap="terrain", vmin=300, vmax=4000, cbar_title="Elevation (m)")
-random_points.pc.plot(ax=axes[0], color="darkred", add_cbar=False, marker="x", markersize=3)
+swath_points.pc.plot(ax=axes[0], color="darkred", add_cbar=False, marker="x", markersize=3)
 glaciers.vct.plot(ref=ds, ax=axes[0], ec="k", fc="none", linewidth=0.6)
 axes[0].set_xlim(x_points.min(), x_points.max())
-axes[0].set_ylim(y_points.min(), y_points.max())
+axes[0].set_ylim(ds.rst.bbox.bottom, ds.rst.bbox.top)
 axes[0].set_title("All input datasets")
 axes[0].legend(
     handles=[
         Line2D([0], [0], color="k", label="Vector mask"),
-        Line2D([0], [0], color="darkred", marker="x", linestyle="none", label="Point cloud"),
+        Line2D([0], [0], color="darkred", marker="x", linestyle="none", label="Point swath"),
     ],
     loc="lower right",
     fontsize=8,
@@ -197,10 +207,14 @@ axes[2].set_yticklabels([])
 plt.tight_layout()
 ```
 
+The output contains two "self" and "other" in its columns or band variables. In this case, the default point output is a 
+{class}`xarray.DataArray`:
 
-The point output is a {class}`geopandas.GeoDataFrame` with `"self"` and `"other"` columns on the common locations.
-GeoUtils object calls return the corresponding {class}`~geoutils.PointCloud`. Co-sampling on a raster grid instead
-returns a {class}`xarray.DataArray` or {class}`~geoutils.Raster`.
+```{code-cell} ipython3
+:tags: [hide-input]
+
+paired
+```
 
 (sampling-pairs)=
 ## Pair-sampling
@@ -208,10 +222,9 @@ returns a {class}`xarray.DataArray` or {class}`~geoutils.Raster`.
 {meth}`ds.rst.pairsample() or Raster.pairsample() <RasterBase.pairsample>`<br>
 {meth}`gdf.pc.pairsample() or PointCloud.pairsample() <PointCloudBase.pairsample>`
 
-Pair-sampling selects **pairs of valid locations and their spatial separation** without calculating every possible
-combination.
+Pair-sampling selects **pairs of valid locations and their spatial separation** efficiently on large data.
 
-The example below samples 750 pairs of raster cells, with a closer look on four pairs and their separation distance:
+The example below samples pairs of raster values, with a closer look on 4 pairs and their separation distance:
 
 ```{code-cell} ipython3
 # Sample raster pairs over distances up to 5 km
@@ -230,6 +243,7 @@ from matplotlib.ticker import MaxNLocator
 
 fig, axes = plt.subplots(1, 2, figsize=(9, 4))
 endpoint_colors = ["tab:blue", "tab:orange"]
+endpoint_names = ["A", "B"]
 for axis in axes:
     ds.rst.plot(ax=axis, cmap="gray", vmin=300, vmax=4000, add_cbar=False, alpha=0.3)
     axis.xaxis.set_major_locator(MaxNLocator(4))
@@ -244,7 +258,7 @@ for endpoint, (color, marker) in enumerate(zip(endpoint_colors, endpoint_markers
         color=color,
         marker=marker,
         linewidths=0.4,
-        label=f"Endpoints {endpoint + 1}",
+        label=f"Endpoints {endpoint_names[endpoint]}",
     )
 axes[0].set_title("All sampled pair endpoints")
 axes[0].legend(loc="lower right", fontsize=8, markerscale=2)
@@ -284,7 +298,7 @@ for endpoint, color in enumerate(endpoint_colors):
         example_pairs["y"].isel(endpoint=endpoint),
         s=20,
         color=color,
-        label=f"Endpoints {endpoint + 1}",
+        label=f"Endpoints {endpoint_names[endpoint]}",
     )
 axes[1].set_title("Four pairs from the sample")
 axes[1].set_yticklabels([])
@@ -301,8 +315,8 @@ and distances. Distances use the CRS units.
 pairs
 ```
 
-The **default `sampling="loglag"` balances short and long separations by sampling uniformly with logarithmic distance**,
-while `sampling="random_xy"` select endpoints at random X/Y coordinates that can undersample close or far pairs.
+The **default `sampling="loglag"` balances separations by sampling uniformly with logarithmic distance**, 
+while `sampling="random_xy"` select endpoints at random X/Y coordinates that can severely undersample close or far pairs.
 Use `min_distance`, `max_distance` or `mask` to limit the location or distances of sampled pairs.
 
 ```{code-cell} ipython3
@@ -337,20 +351,45 @@ To estimate a variogram from these pairs, use {meth}`~geoutils.Variogram.from_pa
 
 ### Subsampling options
 
-Use `mask` to limit eligible locations. Set `as_array=True` to return values alone, and add
-`return_indices=True` to return source positions instead. Raster positions are returned as rows and columns; point
-cloud positions refer to the original table.
+Set `as_array=True` to return **values alone**, and use `mask` to limit eligible locations. Add
+`return_indices=True` to return **source positions** instead: rows and columns for rasters, or row positions for
+point clouds.
+
+Below, we select 10% of valid elevations inside the glacier outlines. Repeating the call with the same seed and
+`return_indices=True` locates those values in the original raster.
 
 ```{code-cell} ipython3
-# Select 10% of valid elevations inside glacier outlines as an array
+# Select elevations and their source positions inside glacier outlines
 glacier_values = ds.rst.subsample(0.1, mask=glaciers, as_array=True, random_state=42)
-glacier_values[:5]
+glacier_rows, glacier_columns = ds.rst.subsample(
+    0.1, mask=glaciers, as_array=True, return_indices=True, random_state=42
+)
+```
+
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for plotting the figure"
+:  code_prompt_hide: "Hide the code for plotting the figure"
+
+# Map the sampled source positions inside glacier outlines
+glacier_x, glacier_y = ds.rst.ij2xy(glacier_rows, glacier_columns)
+fig, axes = plt.subplots(1, 2, figsize=(8, 3.5))
+ds.rst.plot(ax=axes[0], cmap="gray", add_cbar=False, alpha=0.3)
+glaciers.vct.plot(ref=ds, ax=axes[0], ec="k", fc="none", linewidth=0.6)
+axes[0].scatter(glacier_x, glacier_y, s=0.1, color="darkred")
+axes[0].set_title("10% of valid glacier cells")
+
+# Show the distribution of sampled elevations
+axes[1].hist(glacier_values, bins=20, color="darkred")
+axes[1].set(title="Sampled elevations", xlabel="Elevation (m)", ylabel="Number of cells")
+plt.tight_layout()
 ```
 
 ### Choosing cosampled support
 
-Use `at="self"`, `at="other"` or a spatial object to choose the exact output locations. Raster–point comparisons
-use point locations by default. Their conversion direction can also be set explicitly:
+Use `at="self"`, `at="other"` or a spatial object to **choose the output locations**. Raster–point comparisons
+use point locations by default. Their conversion direction can also be set with `raster_point_mode`:
 
 | Mode | Output locations | Value calculation |
 | --- | --- | --- |
@@ -358,41 +397,124 @@ use point locations by default. Their conversion direction can also be set expli
 | `"grid_points"` | Raster grid | Grid point values with `grid_method`, passed to {meth}`grid() <PointCloudBase.grid>` |
 
 Both interpolation and gridding default to `"linear"`. Pass method-specific options through `resample_kwargs` or
-`grid_kwargs`. For example, the points can be averaged onto the raster grid with:
+`grid_kwargs`.
 
-```python
-on_grid = ds.rst.cosample(
-    random_points,
-    raster_point_mode="grid_points",
+Here, we average point elevations onto a 500 m raster grid, using a neighborhood radius of two output pixels.
+The `at="self"` argument selects the grid of the raster on which we call cosample().
+
+```{code-cell} ipython3
+# Create a coarser raster and average the points onto its grid
+reference_grid = ds.rst.reproject(res=500)
+on_grid = reference_grid.rst.cosample(
+    swath_points,
+    at="self",
     grid_method="mean",
     grid_kwargs={"radius": 2, "min_points": 3},
 )
 ```
 
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for plotting the figure"
+:  code_prompt_hide: "Hide the code for plotting the figure"
+
+# Compare the original point elevations with their means on the raster grid
+fig, axes = plt.subplots(1, 2, figsize=(9, 3.5))
+swath_points.pc.plot(
+    ref=ds, ax=axes[0], cmap="terrain", vmin=300, vmax=4000,
+    cbar_title="Elevation (m)", markersize=4,
+)
+axes[0].set_title("Point elevations")
+
+# Plot the second band, which contains the averaged point elevations
+on_grid.isel(band=1).rst.plot(
+    ax=axes[1], cmap="terrain", vmin=300, vmax=4000, cbar_title="Elevation (m)",
+    interpolation="nearest",
+)
+axes[1].set_title("Mean point elevation\non a 500 m grid")
+axes[1].tick_params(labelleft=False)
+plt.tight_layout()
+```
+
 ### Auxiliary variables
 
-Use `auxiliary` to carry predictors, weights or other values through the same selection. Spatial inputs provide
-their coordinates; use `auxiliary_at` to identify the primary grid or point order followed by a plain array.
+Use `auxiliary` to **sample additional variables at the same locations**. These can be predictors, weights or
+other values. Spatial inputs provide their coordinates; use `auxiliary_at` to identify the primary grid or point
+order followed by a plain array.
+
+For example, we carry each point's original row number through the common selection. The same colors identify
+these points on the map and in the elevation comparison.
 
 ```{code-cell} ipython3
 # Carry the point identifiers through the same common selection
+point_ids = np.arange(swath_points.pc.point_count)
 with_auxiliary = ds.rst.cosample(
-    random_points,
-    auxiliary={"point_id": np.arange(len(random_points))},
+    swath_points,
+    auxiliary={"point_id": point_ids},
     auxiliary_at="other",
 )
-with_auxiliary.columns
 ```
 
-Outputs store `"self"`, `"other"`, then auxiliary names in mapping order.
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for plotting the figure"
+:  code_prompt_hide: "Hide the code for plotting the figure"
+
+# Color both the map and the elevation comparison by the original point identifiers
+fig, axes = plt.subplots(1, 2, figsize=(9, 3.5))
+with_auxiliary.pc.plot(
+    column="point_id", ref=ds, ax=axes[0], cmap="viridis", vmin=0, vmax=point_ids[-1],
+    cbar_title="Original point row", markersize=4,
+)
+axes[0].set_title("Selected point identifiers")
+
+# Compare raster and point elevations with the same identifier colors
+axes[1].scatter(
+    with_auxiliary, with_auxiliary["other"], c=with_auxiliary["point_id"],
+    cmap="viridis", vmin=0, vmax=point_ids[-1], s=4,
+)
+axes[1].set(
+    title="Co-located elevations", xlabel="Raster elevation (m)", ylabel="Point elevation (m)"
+)
+plt.tight_layout()
+```
+
+For a point DataArray, `"self"` contains the active values, while `"other"` and the auxiliaries are coordinates.
+Raster outputs store these variables as bands; GeoDataFrame outputs store them as columns.
 
 (sampling-reproducibility)=
 ### Reproducibility and chunked execution
 
-Set `random_state` to reproduce a selection. The default `strategy="topk"` for subsampling and co-sampling keeps the
-same seeded raster locations across chunk layouts; `"sequential"` follows the order of valid values. Pair-sampling
+Set `random_state` to **reproduce a selection**. The default `strategy="topk"` for subsampling and co-sampling selects
+the same seeded raster locations across chunk layouts; `"sequential"` follows the order of valid values. Pair-sampling
 uses its own strategies, some of which depend on chunk layout.
 
-Subsampling and co-sampling preserve lazy Dask outputs where possible. `pairsample()` returns an in-memory
-{class}`xarray.Dataset`. Use `mp_config` for multiprocessing on eager or unloaded data; it cannot be combined with
-Dask input. See {ref}`scalability-logic` for details of the chunked algorithms.
+Below, we sample the same raster with chunks of 128 × 128 and 256 × 256 cells. Both samples contain the same
+locations and values. The returned point arrays stay lazy until their values are requested, for example by plotting.
+
+```{code-cell} ipython3
+# Repeat the seeded selection with two raster chunk layouts
+sample_128 = ds.chunk({"y": 128, "x": 128}).rst.subsample(200, random_state=42)
+sample_256 = ds.chunk({"y": 256, "x": 256}).rst.subsample(200, random_state=42)
+```
+
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for plotting the figure"
+:  code_prompt_hide: "Hide the code for plotting the figure"
+
+# Plot both samples over the same raster so their selected locations can be compared
+fig, axes = plt.subplots(1, 2, figsize=(8, 3.5))
+for axis, sample, chunk_size in zip(axes, [sample_128, sample_256], [128, 256]):
+    ds.rst.plot(ax=axis, cmap="gray", add_cbar=False, alpha=0.3)
+    sample.pc.plot(ref=ds, ax=axis, color="darkred", add_cbar=False, markersize=5)
+    axis.set_title(f"{chunk_size} × {chunk_size} raster chunks\nSame seed: 42")
+axes[1].tick_params(labelleft=False)
+plt.tight_layout()
+```
+
+Pair-sampling returns an in-memory {class}`xarray.Dataset`. Use `mp_config` for multiprocessing on eager or
+unloaded data; it cannot be combined with Dask input. See {ref}`scalability-logic` for details of the chunked algorithms.
