@@ -215,7 +215,7 @@ class TrimmedMean(Reducer):
 
     # We define the minimum values required, below that a NaN is returned
     minimum_inputs = 3
-    
+
     # The custom reducer simply needs to implement "reduce", which receives a local data object
     def reduce(self, data: LocalData) -> float:
         # Remove the two extreme values

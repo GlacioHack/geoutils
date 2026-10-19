@@ -82,6 +82,13 @@ class TestPointCloudOpening:
     ) -> None:
         """Checks that opening exposes source record sizes, LAZ block limits and Parquet row group sizes."""
 
+        if suffix.startswith("parquet"):
+            pytest.importorskip("pyarrow")
+        else:
+            pytest.importorskip("laspy")
+            if suffix == "laz":
+                pytest.importorskip("lazrs")
+
         # Write seven points so groups of three have a shorter final group
         cloud = gu.PointCloud.from_xyz(np.arange(7.0), np.zeros(7), np.arange(7.0), 32633, "Z")
         filename = tmp_path / ("parts" if suffix == "parquet-partitioned" else f"points.{suffix}")
@@ -264,8 +271,17 @@ class TestPointCloudOpeningChunked:
         self, tmp_path: Path, suffix: str, as_object_type: Literal["dataarray", "dataset", "geodataframe"]
     ) -> None:
         """Checks that disk metadata stays available without computing point values and matches eager opening."""
-        import_optional("dask")
+        pytest.importorskip("dask")
         from dask.callbacks import Callback
+
+        if as_object_type == "geodataframe":
+            pytest.importorskip("dask_geopandas")
+        if suffix.startswith("parquet"):
+            pytest.importorskip("pyarrow")
+        else:
+            pytest.importorskip("laspy")
+            if suffix == "laz":
+                pytest.importorskip("lazrs")
 
         # Write groups of three points; computation chunks of two split these disk groups differently
         cloud = gu.PointCloud.from_xyz(np.arange(7.0), np.zeros(7), np.arange(7.0), 32633, "Z")

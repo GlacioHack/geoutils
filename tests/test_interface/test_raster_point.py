@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ import numpy as np
 import pytest
 import rasterio as rio
 import xarray as xr
+from affine import Affine
 from numpy.typing import NDArray
 from rasterio.transform import from_origin
 from shapely.geometry import Point
@@ -350,6 +352,40 @@ class TestRasterPoint:
         # Reject duplicate or reserved names before constructing the dataframe
         with pytest.raises(ValueError, match="must be unique"):
             raster.to_pointcloud(**options)
+
+
+class TestRasterPointArrayChunked:
+    """Test module for Dask point conversion when some optional dependencies are missing."""
+
+    @pytest.mark.parametrize("subsample", [1, 5])
+    def test_to_pointcloud__multiple_opt_dep(self, subsample: int, monkeypatch: pytest.MonkeyPatch) -> None:
+        """
+        Checks that to_pointcloud() works properly when Dask-GeoPandas, LasPy and PyArrow are missing.
+
+        We use monkeypatch to hide Dask-GeoPandas, LasPy and PyArrow while Dask remains available.
+        We need this test because CI only tests environments with all optional dependencies or none.
+        """
+
+        # Make the optional geometry and file readers unavailable
+        pytest.importorskip("dask")
+        for other in ("dask_geopandas", "laspy", "pyarrow"):
+            monkeypatch.setitem(sys.modules, other, None)
+
+        # Split raster rows/columns into chunks of 2/2/1 and 3/3/1
+        # Shorter edge chunks help reveal missing points or changes in their order
+        source = gu.raster.from_array(np.arange(35.0).reshape(5, 7), Affine(1, 0, 0, 0, -1, 5), 32631)
+        lazy = source.chunk({"y": 2, "x": 3})
+        options = {"subsample": subsample, "random_state": 42, "pointcloud_return_type": "dataarray"}
+
+        # Convert the loaded and chunked rasters with the same options
+        expected = source.rst.to_pointcloud(**options)
+        result = lazy.rst.to_pointcloud(**options)
+
+        # Compare the points and check that the Dask input and result stay lazy
+        assert source.rst.is_loaded and expected.pc.is_loaded
+        assert not lazy.rst.is_loaded and not result.pc.is_loaded
+        xr.testing.assert_identical(result.compute(scheduler="synchronous"), expected)
+        assert not lazy.rst.is_loaded and not result.pc.is_loaded
 
 
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")

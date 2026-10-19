@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os.path
 import re
+import sys
 import tempfile
 import warnings
 from importlib.util import find_spec
@@ -35,6 +36,7 @@ from geoutils.operators.interpolator import (
 from geoutils.operators.nodata import NodataChoice
 from geoutils.operators.reducer import Mean, Median, Sum
 from geoutils.projtools import reproject_to_latlon
+from geoutils.stats.variography import VariogramModel
 from tests.operator_helpers import (
     LocalMeanInterpolator,
     NoSupportReducer,
@@ -439,6 +441,38 @@ class TestSamplingOperators:
         expected = raster.interp_at_points(points, method="linear", as_array=True)
         result = raster.interp_at_points(points, method=Linear(), as_array=True)
         np.testing.assert_array_equal(result, expected)
+
+    @pytest.mark.parametrize("backend", ["gstools", "gpytorch"])
+    def test_resample_at_points__multiple_opt_dep(
+        self, backend: Literal["gstools", "gpytorch"], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """
+        Checks that resample_at_points() works properly when either GSTools or GPyTorch is missing.
+
+        We use monkeypatch to hide SciKit-GStat and whichever kriging library we are not using.
+        We need this test because CI only tests environments with all optional dependencies or none.
+        """
+
+        # Make the unused kriging libraries unavailable
+        pytest.importorskip(backend)
+        for other in {"skgstat", "gstools", "gpytorch"} - {backend}:
+            monkeypatch.setitem(sys.modules, other, None)
+
+        # Create a constant raster and supply a model so no variogram fitting is needed
+        source = gu.Raster.from_array(np.full((5, 5), 2.0), Affine(1, 0, 0, 0, -1, 5), 32631)
+        model = VariogramModel("exponential", effective_range=3, partial_sill=1)
+
+        # Estimate a value between pixel centers with the available library
+        result = source.resample_at_points(
+            (np.array([2.2]), np.array([2.8])),
+            resampling="kriging",
+            backend=backend,
+            resampling_kwargs={"model": model},
+            as_array=True,
+        )
+
+        # Check the constant value, allowing for rounding in the kriging calculation
+        np.testing.assert_allclose(result, [2.0], rtol=0, atol=1e-12)
 
     def test_interp_points__custom_grid_neighbours(self) -> None:
         """Checks that a custom Interpolator receives the expected source window around each raster target."""

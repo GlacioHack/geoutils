@@ -1,4 +1,4 @@
-"""Create point clouds from coordinate and value arrays."""
+"""Constructor function for point cloud from arrays (for accessors, otherwise PointCloud.from_xyz() is used)."""
 
 from __future__ import annotations
 
@@ -26,10 +26,7 @@ def from_xyz(
     as_object_type: Literal["dataarray", "dataset", "geodataframe"] | None = None,
 ) -> xr.DataArray | xr.Dataset | gpd.GeoDataFrame | Any:
     """
-    Create a point cloud from separate X, Y and value arrays.
-
-    Xarray outputs store coordinates directly. GeoDataFrame outputs construct point geometries, using
-    Dask-GeoPandas when any input array is lazy. Auxiliary attributes preserve their individual dtypes.
+    Create a point cloud from X, Y and value arrays.
 
     :param x: One-dimensional X coordinates.
     :param y: One-dimensional Y coordinates, with the same length as x.
@@ -45,7 +42,7 @@ def from_xyz(
     """
     from geoutils.pointcloud.xr_accessor import DataArrayPointCloudAccessor, _pointcloud_array_to_dataset
 
-    # Validate the requested output before preparing its coordinates and attributes
+    # 1/ Check inputs
     if as_object_type is None:
         as_object_type = config["pointcloud_return_type"]
     if as_object_type not in ("dataarray", "dataset", "geodataframe"):
@@ -56,7 +53,7 @@ def from_xyz(
     if as_object_type == "dataset":
         return _pointcloud_array_to_dataset(points)
 
-    # Construct geometries per partition so lazy coordinates and values do not need to be collected
+    # 2/ Construct geometries per partition so lazy coordinates and values do not need to be collected
     name = str(points.name)
     point_crs = points.pc.crs
     arrays = [points.data, *(coordinate.data for coordinate in points.coords.values())]
@@ -71,7 +68,7 @@ def from_xyz(
     else:
         frame = _point_geometry_partition(points.to_dataset().to_dataframe(), name, point_crs, use_z)
 
-    # Record the known count and geometry type without reading lazy partitions
+    # 3/ Record count and geometry type without reading lazy partitions
     return _build_pointcloud_output(
         frame,
         data_name=None if use_z else name,

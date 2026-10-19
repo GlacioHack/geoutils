@@ -1,4 +1,4 @@
-"""Create georeferenced rasters from arrays."""
+"""Constructor of raster from arrays (for accessors, otherwise Raster.from_array() is used)."""
 
 from __future__ import annotations
 
@@ -26,8 +26,9 @@ def from_array(
     """
     Create a georeferenced raster from a single-band or multiband array.
 
-    A single band uses a two-dimensional array. Multiband arrays have shape (bands, rows, columns);
-    a singleton band dimension is removed. Masked values become NaNs, and Dask arrays remain lazy.
+    A single band requires a two-dimensional array.
+    Multiband arrays must have shape (bands, rows, columns), a singleton band dimension is removed.
+    Masked values become NaNs, and Dask arrays remain lazy.
 
     :param data: Raster values with shape (rows, columns) or (bands, rows, columns).
     :param transform: Affine transform, or its six coefficients in Affine order.
@@ -42,7 +43,7 @@ def from_array(
     """
     from geoutils.raster.xr_accessor import DataArrayRasterAccessor
 
-    # Validate the output and normalize tuple transforms before deriving pixel coordinates
+    # Check inputs
     if as_object_type not in ("dataarray", "dataset"):
         raise ValueError("Argument 'as_object_type' must be 'dataarray' or 'dataset'.")
     if not isinstance(transform, Affine):
@@ -50,7 +51,7 @@ def from_array(
     raster_crs = None if crs is None else CRS.from_user_input(crs)
     metadata = {} if tags is None else tags.copy()
 
-    # Reuse the accessor's array construction and georeferencing without computing Dask values
+    # We dispatch to accessor construction
     raster = DataArrayRasterAccessor.from_array(
         data, transform, raster_crs, nodata, area_or_point, metadata, cast_nodata
     )

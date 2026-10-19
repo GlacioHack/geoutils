@@ -188,11 +188,11 @@ class TestDataArrayRasterAccessor:
 
         # Write known disk chunks and reopen without Dask or pixel loading
         if storage == "zarr":
-            import_optional("zarr")
+            pytest.importorskip("zarr")
             dataset.to_zarr(filename, zarr_format=2, encoding=encoding)
             opened = xr.open_zarr(filename, chunks=None, decode_coords="all")
         else:
-            import_optional("netCDF4")
+            pytest.importorskip("netCDF4")
             dataset.to_netcdf(filename, engine="netcdf4", encoding=encoding)
             opened = xr.open_dataset(filename, engine="netcdf4", decode_coords="all")
         variable = opened["height"]
@@ -1609,7 +1609,7 @@ class TestRasterOpeningChunked:
         self, tmp_path: Path, as_object_type: Literal["dataarray", "dataset"]
     ) -> None:
         """Checks that disk tile metadata remains independent of computation chunks and matches eager opening."""
-        import_optional("dask")
+        pytest.importorskip("dask")
         from dask.callbacks import Callback
 
         # Write 16/32 pixel disk tiles, then use chunks of 7/9 to split those tiles differently
@@ -1636,7 +1636,7 @@ class TestRasterOpeningChunked:
     @pytest.mark.parametrize("storage", ["netcdf", "zarr"])
     def test_tags__disk_chunks(self, tmp_path: Path, storage: str) -> None:
         """Checks that inspecting stored array chunks stays lazy and computed values match eager opening."""
-        import_optional("dask")
+        pytest.importorskip("dask")
         from dask.callbacks import Callback
 
         # Write 16/32 pixel disk chunks, then combine them into 32/64 pixel computation chunks
@@ -1647,11 +1647,11 @@ class TestRasterOpeningChunked:
         encoding = {"height": {encoding_key: (16, 32), "grid_mapping": array.rio.grid_mapping}}
         filename = tmp_path / storage
         if storage == "zarr":
-            import_optional("zarr")
+            pytest.importorskip("zarr")
             array.to_dataset().to_zarr(filename, zarr_format=2, encoding=encoding)
             eager = xr.open_zarr(filename, chunks=None, decode_coords="all")
         else:
-            import_optional("netCDF4")
+            pytest.importorskip("netCDF4")
             array.to_dataset().to_netcdf(filename, engine="netcdf4", encoding=encoding)
             eager = xr.open_dataset(filename, engine="netcdf4", decode_coords="all")
 

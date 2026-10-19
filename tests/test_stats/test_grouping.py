@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Mapping
 from importlib.util import find_spec
 from pathlib import Path
@@ -684,6 +685,31 @@ class TestGroupedStats:
         assert table[("band_1", "count")].tolist() == [3]
         assert table[("band_1", "mean")].tolist() == [pytest.approx(11 / 3)]
         assert int(np.count_nonzero(masks[0].data)) == 4
+
+    def test_stats__multiple_opt_dep(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """
+        Checks that stats() works properly when Numba, ExactExtract, Dask and Dask-GeoPandas are missing.
+
+        We use monkeypatch to hide Numba, ExactExtract, Dask and Dask-GeoPandas.
+        We need this test because CI only tests environments with all optional dependencies or none.
+        """
+
+        # Use monkeypatch to simulate a partial installation
+        pytest.importorskip("flox")
+        for other in ("numba", "exactextract", "dask", "dask_geopandas"):
+            monkeypatch.setitem(sys.modules, other, None)
+
+        # Create two groups of raster values with known means
+        source = gu.Raster.from_array(np.arange(6.0).reshape(2, 3), Affine(1, 0, 0, 0, -1, 2), 32631)
+        groups = np.arange(6).reshape(2, 3) % 2
+
+        # Calculate means with Flox and check the warning about loading raster values
+        with pytest.warns(UserWarning, match="loads Raster and PointCloud inputs"):
+            result = source.stats("mean", by={"zone": groups}, categories={"zone": [0, 1]}, backend="flox")
+
+        # Check the means of even and odd values, with three pixels in each group
+        np.testing.assert_array_equal(result[("band_1", "mean")], [2.0, 3.0])
+        np.testing.assert_array_equal(result[("band_1", "count")], [3, 3])
 
     def test_stats__flox_categories(self) -> None:
         """Checks that Flox returns the same ordered category counts, means and standard deviations as GeoUtils."""

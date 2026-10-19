@@ -148,6 +148,8 @@ class TestResamplingBackends:
 
         # Create a finite raster and a circular window cutting through its edge cells
         if backend == "numba":
+            if find_spec("numba") is None:
+                pytest.skip("Requires Numba")
             import_optional("numba")
         values = np.arange(49, dtype=float).reshape(7, 7)
         raster = gu.Raster.from_array(values, Affine(1, 0, 0, 0, -1, 7), 32631)

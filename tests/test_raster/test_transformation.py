@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 import warnings
 from importlib.util import find_spec
 from pathlib import Path
@@ -2091,6 +2092,32 @@ class TestReprojectionGDALOperators:
 
 class TestReprojectionOverlapBackends:
     """Test module for matching raster-cell coverage across Numba, ExactExtract, and Shapely."""
+
+    @pytest.mark.parametrize("dependency", ["numba", "exactextract"])
+    def test_reproject__multiple_opt_dep(self, dependency: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """
+        Checks that reproject() works properly when either Numba or ExactExtract is missing.
+
+        We use monkeypatch to hide one of these libraries and Flox.
+        We need this test because CI only tests environments with all optional dependencies or none.
+        """
+
+        # Use monkeypatch to make the other libraries unavailable
+        pytest.importorskip(dependency)
+        for other in {"numba", "exactextract", "flox"} - {dependency}:
+            monkeypatch.setitem(sys.modules, other, None)
+
+        # Create a constant raster and offset reference cells whose edges cut through source pixels
+        source = gu.Raster.from_array(np.full((6, 6), 3.0), Affine(1, 0, 0, 0, -1, 6), 32631, nodata=-9999)
+        reference = gu.Raster.from_array(np.zeros((3, 3)), Affine(1.5, 0, 0.25, 0, -1.5, 5.75), 32631)
+
+        # Reproject using whichever overlap library is available
+        result = source.reproject(reference, resampling="mean", backend="scipy", area_weighting="intersection")
+
+        # Check constant values and the reference grid
+        assert result is not None
+        np.testing.assert_array_equal(result.to_nanarray(), np.full((3, 3), 3.0))
+        assert result.georeferenced_grid_equal(reference)
 
     @pytest.mark.parametrize("geometry", ["shifted", "rotated", "sheared", "different_crs"])
     @pytest.mark.parametrize("backend", ["auto", "numba", "exactextract"])

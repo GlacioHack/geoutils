@@ -372,8 +372,7 @@ class TestBenchmarkOutputsChunked:
             assert not source.rst.is_loaded
             eager_source = source.compute()
             options = dict(operation.option_builder(case, runner.config))
-            if case.variant == "xarray":
-                options["backend"] = "xarray"
+            options["pointcloud_return_type"] = "dataarray" if case.variant == "xarray" else "geodataframe"
             eager_points = getattr(eager_source.rst, operation_name)(**options)
 
             # Run the benchmark and save the same public call on eager inputs for comparison

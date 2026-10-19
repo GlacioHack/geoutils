@@ -1,4 +1,4 @@
-"""Test point cloud construction from coordinate and value arrays."""
+"""Test point cloud construction from arrays."""
 
 from typing import Literal
 
@@ -9,19 +9,18 @@ import xarray as xr
 from geopandas.testing import assert_geodataframe_equal
 
 import geoutils as gu
-from geoutils._misc import import_optional
 
 
 class TestPointCloudConstructors:
-    """Test module for default output, representations and auxiliary attributes in from_xyz()."""
+    """Test point cloud construction with from_xyz()."""
 
     def test_from_xyz__default(self) -> None:
-        """Checks that from_xyz() returns a DataArray with the supplied coordinates, values and CRS."""
+        """Checks that from_xyz() returns a DataArray per default, with the right coords/values."""
 
-        # Create three elevations from separate coordinate and value lists
+        # Create from synthetic data
         points = gu.pointcloud.from_xyz([5, 15, 25], [25, 15, 5], [100, 110, 120], crs=32631)
 
-        # Check the default name, point dimension and exact coordinates and elevations
+        # Check default name, dimension and equality of values
         assert isinstance(points, xr.DataArray)
         assert points.name == "z" and points.dims == ("point",)
         np.testing.assert_array_equal(points.pc.to_array(), [[5, 15, 25], [25, 15, 5], [100, 110, 120]])
@@ -34,15 +33,15 @@ class TestPointCloudConstructors:
     def test_from_xyz__representations_and_attributes(
         self, as_object_type: Literal["dataarray", "dataset", "geodataframe"], data_name: str | None, use_z: bool
     ) -> None:
-        """Checks that every representation preserves point values, CRS and large integer auxiliary attributes."""
+        """Checks that every object type preserves point values/dtypes, CRS and auxiliary attributes."""
 
-        # Create IDs above the exact float64 integer range to expose unwanted dtype conversion
+        # We create integer IDs above float64 range to trigger potentially unwanted dtype conversion
         x = np.array([5.0, 15.0, 25.0])
         y = np.array([25.0, 15.0, 5.0])
         values = np.array([100.0, 110.0, 120.0])
         identifiers = np.array([2**63 + 1, 2**63 + 2, 2**63 + 3], dtype=np.uint64)
 
-        # Construct the requested representation with an auxiliary measurement
+        # Construct point cloud
         points = gu.pointcloud.from_xyz(
             x,
             y,
@@ -56,7 +55,7 @@ class TestPointCloudConstructors:
         name = data_name or "z"
         active = points[name] if as_object_type == "dataset" else points
 
-        # Check ordered values, metadata and auxiliary dtype for each output type
+        # Check values, metadata and auxiliary dtype for each output type
         expected_type = {"dataarray": xr.DataArray, "dataset": xr.Dataset, "geodataframe": gpd.GeoDataFrame}
         assert isinstance(points, expected_type[as_object_type])
         np.testing.assert_array_equal(active.pc.to_array(), np.stack([x, y, values]))
@@ -73,7 +72,7 @@ class TestPointCloudConstructors:
 
 
 class TestPointCloudConstructorsChunked:
-    """Test module for lazy values, coordinates and auxiliary arrays in every from_xyz() representation."""
+    """Test module errors/warnings in from_xyz()."""
 
     @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
     @pytest.mark.parametrize("lazy_field", ["values", "coordinates", "auxiliary"])
@@ -81,15 +80,15 @@ class TestPointCloudConstructorsChunked:
     def test_from_xyz__loading_laziness(
         self, as_object_type: Literal["dataarray", "dataset", "geodataframe"], lazy_field: str, use_z: bool
     ) -> None:
-        """Checks that constructing from lazy arrays runs no tasks and exactly matches eager construction."""
-        import_optional("dask")
+        """Checks lazy construction runs no tasks and exactly matches eager construction."""
+        pytest.importorskip("dask")
         import dask.array as da
         from dask.callbacks import Callback
 
         if as_object_type == "geodataframe":
-            import_optional("dask_geopandas")
+            pytest.importorskip("dask_geopandas")
 
-        # Split seven points into chunks of 3/3/1 to reveal missing or duplicated final rows
+        # We use 7 points to reveal issues with uneven chunk sizes
         x, y, values = np.arange(7.0), np.arange(7.0) + 10, np.arange(7.0) + 100
         identifiers = np.arange(7, dtype=np.uint64) + np.uint64(2**63)
         arrays = {"x": x, "y": y, "z": values, "identifier": identifiers}
@@ -98,7 +97,7 @@ class TestPointCloudConstructorsChunked:
             arrays[name] = da.from_array(arrays[name], chunks=3)
             assert arrays[name].chunks == ((3, 3, 1),)
 
-        # Construct both outputs, forbidding task execution during lazy construction
+        # We construct both outputs, checking there is no task execution during lazy construction
         eager = gu.pointcloud.from_xyz(
             x,
             y,
@@ -119,7 +118,7 @@ class TestPointCloudConstructorsChunked:
                 as_object_type=as_object_type,
             )
 
-        # Check which point values are loaded before computing the output
+        # Check loading, then equality
         active = lazy["z"] if as_object_type == "dataset" else lazy
         active_is_loaded = as_object_type == "dataset" and lazy_field == "auxiliary"
         assert active.pc.is_loaded == active_is_loaded
@@ -130,7 +129,7 @@ class TestPointCloudConstructorsChunked:
             xr.testing.assert_identical(actual, eager)
         assert (actual["z"] if as_object_type == "dataset" else actual).pc.is_loaded
 
-        # Check computing the output leaves the input graphs and lazy result unchanged
+        # Check computing output leaves the input graphs and lazy result unchanged
         assert active.pc.is_loaded == active_is_loaded
         for name in lazy_names:
             assert isinstance(arrays[name], da.Array)
@@ -145,12 +144,11 @@ class TestPointCloudConstructorsChunked:
 
 
 class TestPointCloudConstructorsErrors:
-    """Test module for invalid output types and point attributes in from_xyz()."""
+    """Test module for errors/warnings in from_xyz()."""
 
     def test_from_xyz__error_invalid_type(self) -> None:
         """Checks an error is raised for an unsupported point cloud representation."""
 
-        # Request a representation outside the public choices
         with pytest.raises(ValueError, match="as_object_type"):
             gu.pointcloud.from_xyz([0], [0], [1], 32631, as_object_type="scene")  # type: ignore[arg-type]
 
@@ -160,6 +158,5 @@ class TestPointCloudConstructorsErrors:
     ) -> None:
         """Checks an error is raised when an auxiliary attribute has a coordinate name."""
 
-        # Try replacing X coordinates with an auxiliary measurement
         with pytest.raises(ValueError, match="distinct"):
             gu.pointcloud.from_xyz([0], [0], [1], 32631, auxiliary={"x": [2]}, as_object_type=as_object_type)

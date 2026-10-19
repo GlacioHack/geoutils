@@ -333,7 +333,7 @@ class TestReferencingErrors:
             ("coords", ()),
             ("xy2ij", (10, 50)),
             ("ij2xy", (1, 2)),
-            ("get_bounds_projected", (4326,)),
+            ("get_bbox_projected", (4326,)),
             ("get_footprint_projected", (4326,)),
         ],
     )

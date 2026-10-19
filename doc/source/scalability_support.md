@@ -301,15 +301,15 @@ For more insights into chunked implementation strategies and behaviour expected 
 ## Notes
 
 1. <span id="scalability-note-reprojection"></span>For reprojecion, **CRS overlap** corresponds to the source area needed for each
-   output chunk after reprojection. By default, GeoUtils sets output chunks to a size that follows changes in resolution 
+   output chunk after reprojection. By default, GeoUtils sets output chunks to a size that follows changes in resolution
    to avoid loading more than one source chunk. **GCP/RPC models are supported for reprojection**, alongside affine grids.
 
 2. <span id="scalability-note-neighborhoods"></span>The **overlap** corresponds to neighboring data needed to calculate
    values near chunk edges, which depends directly on filter window/neighborhood size. Chunked proximity, point
    filtering, gridding and kriging limit this through a maximum search distance.
 
-3. <span id="scalability-note-random-fields"></span>The **model** is typically a small dataframe describing variable errors along predictors, and 
+3. <span id="scalability-note-random-fields"></span>The **model** is typically a small dataframe describing variable errors along predictors, and
    modelled correlation functions. All chunks use it.
 
-4. <span id="scalability-note-sampling-memory"></span>The **sample** is the returned in-memory sample. The **index** helps 
+4. <span id="scalability-note-sampling-memory"></span>The **sample** is the returned in-memory sample. The **index** helps
    find nearby points and uses more memory for larger point clouds.

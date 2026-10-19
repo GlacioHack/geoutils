@@ -289,8 +289,8 @@ class TestPointCloudAccessor:
             expected_values["z"] *= 2
             assert_geodataframe_equal(value_copy.compute(), expected_values)
 
-    def test_to_file__dask_geopandas(self) -> None:
-        """Write a lazy point cloud to a regular GeoPandas-supported vector file."""
+    def test_to_file__dask_geopandas(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Checks that GeoPackage writing computes separate Dask partitions and matches eager point output."""
 
         pytest.importorskip("dask_geopandas")
 
@@ -304,6 +304,11 @@ class TestPointCloudAccessor:
         )
         assert not ds.pc.is_loaded
         output_file = os.path.join(temp_dir.name, "output.gpkg")
+
+        # Write each partition without computing the complete Dask GeoDataFrame
+        monkeypatch.setattr(
+            type(ds), "compute", lambda *args, **kwargs: pytest.fail("Writing must compute individual partitions")
+        )
         ds.pc.to_file(output_file)
 
         # Reopen through PointCloud to validate geometry, CRS and data values

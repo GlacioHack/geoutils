@@ -108,14 +108,14 @@ optional masks.
 The **support** on which the datasets are sampled can be specified with `at`.
 
 ```{important}
-If inputs are not aligned in CRS, or differ in type, cosampling will automatically resample them at the common support, respecting 
-their chunks. 
-For a **raster-point comparison**, use `raster_point_mode` to specify if you want the point input to be gridded, 
-or the raster input to be resampled at points. By default, raster-raster comparisons return the raster from which the function is called, while raster–point return 
+If inputs are not aligned in CRS, or differ in type, cosampling will automatically resample them at the common support, respecting
+their chunks.
+For a **raster-point comparison**, use `raster_point_mode` to specify if you want the point input to be gridded,
+or the raster input to be resampled at points. By default, raster-raster comparisons return the raster from which the function is called, while raster–point return
 the support of the point cloud.
 ```
 
-Below, we cosample a point and a raster, with a vector **mask** to further reduce the locations, and a **subsample** to further 
+Below, we cosample a point and a raster, with a vector **mask** to further reduce the locations, and a **subsample** to further
 reduce the output.
 
 
@@ -207,7 +207,7 @@ axes[2].set_yticklabels([])
 plt.tight_layout()
 ```
 
-The output contains two "self" and "other" in its columns or band variables. In this case, the default point output is a 
+The output contains two "self" and "other" in its columns or band variables. In this case, the default point output is a
 {class}`xarray.DataArray`:
 
 ```{code-cell} ipython3
@@ -315,7 +315,7 @@ and distances. Distances use the CRS units.
 pairs
 ```
 
-The **default `sampling="loglag"` balances separations by sampling uniformly with logarithmic distance**, 
+The **default `sampling="loglag"` balances separations by sampling uniformly with logarithmic distance**,
 while `sampling="random_xy"` select endpoints at random X/Y coordinates that can severely undersample close or far pairs.
 Use `min_distance`, `max_distance` or `mask` to limit the location or distances of sampled pairs.
 

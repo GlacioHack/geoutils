@@ -1674,6 +1674,13 @@ class GeometryPointCloudBase(PointCloudBase, VectorBase):
         """
         if pathlib.Path(filename).suffix.lower() == ".parquet" or driver == "PARQUET":
             self.to_parquet(filename, **kwargs)
+        elif self._is_dask and (pathlib.Path(filename).suffix.lower() == ".gpkg" or driver == "GPKG"):
+            # Write one partition at a time so the complete point cloud never occupies client memory
+            options = dict(kwargs)
+            for partition in self._dataset.to_delayed():
+                dataframe = partition.compute()
+                dataframe.to_file(filename, driver=driver, schema=schema, index=index, **options)
+                options["mode"] = "a"
         else:
             # Vector and GeoDataFrameVectorAccessor supply the concrete writer through multiple inheritance
             super().to_file(filename, driver=driver, schema=schema, index=index, **kwargs)  # type: ignore[misc]
