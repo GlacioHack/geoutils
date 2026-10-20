@@ -53,7 +53,7 @@ jobs:
         path: ${{ env.CONDA }}/envs
         key: conda-${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.dep-level }}-${{ env.cache_date }}-${{ hashFiles('dev-environment.yml') }}-${{ env.CACHE_NUMBER }}
       env:
-        CACHE_NUMBER: 1 # Increase this value to reset cache if environment.yml has not changed
+        CACHE_NUMBER: 2 # Increase this value to reset cache if environment.yml has not changed
       id: cache
 
     # The trick below is necessary because the generic environment file does not specify a Python version, and ONLY
@@ -71,6 +71,13 @@ jobs:
     - name: Install project environment (base)
       if: ${{ matrix.dep-level == 'base' }}
       run: uv pip install -e ".[test]"
+
+    - name: Install macOS PyTorch with shared OpenMP
+      if: ${{ runner.os == 'macOS' && matrix.dep-level != 'base' && steps.cache.outputs.cache-hit != 'true' }}
+      # Use Conda's OpenMP runtime for PyTorch and its numerical dependencies
+      run: >-
+        mamba install --yes --channel conda-forge
+        "python=${{ matrix.python-version }}" "gdal<3.13.3" "pytorch-cpu>=2" "gpytorch>=1.11"
 
     - name: Install project environment (optional)
       if: ${{ matrix.dep-level != 'base' }}
