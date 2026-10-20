@@ -62,22 +62,18 @@ jobs:
     # processing packages very much like geo-packages; not a problem for docs, dev installs where all is done at once)
     - name: Install base environment with a fixed Python version
       if: steps.cache.outputs.cache-hit != 'true'
+      env:
+        # Use Conda's OpenMP runtime for PyTorch and its numerical dependencies
+        CI_EXTRA_DEPS: ${{ runner.os != 'Linux' && matrix.dep-level != 'base' && 'gdal<3.13.3,pytorch-cpu>=2,gpytorch>=1.11' || 'gdal<3.13.3' }}
       run: |
         mamba install pyyaml python=${{ matrix.python-version }}
-        python .github/scripts/generate_yml_env_fixed_py.py --pyv ${{ matrix.python-version }} --add "gdal<3.13.3" "environment.yml"
+        python .github/scripts/generate_yml_env_fixed_py.py --pyv ${{ matrix.python-version }} --add "${{ env.CI_EXTRA_DEPS }}" "environment.yml"
         mamba env update -n geoutils-dev -f environment-ci-py${{ matrix.python-version }}.yml
 
     # If/else equivalent to install base environment, or base+optional
     - name: Install project environment (base)
       if: ${{ matrix.dep-level == 'base' }}
       run: uv pip install -e ".[test]"
-
-    - name: Install PyTorch with shared native libraries
-      if: ${{ runner.os != 'Linux' && matrix.dep-level != 'base' && steps.cache.outputs.cache-hit != 'true' }}
-      # Use Conda's OpenMP runtime for PyTorch and its numerical dependencies
-      run: >-
-        mamba install --yes --channel conda-forge
-        "python=${{ matrix.python-version }}" "gdal<3.13.3" "pytorch-cpu>=2" "gpytorch>=1.11"
 
     - name: Install project environment (optional)
       if: ${{ matrix.dep-level != 'base' }}
