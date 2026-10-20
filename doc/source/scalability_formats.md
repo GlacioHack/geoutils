@@ -142,7 +142,7 @@ To read a remote file, simply pass an **HTTPS URL** or an **S3 address** to {fun
 {func}`~geoutils.open_pointcloud` or {func}`~geoutils.open_vector`, using the same options as for a local file.
 
 ```{note}
-These executable examples reuse the **mock HTTP/S3 server from our tests**.
+The examples below reuse a **"mock" (i.e. simulated) HTTP/S3 server** from our tests.
 Replace `server_url` in the HTTP example and `bucket_url` in the S3 example below with your own addresses.
 ```
 

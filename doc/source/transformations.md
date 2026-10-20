@@ -184,10 +184,10 @@ plt.tight_layout()
 
 ```{note}
 GeoUtils resampling uses `tolerance=0` by default to calculate exact pixel transformations and make results
-consistent across chunks. Rasterio/GDAL's default is 0.125 pixel, which allows faster computation but can
+**consistent across chunks**. Rasterio/GDAL's default is 0.125 pixel, which allows faster computation but can
 change results depending on chunk bounds. Passing the `tolerance` option requires Rasterio 1.5 or newer.
 
-When values represent elevations and the transformation should also change their vertical datum,
+When values represent elevations and the transformation should also **change their vertical datum**,
 either use `apply_vertical=True` or use [xDEM](https://xdem.readthedocs.io/en/stable/)'s reprojection which accounts
 for vertical referencing implicitly.
 ```
@@ -279,13 +279,13 @@ plt.tight_layout()
 #### GCP/RPC reprojection
 
 Rasters referenced by **ground control points (GCPs)** or **rational polynomial coefficients (RPCs)** can also be
-reprojected, with chunked execution support through Dask/multiprocessing.
-GeoUtils reads and uses these models from file automatically. The result has a regular affine grid. GCPs use their stored CRS, and RPCs describe WGS84 coordinates.
-GCP/RPC reprojection requires a Rasterio resampling method, such as `"bilinear"`, which interpolates pixel values
-onto the output grid, while GDAL transformer options control how GCPs/RPCs map pixel positions to ground coordinates
+reprojected. 
+
+GeoUtils reads and uses the GCP/RPC models from file automatically. The result has a regular affine grid. GCPs use their stored CRS, and RPCs describe WGS84 coordinates.
+However, GCP/RPC reprojection **requires a Rasterio resampling method**, such as `"bilinear"`. Use GDAL transformer options control how GCPs/RPCs map pixel positions to ground coordinates
 (see [Rasterio's documentation](https://rasterio.readthedocs.io/en/stable/topics/reproject.html#reprojecting-with-other-georeferencing-metadata)).
 
-We give the ASTER DEM GCPs at its four corners. The `GCP_TPS` option uses thin plate splines to map pixels smoothly through the
+Below, we give the ASTER DEM some GCPs at its four corners. The `GCP_TPS` option uses thin plate splines to map pixels smoothly through the
 control points.
 
 ```{code-cell} ipython3
@@ -327,12 +327,17 @@ print(result.transform)
 {meth}`gdf.vct.crop() or Vector.crop() <VectorBase.crop>`<br>
 {meth}`gdf.pc.crop() or PointCloud.crop() <geoutils.pointcloud.base.GeometryPointCloudBase.crop>`
 
-Cropping **selects data in a rectangular extent** without modifying the selected values or geometries. A file-backed
-raster, vector or point cloud can store this selection and defer reading until its data are requested.
+Cropping **selects data in a rectangular extent** without modifying the selected values or geometries.
 
 For rasters, crop removes complete rows and columns outside the extent. For point clouds, it removes points outside
 the extent. For vectors, the default `mode="intersects"` keeps every unchanged feature touching the extent;
 `mode="within"` keeps only features fully contained by it.
+
+```{note}
+A file-backed raster, vector or point cloud stores this selection as metadata and defer reading until its data are requested, much 
+like Xarray's {meth}`~xarray.DataArray.isel`.
+See {ref}`Deferred I/O <core-lazy-load>` for details.
+```
 
 First, we crop a raster to the **bounding box of a vector**:
 
@@ -358,7 +363,7 @@ _ = ax[1].set_yticklabels([])
 plt.tight_layout()
 ```
 
-Then, for a vector, we crop **intersect or fully contained features** using the smaller raster as the crop extent:
+Then, for a vector, we crop **intersecting or contained features** using the smaller raster as crop extent:
 
 ```{code-cell} ipython3
 # Select whole features using the same extent with either mode
@@ -397,8 +402,9 @@ plt.tight_layout()
 {meth}`gdf.vct.clip() or Vector.clip() <VectorBase.clip>`<br>
 {meth}`gdf.pc.clip() or PointCloud.clip() <geoutils.pointcloud.base.GeometryPointCloudBase.clip>`
 
-Clipping **cuts values within exact geometry**. It masks raster cells outside the geometry, removes point
-cloud rows outside it, and cuts vector geometries at its boundary. Raster, vector and point cloud clipping support
+Clipping **cuts values within exact geometry**. 
+
+It masks raster cells outside the geometry, removes point cloud rows outside it, and cuts vector geometries at its boundary. Raster, vector and point cloud clipping support
 lazy Dask chunks or partitions and file-backed multiprocessing blocks.
 
 Below, we first clip a raster with an **exact vector geometry**, turning outside cells into NaNs.
@@ -630,13 +636,13 @@ plt.tight_layout()
 
 Standard rasterization assigns a unique value to selected cells, while fractional rasterization instead returns the
 **fraction of each cell covered by a geometry**, from 0 to 1. This is useful when polygon edges cut through cells
-and whole-cell membership would distort the represented area.
+and using a binary intersection (0 or 1) would substantially distort the represented area.
 
 ```{code-cell} ipython3
 # Calculate the fraction of each raster cell covered by the union of glacier polygons
 glacier_fraction = gdf.vct.rasterize(ref=ds, fractional="union")
 ```
-We zoom into a glacier margin to show **partial coverage of individual 30 m cells**:
+We zoom into a glacier margin to show **fractional coverage of individual 30 m cells**:
 
 ```{code-cell} ipython3
 :tags: [hide-input]
@@ -689,12 +695,11 @@ f.colorbar(axes[1].images[0], cax=axes[2], label="Fraction of cell covered", tic
 plt.tight_layout()
 ```
 
-Using `fractional=True` returns one layer per feature, `fractional_by="column"` combines features sharing a label into
-one layer per group; `fractional="union"` combines all features into one layer. Overlaps within a group count once,
-while different groups can overlap independently.
+By default, the function returns one fractional layer per feature, but all features can also be combined together with `fractional="union"`, 
+returning the sum of fractional coverages per pixel over all features.
 
 See {ref}`core-coverage` for coverage semantics and {ref}`stats-fractional` for calculating zonal statistics directly,
-without storing fractional coverage rasters.
+without computing fractional coverage rasters manually.
 
 ### Polygonize
 
@@ -878,7 +883,8 @@ plt.tight_layout()
 ### Point gridding
 
 Gridding of a point cloud **consists in estimating the values at 2D regular gridded coordinates based on an irregular
-point cloud** using Delaunay triangular interpolation (default), inverse-distance weighting or circular statistics.
+point cloud** using Delaunay triangular interpolation with "bilinear" (default) or "cubic" resampling, inverse-distance 
+weighting or circular statistics.
 
 Choose an {ref}`interpolator <transformations-interpolators>` or {ref}`reducer <transformations-reducers>`
 and a backend from the comparisons above.

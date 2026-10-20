@@ -567,6 +567,16 @@ Use {func}`~geoutils.pointcloud.from_xyz` to create a DataArray from coordinate 
     :toctree: gen_modules/
 
     PointCloud.to_xarray
+```
+
+### Writing to file
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PointCloud.to_file
+    PointCloud.to_las
     PointCloud.to_parquet
 ```
 
@@ -802,4 +812,24 @@ or {class}`~geoutils.multiproc.MpCluster` (parallel).
 
     multiproc.map_overlap
     multiproc.map_blocks
+```
+
+(profiling-api)=
+## Profiling
+
+Measure function runtime and memory, or collect decorated workflow calls. See {ref}`profiling` for examples.
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+    :template: module.rst
+
+    profiler
+
+.. autosummary::
+
+    profiler.profile_call
+    profiler.profile
+    profiler.ProfileMetrics
+    profiler.Profiler
 ```

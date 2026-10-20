@@ -11,8 +11,7 @@ Match-reference means to **match** the georeferencing of a dataset to that of an
 
 ```{important}
 A match-reference argument can be **any object** implementing the georeferencing attributes needed by the operation:
-{attr}`~RasterBase.bbox`, {attr}`~RasterBase.crs` and/or {attr}`~RasterBase.transform`.
-Matching a complete raster grid also requires {attr}`~RasterBase.shape` and an affine transform.
+{attr}`~RasterBase.bbox`, {attr}`~RasterBase.crs` and/or {attr}`~RasterBase.transform`/{attr}`~RasterBase.shape`.
 ```
 
 ```{eval-rst}
@@ -21,9 +20,8 @@ Matching a complete raster grid also requires {attr}`~RasterBase.shape` and an a
     :alt: A source raster and reference produce a reprojected raster matching the reference grid, or a crop using the source grid within the reference bounding box.
 ```
 
-Reprojection to a raster reference matches its **CRS and grid** (pixel size, alignment and bounding box). Cropping uses the
-reference **bounding box**, preserving the source CRS and pixel size. Here the crop bounding box aligns with source cells;
-otherwise its edges are rounded to the source grid.
+Here, reprojection to a raster reference matches its **CRS and grid** (pixel size, alignment and bounding box). Cropping uses the
+reference **bounding box**, preserving the source CRS and pixel size. 
 
 ## Matching with a raster, vector or point cloud
 
@@ -35,25 +33,18 @@ spatial selection uses its bounding box or geometry, and operations creating a r
 An operation can use several of these together, as raster reprojection does with CRS and grid.
 
 
-| Reference information | Operations using it |
-|---|---|
-| **CRS** | {meth}`raster.reproject() <RasterBase.reproject>`, {meth}`vector.reproject() <VectorBase.reproject>`, {meth}`point_cloud.reproject() <geoutils.pointcloud.base.GeometryPointCloudBase.reproject>` |
-| **Bounding box and CRS** | {meth}`raster.crop() <RasterBase.crop>`, {meth}`vector.crop() <VectorBase.crop>`, {meth}`point_cloud.crop() <geoutils.pointcloud.base.GeometryPointCloudBase.crop>`; {meth}`raster.plot() <RasterBase.plot>`, {meth}`vector.plot() <VectorBase.plot>`, {meth}`point_cloud.plot() <geoutils.pointcloud.base.GeometryPointCloudBase.plot>`; {meth}`raster.intersection() <RasterBase.intersection>` for the overlap bounding box |
-| **Geometry or footprint**, projected into the source CRS | {meth}`raster.clip() <RasterBase.clip>`, {meth}`vector.clip() <VectorBase.clip>`, {meth}`point_cloud.clip() <geoutils.pointcloud.base.GeometryPointCloudBase.clip>` |
-| **Raster grid** (CRS, transform and shape) | {meth}`raster.reproject() <RasterBase.reproject>`, {meth}`raster.krige() <RasterBase.krige>`; {meth}`vector.rasterize() <VectorBase.rasterize>`, {meth}`vector.create_mask() <VectorBase.create_mask>`, {meth}`vector.proximity() <VectorBase.proximity>`; {meth}`point_cloud.grid() <PointCloudBase.grid>`, {meth}`point_cloud.krige() <PointCloudBase.krige>` |
-| **Point locations** (X/Y, projected into the source CRS) | {meth}`raster.resample_at_points() <RasterBase.resample_at_points>`, {meth}`raster.interp_at_points() <RasterBase.interp_at_points>`, {meth}`raster.reduce_at_points() <RasterBase.reduce_at_points>`; {meth}`vector.create_mask() <VectorBase.create_mask>` with a point cloud reference |
+| Reference information | Operations using it                                                                                                                                                                                                                                                                                                                                                                                                           |
+|---|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **CRS** | {meth}`raster.reproject() <RasterBase.reproject>`, {meth}`vector.reproject() <VectorBase.reproject>`, {meth}`point_cloud.reproject() <geoutils.pointcloud.base.GeometryPointCloudBase.reproject>`                                                                                                                                                                                                                             |
+| **Bounding box and CRS** | {meth}`raster.crop() <RasterBase.crop>`, {meth}`vector.crop() <VectorBase.crop>`, {meth}`point_cloud.crop() <geoutils.pointcloud.base.GeometryPointCloudBase.crop>`; {meth}`raster.plot() <RasterBase.plot>`, {meth}`vector.plot() <VectorBase.plot>`, {meth}`point_cloud.plot() <geoutils.pointcloud.base.GeometryPointCloudBase.plot>` |
+| **Geometry or footprint**, projected into the source CRS | {meth}`raster.clip() <RasterBase.clip>`, {meth}`vector.clip() <VectorBase.clip>`, {meth}`point_cloud.clip() <geoutils.pointcloud.base.GeometryPointCloudBase.clip>`                                                                                                                                                                                                                                                           |
+| **Raster grid** (CRS, transform and shape) | {meth}`raster.reproject() <RasterBase.reproject>`, {meth}`raster.krige() <RasterBase.krige>`; {meth}`vector.rasterize() <VectorBase.rasterize>`, {meth}`vector.create_mask() <VectorBase.create_mask>` with a raster reference, {meth}`vector.proximity() <VectorBase.proximity>`; {meth}`point_cloud.grid() <PointCloudBase.grid>`, {meth}`point_cloud.krige() <PointCloudBase.krige>`                                       |
+| **Point locations** (X/Y, projected into the source CRS) | {meth}`raster.resample_at_points() <RasterBase.resample_at_points>`, {meth}`raster.interp_at_points() <RasterBase.interp_at_points>`, {meth}`raster.reduce_at_points() <RasterBase.reduce_at_points>`; {meth}`vector.create_mask() <VectorBase.create_mask>` with a point cloud reference                                                                                                                                     |
 
-When a reference supplies only a bounding box and CRS, rasterization and point gridding need `res` or `shape` to define the
-grid. Raster reprojection instead estimates resolution from the source unless `res` or `grid_size` is given.
-For point cloud gridding, reproject() the points first if their CRS differs from the reference.
 
-Cropping selects existing cells, features or points using the reference bounding box, without changing their geometry.
-Clipping follows the exact geometry boundary. Vector cropping selects whole intersecting features by default.
-Raster intersection() aligns the overlap bounding box with the source grid by default (`match_ref=True`).
+**When only a bounding box and CRS are supplied to an operation requiring a grid definition**, such as rasterization, gridding or reprojection, 
+then **one of resolution `res` or output shape `shape`** must be defined. Raster reprojection is an exception, as it can 
+estimate resolution from the source instead. 
 
-{func}`~geoutils.raster.stack_rasters` and {func}`~geoutils.raster.merge_rasters` use the reference **CRS and resolution**.
-Their `reference` is a GeoUtils raster or input index (default: first input); the output bounding box covers the inputs' union unless
-`use_ref_bounds=True` requests the reference bounding box.
-
-Outputs derived from a raster often need no external reference: {meth}`~RasterBase.polygonize` and {meth}`~RasterBase.proximity`
-inherit source georeferencing, and raster krige() uses the source grid unless a `ref` is supplied.
+Note that **outputs derived from a raster often need no external reference**: for example, {meth}`~RasterBase.polygonize` 
+and {meth}`~RasterBase.proximity` inherit georeferencing of the source raster directly.

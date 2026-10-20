@@ -14,11 +14,13 @@ kernelspec:
 
 # The georeferenced vector
 
-GeoUtils also exposes vector methods through the {class}`vct <geoutils.GeoDataFrameVectorAccessor>` accessor on a
-{class}`geopandas.GeoDataFrame`. We recommend this interface for new workflows, while the {class}`~geoutils.Vector`
-object remains available with the same GeoUtils-specific methods.
+In GeoUtils, georeferenced vectors are exposed through two interfaces:
 
-Below, a summary of the {class}`~geoutils.Vector` object and its methods.
+- The GeoPandas {class}`vct <geoutils.GeoDataFrameVectorAccessor>` accessor for a {class}`geopandas.GeoDataFrame`,
+- The {class}`~geoutils.Vector`.
+
+For new workflows, we **recommend using the {class}`vct <geoutils.GeoDataFrameVectorAccessor>` accessor**, and using either only accessors or only GeoUtils objects.
+Their behaviour is largely similar, with the main differences summarized below.
 
 ## Accessor {class}`vct <geoutils.GeoDataFrameVectorAccessor>` versus {class}`~geoutils.Vector`
 
@@ -41,16 +43,16 @@ In short, {class}`~geoutils.Vector` is a "convenience" composition class built o
 directly on the {class}`~geopandas.GeoDataFrame`. Dataframe functionalities from Pandas can be called from its {attr}`~geoutils.Vector.gdf`.
 
 ```{caution}
-The {attr}`~geoutils.Vector.bbox` attribute of a {class}`~geoutils.Vector` corresponds to the {attr}`~geopandas.GeoDataFrame.total_bounds` attribute of a
+The {attr}`~VectorBase.bbox` attribute of a {class}`~geoutils.Vector` corresponds to the {attr}`~geopandas.GeoSeries.total_bounds` attribute of a
 {class}`~geopandas.GeoDataFrame` converted to a {class}`rasterio.coords.BoundingBox`, for consistency between rasters and vectors.
 
-The equivalent of {attr}`geopandas.GeoDataFrame.bounds` (i.e., a per-feature bounds) for {class}`Vectors<geoutils.Vector>` is {attr}`~geoutils.Vector.geom_bounds`.
+The equivalent of {attr}`geopandas.GeoDataFrame.bounds <geopandas.GeoSeries.bounds>` (i.e., a per-feature bounds) for {class}`Vectors<geoutils.Vector>` is {attr}`~geoutils.Vector.geom_bounds`.
 ```
 
 ## Open and save
 
 A {class}`~geoutils.Vector` is opened by instantiating with either a {class}`str`, a {class}`pathlib.Path`, a {class}`geopandas.GeoDataFrame`,
-a {class}`geopandas.GeoSeries` or a {class}`shapely.Geometry`.
+a {class}`geopandas.GeoSeries` or a {external+shapely:doc}`shapely.Geometry <geometry>`.
 
 
 ```{code-cell} ipython3
@@ -64,7 +66,7 @@ vect = gu.Vector(filename_vect)
 vect
 ```
 
-Detailed information on the {class}`~geoutils.Vector` is printed using {func}`~geoutils.Vector.info`:
+Detailed information on the {class}`~geoutils.Vector` is printed using {meth}`~VectorBase.info`:
 
 ```{code-cell} ipython3
 # Print details of vector
@@ -84,8 +86,8 @@ os.remove("myvector.gpkg")
 ```
 
 ```{note}
-GeoPandas functions with the same behaviour such as {func}`geopandas.GeoDataFrame.to_file` can also be used directly on a {class}`~geoutils.Vector`,
-for example calling {func}`geoutils.Vector.to_file`.
+GeoPandas functions with the same behaviour such as {meth}`geopandas.GeoDataFrame.to_file` can also be used directly on a {class}`~geoutils.Vector`,
+for example calling {meth}`geoutils.Vector.to_file`.
 ```
 
 
@@ -95,11 +97,11 @@ Nearly all geometric attributes and functions of GeoPandas (and sometimes, under
 
 In {class}`~geoutils.Vector`, those have three types of behaviour:
 
-1. Methods that return a geometric output (e.g., {attr}`~geoutils.Vector.boundary` or {func}`~geoutils.Vector.symmetric_difference`), which are cast into a
+1. Methods that return a geometric output (e.g., {attr}`~geoutils.Vector.boundary` or {meth}`~geoutils.Vector.symmetric_difference`), which are cast into a
    {class}`~geoutils.Vector`,
-2. Methods that return a non-geometric series of the same length as the number of features (e.g., {attr}`~geoutils.Vector.area` or {func}`~geoutils.Vector.overlaps`),
+2. Methods that return a non-geometric series of the same length as the number of features (e.g., {attr}`~geoutils.Vector.area` or {meth}`~geoutils.Vector.overlaps`),
    which return a {class}`pandas.Series` that can be assigned to a column of {attr}`~geoutils.Vector.gdf`,
-3. Methods that return any other type of output (e.g., {func}`~geoutils.Vector.has_sindex` or {func}`~geoutils.Vector.to_feather`), for which the output is
+3. Methods that return any other type of output (e.g., {attr}`~geoutils.Vector.has_sindex` or {meth}`~geoutils.Vector.to_feather`), for which the output is
    preserved.
 
 ```{important}
@@ -107,7 +109,7 @@ See the full list of supported methods in the {ref}`dedicated section of the API
 ```
 
 These behaviours aim to simplify the analysis of vectors, removing the need to operate on many different objects due to varying function outputs
-({class}`geopandas.GeoDataFrame`, {class}`geopandas.GeoSeries`, {class}`shapely.Geometry`, {class}`pandas.Series`).
+({class}`geopandas.GeoDataFrame`, {class}`geopandas.GeoSeries`, {external+shapely:doc}`shapely.Geometry <geometry>`, {class}`pandas.Series`).
 
 ```{code-cell} ipython3
 :tags: [remove-cell]

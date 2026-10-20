@@ -5,15 +5,14 @@ GeoUtils supports **scalable execution for most of its operations**, nearly all 
 
 Chunked implementations can run through either **Dask** (via the Xarray and Pandas accessors) or **Multiprocessing** (via GeoUtils objects).
 
-The interfaces expose shared geospatial methods, and both chunked backends reuse their numerical calculations.
-Tests compare chunked and in-memory results, using numerical tolerances for floating point reductions.
+The two interfaces expose the **same operations**, and chunked implementations yield **identical results** as in-memory operations, including with different backends (e.g., SciPy, Numba).
 
 ## Table summary
 
 The table below summarizes the **scalability support** of GeoUtils operations with respect to their input and output
-behavior. Operations marked as chunked are also validated with inputs larger than the memory available to one worker.
+behavior.
 
-If you are unfamiliar with **chunked and lazy execution** or **deferred I/O**, see the {ref}`scalability-concept` page.
+If you are unfamiliar with **chunked and lazy execution** or **deferred I/O**, see {ref}`scalability-concept`.
 
 ```{admonition} Legend
 - {bdg-success}`Chunked` — Processes in chunks, without loading (for input) and/or returning (for output) the full data. This is **also lazy (deferred execution) when using Dask**.
@@ -23,8 +22,8 @@ If you are unfamiliar with **chunked and lazy execution** or **deferred I/O**, s
 
 The **`⟶`** symbol denotes methods interfacing from one specific object type to another, with point-cloud type shortened to "Point".
 
-The **memory usage** gives the estimate number of chunks in-memory per task: `1R`, `1P` and `1V` mean one
-raster, point or vector chunk, `R/P` means either raster or point. See bottom notes for special cases.
+**Memory usage** estimates the number of chunks in-memory: **1R**/**1P**/**1V** mean one
+raster/point/vector chunk respectively, **R/P** means either raster or point. See bottom notes for special cases.
 ```
 
 ```{list-table}
@@ -293,12 +292,9 @@ raster, point or vector chunk, `R/P` means either raster or point. See bottom no
 
 Note that nearly all **raster inputs/outputs** and most **point inputs/outputs** methods support {bdg-success}`Chunked`, while **vector inputs** are often {bdg-secondary}`In-memory`, as usually less limiting.
 
-See {ref}`uncertainty` for error workflows and {ref}`scalability-formats` for reading and writing limits imposed
-by the file layout.
-
 For more insights into chunked implementation strategies and behaviour expected for each operation, see the {ref}`scalability-logic` page.
 
-## Notes
+### Notes
 
 1. <span id="scalability-note-reprojection"></span>For reprojecion, **CRS overlap** corresponds to the source area needed for each
    output chunk after reprojection. By default, GeoUtils sets output chunks to a size that follows changes in resolution

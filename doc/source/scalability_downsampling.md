@@ -119,7 +119,7 @@ np.testing.assert_array_equal(sample_computed.classification, sample_eager.class
 The {meth}`~RasterBase.plot` function **automatically downsamples rasters and point clouds to the figure's size
 and resolution**, omitting detail too fine to see in the plot.
 
-By default, `"auto"` determines the limit from the axes size and figure DPI, with a maximum of 100,000 points.
+By default, `"auto"` determines the limit from the axes size and figure DPI, with a maximum of 10,000,000 points.
 The maximum number of pixels or points used can also be controlled manually with the `max_pixels` and `max_points` arguments.
 Passing `None` displays the original grid or every point.
 

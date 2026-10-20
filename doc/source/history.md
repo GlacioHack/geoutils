@@ -6,7 +6,7 @@ More information on how the package was created, who are the people behind it, a
 
 ## Creation
 
-GeoUtils was created during the [GlacioHack](https://github.com/GlacioHack) hackaton event, that took place online on November 8, 2020 and was initiated by
+GeoUtils was created during the [GlacioHack](https://github.com/GlacioHack) hackathon event, that took place online on November 8, 2020 and was initiated by
 Amaury Dehecq<sup>1</sup>.
 
 ```{margin}

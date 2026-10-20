@@ -88,10 +88,6 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
   - Filter values over local neighborhoods.
   - ✅
 
-* - {meth}`fill_nodata() <RasterBase.fill_nodata>` / {meth}`sieve() <RasterBase.sieve>`
-  - Fill raster gaps or remove small raster regions.
-  - ❌
-
 * - {meth}`subsample() <RasterBase.subsample>`
   - Randomly select valid cells or points.
   - ✅
@@ -105,11 +101,11 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
   - ✅
 
 * - {meth}`stats() <RasterBase.stats>`
-  - Summarize valid values.
+  - Estimate global statistics.
   - ✅
 
 * - {meth}`stats() <RasterBase.stats>` with ``by``
-  - Group statistics by bins, categories or zones.
+  - Estimate statistics grouped by bins, categories or zones.
   - ✅
 
 * - {meth}`variogram() <RasterBase.variogram>`
@@ -132,16 +128,8 @@ We first describe GeoUtils' core **data operations**, which operate on underlyin
   - Burn geometries onto a raster grid.
   - ✅
 
-* - {meth}`rasterize() <VectorBase.rasterize>` with ``fractional=True``
-  - Compute coverage fractions.
-  - ✅
-
-* - {meth}`stats() <RasterBase.stats>` with ``fractional=True``
-  - Compute area-weighted polygon statistics.
-  - ❌
-
 * - {meth}`polygonize() <RasterBase.polygonize>`
-  - Convert raster regions to polygons.*
+  - Convert raster regions to polygons.
   - ✅
 
 * - <span class="gu-table-section">Raster ⟷ Point</span>

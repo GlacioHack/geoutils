@@ -120,7 +120,7 @@ which corresponds to variables with the right shapes (2D or 3D for rasters, 1D f
 list(ds.rst.compatible_variables.keys()), list(ds.pc.compatible_variables.keys())
 ```
 
-**By default, operations will loop through every compatible variable**, but those can also be passed manually through the `variables`,
+**By default, operations will loop through every compatible variable**, but those can also be passed manually through the `variables` argument,
 which is exposed for all functions with the {class}`rst <geoutils.DatasetRasterAccessor>` Dataset accessor.
 
 ```{code-cell} ipython3

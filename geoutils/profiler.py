@@ -463,7 +463,7 @@ class Profiler:
         If function_name is filled, it returns only matching rows (empty if no "name" matches).
 
         :param function_name: function name to show the profiled information
-        :return dataframe information restrains function_name if filled
+        :returns: Profiling DataFrame, filtered by function_name when supplied.
         """
 
         if Profiler._profiling_info.empty or not function_name:

@@ -43,7 +43,7 @@ GeoUtils currently targets scalable **CPU** execution. However, as many of our n
 ## Using Dask through accessors
 
 With **Dask**, raster operations are both **chunked** and **lazy**.
-This behavior is enabled by opening a raster with the `chunks` argument, which returns an Xarray object backed by Dask arrays.
+This behavior is enabled by opening a file with the `chunks` argument, which returns an Xarray or GeoPandas object backed by Dask arrays.
 
 ```{code-cell} python
 import geoutils as gu
@@ -68,7 +68,7 @@ ds_reproj = ds.rst.reproject(
 ds_reproj
 ```
 
-The resulting raster remains **lazy**. Computation (reading input files and applying all chained operations) only happens when later explicitly requested with {meth}`~dask.array.Array.compute()`.
+The resulting raster remains **lazy** (i.e. a Dask array). Computation (reading input files and applying all chained operations) only happens when later explicitly requested with {meth}`~dask.array.Array.compute()`.
 
 For a raster output, one typically wants to write to file while avoid loading it in-memory:
 
@@ -88,7 +88,7 @@ sub_ds = ds_reproj.rst.subsample(
 sub_ds
 ```
 
-The output point cloud is again lazy. Calling `compute()` returns an in-memory DataArray:
+The output point cloud is again lazy. Calling {meth}`compute() <xarray.DataArray.compute>` returns an in-memory DataArray:
 ```{code-cell} python
 sub_ds.compute()
 ```
@@ -106,7 +106,7 @@ rast
 ```
 
 By passing a {class}`~geoutils.multiproc.MultiprocConfig` configuration to an operation, the out-of-memory behaviour is triggered.
-The configuration requires `chunks`, and can optionally define the output file and cluster to use (defaults to temporary instances for both).
+The configuration requires `chunks`, and can optionally define the output file and cluster to use (defaults to temporary instances for both, see {ref}`multiprocessing`).
 
 ```{code-cell} python
 from geoutils.multiproc import MultiprocConfig
@@ -138,12 +138,6 @@ samp_rast_mp = rast_reproj_mp.subsample(
 samp_rast_mp
 ```
 
-Large multiprocessing value or index outputs requested with ``as_array=True`` from
-{meth}`~RasterBase.subsample` or {meth}`~PointCloudBase.subsample` use the same sample-size decision and
-are written to a NumPy ``.npy`` file.
-Dask inputs continue through their partitioned execution path without a file-backed result. Pass
-``force_output_to_memory=True`` to raster or point subsampling when the complete sample should be returned in memory
-even though it is larger than one input chunk.
 
 ```{code-cell} ipython3
 :tags: [remove-cell]
@@ -158,11 +152,11 @@ This backend is convenient when working directly with {class}`~geoutils.Raster` 
 
 - **Downsample or use file overviews** when opening/plotting/analyzing data (see {ref}`scalability-downsampling` on how to do this in GeoUtils),
 - Choose chunk sizes large enough to reduce scheduling overhead, but **small enough to fit comfortably in memory**,
-- Check that your data files have **disk chunksizes** (otherwise loads everything) and use a multiple of it for optimal **in-memory chunking** (see {ref}`scalability-formats` to handle disk chunks in GeoUtils),
-- If **memory** is the limiting factor for you, use a **single-threaded scheduler** through Dask (`dask.config.set(scheduler='single-threaded')`) or sequential chunk processing through multiprocessing (default cluster),
+- Check that your data files have **disk chunksizes** (otherwise loads all) and use a multiple of them as **in-memory chunking** (see {ref}`scalability-formats` to handle disk chunks in GeoUtils),
+- If **memory** is the limiting factor for you, use a **single-threaded scheduler** through Dask (`dask.config.set(scheduler='single-threaded')`) or sequential chunk processing through multiprocessing (default cluster) to avoid parallel chunk being loaded,
 - If **speed** is the limiting factor for you, use **parallelized processes** through Dask (see [Dask scheduler configuration](https://docs.dask.org/en/stable/scheduler-overview.html#scheduler-overview)) or through a {ref}`multiprocessing cluster<multiprocessing>`,
 - Insert **breakpoints** (for example by writing intermediate results to disk) to prevent building overly large Dask graphs.
 
 For more guidance on chunk sizing and performance, see the [Dask array best practices](https://docs.dask.org/en/stable/array-best-practices.html).
 
-The full description of supported methods is available on the {ref}`scalability-support` page.
+Finally, **ensure an operation is supported in chunks** in GeoUtils or elsewhere. The full description of supported methods is available on the {ref}`scalability-support` page.

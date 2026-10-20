@@ -61,9 +61,9 @@ depends on the projection, resolution change, chunk sizes and neighborhood.
 With Dask, output chunks default to the source's spatial chunk sizes in pixels. A coarser output pixel covers more
 source pixels, so downsampling can increase memory per output chunk. For example, doubling both pixel dimensions
 makes an output chunk cover about four times the source area. Choose smaller source chunks before reprojection
-when that increase would exceed available memory. Multiprocessing uses `mp_config.chunks` for the output tiles.
+when that increase would exceed available memory.
 
-Chunked reprojection supports both affine grids and GCP/RPC transformation models.
+Chunked reprojection **supports both affine grids and GCP/RPC transformation models**.
 
 ### Chunked polygonization
 
@@ -83,7 +83,7 @@ Conceptually, the methods differ in how cross-chunk regions are reconstructed:
 - **`label_stitch`** labels values as in **`label_union`**, then polygonizes each chunk independently and **stitches polygons afterward in vector space**, avoiding the need for a union–find structure,
 - **`geometry_stitch`** bypasses labeling entirely by performing **polygonization on halo-expanded chunks** (1-pixel overlap), then stitches polygons similarly as in **`label_stitch`** after clipping.
 
-GeoUtils uses **`label_stitch`** by default because it scales best in the {ref}`benchmarking-performance`.
+GeoUtils uses **`label_stitch`** by default because it scales best in our {ref}`benchmarking-performance` tests.
 
 Connectivity assumptions influence how many neighboring chunks must be used in memory, which remains small and bounded:
 

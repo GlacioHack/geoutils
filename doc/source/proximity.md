@@ -41,7 +41,7 @@ Proximity corresponds to **the distance to the closest target geospatial data**,
 The target geospatial data can be either a vector or a raster.
 
 ```{caution}
-With Dask or multiprocessing, proximity only works until a finite `max_distance` around each chunk. Cells farther remain nodata.
+With Dask or multiprocessing, proximity only works until a finite `max_distance` around each chunk. Farther cells remain nodata.
 ```
 
 ```{code-cell} ipython3

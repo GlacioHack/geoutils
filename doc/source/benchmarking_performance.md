@@ -1,16 +1,17 @@
 (benchmarking-performance)=
 # Performance
 
-GeoUtils benchmarks its functionalities to measure **execution time and memory usage**, check **lazy and out-of-core behaviour** with
-Dask and Multiprocessing, track **improvements or regressions over time**, and compare different **execution modes** and
-**calculation engines** against the [**GDAL CLI**](https://gdal.org/en/stable/programs/index.html). Chunked operations
-also compare strategies used to coordinate selections or reconcile results across chunks.
+GeoUtils benchmarks its operations to ensure **efficiency and robustness to updates**.
 
-The benchmarks use GeoUtils' profiling tool described in {ref}`profiling`, which relies on [**psutil**](https://psutil.readthedocs.io/) and [**Dask's worker memory diagnostics**](https://distributed.dask.org/en/stable/worker-memory.html).
+The benchmarks tests measure **execution time and memory usage**, check **lazy and out-of-core behaviour** with
+Dask and Multiprocessing, track **improvements or regressions over time**, and compare different **execution modes** and
+**calculation engines**, including external checks against [**GDAL CLI**](https://gdal.org/en/stable/programs/index.html) and PDAL. 
+
+The benchmarks use GeoUtils' profiling tool described in {ref}`profiling`.
 
 ## Improvements or regressions over time
 
-The [**GeoUtils benchmark webpage**](https://glaciohack.github.io/geoutils/) provides performance of core functionalities and their changes with commit history.
+The [**GeoUtils benchmark webpage**](https://glaciohack.github.io/geoutils/) summarizes performance of core functionalities and their changes with commit history.
 It relies on [Airspeed Velocity (ASV)](https://asv.readthedocs.io/) to record reproducible performance measurements for each commit and publish them.
 
 ## Comparison across execution modes, engines and external CLI tools
@@ -23,15 +24,6 @@ execution-mode and chunk-strategy comparisons fix the other dimensions. Fixed-si
 each compiled gridding kernel in Dask and Multiprocessing workers. The Rasterio/GDAL calculation engine used inside
 GeoUtils remains distinct from the external GDAL CLI reference. Raster subsampling and raster-to-point conversion use
 equivalent **PDAL CLI pipelines** as an additional external reference.
-
-For GDAL warp operations, `-wm` limits working memory to approximately one GeoUtils chunk, although GDAL chooses the
-exact processing-window shape itself. `GDAL_CACHEMAX` separately controls the raster block cache. The
-`gdal_rasterize` CLI has no documented option for two-dimensional pixel chunks; its lower-level API only exposes a
-scanline chunk height. The comparison therefore keeps the default `-optim AUTO`, which chooses between GDAL's raster
-and vector algorithms.
-The scheduled GDAL raster-size comparisons use the same 2,048², 4,096² and 8,192² rasters with 2,048² chunks. PDAL
-comparisons use up to a 2,048² raster with 1,024² chunks because every cell expands into a point row. This keeps task
-dispatch from dominating either comparison while the selected pull-request smoke cases continue to use small inputs.
 
 Four reference graphics summarize the core results:
 

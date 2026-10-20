@@ -14,21 +14,22 @@ kernelspec:
 # Multiprocessing configuration
 
 GeoUtils implements logic from Python's [multiprocessing library](https://docs.python.org/3/library/multiprocessing.html) library to process raster, vector and point cloud data
-in chunks without loading the entire dataset into memory **when working with **GeoUtils objects**.
-({class}`~geoutils.Raster`, {class}`~geoutils.Vector` and {class}`~geoutils.PointCloud`),
+in chunks without loading the entire dataset into memory when working with **GeoUtils objects** ({class}`~geoutils.Raster`, {class}`~geoutils.Vector` and {class}`~geoutils.PointCloud`).
 
 ```{important}
 When using the {class}`rst <geoutils.DataArrayRasterAccessor>`, {class}`vct <geoutils.GeoDataFrameVectorAccessor>` and {class}`pc <geoutils.GeoDataFramePointCloudAccessor>` **accessors**, use Dask instead.
 ```
 
-Below, we show how to configure multiprocessing for chunked execution on various cases.
+Below, we show **how to configure multiprocessing** for chunked execution on various cases.
 
 ## Using {class}`~geoutils.multiproc.MultiprocConfig`
 
-{class}`~geoutils.multiproc.MultiprocConfig` defines processing settings, such as chunk sizes, output file, driver,
-and computing cluster. Pass it as `mp_config` to a supported method to trigger out-of-memory execution.
+A {class}`~geoutils.multiproc.MultiprocConfig` object defines processing settings, such as chunk sizes, output file, driver,
+and computing cluster. Pass it as `mp_config` to a method **to trigger out-of-memory execution**.
 
 ### Raster example
+
+As an example below, we reproject a raster using multiprocessing:
 
 ```{code-cell} ipython3
 import geoutils as gu
@@ -66,8 +67,7 @@ with ClusterGenerator("multi", nb_workers=4) as cluster:
 rast_reprojected_parallel
 ```
 
-The `ClusterGenerator("multi", nb_workers=4)` call above creates an {class}`~geoutils.multiproc.MpCluster` internally.
-By default, `MpCluster` starts workers with `forkserver` when the current platform supports it and otherwise uses
+The {class}`~geoutils.multiproc.ClusterGenerator` call above creates a {class}`~geoutils.multiproc.MpCluster`. By default, {class}`~geoutils.multiproc.MpCluster` starts workers with `forkserver` when the current platform supports it and otherwise uses
 `spawn` (e.g. on Windows). To select another start method supported by the current platform, create the
 cluster directly:
 
@@ -89,8 +89,8 @@ os.remove(parallel_config.outfile)
 
 ### Point cloud example
 
-{meth}`~geoutils.pointcloud.base.GeometryPointCloudBase.reproject` uses the same `mp_config` argument. For point cloud operations, `chunks` is an
-integer number of points per task rather than raster dimensions, and the output can be GeoPackage, LAS or LAZ.
+**Point cloud operation use the same `mp_config` argument**, where `chunks` is a number of points (in 1D), 
+and the output can be GeoPackage, LAS or LAZ.
 
 ```python
 points = gu.PointCloud("observations.laz")
@@ -101,20 +101,17 @@ assert not points.is_loaded
 assert not projected.is_loaded
 ```
 
-The output format follows the filename extension, or an explicit `driver="GPKG"`, `"LAS"` or `"LAZ"`.
-GeoPackage is the default when no extension is supplied. Point order and value columns are preserved; LAS/LAZ
-coordinates use the file's stored precision. The accessor interfaces use their normal eager or lazy Dask path without
-`mp_config`.
+As for rasters, the output format follows the filename extension. **GeoPackage is the default** when no extension is supplied.
 
 ## Advanced block functions
 
-GeoUtils offers Dask-named functions for custom out-of-memory multiprocessing. The naming mirrors Dask arrays and
+GeoUtils implements functions for custom out-of-memory multiprocessing. The naming mirrors Dask arrays and
 dataframes, but multiprocessing results are computed eagerly and cannot remain lazy.
 
 ### {func}`~geoutils.multiproc.map_overlap`: process and save large rasters
 
 This function applies a user-defined function to raster blocks and **saves the output** to a file. The entire raster is
-**never loaded into memory at once**. It returns the raster metadata loaded from the file.
+**never loaded into memory at once**.
 
 ```{code-cell} ipython3
 import numpy as np

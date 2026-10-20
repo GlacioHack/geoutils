@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from geoutils.pointcloud.base import PointCloudBase
 
 
-_AUTO_MAX_POINTS = 100_000
+_AUTO_MAX_POINTS = 10_000_000
 
 
 def _display_point_count(

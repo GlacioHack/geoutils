@@ -90,7 +90,7 @@ Dtypes follow [NumPy's promotion rules](https://numpy.org/doc/stable/reference/a
 The same is true for a {class}`~geoutils.PointCloud`. However, different object types cannot perform arithmetic directly with each other.
 To do so, first reconcile them to the same object type (i.e. spatial support) either at high-level through {ref}`sampling-cosample` or directly with {ref}`transformations`.
 
-We create the same small raster with both a {class}`~geoutils.Raster` and {class}`~xarray.DataArray`, using `float32` so Xarray can
+We create the same small raster with both a {class}`~geoutils.Raster` and {class}`~xarray.DataArray`, using {attr}`~numpy.float32` so Xarray can
 represent missing pixels as NaNs:
 
 ```{code-cell} ipython3
@@ -171,7 +171,7 @@ or a boolean {class}`~xarray.DataArray` or {class}`~pandas.Series`.
 
 Notice that {class}`Rasters <geoutils.Raster>` can have masked boolean (`True`/`False`) values,
 while boolean {class}`DataArrays <xarray.DataArray>` cannot. When we use them to index or assign values,
-both use the booleans directly, to ensure no difference on behaviour.
+both use the booleans directly, to ensure no difference in behaviour.
 ```
 
 ```{code-cell} ipython3

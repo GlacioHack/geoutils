@@ -1305,7 +1305,7 @@ class GeometryPointCloudBase(PointCloudBase, VectorBase):
         :param return_axes: Whether to return the plot and colorbar axes.
         :param savefig_fname: Optional path at which to save the current figure.
         :param max_points: The default ``"auto"`` limits the sample to the smaller of the Matplotlib axes pixel area
-            and 1,000,000 points, as set by the figure size and DPI. An integer sets an explicit point limit, and None
+            and 10,000,000 points, as set by the figure size and DPI. An integer sets an explicit point limit, and None
             plots every point.
         :param random_state: Random generator or seed used for deterministic point selection.
         :returns: None, or the plot axes and optional colorbar axes when ``return_axes=True``.

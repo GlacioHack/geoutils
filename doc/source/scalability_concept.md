@@ -36,11 +36,12 @@ Naturally, all **metadata operations** (e.g., accessing {attr}`~RasterBase.crs`,
 All three GeoUtils objects, {class}`~geoutils.Raster`, {class}`~geoutils.Vector` and
 {class}`~geoutils.PointCloud`, support **deferred I/O and implicit loading** when opened from files.
 Their constructors read metadata first; values and geometries are read when an operation needs them.
-The {attr}`~RasterBase.is_loaded` or {attr}`~VectorBase.is_loaded` property reports whether the data are in memory.
+The {attr}`~RasterBase.is_loaded` property reports whether the data are in memory.
 
-For rasters, crop(), icrop(), copy(), and translate() can update an unloaded object without reading its pixels.
+For rasters, {meth}`~RasterBase.crop`, {meth}`~RasterBase.icrop`, {meth}`~RasterBase.copy`, and
+{meth}`~RasterBase.translate` can update an unloaded object without reading its pixels.
 These behave similarly to Xarray's {meth}`~xarray.DataArray.sel`, {meth}`~xarray.DataArray.copy`, or
-{meth}`~xarray.DataArray.assign_coords`. For vectors and point clouds, crop() stores a spatial selection that
+{meth}`~xarray.DataArray.assign_coords`. For vectors and point clouds, {meth}`~VectorBase.crop` stores a spatial selection that
 is applied when their geometries or values are read. The file format determines how efficiently those rows
 can be read; see {ref}`scalability-formats`.
 
@@ -91,7 +92,7 @@ This enables **out-of-core execution**, allowing datasets larger than available 
 In GeoUtils, chunked execution is implemented through two backends:
 
 - **Dask**, used through the Xarray {class}`rst <geoutils.DataArrayRasterAccessor>` and GeoPandas {class}`vct <geoutils.GeoDataFrameVectorAccessor>` and {class}`pc <geoutils.GeoDataFramePointCloudAccessor>` accessors,
-- **Multiprocessing**, used through supported methods of the {class}`~geoutils.Raster`, {class}`~geoutils.Vector` and {class}`~geoutils.PointCloud` objects.
+- **Multiprocessing**, used through the {class}`~geoutils.Raster`, {class}`~geoutils.Vector` and {class}`~geoutils.PointCloud` objects.
 
 Both backends read and process chunks separately, keeping peak memory usage proportional to the chunk size rather than the full dataset size.
 Chunked execution therefore allows GeoUtils to scale to large datasets while maintaining a **predictable memory footprint**.
@@ -128,7 +129,7 @@ In GeoUtils, lazy execution is available through the Xarray {class}`rst <geoutil
 {class}`pc <geoutils.GeoDataFramePointCloudAccessor>` accessors with **Dask dataframes**.
 
 Operations build a **Dask computation graph** instead of executing immediately. The computation is triggered only when required, for example when calling
-`compute()` directly or when writing results to disk. It is particularly useful when **chaining multiple operations**, because intermediate results do not need to be materialized or
+{meth}`compute() <dask.array.Array.compute>` directly or when writing results to disk. It is particularly useful when **chaining multiple operations**, because intermediate results do not need to be materialized or
 written/read from disk (which costs extra I/O time, often much longer than compute time).
 
 Lazy execution always relies on **chunked execution**, but the reverse is not true: chunked processing can also run eagerly, as in the Multiprocessing backend.
@@ -156,7 +157,7 @@ print("Result is still lazy after raster interpolation:\n")
 ds_interp
 ```
 
-We can materialize it with `compute()`, which now returns a NumPy array:
+We can materialize it with {meth}`compute() <dask.array.Array.compute>`, which now returns a NumPy array:
 
 ```{code-cell}
 ds_interp = ds_interp.compute()

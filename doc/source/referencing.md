@@ -13,9 +13,10 @@ kernelspec:
 (referencing)=
 # Referencing
 
-Below, a summary of the **georeferencing attributes** of geospatial data objects and the **methods to manipulate these
-georeferencing attributes** in different projections, without any data transformation. For georeferenced transformations
-(such as reprojection and cropping), see {ref}`transformations`.
+Below, a summary of the **referencing attributes** of geospatial data objects and the **methods to manipulate these** 
+in different projections, without any data transformation. 
+
+For georeferenced transformations (such as reprojection, or polygonization), see {ref}`transformations`.
 
 ```{code-cell} ipython3
 :tags: [remove-cell]
@@ -29,8 +30,8 @@ pyplot.rcParams['font.size'] = 9
 
 ## Attributes
 
-In GeoUtils, the **georeferencing syntax is consistent across all geospatial data objects**. Additionally, **data objects
-load only their metadata by default**, allowing quick operations on georeferencing without requiring the array data
+In GeoUtils, the **georeferencing syntax is consistent** across all geospatial data objects. Additionally, data objects
+**load only their metadata by default**, allowing quick operations on georeferencing without requiring the array data
 (for a {class}`~geoutils.Raster`) to be present in memory.
 
 ### Metadata summary
@@ -39,8 +40,7 @@ load only their metadata by default**, allowing quick operations on georeferenci
 {meth}`gdf.vct.info() or Vector.info() <VectorBase.info>`<br>
 {meth}`gdf.pc.info() or PointCloud.info() <geoutils.pointcloud.base.GeometryPointCloudBase.info>`
 
-These methods summarize all the metadata of a geospatial data object, including its georeferencing.
-
+The {meth}`~RasterBase.info` method summarizes **all metadata** of a geospatial data object, including its georeferencing.
 
 ```{code-cell} ipython3
 :tags: [hide-cell]
@@ -70,7 +70,7 @@ gdf.vct.info()
 {attr}`gdf.pc.crs or PointCloud.crs <PointCloudBase.crs>`
 
 [Coordinate reference systems (CRSs)](https://en.wikipedia.org/wiki/Spatial_reference_system), sometimes also called
-spatial reference systems (SRSs), define the 2D projection of geospatial data. GeoUtils stores them as
+spatial reference systems (SRSs), **define the 2D or 3D projection of geospatial data**. GeoUtils stores them as
 {class}`pyproj.crs.CRS` objects.
 
 ```{code-cell} ipython3
@@ -97,7 +97,7 @@ can help define a 3D CRS.
 {attr}`gdf.vct.bbox or Vector.bbox <VectorBase.bbox>`<br>
 {attr}`gdf.pc.bbox or PointCloud.bbox <geoutils.pointcloud.base.GeometryPointCloudBase.bbox>`
 
-Bounding boxes define the spatial extent of geospatial data through the "left", "right", "bottom", and "top"
+Bounding boxes define the **spatial extent** of geospatial data through the "left", "right", "bottom", and "top"
 coordinates. GeoUtils represents them with {class}`rasterio.coords.BoundingBox` objects.
 
 ```{code-cell} ipython3
@@ -123,9 +123,8 @@ To reproduce the behaviour of {attr}`geopandas.GeoSeries.bounds` (per-feature bo
 {attr}`gdf.vct.footprint or Vector.footprint <VectorBase.footprint>`<br>
 {attr}`gdf.pc.footprint or PointCloud.footprint <geoutils.pointcloud.base.GeometryPointCloudBase.footprint>`
 
-As reprojections between CRSs deform shapes, including extents, a vectorized footprint provides more reliable
-intersections than a bounding box. It contains a single polygon whose edges are densified when projected into another
-CRS.
+A footprint defines **a polygon of the object extent**, vectorized with densified lines.
+As reprojections between CRSs deform shapes, a footprint provides more reliable intersections than a bounding box. 
 
 ```{code-cell} ipython3
 # Plot the raster and vector footprints together
@@ -140,11 +139,11 @@ _ = ax.set_title("Raster (blue) and vector (orange) footprints")
 {attr}`ds.rst.transform or Raster.transform <RasterBase.transform>`<br>
 {attr}`ds.rst.shape or Raster.shape <RasterBase.shape>`
 
-These attributes define a raster's georeferenced grid through its origin, resolution and 2D array shape, independently
+The {attr}`~RasterBase.transform` and {attr}`~RasterBase.shape` attributes define a **raster's georeferenced grid through its origin, resolution and 2D array shape**, independently
 of the number of bands {attr}`~RasterBase.bands`.
 
 From the grid are derived the resolution {attr}`~RasterBase.res`, and {attr}`~RasterBase.height` and
-{attr}`~RasterBase.width`, as well as the bounds detailed above in {ref}`bounds`.
+{attr}`~RasterBase.width`, as well as the bounding box detailed above in {ref}`bounds`.
 
 ```{code-cell} ipython3
 # Get raster transform and shape
@@ -157,11 +156,11 @@ print(ds.rst.shape)
 
 {attr}`ds.rst.area_or_point or Raster.area_or_point <RasterBase.area_or_point>`
 
-A largely overlooked aspect of a raster's georeferencing is the pixel interpretation stored in the
+A largely overlooked aspect of a raster's georeferencing is the **pixel interpretation** stored in the
 [AREA_OR_POINT metadata](https://gdal.org/user/raster_data_model.html#metadata).
 Pixels can be interpreted either as **"Area"** (the most common) where **the value represents a sampling over the region
-of the pixel (and typically refers to the upper-left corner coordinate)**, or as **"Point"**
-where **the value relates to a point sample (and typically refers to the center of the pixel)**, the latter often used
+of the pixel** (and typically refers to the upper-left corner coordinate), or as **"Point"**
+where **the value relates to a point sample** (and typically refers to the center of the pixel), the latter often used
 for digital elevation models (DEMs).
 
 Pixel interpretation is stored as a string.
@@ -194,7 +193,7 @@ Several functionalities are available to facilitate the manipulation of the geor
 {meth}`gdf.vct.get_bbox_projected() or Vector.get_bbox_projected() <VectorBase.get_bbox_projected>`<br>
 {meth}`gdf.pc.get_bbox_projected() or PointCloud.get_bbox_projected() <VectorBase.get_bbox_projected>`
 
-These methods return the bounding box in another CRS, accounting for non-linear deformation by densifying its edges
+These methods return the **bounding box in another CRS**, accounting for non-linear deformation by densifying its edges
 during projection.
 
 ### Projected footprints
@@ -203,7 +202,7 @@ during projection.
 {meth}`gdf.vct.get_footprint_projected() or Vector.get_footprint_projected() <VectorBase.get_footprint_projected>`<br>
 {meth}`gdf.pc.get_footprint_projected() or PointCloud.get_footprint_projected() <VectorBase.get_footprint_projected>`
 
-These methods retain the densified polygon instead of reducing the projected result to a bounding box.
+These methods return **the footprint polygon in another CRS**, also densifying lines to preserve shape during projection.
 
 ```{code-cell} ipython3
 # Get footprint of larger buffered vector in polar stereo CRS (to show deformations)
@@ -216,7 +215,7 @@ gdf.vct.buffer_metric(10**6).vct.get_footprint_projected(3995).vct.plot()
 {meth}`gdf.vct.get_metric_crs() or Vector.get_metric_crs() <VectorBase.get_metric_crs>`<br>
 {meth}`gdf.pc.get_metric_crs() or PointCloud.get_metric_crs() <VectorBase.get_metric_crs>`
 
-These methods estimate a local metric coordinate system. The result can be either "universal" (zone of the Universal
+These methods estimate a **local metric coordinate system**. The result can be either "universal" (zone of the Universal
 Transverse Mercator or Universal Polar Stereographic system), or "custom"
 (Mercator or Polar projection centered on the {class}`Raster<geoutils.Raster>`, {class}`Vector<geoutils.Vector>` or
 {class}`PointCloud<geoutils.PointCloud>`).
@@ -230,7 +229,7 @@ ds.rst.get_metric_crs()
 
 {meth}`ds.rst.edit() or Raster.edit() <RasterBase.edit>`
 
-This method returns a copy with several metadata fields changed together, while keeping the source and its pixel
+This method returns **a copy with edited metadata fields**, while keeping the source and its pixel
 values unchanged. Omitted fields keep their current values, explicit `None` values clear optional metadata, and new
 tags are merged with the existing tags.
 
@@ -253,7 +252,7 @@ edited_ds = ds.rst.edit(tags={"purpose": "corrected metadata"}, area_or_point="P
 {meth}`ds.rst.set_nodata() or Raster.set_nodata() <RasterBase.set_nodata>`<br>
 {meth}`ds.rst.set_area_or_point() or Raster.set_area_or_point() <RasterBase.set_area_or_point>`
 
-These methods update one field in place and provide field-specific options when needed. Assigning the corresponding
+These methods **update one metadata field in-place** and provide field-specific options when needed. Assigning the corresponding
 attribute, such as {attr}`~RasterBase.crs` or {attr}`~RasterBase.transform`, uses the setter's default options.
 
 ```{code-cell} ipython3

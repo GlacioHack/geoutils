@@ -2,8 +2,7 @@
 # Scalability
 
 The following sections explain how to work efficiently with large geospatial datasets through **chunked execution** with Dask and
-multiprocessing, **downsampling** to reduce data before or during an operation, considering **file formats and cloud storage**.
-
+multiprocessing, **downsampling** to reduce data before or during an operation, all while considering **file formats and cloud storage**.
 
 For measured comparisons between execution backends and tools to inspect your own workflows, see {ref}`benchmarking`.
 
