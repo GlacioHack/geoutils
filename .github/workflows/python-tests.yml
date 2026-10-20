@@ -53,7 +53,7 @@ jobs:
         path: ${{ env.CONDA }}/envs
         key: conda-${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.dep-level }}-${{ env.cache_date }}-${{ hashFiles('dev-environment.yml') }}-${{ env.CACHE_NUMBER }}
       env:
-        CACHE_NUMBER: 2 # Increase this value to reset cache if environment.yml has not changed
+        CACHE_NUMBER: 3 # Increase this value to reset cache if environment.yml has not changed
       id: cache
 
     # The trick below is necessary because the generic environment file does not specify a Python version, and ONLY
@@ -72,8 +72,8 @@ jobs:
       if: ${{ matrix.dep-level == 'base' }}
       run: uv pip install -e ".[test]"
 
-    - name: Install macOS PyTorch with shared OpenMP
-      if: ${{ runner.os == 'macOS' && matrix.dep-level != 'base' && steps.cache.outputs.cache-hit != 'true' }}
+    - name: Install PyTorch with shared native libraries
+      if: ${{ runner.os != 'Linux' && matrix.dep-level != 'base' && steps.cache.outputs.cache-hit != 'true' }}
       # Use Conda's OpenMP runtime for PyTorch and its numerical dependencies
       run: >-
         mamba install --yes --channel conda-forge
@@ -89,8 +89,10 @@ jobs:
 
     - name: Check GPyTorch imports
       if: ${{ matrix.dep-level != 'base' }}
-      # Import GeoUtils first, as tests load PyTorch after the geospatial libraries
-      run: python -c "import geoutils; import torch; import gpytorch; print(torch.__version__)"
+      # Import geospatial and geostatistical libraries before PyTorch, as in the tests
+      run: >-
+        python -c "import geoutils; import skgstat; import gstools;
+        import torch; import gpytorch; print(torch.__version__)"
 
     - name: Print conda environment (for debugging)
       run: |
