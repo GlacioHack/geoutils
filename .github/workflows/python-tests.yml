@@ -53,7 +53,7 @@ jobs:
         path: ${{ env.CONDA }}/envs
         key: conda-${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.dep-level }}-${{ env.cache_date }}-${{ hashFiles('dev-environment.yml') }}-${{ env.CACHE_NUMBER }}
       env:
-        CACHE_NUMBER: 0 # Increase this value to reset cache if environment.yml has not changed
+        CACHE_NUMBER: 1 # Increase this value to reset cache if environment.yml has not changed
       id: cache
 
     # The trick below is necessary because the generic environment file does not specify a Python version, and ONLY
@@ -74,10 +74,16 @@ jobs:
 
     - name: Install project environment (optional)
       if: ${{ matrix.dep-level != 'base' }}
-      run: uv pip install -e ".[test,${{ matrix.dep-level }}]"
+      # Hosted runners use CPUs, so avoid loading PyTorch's CUDA libraries on Windows
+      run: uv pip install --torch-backend=cpu -e ".[test,${{ matrix.dep-level }}]"
 
     - name: Check import works
       run: python -c "import geoutils"
+
+    - name: Check GPyTorch imports
+      if: ${{ matrix.dep-level != 'base' }}
+      # Import GeoUtils first, as tests load PyTorch after the geospatial libraries
+      run: python -c "import geoutils; import torch; import gpytorch; print(torch.__version__)"
 
     - name: Print conda environment (for debugging)
       run: |
