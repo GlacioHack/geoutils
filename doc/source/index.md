@@ -143,9 +143,9 @@ analysis_examples/index
 :maxdepth: 2
 
 api
-cli
 config
 benchmarking_index
+cli
 data
 release_notes
 ```

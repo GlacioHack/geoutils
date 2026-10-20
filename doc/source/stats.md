@@ -343,7 +343,7 @@ fractional_glacier_stats.head()
 ```
 
 The mean normalizes coverage weights, while the sum adds coverage-weighted values. Choose the statistic according
-to whether values represent means, totals or densities, as explained in {ref}`core-weighting`.
+to whether values represent means, totals or densities.
 In fractional summaries, `count` is the sum of valid covered-cell fractions, which can differ from
 the number of intersected cells.
 

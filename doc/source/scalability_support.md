@@ -302,7 +302,7 @@ For more insights into chunked implementation strategies and behaviour expected 
 
 1. <span id="scalability-note-reprojection"></span>For reprojecion, **CRS overlap** corresponds to the source area needed for each
    output chunk after reprojection. By default, GeoUtils sets output chunks to a size that follows changes in resolution
-   to avoid loading more than one source chunk. **GCP/RPC models are supported for reprojection**, alongside affine grids.
+   to avoid loading more than one source chunk + overlap. **GCP/RPC models are supported for chunked reprojection**, alongside classic affine grids.
 
 2. <span id="scalability-note-neighborhoods"></span>The **overlap** corresponds to neighboring data needed to calculate
    values near chunk edges, which depends directly on filter window/neighborhood size. Chunked proximity, point

@@ -64,6 +64,7 @@ Below we **compare an elevation raster with LiDAR point observations using krigi
 
 ```python
 import geoutils as gu
+import xarray as xr
 
 # Open big raster and point files as lazy Xarray arrays in chunks
 ds = gu.open_raster("dem.tif", chunks={"x": 512, "y": 512})
@@ -84,7 +85,8 @@ ds_point = ds.rst.resample_at_points(
 )
 
 # Subtract observed elevations lazily, then compute bias, spread and RMSE, also all in chunks
-ds_diff = ds_point - ds_lidar
+with xr.set_options(keep_attrs=True):
+    ds_diff = ds_point - ds_lidar
 print(ds_diff.pc.stats(["mean", "std", "rmse"]))
 ```
 

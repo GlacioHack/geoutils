@@ -20,6 +20,14 @@ object remains available with the same GeoUtils-specific methods.
 
 Below, a summary of the {class}`~geoutils.Vector` object and its methods.
 
+## Accessor {class}`vct <geoutils.GeoDataFrameVectorAccessor>` versus {class}`~geoutils.Vector`
+
+The main differences are the following:
+
+1. A {class}`~geoutils.Vector`'s **geometric operations always return a {class}`~geoutils.Vector`**, while the accessor follows GeoPandas' distinction between a {class}`~geopandas.GeoSeries` and a {class}`~geopandas.GeoDataFrame`.
+
+2. A {class}`~geoutils.Vector` supports **Multiprocessing**, while the accessor supports **Dask**, allowing lazy graph building.
+
 ## Object definition and attributes
 
 A {class}`~geoutils.Vector` contains **a single main attribute**: a {class}`~geopandas.GeoDataFrame` as {attr}`~geoutils.Vector.gdf`.

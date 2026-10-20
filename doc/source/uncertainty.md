@@ -28,7 +28,6 @@ propagated uncertainty with their expected behavior. Numerical propagation and e
 ```{note}
 Error magnitudes use the measured variable's units; correlation distances use the coordinate units.
 Here, both are in metres. Install `geoutils[opt]` for the optional variogram fitting and random field backends.
-See {ref}`core-weighting` for the relationship between coefficients, weights and error covariance.
 ```
 
 ```{code-cell} ipython3

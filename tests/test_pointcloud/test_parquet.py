@@ -54,7 +54,8 @@ class TestPointParquet:
 
         # Reopen to verify exact equality (through GeoPandas reader)
         reopened = gu.open_pointcloud(str(filename), as_object_type="dataarray", columns="all")
-        xr.testing.assert_identical(reopened, points)
+        expected = points.assign_attrs(row_group_sizes=[4, 4, 3])
+        xr.testing.assert_identical(reopened, expected)
         frame = gpd.read_parquet(filename)
         np.testing.assert_array_equal(frame.geometry.x, points.coords["x"])
         np.testing.assert_array_equal(frame["id"], points.coords["id"])
@@ -118,7 +119,8 @@ class TestPointParquet:
         # Write and reopen every attribute, check for equality
         points.pc.to_parquet(str(filename))
         reopened = gu.open_pointcloud(str(filename), as_object_type="dataarray", columns="all")
-        xr.testing.assert_identical(reopened, points)
+        expected = points.assign_attrs(row_group_sizes=[0])
+        xr.testing.assert_identical(reopened, expected)
 
 
 class TestPointParquetChunked:

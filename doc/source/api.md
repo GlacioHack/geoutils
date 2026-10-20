@@ -40,11 +40,11 @@ GeoUtils exposes the raster API through the following interfaces:
 
 
 The DataArray accessor and Raster expose the **same methods and attributes**. The Dataset accessor applies operations
-to all compatible raster variables by default, or to those selected with `variables`.
+to all compatible raster variables by default, or to those selected.
 
-Only **file opening** and **scalable execution** differ between the DataArray accessor and Raster:
+Only **file opening** and **scalable execution** differ substantially between the accessors and Raster:
 
-- **File opening:** {class}`~geoutils.Raster` objects are opened by instantiating the class, whereas {meth}`~geoutils.open_raster` is used for an {class}`xarray.DataArray` object,
+- **File opening:** {meth}`~geoutils.open_raster` is used for an {class}`xarray.DataArray` object, while {class}`~geoutils.Raster` objects are opened by instantiating the class, 
 - **Scalable execution:** the {class}`DataArray.rst <geoutils.DataArrayRasterAccessor>` accessor supports **Dask**, while the {class}`~geoutils.Raster` supports **Multiprocessing** instead.
 
 ### Opening a raster file
@@ -320,20 +320,20 @@ Writing and conversion methods depend on the concrete interface.
 ```
 
 (vector-api)=
-## Vector
+## Vector API
 
 GeoUtils exposes the vector API through two mirrored interfaces:
 
 - A {class}`vct <geoutils.GeoDataFrameVectorAccessor>` accessor extending {class}`geopandas.GeoDataFrame` objects as vectors.
 - {class}`~geoutils.Vector`, an interface operating directly on a GeoUtils object.
 
-Both expose the same GeoUtils-specific methods and attributes listed below. Native GeoPandas methods remain available
-directly on the GeoDataFrame.
+The GeoDataFrame accessor and Vector expose the **same methods and attributes**. Native GeoPandas
+methods are available directly on the GeoDataFrame.
 
-```{eval-rst}
-.. minigallery:: geoutils.Vector geoutils.GeoDataFrameVectorAccessor
-      :add-heading: Examples using vectors
-```
+Only **file opening** and **scalable execution** differ substantially between the accessor and Vector:
+
+- **File opening:** {meth}`~geoutils.open_vector` is used for a {class}`~geopandas.GeoDataFrame` object, while {class}`~geoutils.Vector` objects are opened by instantiating the class,
+- **Scalable execution:** the {class}`vct <geoutils.GeoDataFrameVectorAccessor>` accessor supports **Dask**, while the {class}`~geoutils.Vector` supports **Multiprocessing** instead.
 
 ### Opening a file
 
@@ -373,9 +373,7 @@ directly on the GeoDataFrame.
 
 ```{caution}
 The {attr}`~VectorBase.bbox` attribute of a {class}`~geoutils.Vector` corresponds to the {attr}`~geopandas.GeoDataFrame.total_bounds` attribute of a
-{class}`~geopandas.GeoDataFrame`, for consistency between rasters and vectors (and can also be accessed through {attr}`~VectorBase.total_bounds`).
-
-The equivalent of {attr}`geopandas.GeoDataFrame.bounds` (i.e., a per-feature bounds) for {class}`Vectors<geoutils.Vector>` is {attr}`~geoutils.Vector.geom_bounds`.
+{class}`~geopandas.GeoDataFrame`, while {attr}`geopandas.GeoDataFrame.bounds` returns a {class}`~pandas.Series` of per-feature bounds of the vector.
 ```
 
 ### Geospatial handling methods
@@ -471,7 +469,7 @@ Native operations remain available directly on the GeoDataFrame. The {ref}`vecto
 additional methods exposed by the {class}`~geoutils.Vector` wrapper and explains how their outputs are converted.
 
 (pointcloud-api)=
-## Point cloud
+## Point cloud API
 
 GeoUtils exposes the point cloud API through the following interfaces:
 
@@ -480,16 +478,15 @@ GeoUtils exposes the point cloud API through the following interfaces:
 - A {class}`pc <geoutils.GeoDataFramePointCloudAccessor>` accessor extending {class}`geopandas.GeoDataFrame` objects as point clouds.
 - {class}`~geoutils.PointCloud`, an interface operating directly on a GeoUtils object.
 
-The DataArray and GeoDataFrame accessors and PointCloud expose the GeoUtils-specific methods and attributes listed below.
-The Dataset accessor applies operations to all compatible point variables by default, or to those selected with `variables`.
+The DataArray and GeoDataFrame accessors and PointCloud expose the **same GeoUtils-specific methods and attributes**.
+The Dataset accessor applies operations to all compatible point variables by default, or to those selected.
 Native Xarray and GeoPandas methods remain available directly on their objects.
 
-```{eval-rst}
-.. minigallery:: geoutils.PointCloud geoutils.GeoDataFramePointCloudAccessor
-      :add-heading: Examples using point clouds
-```
+Only **file opening** and **scalable execution** differ substantially between the accessors and PointCloud:
 
-See the {ref}`point cloud guide <point-cloud>` for their data and {ref}`scalability-usage` for execution options.
+- **File opening:** {meth}`~geoutils.open_pointcloud` is used for Xarray or GeoPandas objects, while {class}`~geoutils.PointCloud` objects are opened by instantiating the class,
+- **Scalable execution:** the accessors support **Dask**, while the {class}`~geoutils.PointCloud` supports **Multiprocessing** instead.
+
 
 ### Opening a file
 
@@ -672,10 +669,10 @@ See {ref}`sampling` for sampling values and locations from point clouds.
 (api-statistics)=
 ## Statistics
 
-The {ref}`Statistics feature page<stats>` introduces these functions and result objects. The corresponding spatial
-methods are listed under {ref}`api-raster-statistics` and {ref}`api-point-statistics`.
+Most statistical functions are available directly from the objects and accessors, as shown above.
 
-### Array estimators
+Below, we list functions defining additional estimators, variogram objects, and that can help plot.
+### GeoUtils estimators
 
 ```{eval-rst}
 .. autosummary::
@@ -687,87 +684,30 @@ methods are listed under {ref}`api-raster-statistics` and {ref}`api-point-statis
     stats.sum_square
 ```
 
-### Grouped statistics and plotting
-
-**Zonal statistics are grouped statistics with bins defined by vector features.** Use
-`raster.stats(by={"zone": (zones, "id")})`, or the same point cloud method, to calculate statistics by
-feature ID. See {ref}`stats-zonal` for examples. The array function below handles already aligned values and groupers.
+### Variogram
 
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
+    :template: variogram.rst
 
-    stats.stats
-    stats.plot_grouped_stats
-```
-
-### Variograms and covariance models
-
-```{eval-rst}
-.. autosummary::
-    :toctree: gen_modules/
-
-    stats.variogram
     Variogram
 ```
 
+### Plotting helpers
+
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
 
-    Variogram.estimate
-    Variogram.from_pairs
-    Variogram.from_model
-    Variogram.fit
+    stats.plot_grouped_stats
     Variogram.plot
-    Variogram.variogram
-    Variogram.covariance
-    Variogram.correlation
-    Variogram.combine
 ```
-
-### Export and backend conversion
-
-```{eval-rst}
-.. autosummary::
-    :toctree: gen_modules/
-
-    Variogram.to_dataframe
-    Variogram.to_xarray
-    Variogram.to_dict
-    Variogram.from_dict
-    Variogram.from_skgstat
-    Variogram.without_backend
-    Variogram.to_gstools
-    Variogram.to_gpytorch
-```
-
-(api-sampling)=
-## Sampling
-
-The {ref}`Sampling feature page<sampling>` describes selection from one dataset, matching locations between datasets,
-and spatial pairs. Their object methods are listed under {ref}`api-raster-sampling` and {ref}`api-point-sampling`.
-
-### Common-location samples
-
-{meth}`~RasterBase.cosample` and
-{meth}`~PointCloudBase.cosample` return a raster or point cloud on the
-support selected by `at`. Accessor calls return an {class}`xarray.DataArray` or {class}`geopandas.GeoDataFrame`.
-Bands or columns contain `"self"`, `"other"`, then named auxiliaries in mapping order. Raster band names are stored
-in `tags["long_name"]` (Xarray `attrs["long_name"]`); point outputs retain the support's selected index labels and
-use `"self"` as their active data column. See {ref}`sampling-cosample` for examples.
-
-### Pair samples
-
-{meth}`~RasterBase.pairsample` and
-{meth}`~PointCloudBase.pairsample` return an {class}`xarray.Dataset`
-with dimensions `pair` and `endpoint`, containing values, source indexes, coordinates and distances. See
-{ref}`sampling-pairs` for its use and the available distance sampling schemes.
 
 ## Numerical operators and uncertainty
 
-See {ref}`core-operators` for neighborhoods and custom definitions, {ref}`core-weighting` for the meaning of
-weights and covariance, and {ref}`uncertainty` for estimation and propagation workflows.
+See {ref}`core-operators` for neighborhoods, weights and custom definitions, and {ref}`uncertainty` for
+estimation and propagation workflows.
 
 ### Operator interfaces and neighborhoods
 
@@ -834,13 +774,32 @@ weights and covariance, and {ref}`uncertainty` for estimation and propagation wo
     uncertainty.random_field
 ```
 
-## Multiprocessing configuration
+## Multiprocessing
 
-To perform **chunked execution** on GeoUtils objects, pass this Multiprocessing configuration to function that support it.
+Pass a {class}`~geoutils.multiproc.MultiprocConfig` as `mp_config` to supported methods for **chunked execution**
+on GeoUtils objects. See {ref}`multiprocessing` for configuration and custom block examples.
+
+### Configuration and clusters
+
+Use {class}`~geoutils.multiproc.ClusterGenerator` to choose a {class}`~geoutils.multiproc.BasicCluster` (sequential)
+or {class}`~geoutils.multiproc.MpCluster` (parallel).
 
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
 
     multiproc.MultiprocConfig
+    multiproc.ClusterGenerator
+    multiproc.BasicCluster
+    multiproc.MpCluster
+```
+
+### Block functions
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    multiproc.map_overlap
+    multiproc.map_blocks
 ```

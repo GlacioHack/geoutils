@@ -96,7 +96,7 @@ their contribution to raster reductions, filters, polygon statistics and rasteri
     :alt: Center, all touched and fractional coverage for the same circle, with every fractional percentage labeled.
 ```
 
-A cell with 25% coverage has a geometric weight of 0.25. See {ref}`core-weighting` for fractional means and sums.
+A cell with 25% coverage has a geometric weight of 0.25.
 Reprojection uses the output cell's footprint in the source grid unless an explicit window is supplied.
 Polygon examples are in {ref}`transformations-fractional` and {ref}`stats-fractional`.
 
@@ -138,8 +138,7 @@ an `error_structure=` model. The same operators can be passed through a spatial 
 {func}`~geoutils.uncertainty.propagate` to calculate output uncertainty, analytically for linear operators or
 numerically for nonlinear ones.
 
-See {ref}`core-weighting` for worked examples on real data across sampling and reprojection, and
-{ref}`uncertainty` for defining and estimating the error structure itself.
+See {ref}`uncertainty` for defining, estimating and propagating error structures.
 
 (core-custom-operators)=
 ## Customize operators and neighborhoods
@@ -289,4 +288,4 @@ predicted
 ```
 
 The same `coefficients()` contract applies to linear reducers. It requires one coefficient per selected value and
-allows a constant offset. See {ref}`core-weighting` for how these coefficients relate to weights and uncertainty.
+allows a constant offset. See {ref}`uncertainty-propagation` for propagating source errors through these operators.

@@ -22,6 +22,10 @@ In GeoUtils, georeferenced rasters are exposed through two interfaces:
 For new workflows, we **recommend using the {class}`rst <geoutils.DataArrayRasterAccessor>` accessor**, and using either only accessors or only GeoUtils objects.
 Their behaviour is largely similar, with the main differences summarized below.
 
+```{important}
+The {class}`rst <geoutils.DatasetRasterAccessor>` accessor on a {class}`~xarray.Dataset` supports **processing several rasters at once**. See {ref}`core-datasets`.
+```
+
 ## Accessor {class}`rst <geoutils.DataArrayRasterAccessor>` versus {class}`~geoutils.Raster`
 
 The main differences are the following:

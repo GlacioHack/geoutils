@@ -13,6 +13,5 @@ core_data_structures
 core_operators
 core_match_ref
 core_numerical_interface
-core_weighting
 core_parsing
 ```

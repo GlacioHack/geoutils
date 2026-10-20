@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 import pytest
 import rasterio as rio
+import xarray as xr
 from pyproj import CRS
 from rasterio.transform import from_origin
 
@@ -23,8 +24,9 @@ from geoutils._misc import import_optional
 class TestReadmeChunked:
     """Test module for the README variogram, kriging and statistics workflow on chunked files."""
 
+    @pytest.mark.parametrize("keep_attrs", [False, True])
     def test_readme_quick_start(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], keep_attrs: bool
     ) -> None:
         """Checks that the README code preserves lazy point results and recovers a known elevation bias."""
 
@@ -71,7 +73,10 @@ class TestReadmeChunked:
         code_blocks = re.findall(r"^```python\n(.*?)^```$", quick_start, flags=re.MULTILINE | re.DOTALL)
         assert len(code_blocks) == 1, "Expected one Python block in the README quick start"
         namespace: dict[str, Any] = {}
-        exec(compile(code_blocks[0], str(readme_path), "exec"), namespace)
+
+        # Older Xarray versions drop attributes during arithmetic unless we explicitly preserve them
+        with xr.set_options(keep_attrs=keep_attrs):
+            exec(compile(code_blocks[0], str(readme_path), "exec"), namespace)
         ds, ds_lidar = namespace["ds"], namespace["ds_lidar"]
         ds_point, ds_diff = namespace["ds_point"], namespace["ds_diff"]
         variogram = namespace["variogram"]

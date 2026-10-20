@@ -28,14 +28,25 @@ specific interface with rasters (interpolation or reduction to same coordinates,
 clouds (pairwise distance matching).
 For **geometric operations**, point clouds interface in specific ways with other vector-types (zonal statistics, geometric masking).
 
-GeoUtils aims to support these features, as well the reading and writing of point clouds both from vector-type files (e.g., ESRI shapefile, geopackage,
-geoparquet) usually used for **sparse point clouds**, and from point-cloud-type files (e.g., LAS, LAZ, COPC) usually
-used for **dense point clouds**.
-
-LAS, LAZ, COPC and GeoParquet points can be opened lazily with `open_pointcloud(chunks=...)`.
-See {ref}`scalability-formats` for how record slices, row groups and spatial queries affect reading.
+GeoUtils supports these features, as well the reading and writing of point clouds both from vector-type files (e.g., ESRI shapefile, GeoPackage,
+GeoParquet) usually used for **sparse point clouds**, and from point-cloud-type files (e.g., LAS, LAZ, COPC) usually
+used for **dense point clouds** like LiDAR.
 
 Below, a summary of the {class}`~geoutils.PointCloud` object and its methods.
+
+```{important}
+The {class}`pc <geoutils.DatasetPointCloudAccessor>` accessor on a {class}`~xarray.Dataset` supports **processing several point clouds at once**. See {ref}`core-datasets`.
+```
+
+## Accessors {class}`pc <geoutils.DataArrayPointCloudAccessor>` versus {class}`~geoutils.PointCloud`
+
+The main differences are the following:
+
+1. A {class}`~geoutils.PointCloud` applies **arithmetic to its main data column**, while the accessors require selecting the column or variable explicitly.
+
+2. A {class}`~geoutils.PointCloud` supports **Multiprocessing**, while the accessors support **Dask**, allowing lazy graph building.
+
+For numerical analysis, we recommend the **Xarray accessor**, and for geometric operations, the **GeoPandas accessor**. See {ref}`core-point-accessors`.
 
 (pc-obj-def)=
 
