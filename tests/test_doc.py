@@ -1,10 +1,10 @@
 """Functions to test the documentation."""
 
-import ast
 import re
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -25,9 +25,7 @@ class TestReadmeChunked:
     """Test module for the README variogram, kriging and statistics workflow on chunked files."""
 
     @pytest.mark.parametrize("keep_attrs", [False, True])
-    def test_readme_quick_start(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], keep_attrs: bool
-    ) -> None:
+    def test_readme_quick_start(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, keep_attrs: bool) -> None:
         """Checks that the README code preserves lazy point results and recovers a known elevation bias."""
 
         # 1/ Write a smooth DEM split into 512 + 8 cells along both axes by the README chunk sizes
@@ -72,7 +70,10 @@ class TestReadmeChunked:
         quick_start = readme.split("## Quick start\n", 1)[1].split("\n## ", 1)[0]
         code_blocks = re.findall(r"^```python\n(.*?)^```$", quick_start, flags=re.MULTILINE | re.DOTALL)
         assert len(code_blocks) == 1, "Expected one Python block in the README quick start"
-        namespace: dict[str, Any] = {}
+
+        # Capture the README's print() argument, since dependencies can also write to stdout
+        readme_print = Mock()
+        namespace: dict[str, Any] = {"print": readme_print}
 
         # Older Xarray versions drop attributes during arithmetic unless we explicitly preserve them
         with xr.set_options(keep_attrs=keep_attrs):
@@ -80,7 +81,8 @@ class TestReadmeChunked:
         ds, ds_lidar = namespace["ds"], namespace["ds_lidar"]
         ds_point, ds_diff = namespace["ds_point"], namespace["ds_diff"]
         variogram = namespace["variogram"]
-        statistics = ast.literal_eval(capsys.readouterr().out.strip())
+        readme_print.assert_called_once()
+        statistics = readme_print.call_args.args[0]
 
         # 4/ Check that sources and outputs stay lazy, including the final three-point chunk
         da = import_optional("dask").array

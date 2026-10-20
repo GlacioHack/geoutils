@@ -44,7 +44,7 @@ to all compatible raster variables by default, or to those selected.
 
 Only **file opening** and **scalable execution** differ substantially between the accessors and Raster:
 
-- **File opening:** {meth}`~geoutils.open_raster` is used for an {class}`xarray.DataArray` object, while {class}`~geoutils.Raster` objects are opened by instantiating the class, 
+- **File opening:** {meth}`~geoutils.open_raster` is used for an {class}`xarray.DataArray` object, while {class}`~geoutils.Raster` objects are opened by instantiating the class,
 - **Scalable execution:** the {class}`DataArray.rst <geoutils.DataArrayRasterAccessor>` accessor supports **Dask**, while the {class}`~geoutils.Raster` supports **Multiprocessing** instead.
 
 ### Opening a raster file
