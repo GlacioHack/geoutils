@@ -562,4 +562,23 @@ For simulations from an error model instead of predictions from measurements, se
 (stats-chunked-strategies)=
 ## Chunked strategies
 
-In construction
+This section covers advanced controls for grouped statistics on chunked data. `strategy` changes how partial group
+results are combined; it does not change group membership or the requested estimator.
+
+| Strategy | How chunks are combined | Best suited to |
+| --- | --- | --- |
+| `"dense"` | Keep a summary slot for every declared group | Mergeable estimators with a moderate number of groups |
+| `"sparse"` | Keep summaries only for groups present in each chunk | Mergeable estimators with many or sparsely populated groups |
+| `"groupwise"` | Gather the observations belonging to complete groups | Median, NMAD, quantiles and custom estimators |
+
+The default, `strategy="auto"`, uses `groupwise` for non-mergeable estimators. For mergeable estimators, it uses
+`dense` for at most 4096 declared group combinations and `sparse` above that. A complete group must still fit in
+memory for a non-mergeable estimator, and `observed=False` can produce a large in-memory result table.
+
+Dask follows the input chunks and scheduler. Eager arrays and GeoUtils objects can instead use a
+{class}`~geoutils.multiproc.MultiprocConfig` to distribute tiles across workers. The numerical reductions are shared.
+
+Sampling is independent of the reduction strategy. `subsampling_strategy="topk"` keeps sampled locations stable
+across chunk layouts for a fixed seed, while `"sequential"` follows traversal order. With grouped statistics,
+`subsample_per_group=True` applies the requested sample limit independently to every combined group. See
+{ref}`sampling-reproducibility` for details.

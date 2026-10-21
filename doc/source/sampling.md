@@ -487,4 +487,34 @@ Raster outputs store these variables as bands; GeoDataFrame outputs store them a
 (sampling-reproducibility)=
 ### Reproducibility and chunked execution
 
-In construction
+Set `random_state` to **reproduce a selection**. The default `strategy="topk"` for subsampling and co-sampling selects
+the same seeded raster locations across chunk layouts; `"sequential"` follows the order of valid values. Pair-sampling
+uses its own strategies, some of which depend on chunk layout.
+
+Below, we sample the same raster with chunks of 128 × 128 and 256 × 256 cells. Both samples contain the same
+locations and values. The returned point arrays stay lazy until their values are requested, for example by plotting.
+
+```{code-cell} ipython3
+# Repeat the seeded selection with two raster chunk layouts
+sample_128 = ds.chunk({"y": 128, "x": 128}).rst.subsample(200, random_state=42)
+sample_256 = ds.chunk({"y": 256, "x": 256}).rst.subsample(200, random_state=42)
+```
+
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for plotting the figure"
+:  code_prompt_hide: "Hide the code for plotting the figure"
+
+# Plot both samples over the same raster so their selected locations can be compared
+fig, axes = plt.subplots(1, 2, figsize=(8, 3.5))
+for axis, sample, chunk_size in zip(axes, [sample_128, sample_256], [128, 256]):
+    ds.rst.plot(ax=axis, cmap="gray", add_cbar=False, alpha=0.3)
+    sample.pc.plot(ref=ds, ax=axis, color="darkred", add_cbar=False, markersize=5)
+    axis.set_title(f"{chunk_size} × {chunk_size} raster chunks\nSame seed: 42")
+axes[1].tick_params(labelleft=False)
+plt.tight_layout()
+```
+
+Pair-sampling returns an in-memory {class}`xarray.Dataset`. Use `mp_config` for multiprocessing on eager or
+unloaded data; it cannot be combined with Dask input. See {ref}`scalability-logic` for details of the chunked algorithms.
