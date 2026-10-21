@@ -142,18 +142,18 @@ class DataArrayPointCloudAccessor(PointCloudBase):
     @property
     def _is_dask(self) -> bool:
         """Whether values or per-point coordinates use Dask arrays."""
-        return any(is_dask_array(value.data) for value in (self._dataset, *self._dataset.coords.values()))
+        return any(value.chunks is not None for value in (self._dataset, *self._dataset.coords.values()))
 
     @property
     def is_loaded(self) -> bool:
-        return not self._is_dask
+        return all(value.variable._in_memory for value in (self._dataset, *self._dataset.coords.values()))
 
     @property
     def bounds(self) -> BoundingBox:
         """Horizontal extent, computing only coordinate reductions for a lazy array."""
         if self.point_count == 0:
             return BoundingBox(*(np.nan,) * 4)
-        x, y, _ = self.to_xyz()
+        x, y = (self._dataset.coords[name].data for name in ("x", "y"))
         extrema = [np.nanmin(x), np.nanmin(y), np.nanmax(x), np.nanmax(y)]
         if self._is_dask:
             extrema = import_optional("dask").compute(*extrema)
@@ -219,7 +219,7 @@ class DataArrayPointCloudAccessor(PointCloudBase):
 
         # We just pass input arrays (to avoid loading Dask or affect other array types)
         arrays = [value if hasattr(value, "ndim") else np.asarray(value) for value in (x, y, z)]
-        x, y, z = (np.atleast_1d(value) for value in arrays)
+        x, y, z = (value if isinstance(value, xr.Variable) else np.atleast_1d(value) for value in arrays)
         if any(value.ndim != 1 or value.shape != z.shape for value in (x, y, z)):
             raise ValueError("X, Y and point values must be one-dimensional arrays with the same length.")
         if not all(np.issubdtype(value.dtype, np.number) for value in (x, y)):
@@ -263,9 +263,7 @@ class DataArrayPointCloudAccessor(PointCloudBase):
 
     def _cast_pointcloud_output(self, output: xr.DataArray) -> xr.DataArray:
         """Return an array point result with independent metadata."""
-        output.attrs = self._dataset.attrs.copy()
-        output.encoding = {}
-        return output
+        return output.pc.copy(deep=False)
 
     def _cast_raster_output(self, raster: Any) -> xr.DataArray:
         """Expose a gridded result through the Xarray raster accessor."""
@@ -451,7 +449,7 @@ class DataArrayPointCloudAccessor(PointCloudBase):
             from geoutils.projtools import _get_bounds_projected
 
             bounds = BoundingBox(*_get_bounds_projected(bounds, CRS.from_user_input(crs), self.crs))
-        x, y, _ = self.to_xyz()
+        x, y = (self._dataset.coords[name].data for name in ("x", "y"))
         if mode == "within":
             mask = (x > bounds.left) & (x < bounds.right) & (y > bounds.bottom) & (y < bounds.top)
         else:

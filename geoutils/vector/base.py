@@ -40,7 +40,7 @@ from geoutils._dispatch import (
     has_geo_attr,
     is_dask_dataframe,
 )
-from geoutils._misc import deprecate
+from geoutils._misc import deprecate, import_optional
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.rasterization import _create_mask, _rasterize
@@ -48,6 +48,7 @@ from geoutils.multiproc import MultiprocConfig
 from geoutils.operators.overlap import OverlapBackend
 from geoutils.projtools import (
     _get_bounds_projected,
+    _get_custom_crs,
     _get_footprint_projected,
     _get_utm_ups_crs,
 )
@@ -280,15 +281,27 @@ class VectorBase(ABC):
         """
         Summarize information about the vector.
 
+        Lazy inputs compute their extent and feature count without replacing the Dask collection.
+
         :param verbose: If True, print to screen and return None.
+        :returns: Summary text when verbose=False, otherwise None.
         """
 
+        # Compute summary reductions together so lazy partitions can share file reads
+        dataframe = self._dataset
+        total_bounds = dataframe.total_bounds
+        feature_count = dataframe.shape[0]
+        if is_dask_dataframe(dataframe):
+            dask = import_optional("dask")
+            total_bounds, feature_count = dask.compute(total_bounds, feature_count.to_delayed())
+
+        # Format the same summary for eager and lazy vectors
         as_str = [
             f"Filename:           {self.name} \n",
             f"Coordinate system:  {[CRS(self.crs).name if self.crs is not None else None]}\n",
-            f"Extent:             {self._dataset.total_bounds.tolist()} \n",
-            f"Number of features: {len(self._dataset)} \n",
-            f"Attributes:         {self._dataset.columns.tolist()}",
+            f"Extent:             {total_bounds.tolist()} \n",
+            f"Number of features: {feature_count} \n",
+            f"Attributes:         {dataframe.columns.tolist()}",
         ]
 
         if verbose:
@@ -932,7 +945,7 @@ class VectorBase(ABC):
     def buffer_metric(self: VectorBaseType, buffer_size: float) -> VectorBaseType | gpd.GeoDataFrame:
         """Buffer the vector features in a local metric system."""
 
-        new_ds = _buffer_metric(gdf=self._dataset, buffer_size=buffer_size)
+        new_ds = _buffer_metric(gdf=_as_geodataframe(self), buffer_size=buffer_size)
         return self._override_gdf_output(new_ds)
 
     def get_bbox_projected(self, out_crs: CRS, densify_points: int = 5000) -> rio.coords.BoundingBox:
@@ -954,19 +967,34 @@ class VectorBase(ABC):
         self,
         local_crs_type: Literal["universal"] | Literal["custom"] = "universal",
         method: Literal["centroid"] | Literal["geopandas"] = "centroid",
+        *,
+        center: tuple[float, float] | None = None,
     ) -> CRS:
-        """Get local metric coordinate reference system for the vector."""
+        """
+        Get a universal or custom local metric coordinate reference system for the vector.
 
+        :param local_crs_type: Universal selects UTM/UPS; custom centers stereographic on the geographic centroid.
+        :param method: Universal zone selection by centroid or GeoPandas. Ignored for a custom CRS.
+        :param center: Optional (longitude, latitude) in WGS84 degrees for a custom CRS. By default, use the planar
+            geometry centroid after unwrapping longitudes across the antimeridian. Supply a center for footprints
+            that span a hemisphere or surround a pole.
+        :returns: A projected CRS with metre units. A custom CRS has true scale at its center and suits compact regions.
+        """
+
+        if center is not None and local_crs_type != "custom":
+            raise ValueError("center is only supported for a custom metric CRS.")
         if local_crs_type == "universal":
-            return _get_utm_ups_crs(self._dataset, method=method)
-        raise NotImplementedError("This is not implemented yet.")
+            return _get_utm_ups_crs(_as_geodataframe(self), method=method)
+        if local_crs_type == "custom":
+            return _get_custom_crs(_as_geodataframe(self), center=center)
+        raise ValueError("local_crs_type must be 'universal' or 'custom'.")
 
     def buffer_without_overlap(
         self: VectorBaseType, buffer_size: int | float, metric: bool = True, plot: bool = False
     ) -> VectorBaseType | gpd.GeoDataFrame:
         """Buffer the vector geometries without overlapping each other."""
 
-        new_ds = _buffer_without_overlap(self._dataset, buffer_size=buffer_size, metric=metric, plot=plot)
+        new_ds = _buffer_without_overlap(_as_geodataframe(self), buffer_size=buffer_size, metric=metric, plot=plot)
         return self._override_gdf_output(new_ds)
 
     def to_geoutils(self) -> Any:

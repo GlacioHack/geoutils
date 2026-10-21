@@ -24,6 +24,30 @@ For new workflows, we **recommend using the accessors**, and using either only a
 
 A point cloud represents 2D point geometries of georeferenced coordinates associated with a main 1D data array, and optionally auxiliary data.
 
+```{important}
+The {class}`pc <geoutils.DatasetPointCloudAccessor>` accessor on a {class}`~xarray.Dataset` supports **processing several point clouds at once**. See {ref}`core-datasets`.
+```
+
+Except for the differences outlined in {ref}`pc-accessor-comparison`, the accessors and the {class}`~geoutils.PointCloud`
+object provide the **same geospatial operations**, described in the feature pages linked in {ref}`feature-overview`
+and listed in {ref}`pointcloud-api`.
+
+Below, we describe how to **open, create and save point clouds with the accessors**, followed by the **attributes and
+behaviour of the {class}`~geoutils.PointCloud` object**.
+
+(pc-accessor-comparison)=
+## Accessors {class}`pc <geoutils.DataArrayPointCloudAccessor>` versus {class}`~geoutils.PointCloud`
+
+The main differences are the following:
+
+1. A {class}`~geoutils.PointCloud` applies **arithmetic to its main data column**, while the accessors require selecting the column or variable explicitly.
+
+2. A {class}`~geoutils.PointCloud` supports **Multiprocessing**, while the accessors support **Dask**, allowing lazy graph building.
+
+For numerical analysis, we recommend the **Xarray accessor**, and for geometric operations, the **GeoPandas accessor**. See {ref}`core-point-accessors` for details.
+
+## Why a separate point object?
+
 Although a subtype of {class}`~geoutils.Vector`, point clouds have a very different nature than other vectors and are
 ubiquitous in geospatial analysis, requiring their own object type.
 For **numerical operations**, a point cloud manipulation is facilitated by its own arithmetic to manipulate its main data array, as well as a
@@ -35,25 +59,70 @@ GeoUtils supports these features, as well the reading and writing of point cloud
 GeoParquet) usually used for **sparse point clouds**, and from point-cloud-type files (e.g., LAS, LAZ, COPC) usually
 used for **dense point clouds** like LiDAR.
 
-Below, a summary of the {class}`~geoutils.PointCloud` object and its methods.
+## Point cloud accessors
 
-```{important}
-The {class}`pc <geoutils.DatasetPointCloudAccessor>` accessor on a {class}`~xarray.Dataset` supports **processing several point clouds at once**. See {ref}`core-datasets`.
+### Opening files
+
+A point cloud is opened with {func}`~geoutils.open_pointcloud`, which returns a {class}`~xarray.DataArray` by default.
+Its values contain the main measurement, while auxiliary attributes are stored as coordinates along the same point dimension.
+
+```{code-cell} ipython3
+import geoutils
+
+filename_dem = geoutils.examples.get_path("coromandel_lidar")
+
+# Open elevation and classification as lazy numeric arrays from the LAS file
+points = geoutils.open_pointcloud(filename_dem, data_name="Z", columns=["classification"], chunks=5000)
+points
 ```
 
-## Accessors {class}`pc <geoutils.DataArrayPointCloudAccessor>` versus {class}`~geoutils.PointCloud`
+Passing `as_object_type="dataset"` stores several measurements as separate variables, while `as_object_type="geodataframe"`
+returns a {class}`~geopandas.GeoDataFrame` for working with point geometries. For LAS and GeoParquet files, `columns`
+selects the main attributes (`"main"`), all attributes (`"all"`) or a list of names. The CRS, X/Y coordinates and main
+measurement are always read together.
 
-The main differences are the following:
+By default, the Xarray data is read only when needed (`load=False`), without requiring Dask. We can select points with
+`isel(point=...)` before loading their values. This reads only the selected LAS/LAZ records, intersecting COPC nodes or
+intersecting GeoParquet row groups. Passing `chunks=` enables Dask execution and sets the number of points per chunk,
+while `load=True` reads the data into memory when opening the file.
 
-1. A {class}`~geoutils.PointCloud` applies **arithmetic to its main data column**, while the accessors require selecting the column or variable explicitly.
+For a {class}`~geopandas.GeoDataFrame`, `load=False` uses Dask-GeoPandas, and `chunks=` sets the number of points per
+partition. Passing `parse_sensor_metadata=True` adds sensor information parsed from the filename.
 
-2. A {class}`~geoutils.PointCloud` supports **Multiprocessing**, while the accessors support **Dask**, allowing lazy graph building.
+### Constructing from arrays
 
-For numerical analysis, we recommend the **Xarray accessor**, and for geometric operations, the **GeoPandas accessor**. See {ref}`core-point-accessors` for details.
+A point cloud is created from X/Y coordinate and value arrays with {func}`~geoutils.pointcloud.from_xyz`, which also
+accepts auxiliary attributes:
+
+```python
+points = geoutils.pointcloud.from_xyz([0, 1], [2, 3], [4, 5], crs=32631, data_name="height")
+```
+
+As with {func}`~geoutils.open_pointcloud`, passing `as_object_type="dataset"` or `"geodataframe"` returns the corresponding
+object type. Dask arrays remain lazy during construction.
+
+### Writing points
+
+A point cloud is saved to file with {meth}`~geoutils.DataArrayPointCloudAccessor.to_file`,
+{meth}`~geoutils.DataArrayPointCloudAccessor.to_las` or {meth}`~geoutils.DataArrayPointCloudAccessor.to_parquet`.
+For GeoParquet, a lazy array can be written in row groups of a chosen size or as a directory of partition files:
+
+```python
+# Write lazy point arrays in groups of 5000 rows
+points.pc.to_parquet("elevations.parquet", chunks=5000)
+
+# Reopen the saved active measurement and auxiliary attributes
+reopened = geoutils.open_pointcloud("elevations.parquet", columns="all", chunks=5000)
+```
+
+Writing runs the tasks needed to save the data, including for lazy arrays. The GeoParquet file stores the point
+coordinates, CRS and main measurement. See {ref}`scalability-formats` for choosing formats and partition sizes,
+and {ref}`core-composition` for converting between array and geometry interfaces.
+
+## The {class}`~geoutils.PointCloud` object
 
 (pc-obj-def)=
-
-## Object definition and attributes
+### Object definition and attributes
 
 A {class}`~geoutils.PointCloud` is a vector of 2D point geometries associated with
 numeric values from a named {attr}`~PointCloudBase.data` attribute, and can also contain auxiliary attributes.
@@ -72,7 +141,7 @@ Generic vector attributes and methods are inherited through the {class}`~geoutil
 The complete list of {class}`~geoutils.Vector` attributes and methods can be found in {ref}`the Vector section of the API <vector-api>`.
 ```
 
-## Open and save
+### Open and save
 
 A {class}`~geoutils.PointCloud` is opened by instantiating the class with a {class}`str`, a {class}`pathlib.Path`, a {class}`geopandas.GeoDataFrame`,
 a {class}`geopandas.GeoSeries` or a {external+shapely:doc}`shapely.Geometry <geometry>`.
@@ -99,39 +168,7 @@ pc
 See {ref}`core-downsampling` for details on reducing point cloud density when opening or plotting,
 including how GeoUtils selects deterministic point samples.
 
-### Opening native arrays or dataframes
-
-{func}`~geoutils.open_pointcloud` returns a Xarray DataArray by default. The active measurement is its value array;
-selected auxiliary attributes are coordinates on the same point dimension.
-
-```{code-cell} ipython3
-# Open elevation and classification as lazy numeric arrays from the LAS file
-points = geoutils.open_pointcloud(filename_dem, data_name="Z", columns=["classification"], chunks=5000)
-points
-```
-
-Use `as_object_type="dataset"` to represent several measurements as separate variables, or `as_object_type="geodataframe"`
-to work with point geometry and native GeoPandas methods. `columns="main"`, `"all"` or a list selects attributes
-for LAS and GeoParquet. CRS, X/Y coordinates and the active measurement are read together.
-
-### Writing points
-
-Point accessors provide {meth}`~geoutils.DataArrayPointCloudAccessor.to_file`, {meth}`~geoutils.DataArrayPointCloudAccessor.to_las` and {meth}`~geoutils.DataArrayPointCloudAccessor.to_parquet`. The GeoParquet writer can process a lazy array in
-bounded row groups or write a directory of partition files:
-
-```python
-# Write lazy point arrays in groups of 5000 rows
-points.pc.to_parquet("elevations.parquet", chunks=5000)
-
-# Reopen the saved active measurement and auxiliary attributes
-reopened = geoutils.open_pointcloud("elevations.parquet", columns="all", chunks=5000)
-```
-
-Writes execute the required tasks; {meth}`~geoutils.DataArrayPointCloudAccessor.to_parquet` does not return a deferred write. GeoParquet stores the point
-coordinates, CRS and active measurement. See {ref}`scalability-formats` for file selection and partition sizes,
-and {ref}`core-composition` for conversions between array and geometry interfaces.
-
-## Create from arrays or tuples
+### Create from arrays or tuples
 
 A {class}`~geoutils.PointCloud` is created from three 1D arrays, from a Nx3 or 3xN array, or from an iterable of 3-tuples by calling the class
 methods {meth}`~PointCloudBase.from_xyz`, {meth}`~PointCloudBase.from_array` or {meth}`~PointCloudBase.from_tuples` respectively.
@@ -145,7 +182,7 @@ pc2 = geoutils.PointCloud.from_array(np.array([[1, 2, 3], [4, 5, 6]]), crs=4326)
 pc3 = geoutils.PointCloud.from_tuples([(1, 2, 3), (4, 5, 6)], crs=4326)
 ```
 
-## Arithmetic
+### Arithmetic
 
 
 A {class}`~geoutils.PointCloud` can be applied any pythonic arithmetic operation ({func}`+<operator.add>`, {func}`-<operator.sub>`, {func}`/<operator.truediv>`, {func}`//<operator.floordiv>`, {func}`*<operator.mul>`,
@@ -169,7 +206,7 @@ pc1 > 20
 
 See {ref}`core-py-ops` for more details.
 
-## Array interface
+### Array interface
 
 A {class}`~geoutils.PointCloud` can be applied any NumPy universal functions and most mathematical, logical or masked-array functions with another
 {class}`~geoutils.PointCloud`, {class}`~numpy.ndarray` or number.

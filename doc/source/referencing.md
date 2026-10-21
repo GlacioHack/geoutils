@@ -13,8 +13,8 @@ kernelspec:
 (referencing)=
 # Referencing
 
-Below, a summary of the **referencing attributes** of geospatial data objects and the **methods to manipulate these** 
-in different projections, without any data transformation. 
+Below, a summary of the **referencing attributes** of geospatial data objects and the **methods to manipulate these**
+in different projections, without any data transformation.
 
 For georeferenced transformations (such as reprojection, or polygonization), see {ref}`transformations`.
 
@@ -124,7 +124,7 @@ To reproduce the behaviour of {attr}`geopandas.GeoSeries.bounds` (per-feature bo
 {attr}`gdf.pc.footprint or PointCloud.footprint <geoutils.pointcloud.base.GeometryPointCloudBase.footprint>`
 
 A footprint defines **a polygon of the object extent**, vectorized with densified lines.
-As reprojections between CRSs deform shapes, a footprint provides more reliable intersections than a bounding box. 
+As reprojections between CRSs deform shapes, a footprint provides more reliable intersections than a bounding box.
 
 ```{code-cell} ipython3
 # Plot the raster and vector footprints together
@@ -215,10 +215,14 @@ gdf.vct.buffer_metric(10**6).vct.get_footprint_projected(3995).vct.plot()
 {meth}`gdf.vct.get_metric_crs() or Vector.get_metric_crs() <VectorBase.get_metric_crs>`<br>
 {meth}`gdf.pc.get_metric_crs() or PointCloud.get_metric_crs() <VectorBase.get_metric_crs>`
 
-These methods estimate a **local metric coordinate system**. The result can be either "universal" (zone of the Universal
-Transverse Mercator or Universal Polar Stereographic system), or "custom"
-(Mercator or Polar projection centered on the {class}`Raster<geoutils.Raster>`, {class}`Vector<geoutils.Vector>` or
-{class}`PointCloud<geoutils.PointCloud>`).
+These methods estimate a **local metric coordinate system**.
+
+The local coordinate system can be **either "universal"**, a standard zone of the Universal
+Transverse Mercator (UTM) or Universal Polar Stereographic (UPS) system, **or "custom"**
+(a stereographic projection centered exactly on the centroid of the {class}`Raster<geoutils.Raster>`,
+{class}`Vector<geoutils.Vector>` or {class}`PointCloud<geoutils.PointCloud>`).
+
+The custom CRS has true scale near its center, suiting small regions particularly well.
 
 ```{code-cell} ipython3
 # Get local metric CRS

@@ -1492,7 +1492,7 @@ class TestInterpPointsChunked:
         )
         filename = tmp_path / "points.parquet"
         points.pc.to_parquet(filename, chunks=2)
-        points = gu.open_pointcloud(filename, as_object_type=as_object_type)
+        points = gu.open_pointcloud(filename, as_object_type=as_object_type, load=True)
         lazy_points = gu.open_pointcloud(filename, chunks=2, as_object_type=as_object_type)
         source = raster.to_xarray().chunk(y=2, x=3).rst if raster_chunks else raster
         options: dict[str, Any] = (

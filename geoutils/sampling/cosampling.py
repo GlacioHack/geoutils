@@ -575,7 +575,7 @@ def _wrapper_cosample_raster_block_mp(
 
 def _wrapper_has_finite_raster_block(tile: RasterBase) -> bool:
     """
-    Wrapper for Multiprocessing through map_blocks: check one validity tile for finite cells."""
+    Wrapper for Multiprocessing through map_collect(): check one validity tile for finite cells."""
 
     return bool(np.any(np.isfinite(_selected_raster_data(tile))))
 
@@ -601,7 +601,7 @@ def _cosample_raster_mp(
     sampled rows so each worker can find the cells inside its block.
     """
 
-    from geoutils.multiproc import map_blocks, map_overlap
+    from geoutils.multiproc import map_collect, map_overlap
 
     # Write 1 where all inputs are finite and the mask allows the cell, and NaN elsewhere
     # Select cells from this temporary file before writing the output values
@@ -614,7 +614,7 @@ def _cosample_raster_mp(
     # Check that valid cells exist, or randomly select a subset for all output bands
     indices = None
     if subsample == 1:
-        has_valid = any(map_blocks(_wrapper_has_finite_raster_block, validity_raster, intermediate))
+        has_valid = any(map_collect(_wrapper_has_finite_raster_block, validity_raster, intermediate))
     else:
         indices = _subsample_values(
             validity_raster,

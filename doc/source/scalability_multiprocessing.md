@@ -89,7 +89,7 @@ os.remove(parallel_config.outfile)
 
 ### Point cloud example
 
-**Point cloud operation use the same `mp_config` argument**, where `chunks` is a number of points (in 1D), 
+**Point cloud operation use the same `mp_config` argument**, where `chunks` is a number of points (in 1D),
 and the output can be GeoPackage, LAS or LAZ.
 
 ```python
@@ -107,6 +107,17 @@ As for rasters, the output format follows the filename extension. **GeoPackage i
 
 GeoUtils implements functions for custom out-of-memory multiprocessing. The naming mirrors Dask arrays and
 dataframes, but multiprocessing results are computed eagerly and cannot remain lazy.
+
+The callbacks and return types differ from Dask's similarly named functions:
+
+| Function | Callback input | Result |
+|---|---|---|
+| `geoutils.multiproc.map_collect()` | A georeferenced Raster block | An eager list of arbitrary results |
+| `dask.array.map_blocks()` | A NumPy array block | A lazy Dask array with blocks assembled into an array |
+| `geoutils.multiproc.map_overlap(..., depth=0)` | A georeferenced Raster block | A raster written to disk |
+
+Use `map_overlap()` with zero depth for multiprocessing array transformations without overlap. Pass
+`return_block_info=True` to `map_collect()` to collect source row/column ranges alongside the results.
 
 ### {func}`~geoutils.multiproc.map_overlap`: process and save large rasters
 
@@ -132,20 +143,20 @@ raster_filtered = map_overlap(filter, filename_rast, config_basic, size, depth=s
 raster_filtered
 ```
 
-### {func}`~geoutils.multiproc.map_blocks`: extract and collect data from large rasters
+### {func}`~geoutils.multiproc.map_collect`: extract and collect data from large rasters
 
 This function applies a function to raster blocks and **returns a list** of extracted data without saving a new raster
 file. It is useful for summary statistics, features, or other results that do not return a raster.
 
 ```{code-cell} ipython3
 from typing import Any
-from geoutils.multiproc import map_blocks
+from geoutils.multiproc import map_collect
 
 # Compute mean
 def compute_statistics(raster: gu.Raster) -> dict[str, np.floating[Any]]:
     return raster.stats(["mean", "valid_count"])
 
-stats_results = map_blocks(compute_statistics, filename_rast, config_basic)
+stats_results = map_collect(compute_statistics, filename_rast, config_basic)
 total_count = sum([stats["valid_count"] for stats in stats_results])
 total_mean = sum([stats["mean"] * stats["valid_count"] for stats in stats_results]) / total_count
 print("Mean: ", total_mean)
@@ -165,5 +176,5 @@ To include block location in the results, set `return_block_info=True`.
 | Use case                                      | Function                                                                     |
 |-----------------------------------------------|------------------------------------------------------------------------------|
 | Apply processing and save results as a raster | {func}`~geoutils.multiproc.map_overlap`                                      |
-| Extract statistics or features into a list    | {func}`~geoutils.multiproc.map_blocks`                                       |
-| Track block locations with extracted data     | {func}`~geoutils.multiproc.map_blocks` with `return_block_info=True`         |
+| Extract statistics or features into a list    | {func}`~geoutils.multiproc.map_collect`                                       |
+| Track block locations with extracted data     | {func}`~geoutils.multiproc.map_collect` with `return_block_info=True`         |

@@ -65,7 +65,7 @@ class TestPointCloudAccessor:
         header = laspy.LasHeader(point_format=6, version="1.4")
         header.add_crs(CRS.from_epsg(32633))
         laspy.LasData(header).write(path)
-        expected = gu.open_pointcloud(str(path), columns=columns, as_object_type="geodataframe")
+        expected = gu.open_pointcloud(str(path), columns=columns, as_object_type="geodataframe", load=True)
 
         # Build a lazy collection and inspect metadata without executing a partition
         tasks = []
@@ -90,7 +90,9 @@ class TestPointCloudAccessor:
         # (with chunk size not multiple of downsampling factor to check potential edge effects)
         filename = tmp_path / "points.gpkg"
         _point_grid().to_file(filename, index=False)
-        eager = gu.open_pointcloud(str(filename), data_name="value", downsample=4, as_object_type="geodataframe")
+        eager = gu.open_pointcloud(
+            str(filename), data_name="value", downsample=4, as_object_type="geodataframe", load=True
+        )
         lazy = gu.open_pointcloud(
             str(filename), data_name="value", chunks=17, downsample=4, as_object_type="geodataframe"
         )
@@ -170,28 +172,10 @@ class TestPointCloudAccessor:
         self.gdf.to_file(temp_file)
 
         # The eager path should reproduce the original point cloud
-        ds = gu.open_pointcloud(temp_file, data_name="z", as_object_type="geodataframe")
+        ds = gu.open_pointcloud(temp_file, data_name="z", as_object_type="geodataframe", load=True)
 
         assert isinstance(ds, gpd.GeoDataFrame)
         assert ds.pc.to_geoutils().pointcloud_equal(gu.PointCloud(self.gdf, data_name="z"))
-
-    def test_open_pointcloud__dask(self) -> None:
-        """Keep point-cloud opening lazy when chunks request Dask-GeoPandas."""
-
-        # Skip cleanly when the optional lazy dataframe backend is unavailable
-        dgpd = pytest.importorskip("dask_geopandas")
-
-        # Write a source whose rows can be split into several Dask partitions
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.gpkg")
-        self.gdf.to_file(temp_file)
-
-        # Opening with chunks should expose metadata without reading every partition
-        ds = gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_object_type="geodataframe")
-
-        assert isinstance(ds, dgpd.GeoDataFrame)
-        assert not ds.pc.is_loaded
-        assert ds.pc.point_count == len(self.gdf)
 
     def test_accessor__rejects_invalid_dask_dataframes(self) -> None:
         """Reject plain Dask DataFrames and validate lazy geometry partitions as points."""

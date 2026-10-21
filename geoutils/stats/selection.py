@@ -236,6 +236,10 @@ def _select_values_and_mask_at_support(
                 mp_config=mp_config,
             )
 
+        # Nullable point measurements use object storage; statistical calculations need numeric arrays
+        if _is_pointcloud(value_source) and selected_values[name].dtype.kind == "O":
+            selected_values[name] = selected_values[name].astype(np.float64)
+
     # 3/ Place the optional mask through the same sampling helpers used by cosample()
     # Keep value validity separate because stats() reports finite counts independently for each selected value
     file_mask = (

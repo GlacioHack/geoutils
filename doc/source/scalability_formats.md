@@ -227,7 +227,7 @@ copyfile(data_dir / "survey.parquet", remote.directory / "survey.parquet")
 
 # Write a fresh GeoPackage so remote reads do not need SQLite journal files
 regions = gu.open_vector(gu.examples.get_path("everest_rgi_outlines"))
-regions.to_file(remote.directory / "regions.gpkg")
+regions.vct.to_file(remote.directory / "regions.gpkg")
 
 # Copy files into the password-protected directory
 private_directory = remote.directory / "private"

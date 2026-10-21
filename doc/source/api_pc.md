@@ -13,6 +13,7 @@ Below is the full class description specific to {class}`pc <geoutils.GeoDataFram
 
 .. autoclass:: GeoDataFramePointCloudAccessor
     :members:
+    :exclude-members: to_file
     :inherited-members:
     :undoc-members: false
     :show-inheritance:

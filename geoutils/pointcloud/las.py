@@ -38,6 +38,7 @@ import tempfile
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
 import geopandas as gpd
@@ -456,6 +457,8 @@ def _open_las_array(
     columns: Literal["all", "main"] | list[str],
     chunks: int | None,
     copc_nodes: list[Entry] | None = None,
+    *,
+    load: bool = True,
 ) -> xr.DataArray:
     """
     Read LAS coordinates and attributes as eager arrays or delayed record slices.
@@ -479,8 +482,18 @@ def _open_las_array(
     point_count = metadata.point_count if copc_nodes is None else sum(node.point_count for node in copc_nodes)
     empty = _read_las_arrays(filename, selected, 0, 0)
 
+    # We use Xarray to defer indexed file reads
+    if not load and chunks is None:
+        from geoutils.pointcloud.loading import _deferred_point_variable
+
+        arrays = {
+            name: _deferred_point_variable(
+                point_count, values.dtype, partial(_read_las_attribute, filename, name, copc_nodes)
+            )
+            for name, values in empty.items()
+        }
     # Read points now, or let Dask load them later
-    if chunks is None:
+    elif chunks is None:
         arrays = _read_las_arrays(filename, selected, 0, point_count, copc_nodes)
     else:
         dask = import_optional("dask")
@@ -518,6 +531,26 @@ def _open_las_array(
         auxiliary=arrays,
     )
     return result
+
+
+def _read_las_attribute(filename: str, name: str, nodes: list[Entry] | None, start: int, count: int) -> Any:
+    """Read one attribute from consecutive LAS rows or the COPC nodes containing those rows."""
+    columns = [] if name in ("x", "y") else [name]
+    if nodes is None:
+        return _read_las_arrays(filename, columns, start, count)[name]
+
+    # COPC nodes decompress whole; discard nodes outside the selected row range first
+    selected = []
+    offset = 0
+    first = 0
+    for node in nodes:
+        if offset < start + count and offset + node.point_count > start:
+            if not selected:
+                first = offset
+            selected.append(node)
+        offset += node.point_count
+    values = _read_las_arrays(filename, columns, 0, count, selected)[name]
+    return values[start - first : start - first + count]
 
 
 def _load_laspy_data_slice_dataframe(

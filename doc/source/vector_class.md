@@ -20,8 +20,14 @@ In GeoUtils, georeferenced vectors are exposed through two interfaces:
 - The {class}`~geoutils.Vector`.
 
 For new workflows, we **recommend using the {class}`vct <geoutils.GeoDataFrameVectorAccessor>` accessor**, and using either only accessors or only GeoUtils objects.
-Their behaviour is largely similar, with the main differences summarized below.
 
+Except for the differences outlined in {ref}`vector-accessor-comparison`, both interfaces provide the **same geospatial
+operations**, described in the feature pages linked in {ref}`feature-overview` and listed in {ref}`vector-api`.
+
+Below, we describe how to **open, create and save vectors with the accessor**, followed by the **attributes and behaviour
+of the {class}`~geoutils.Vector` object**.
+
+(vector-accessor-comparison)=
 ## Accessor {class}`vct <geoutils.GeoDataFrameVectorAccessor>` versus {class}`~geoutils.Vector`
 
 The main differences are the following:
@@ -30,7 +36,40 @@ The main differences are the following:
 
 2. A {class}`~geoutils.Vector` supports **Multiprocessing**, while the accessor supports **Dask**, allowing lazy graph building.
 
-## Object definition and attributes
+## Vector accessor
+
+### Open and save
+
+A vector is opened as a {class}`~geopandas.GeoDataFrame` with {func}`~geoutils.open_vector`, and saved to file with
+{meth}`~geoutils.GeoDataFrameVectorAccessor.to_file`:
+
+```python
+import geoutils as gu
+
+features = gu.open_vector(gu.examples.get_path("exploradores_rgi_outlines"))
+features.vct.to_file("features.gpkg")
+```
+
+By default, the file is opened with Dask-GeoPandas in a single partition, and features are read only when needed
+(`load=False`). Passing `chunks=1000` splits the data into partitions of 1000 features, while `load=True` reads the
+data into memory with GeoPandas. The native {meth}`~geopandas.GeoDataFrame.to_file` and
+{meth}`~geopandas.GeoDataFrame.to_parquet` methods can also be used to save the vector.
+
+### Create from geometries
+
+A vector is created from geometries by constructing a {class}`~geopandas.GeoDataFrame` directly. GeoUtils operations
+are then available through its {class}`vct <geoutils.GeoDataFrameVectorAccessor>` accessor:
+
+```python
+import geopandas as gpd
+from shapely.geometry import box
+
+created = gpd.GeoDataFrame(geometry=[box(0, 0, 10, 10)], crs=32631)
+```
+
+## The {class}`~geoutils.Vector` object
+
+### Object definition and attributes
 
 A {class}`~geoutils.Vector` contains **a single main attribute**: a {class}`~geopandas.GeoDataFrame` as {attr}`~geoutils.Vector.gdf`.
 
@@ -49,7 +88,7 @@ The {attr}`~VectorBase.bbox` attribute of a {class}`~geoutils.Vector` correspond
 The equivalent of {attr}`geopandas.GeoDataFrame.bounds <geopandas.GeoSeries.bounds>` (i.e., a per-feature bounds) for {class}`Vectors<geoutils.Vector>` is {attr}`~geoutils.Vector.geom_bounds`.
 ```
 
-## Open and save
+### Open and save
 
 A {class}`~geoutils.Vector` is opened by instantiating with either a {class}`str`, a {class}`pathlib.Path`, a {class}`geopandas.GeoDataFrame`,
 a {class}`geopandas.GeoSeries` or a {external+shapely:doc}`shapely.Geometry <geometry>`.
@@ -91,7 +130,7 @@ for example calling {meth}`geoutils.Vector.to_file`.
 ```
 
 
-## From Shapely and GeoPandas
+### From Shapely and GeoPandas
 
 Nearly all geometric attributes and functions of GeoPandas (and sometimes, under the hood, Shapely) can be called from a {class}`~geoutils.Vector`.
 
@@ -139,7 +178,7 @@ vect.area
 vect.to_json()
 ```
 
-## Related features
+### Related features
 
 For more details on features applicable to vectors, refer to the following pages!
 

@@ -45,7 +45,7 @@ These behave similarly to Xarray's {meth}`~xarray.DataArray.sel`, {meth}`~xarray
 is applied when their geometries or values are read. The file format determines how efficiently those rows
 can be read; see {ref}`scalability-formats`.
 
-When using the Xarray {class}`rst <geoutils.DataArrayRasterAccessor>` accessor, this behavior follows the **native Xarray deferred I/O model**. The {class}`~geoutils.Raster` class implements the
+When using the Xarray {class}`rst <geoutils.DataArrayRasterAccessor>` and {class}`pc <geoutils.DataArrayPointCloudAccessor>` accessor, this behavior follows the **native Xarray deferred I/O model**. The {class}`~geoutils.Raster` class implements the
 same behavior so that both APIs have consistent semantics.
 
 An important aspect of **deferred I/O** is that it works with both **in-memory** (NumPy) and **scalable backends** (Dask), allowing

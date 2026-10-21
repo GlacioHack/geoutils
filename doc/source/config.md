@@ -42,7 +42,7 @@ The default is `"dataarray"`. Use `"dataset"` for an Xarray Dataset, or `"geodat
 
 ## Default configuration file
 
-Below is the **default configuration file**. 
+Below is the **default configuration file**.
 Note that changes to `gu.config` apply only to the current Python session, they do not modify this file!
 
 ```{literalinclude} ../../geoutils/config.ini

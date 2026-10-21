@@ -695,7 +695,7 @@ class Raster(RasterBase):
     def transform(self, new_transform: Affine) -> None:
         self.set_transform(new_transform)
 
-    def _set_crs(self, new_crs: CRS) -> None:
+    def _set_crs(self, new_crs: CRS | None) -> None:
         # Overloads abstract method in RasterBase
         self._crs = new_crs
 

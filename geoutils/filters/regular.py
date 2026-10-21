@@ -657,7 +657,14 @@ def _sieve(
 
     # Rasterio delegates connected-region filtering to GDAL and accepts integer values only
     source = _masked_raster_data(source_raster)
-    if not (np.issubdtype(source.dtype, np.integer) or np.issubdtype(source.dtype, np.bool_)):
+    working_dtype = source.dtype
+    if working_dtype.kind == "f":
+        array = getattr(source_raster, "_obj", source_raster)
+        storage_dtype = np.dtype(getattr(array, "encoding", {}).get("dtype") or source.dtype)
+        if storage_dtype.kind in "iu":
+            # Xarray decodes masked integer files to floats; GDAL processes signed 32-bit categories
+            working_dtype = np.dtype(np.int32)
+    if working_dtype.kind not in "biu":
         raise ValueError("Sieve requires an integer or Boolean raster.")
     bands, squeeze = _as_bands(source)
     requested_mask = _processing_mask(mask, source.shape)
@@ -667,7 +674,10 @@ def _sieve(
     for band_index, band in enumerate(bands):
         source_valid = ~np.ma.getmaskarray(band)
         valid = source_valid & requested_mask
-        values = np.asarray(band.data)
+        with np.errstate(invalid="ignore", over="ignore"):
+            values = np.asarray(band.filled(0), dtype=working_dtype)
+        if source.dtype != working_dtype and not np.array_equal(values[source_valid], band.data[source_valid]):
+            raise ValueError("Sieve requires integer values representable as signed 32-bit integers.")
         sieved = rio_sieve(values, size=int(size), mask=valid.astype(np.uint8), connectivity=connectivity)
         output[band_index] = np.ma.array(sieved, mask=~source_valid)
 

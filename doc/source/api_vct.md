@@ -13,6 +13,7 @@ Below is the full class description specific to {class}`vct <geoutils.GeoDataFra
 
 .. autoclass:: GeoDataFrameVectorAccessor
     :members:
+    :exclude-members: to_file
     :inherited-members:
     :undoc-members: false
     :show-inheritance:

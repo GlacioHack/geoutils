@@ -154,7 +154,7 @@ class TestConfig:
         # Run functions using this config
         results = [
             gu.pointcloud.from_xyz([0], [0], [1], 32631),
-            gu.open_pointcloud(filename, data_name="height"),
+            gu.open_pointcloud(filename, data_name="height", load=True),
             raster.rst.to_pointcloud(),
             raster.rst.subsample(1),
             raster.rst.interp_at_points(([0.5], [1.5]), method="nearest"),

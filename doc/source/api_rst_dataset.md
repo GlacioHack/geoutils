@@ -14,6 +14,7 @@ Below is the full class description specific to {class}`Dataset.rst <geoutils.Da
 
 .. autoclass:: DatasetRasterAccessor
     :members:
+    :exclude-members: to_file
     :undoc-members: false
     :show-inheritance:
 ```

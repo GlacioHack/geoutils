@@ -252,17 +252,18 @@ The following methods apply only to the {class}`~geoutils.Raster` object. Use na
     ~raster.base.RasterBase.from_pointcloud_regular
 ```
 
-Writing and conversion methods depend on the concrete interface.
+Writing to file from accessors or Raster object:
 
 ```{eval-rst}
 .. autosummary::
     :toctree: gen_modules/
 
-    Raster.to_file
     DataArrayRasterAccessor.to_file
+    DatasetRasterAccessor.to_file
+    DataArrayRasterAccessor.to_geoutils
+    Raster.to_file
     Raster.to_rio_dataset
     Raster.to_xarray
-    DataArrayRasterAccessor.to_geoutils
 ```
 
 ### Georeferencing utilities
@@ -369,11 +370,22 @@ Only **file opening** and **scalable execution** differ substantially between th
     ~vector.base.VectorBase.bbox
     ~vector.base.VectorBase.footprint
     ~vector.base.VectorBase.name
+    ~vector.base.VectorBase.is_loaded
 ```
 
 ```{caution}
 The {attr}`~VectorBase.bbox` attribute of a {class}`~geoutils.Vector` corresponds to the {attr}`~geopandas.GeoDataFrame.total_bounds` attribute of a
 {class}`~geopandas.GeoDataFrame`, while {attr}`geopandas.GeoDataFrame.bounds` returns a {class}`~pandas.Series` of per-feature bounds of the vector.
+```
+
+### Writing to file
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    GeoDataFrameVectorAccessor.to_file
+    Vector.to_file
 ```
 
 ### Geospatial handling methods
@@ -533,6 +545,7 @@ Only **file opening** and **scalable execution** differ substantially between th
     :template: pointcloud_method.rst
 
     ~pointcloud.base.GeometryPointCloudBase.point_count
+    ~pointcloud.base.PointCloudBase.is_loaded
 ```
 
 
@@ -570,6 +583,23 @@ Use {func}`~geoutils.pointcloud.from_xyz` to create a DataArray from coordinate 
 ```
 
 ### Writing to file
+
+Accessor methods write the native Xarray or GeoPandas representation:
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    DataArrayPointCloudAccessor.to_file
+    DataArrayPointCloudAccessor.to_las
+    DataArrayPointCloudAccessor.to_parquet
+    DatasetPointCloudAccessor.to_file
+    DatasetPointCloudAccessor.to_las
+    DatasetPointCloudAccessor.to_parquet
+    GeoDataFramePointCloudAccessor.to_file
+```
+
+GeoUtils object methods:
 
 ```{eval-rst}
 .. autosummary::
@@ -811,7 +841,7 @@ or {class}`~geoutils.multiproc.MpCluster` (parallel).
     :toctree: gen_modules/
 
     multiproc.map_overlap
-    multiproc.map_blocks
+    multiproc.map_collect
 ```
 
 (profiling-api)=

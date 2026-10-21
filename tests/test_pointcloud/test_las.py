@@ -283,7 +283,7 @@ class TestLasPyIO:
                 np.testing.assert_array_equal(selected.identifier, reference["identifier"].values[start : start + 2])
 
         # Reopen with GeoUtils and check exact equality
-        saved = gu.open_pointcloud(filename, columns=["classification", "identifier"])
+        saved = gu.open_pointcloud(filename, columns=["classification", "identifier"], load=True)
         assert saved.attrs["laz_chunk_size"] == laz_chunk_size
         assert saved.pc.is_loaded
         if as_object_type == "dataset":
@@ -435,9 +435,13 @@ class TestLasPyIO:
         else:
             filename = tmp_path / "source.las"
             reference.to_las(filename)
-            eager = gu.open_pointcloud(filename, columns=columns, as_object_type=as_object_type)
+            eager = gu.open_pointcloud(filename, columns=columns, as_object_type=as_object_type, load=True)
             chunked = gu.open_pointcloud(
-                filename, columns=columns, as_object_type=as_object_type, chunks=4 if backend == "dask" else None
+                filename,
+                columns=columns,
+                as_object_type=as_object_type,
+                chunks=4 if backend == "dask" else None,
+                load=backend == "multiproc",
             )
             eager_writer, chunked_writer = eager.pc, chunked.pc
             eager_variables = list(eager.data_vars.values()) if as_object_type == "dataset" else [eager]
@@ -460,7 +464,7 @@ class TestLasPyIO:
 
         # Check exact equality and chunk size metadata
         saved = gu.open_pointcloud(chunked_filename, columns=columns, chunks=4)
-        expected = gu.open_pointcloud(eager_filename, columns=columns)
+        expected = gu.open_pointcloud(eager_filename, columns=columns, load=True)
         assert not saved.pc.is_loaded and expected.pc.is_loaded
         assert saved.attrs["laz_chunk_size"] == expected.attrs["laz_chunk_size"] == 3
         xr.testing.assert_identical(saved.compute(), expected)

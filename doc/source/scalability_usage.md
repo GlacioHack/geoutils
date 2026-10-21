@@ -88,7 +88,8 @@ sub_ds = ds_reproj.rst.subsample(
 sub_ds
 ```
 
-The output point cloud is again lazy. Calling {meth}`compute() <xarray.DataArray.compute>` returns an in-memory DataArray:
+The output point cloud is again lazy, although selecting a fixed sample size can run preliminary counting tasks.
+Calling {meth}`compute() <xarray.DataArray.compute>` returns an in-memory DataArray:
 ```{code-cell} python
 sub_ds.compute()
 ```

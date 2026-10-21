@@ -89,6 +89,7 @@ from geoutils.operators.reducer import Reducer
 from geoutils.operators.weighting import _with_error_structure
 from geoutils.projtools import (
     _get_bounds_projected,
+    _get_custom_crs,
     _get_footprint_projected,
     _get_utm_ups_crs,
     align_bounds,
@@ -168,26 +169,6 @@ class RasterBase(ABC):
         self._downsample: int | float = 1
         self._profile: dict[str, Any] | None = None
         self._is_mask: bool = False
-
-    @property
-    def gcps(self) -> tuple[list[rio.control.GroundControlPoint], rio.crs.CRS | None]:
-        """Ground control points and their CRS, following Rasterio's (points, CRS) convention."""
-        return self._gcps
-
-    @gcps.setter
-    def gcps(self, new_gcps: tuple[list[rio.control.GroundControlPoint], rio.crs.CRS | None]) -> None:
-        """Set ground control points and their CRS."""
-        self._gcps = new_gcps
-
-    @property
-    def rpcs(self) -> rio.rpc.RPC | None:
-        """Rational polynomial coefficients relating image pixels to WGS84 ground coordinates."""
-        return self._rpcs
-
-    @rpcs.setter
-    def rpcs(self, new_rpcs: rio.rpc.RPC | None) -> None:
-        """Set rational polynomial coefficients."""
-        self._rpcs = new_rpcs
 
     @property
     def _is_xr(self) -> bool:
@@ -360,7 +341,7 @@ class RasterBase(ABC):
 
         self.set_crs(new_crs)
 
-    def set_crs(self, new_crs: CRS) -> None:
+    def set_crs(self, new_crs: CRS | int | str | None) -> None:
         """
         Set the coordinate reference system of the raster.
         """
@@ -370,7 +351,7 @@ class RasterBase(ABC):
         self._set_crs(new_crs=new_crs)
 
     @abstractmethod
-    def _set_crs(self, new_crs: CRS) -> None: ...
+    def _set_crs(self, new_crs: CRS | None) -> None: ...
 
     @property
     @abstractmethod
@@ -437,7 +418,7 @@ class RasterBase(ABC):
         if new_nodata is not None and not isinstance(new_nodata, (int, float, np.integer, np.floating)):
             raise ValueError("Type of nodata not understood, must be float or int.")
 
-        if new_nodata is not None:
+        if new_nodata is not None and not self._is_xr:
             # Rasterio may probe an invalid cast before rejecting incompatible nodata
             with np.errstate(invalid="ignore", over="ignore"):
                 compatible = rio.dtypes.can_cast_dtype(new_nodata, self.dtype)
@@ -447,7 +428,23 @@ class RasterBase(ABC):
         if self._is_xr:
             # For Mypy, always verified
             assert self._obj is not None
-            self._obj.rio.write_nodata(new_nodata, inplace=True)
+            from geoutils.raster.xr_accessor import _set_raster_encoding
+
+            old_nodata = self.nodata
+            decoded = self._obj.encoding.get("_FillValue") is not None
+            _set_raster_encoding(self._obj, self._obj.encoding, new_nodata, cast_nodata=False)
+
+            # Arrays that already use NaN need no value changes
+            # Otherwise, replace values that mark missing data and update the mask without loading the array
+            if not decoded and new_nodata is not None:
+                values = self._obj
+                valid = values != new_nodata
+                if update_array and old_nodata is not None:
+                    values = values.where(values != old_nodata, new_nodata)
+                if update_mask:
+                    values = values.where(valid)
+                if update_array or update_mask:
+                    self._obj.data = values.data
 
         else:
             # If we update mask or array, get the masked array
@@ -527,6 +524,26 @@ class RasterBase(ABC):
         Set the metadata tags of the raster.
         """
         ...
+
+    @property
+    def gcps(self) -> tuple[list[rio.control.GroundControlPoint], rio.crs.CRS | None]:
+        """Ground control points and their CRS, following Rasterio's (points, CRS) convention."""
+        return self._gcps
+
+    @gcps.setter
+    def gcps(self, new_gcps: tuple[list[rio.control.GroundControlPoint], rio.crs.CRS | None]) -> None:
+        """Set ground control points and their CRS."""
+        self._gcps = new_gcps
+
+    @property
+    def rpcs(self) -> rio.rpc.RPC | None:
+        """Rational polynomial coefficients relating image pixels to WGS84 ground coordinates."""
+        return self._rpcs
+
+    @rpcs.setter
+    def rpcs(self, new_rpcs: rio.rpc.RPC | None) -> None:
+        """Set rational polynomial coefficients."""
+        self._rpcs = new_rpcs
 
     def set_area_or_point(
         self, new_area_or_point: Literal["Area", "Point"] | None, shift_area_or_point: bool | None = None
@@ -1390,25 +1407,33 @@ class RasterBase(ABC):
         self,
         local_crs_type: Literal["universal"] | Literal["custom"] = "universal",
         method: Literal["centroid"] | Literal["geopandas"] = "centroid",
+        *,
+        center: tuple[float, float] | None = None,
     ) -> CRS:
         """
-        Get local metric coordinate reference system for the raster (UTM, UPS, or custom Mercator or Polar).
+        Get a universal or custom local metric coordinate reference system for the raster.
 
         :param local_crs_type: Whether to get a "universal" local CRS (UTM or UPS) or a "custom" local CRS
-            (Mercator or Polar centered on centroid).
+            (stereographic centered on the footprint centroid).
         :param method: Method to choose the zone of the CRS, either based on the centroid of the footprint
             or the extent as implemented in :func:`geopandas.GeoDataFrame.estimate_utm_crs`.
-            Forced to centroid if `local_crs="custom"`.
+            Ignored for a custom CRS.
+        :param center: Optional (longitude, latitude) in WGS84 degrees for a custom CRS. By default, use the planar
+            footprint centroid after unwrapping longitudes across the antimeridian. Supply a center for footprints
+            that span a hemisphere or surround a pole.
+        :returns: A projected CRS with metre units. A custom CRS has true scale at its center and suits compact regions.
         """
 
-        # For universal CRS (UTM or UPS)
+        # Choose a projection from the raster footprint without reading its pixels
+        if local_crs_type not in ("universal", "custom"):
+            raise ValueError("local_crs_type must be 'universal' or 'custom'.")
+        if center is not None and local_crs_type != "custom":
+            raise ValueError("center is only supported for a custom metric CRS.")
+        footprint = self.get_footprint_projected(out_crs=self.crs)
+        footprint_ds = getattr(footprint, "_dataset", footprint)
         if local_crs_type == "universal":
-            footprint = self.get_footprint_projected(out_crs=self.crs)
-            footprint_ds = getattr(footprint, "_dataset", footprint)
             return _get_utm_ups_crs(footprint_ds, method=method)
-        # For a custom CRS
-        else:
-            raise NotImplementedError("This is not implemented yet.")
+        return _get_custom_crs(footprint_ds, center=center)
 
     def intersection(self, other: RasterType, match_ref: bool = True) -> tuple[float, float, float, float]:
         """
@@ -1573,7 +1598,14 @@ class RasterBase(ABC):
             cropped_arr.rst.gcps, cropped_arr.rst.rpcs = gcps, rpcs
             return cast(RasterType, cropped_arr)
         return self.from_array(
-            cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point, gcps=gcps, rpcs=rpcs
+            cropped_arr,
+            new_transform,
+            self.crs,
+            self.nodata,
+            self.area_or_point,
+            tags=self.tags.copy(),
+            gcps=gcps,
+            rpcs=rpcs,
         )
 
     def clip(
@@ -1657,7 +1689,14 @@ class RasterBase(ABC):
             cropped_arr.rst.gcps, cropped_arr.rst.rpcs = gcps, rpcs
             return cast(RasterType, cropped_arr)
         return self.from_array(
-            cropped_arr, new_transform, self.crs, self.nodata, self.area_or_point, gcps=gcps, rpcs=rpcs
+            cropped_arr,
+            new_transform,
+            self.crs,
+            self.nodata,
+            self.area_or_point,
+            tags=self.tags.copy(),
+            gcps=gcps,
+            rpcs=rpcs,
         )
 
     @profiler.profile("geoutils.raster.base.reproject", memprof=True)
@@ -1896,15 +1935,22 @@ class RasterBase(ABC):
         # Not in-place
         if data is None or transformed is None or crs is None:
             raise RuntimeError("Reprojection did not return the expected in-memory output.")
-        nominal_output = self.from_array(
+        # Forward Xarray metadata to its constructor (Raster stores its metadata in tags)
+        array_options: dict[str, Any] = {}
+        if self._obj is not None:
+            encoding = self._obj.encoding.copy()
+            if dtype is not None:
+                encoding["dtype"] = np.dtype(dtype)
+            array_options = {"encoding": encoding, "name": self._obj.name}
+        return self.from_array(
             data=data,
             transform=transformed,
             crs=crs,
             nodata=nodata,
             area_or_point=self.area_or_point,
             tags={key: value for key, value in self.tags.items() if key != "RPC"},
+            **array_options,
         )
-        return nominal_output
 
     def krige(
         self: RasterType,

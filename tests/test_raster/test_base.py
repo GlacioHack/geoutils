@@ -327,6 +327,38 @@ class TestClassVsAccessorConsistency:
         ("load", {}),
     ]
 
+    @pytest.mark.parametrize(
+        "method,kwargs",
+        [
+            (method, kwargs)
+            for method, kwargs in methods_and_kwargs
+            if method in ("copy", "crop", "icrop", "clip", "translate", "reproject", "filter", "sieve", "fill_nodata")
+            and not kwargs.get("inplace")
+        ],
+    )
+    def test_methods__metadata(self, method: str, kwargs: dict[str, Any]) -> None:
+        """Checks that operations preserve custom metadata."""
+
+        # Create integer raster with custom metadata
+        values = np.arange(36, dtype=np.int32).reshape(6, 6)
+        tags = {"title": "elevation survey", "units": "m"}
+        source = Raster.from_array(values, rio.transform.from_origin(0, 60, 10, 10), 32631, nodata=-99999, tags=tags)
+        original = source.copy()
+        options = kwargs.copy()
+        if method == "crop":
+            options["bbox"] = (10, 10, 50, 50)
+        elif method == "clip":
+            options["mask"] = (10, 10, 50, 50)
+        elif method == "copy" and "new_array" in options:
+            options["new_array"] = np.ones(source.shape, dtype=np.int32)
+
+        # Run each operation and check metadata is unchanged
+        result = getattr(source, method)(**options)
+        assert isinstance(result, Raster)
+        assert all(result.tags[name] == value for name, value in tags.items())
+        assert source.tags == original.tags
+        assert source.raster_equal(original)
+
     @pytest.mark.parametrize("path_index", [0, 1, 2])
     @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in methods_and_kwargs])
     def test_methods__equality_and_loading(

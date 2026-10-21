@@ -341,6 +341,10 @@ class TestPointCloud:
                 engine="invalid",  # type: ignore[arg-type]
             )
 
+        # Check the public point count argument before gridding
+        with pytest.raises(ValueError, match="max_points.*positive integer"):
+            gu.PointCloud(pc, data_name="z").grid(grid_coords=grid_coords, max_points=0)
+
     def test_grid__propagates_reducer_uncertainty(self) -> None:
         """Checks that grid() leaves values unchanged and calculates each neighborhood's uncertainty."""
 
@@ -616,6 +620,8 @@ class TestGriddingOperators:
 
         # The configured point limits select only the first two observations, despite the larger pixel radius
         usual = points.grid(ref=reference, resampling=Mean(), dist_nodata_pixel=30, nodata_handling="ignore")
+        limited = points.grid(ref=reference, resampling="mean", radius=30, max_points=2)
+        overridden = points.grid(ref=reference, resampling=reducer, max_points=1)
         reduced = points.grid(
             ref=reference,
             resampling=reducer,
@@ -636,6 +642,8 @@ class TestGriddingOperators:
 
         # Averaging 1 and 3 gives 2; two independent errors of magnitude two give variance 2
         assert usual.to_nanarray()[0, 0] == 5.5
+        assert limited.to_nanarray()[0, 0] == 2
+        assert overridden.to_nanarray()[0, 0] == 1
         assert reduced.to_nanarray()[0, 0] == 2
         assert summary.variance.to_nanarray().reshape(-1)[0] == pytest.approx(2)
         assert reducer.default_neighborhood is neighborhood
@@ -699,6 +707,8 @@ class TestGriddingOperators:
             dist_nodata_pixel=30,
             nodata_handling="ignore",
         )
+        limited = points.grid(ref=reference, resampling="idw", radius=30, max_points=2)
+        assert limited.to_nanarray()[0, 0] == pytest.approx(5 / 3)
         assert nearest_two.to_nanarray()[0, 0] == pytest.approx(5 / 3)
         assert full_radius.to_nanarray()[0, 0] > nearest_two.to_nanarray()[0, 0]
 
@@ -1211,8 +1221,13 @@ class TestPointNeighbourMethodsChunked:
 
     @pytest.mark.parametrize("engine", ["scipy", "numba"])
     @pytest.mark.parametrize("operator_type", [Mean, InverseDistance])
+    @pytest.mark.parametrize("max_points", [None, 1])
     def test_grid__explicit_neighborhood_chunk_invariance(
-        self, engine: Literal["scipy", "numba"], operator_type: type[Reducer] | type[Interpolator], tmp_path: Path
+        self,
+        engine: Literal["scipy", "numba"],
+        operator_type: type[Reducer] | type[Interpolator],
+        max_points: int | None,
+        tmp_path: Path,
     ) -> None:
         """Checks that count-limited neighborhoods cross output chunk boundaries without changing the grid."""
 
@@ -1223,7 +1238,12 @@ class TestPointNeighbourMethodsChunked:
         points = gu.PointCloud.from_xyz([0, 1, 3, 6], [0, 0, 1, 2], [1, 3, 7, 11], crs=32631)
         reference = gu.Raster.from_array(np.zeros((4, 5)), rio.transform.from_origin(0, 4, 1, 1), crs=32631)
         operator = operator_type(neighborhood=PointNeighbours(max_points=2, radius=4))
-        options: dict[str, Any] = {"resampling": operator, "engine": engine, "nodata_handling": "ignore"}
+        options: dict[str, Any] = {
+            "resampling": operator,
+            "engine": engine,
+            "nodata_handling": "ignore",
+            "max_points": max_points,
+        }
         expected = points.grid(ref=reference, **options)
 
         # Dask returns a lazy array; multiprocessing writes its output without loading the returned raster

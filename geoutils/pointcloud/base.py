@@ -924,6 +924,7 @@ class PointCloudBase(ABC):
         nodata_handling: NodataChoice | None = None,
         distance_power: float = 2.0,
         min_points: int = 1,
+        max_points: int | None = None,
         engine: GriddingEngine | None = None,
         chunksizes: tuple[int, int] | None = None,
         mp_config: MultiprocConfig | None = None,
@@ -960,6 +961,8 @@ class PointCloudBase(ABC):
             Interpolators default to the configured choice.
         :param distance_power: Distance exponent used for inverse-distance weighting.
         :param min_points: Minimum number of finite points required inside a circular neighborhood.
+        :param max_points: Maximum number of nearest observations used for each cell, including missing values.
+            None uses the method's existing point limit.
         :param engine: Legacy alias for backend ("scipy" or "numba").
         :param chunksizes: Output chunk size as ``(rows, columns)`` for Dask or multiprocessing execution.
         :param mp_config: Multiprocessing configuration for computing output chunks in workers.
@@ -974,6 +977,10 @@ class PointCloudBase(ABC):
         if kwargs:
             name = next(iter(kwargs))
             raise TypeError(f"grid() got an unexpected keyword argument '{name}'.")
+        if max_points is not None and (
+            isinstance(max_points, (bool, np.bool_)) or not isinstance(max_points, (int, np.integer)) or max_points < 1
+        ):
+            raise ValueError("Argument 'max_points' must be a positive integer or None.")
 
         # Resolve string choices before eager, Dask or multiprocessing gridding
         selected_backend = _resampling_backend(
@@ -1002,6 +1009,7 @@ class PointCloudBase(ABC):
             nodata_handling=nodata_handling,
             distance_power=distance_power,
             min_points=min_points,
+            max_points=max_points,
             engine="numba" if selected_backend == "numba" else "scipy",
             chunksizes=chunksizes,
             mp_config=mp_config,

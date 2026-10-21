@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError
 
@@ -12,6 +13,7 @@ import numpy as np
 import pyogrio
 import pytest
 import rasterio as rio
+import xarray as xr
 from geopandas.testing import assert_geodataframe_equal
 from pyproj import CRS
 from pyproj.crs import CompoundCRS
@@ -20,6 +22,7 @@ from shapely.geometry import box
 
 import geoutils as gu
 from geoutils import PointCloud, Raster, Vector
+from geoutils._dispatch import is_dask_dataframe
 from geoutils.vector.base import VectorBase
 from geoutils.vector.pd_accessor import GeoDataFrameVectorAccessor
 from tests.accessor_helpers import assert_output_equal
@@ -94,9 +97,6 @@ class TestClassVsAccessorConsistency:
     methods = [k for k, v in VectorBase.__dict__.items() if not k.startswith("_") and not isinstance(v, property)]
     methods = [m for m in methods if m not in ["geometry_mask", "plot", "save"]]
 
-    # Methods tested separately because their output contains class/accessor specific filenames
-    methods_exceptions = ["info"]
-
     def test_geo_interface__features_and_bbox(self) -> None:
         """Checks that a vector exposes its geometries, columns and total bounding box."""
 
@@ -134,6 +134,7 @@ class TestClassVsAccessorConsistency:
 
     methods_and_kwargs = [
         ("copy", {}),
+        ("info", {"verbose": False}),
         ("vector_equal", {"other": "self"}),
         ("vector_allclose", {"other": "self"}),
         ("crop", {"bbox": (-1, -1, 3, 3)}),
@@ -163,18 +164,57 @@ class TestClassVsAccessorConsistency:
         ("get_bbox_projected", {"out_crs": CRS.from_epsg(4326)}),
         ("get_footprint_projected", {"out_crs": CRS.from_epsg(4326)}),
         ("get_metric_crs", {"local_crs_type": "universal"}),
+        ("get_metric_crs", {"local_crs_type": "custom"}),
         ("buffer_without_overlap", {"buffer_size": 1, "metric": False}),
         ("to_geoutils", {}),
     ]
 
-    @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in methods_and_kwargs])
-    def test_methods__equality(self, method: str, kwargs: dict[str, Any]) -> None:
-        """
-        Test that the method output is exactly the same between a Vector and a GeoDataFrame using the "vct" accessor.
-        """
+    @pytest.mark.parametrize("representation", ["vector", "geodataframe"])
+    @pytest.mark.parametrize(
+        "method,kwargs",
+        [
+            (method, kwargs)
+            for method, kwargs in methods_and_kwargs
+            if method in ("copy", "crop", "clip", "reproject", "translate", "query", "to_geoutils")
+        ],
+    )
+    def test_methods__metadata(self, method: str, kwargs: dict[str, Any], representation: str) -> None:
+        """Checks that operations preserve custom metadata."""
 
-        vector = Vector(self.ds)
-        ds = self.ds.copy()
+        # Create vector with custom metadata
+        frame = self.ds.copy()
+        frame.attrs["title"] = "survey outlines"
+        source = Vector(frame) if representation == "vector" else frame
+        original = source.copy()
+
+        # Run each operation and check metadata is unchanged
+        interface = source if isinstance(source, Vector) else source.vct
+        result = getattr(interface, method)(**kwargs)
+        output_frame = result.gdf if isinstance(result, Vector) else result
+        assert output_frame.attrs["title"] == "survey outlines"
+        assert frame.attrs["title"] == "survey outlines"
+        assert_output_equal(source, original)
+
+    @pytest.mark.parametrize("loaded,chunks", [(True, None), (False, None), (False, 2)])
+    @pytest.mark.parametrize("method, kwargs", methods_and_kwargs)
+    def test_methods__equality_and_loading(
+        self, tmp_path: Path, method: str, kwargs: dict[str, Any], loaded: bool, chunks: int | None
+    ) -> None:
+        """Checks that vector methods load as needed and match eager class and accessor outputs."""
+
+        if not loaded:
+            pytest.importorskip("dask_geopandas")
+
+        # Write three features so chunks of 2 leave a shorter final partition
+        filename = tmp_path / "outlines.gpkg"
+        self.ds.to_file(filename, index=False)
+        eager_reference = loaded or chunks is not None
+        vector = Vector(self.ds.copy()) if eager_reference else Vector(filename)
+        ds = gu.open_vector(str(filename), load=loaded, chunks=chunks)
+        assert vector.is_loaded is eager_reference
+        assert ds.vct.is_loaded is loaded
+
+        # Run each operation through the class and accessor
         args_vector = kwargs.copy()
         args_ds = kwargs.copy()
         if args_vector.get("other") == "self":
@@ -184,7 +224,27 @@ class TestClassVsAccessorConsistency:
         output_vector = getattr(vector, method)(**args_vector)
         output_ds = getattr(ds.vct, method)(**args_ds)
 
-        assert_output_equal(output_vector, output_ds, use_allclose=method == "proximity", strict_masked=False)
+        # Check loading before comparing values, which can load deferred outputs
+        input_loaded = eager_reference or method not in ("crop", "get_bbox_projected", "get_footprint_projected")
+        assert vector.is_loaded is input_loaded
+        assert ds.vct.is_loaded is loaded
+        if isinstance(output_vector, (Vector, Raster)):
+            assert output_vector.is_loaded is (eager_reference or method != "crop")
+        if isinstance(output_ds, gpd.GeoDataFrame) or is_dask_dataframe(output_ds):
+            output_loaded = loaded or method not in ("copy", "crop", "clip", "reproject", "translate", "query")
+            assert output_ds.vct.is_loaded is output_loaded
+        elif isinstance(output_ds, Raster):
+            assert output_ds.is_loaded
+        elif isinstance(output_ds, xr.DataArray):
+            assert output_ds.rst.is_loaded
+
+        # Compare summaries without their representation-specific filenames
+        if method == "info":
+            output_vector = output_vector.splitlines()[1:]
+            output_ds = output_ds.splitlines()[1:]
+        actual = output_ds.compute() if is_dask_dataframe(output_ds) else output_ds
+        assert_output_equal(output_vector, actual, use_allclose=method == "proximity", strict_masked=False)
+        assert ds.vct.is_loaded is loaded
 
     inplace_methods_and_kwargs = [
         ("crop", {"bbox": (9, 9, 11, 11), "inplace": True}),
@@ -267,9 +327,7 @@ class TestClassVsAccessorConsistency:
 
         methods_1 = [m[0] for m in self.methods_and_kwargs]
         methods_2 = [m[0] for m in self.class_methods_and_kwargs]
-        list_missing = [
-            method for method in self.methods if method not in methods_1 + methods_2 + self.methods_exceptions
-        ]
+        list_missing = [method for method in self.methods if method not in methods_1 + methods_2]
 
         if len(list_missing) != 0:
             raise NeedsTestError(f"VectorBase methods not covered by tests: {list_missing}")
@@ -332,8 +390,8 @@ class TestVectorRemote:
         frame = gpd.GeoDataFrame({"id": [1, 2]}, geometry=[box(0, 0, 2, 3), box(4, 5, 7, 9)], crs=4326)
         filename = remote_files.directory / f"polygons.{suffix}"
         frame.to_file(filename)
-        expected = gu.open_vector(str(filename))
-        remote = gu.open_vector(remote_url(filename.name))
+        expected = gu.open_vector(str(filename), load=True)
+        remote = gu.open_vector(remote_url(filename.name), load=True)
 
         # Check loading and equality
         assert isinstance(remote, gpd.GeoDataFrame)
@@ -364,7 +422,7 @@ class TestVectorRemoteChunked:
         frame.to_file(filename)
 
         # Open local/remote with chunks (Dask)
-        expected = gu.open_vector(str(filename))
+        expected = gu.open_vector(str(filename), load=True)
         remote = gu.open_vector(remote_url(filename.name), chunks=2)
         assert expected.vct.is_loaded
         assert not remote.vct.is_loaded
@@ -401,4 +459,4 @@ class TestVectorRemoteErrors:
         filename = remote_url("missing.gpkg")
         error = HTTPError if chunks is None and filename.startswith("http://") else pyogrio.errors.DataSourceError
         with pytest.raises(error):
-            gu.open_vector(filename, chunks=chunks)
+            gu.open_vector(filename, chunks=chunks, load=True)

@@ -37,6 +37,9 @@ Then, we delve into how to {ref}`core-custom-operators`.
 An **interpolator predicts a continuous value at a requested coordinate**, usually using the positions of nearby observations.
 A **reducer summarizes values within a neighborhood**, for example by their mean or median.
 
+```{seealso}
+See **{ref}`transformations-resampling`** for a list of all interpolators and reducers.
+```
 
 ```{eval-rst}
 .. plot:: diagrams/diagram_operators.py
@@ -44,29 +47,67 @@ A **reducer summarizes values within a neighborhood**, for example by their mean
     :alt: Cubic interpolation and a mean of five observations, with both results shown at the central target.
 ```
 
-```{note}
-When applied to **resampling** in transformations, the choice of using an **interpolator** or a **reducer** relates to the support interpretation of a raster or point dataset.
-In other words, to the question: **Does this data aim to represent an average value over a surrounding (pixel/footprint), or the exact value at a point (pixel center, point coordinates)?**
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for creating example data"
+:  code_prompt_hide: "Hide the code for creating example data"
 
-See {ref}`pixel-interpretation` for details on this interpretation in raster metadata.
+import geopandas as gpd
+import numpy as np
+from affine import Affine
+from shapely.geometry import box
+
+import geoutils as gu
+
+# Create a small elevation grid with 10 m cells in a projected CRS
+elevations = np.arange(25, dtype=float).reshape(5, 5)
+ds = gu.raster.from_array(elevations, Affine(10, 0, 0, 0, -10, 50), 32631, nodata=-9999)
+locations = (np.array([20.0, 30.0]), np.array([30.0, 20.0]))
+
+# Create point measurements from the same grid
+points = ds.rst.to_pointcloud()
+
+# Create polygon zones that cut through raster cells
+zones = gpd.GeoDataFrame(
+    {"zone": ["west", "east"]},
+    geometry=[box(2, 3, 23, 47), box(23, 3, 48, 47)],
+    crs=ds.rst.crs,
+)
 ```
 
-Choose the calculation with `resampling=` for transformations and gap filling, `method=` for filters,
-or `statistics=` for statistics. Where available, `backend=` selects the implementation.
-Extra settings use `resampling_kwargs=` for transformations or `method_kwargs=` for filters.
+We can for instance **apply a linear interpolator similarly** across raster reprojection,
+raster resampling at point coordinates, or point gridding to a raster:
 
-Compare {ref}`built-in interpolators <transformations-interpolators>` and {ref}`reducers <transformations-reducers>`
-with their available backends on the {ref}`transformations` page.
+```{code-cell} ipython3
+reprojected = ds.rst.reproject(res=5, resampling="linear", backend="scipy")
+interpolated = ds.rst.resample_at_points(locations, resampling="linear", backend="scipy", as_array=True)
+gridded = points.pc.grid(ref=reprojected, resampling="linear", backend="scipy")
+```
+
+However, the underlying method **often depends on the nature of the input**: raster or point. For instance, "linear" in {meth}`reproject() <RasterBase.reproject>` and
+{meth}`resample_at_points() <RasterBase.resample_at_points>` uses regular-grid interpolation,
+while "linear" in {meth}`grid() <PointCloudBase.grid>` uses irregular point interpolation through Delaunay triangulation.
+
+We can also **use the same mean reducer** for filtering, sampling raster windows and calculating statistics:
+
+```{code-cell} ipython3
+filtered = ds.rst.filter(method="mean", window=3)
+averaged = ds.rst.resample_at_points(locations, resampling="mean", window=3)
+summary = ds.rst.stats(statistics="mean")
+```
+
+```{note}
+When applied to **resampling** in transformations, the choice of using an **interpolator** or a **reducer** often relates to the support interpretation of a raster or point dataset.
+In short: Does this data aim to represent **an average value over a surrounding** (pixel/footprint), or the **exact value at a point** (pixel center, point coordinates)?
+
+See {ref}`pixel-interpretation` for metadata storing this interpretation in rasters.
+```
 
 (core-neighborhoods)=
 ## Grid and point neighborhoods
 
-A **grid neighborhood selects source pixels**, while a **point neighborhood selects nearby observations**:
-
-- For raster filtering, resampling and reprojection, use `window=` and `window_shape=`. Sizes are in source pixels,
-  with square or circular windows.
-- For point filtering, `radius=` limits the X/Y distance in CRS units and `max_points=` limits the number of nearest points.
-  Gridding uses `radius=` for a search distance in output pixels.
+A grid neighborhood **selects nearby pixels**, while a point neighborhood **selects nearby points**.
 
 ```{eval-rst}
 .. plot:: diagrams/diagram_neighbours.py
@@ -74,21 +115,32 @@ A **grid neighborhood selects source pixels**, while a **point neighborhood sele
     :alt: A bounded search on points and a circular window on a raster grid.
 ```
 
-Here, `max_points=4` caps the point neighborhood at four observations. Grid interpolation uses the cells required by
-its method. A finite radius bounds the surrounding data needed for chunked point calculations;
-see {ref}`scalability-support` for the requirements.
+For example, use the **same circular window** (in pixels) for raster filtering and sampling:
+
+```{code-cell} ipython3
+circular_filter = ds.rst.filter(method="mean", window=5, window_shape="circular")
+circular = ds.rst.resample_at_points(
+    locations, resampling="mean", window=5, window_shape="circular"
+)
+```
+
+Or the **same search radius** (in CRS units) and **max points** for point filtering and gridding:
+
+```{code-cell} ipython3
+nearby_points = points.pc.filter(method="mean", radius=20, max_points=4)
+nearby_grid = points.pc.grid(ref=ds, resampling="mean", radius=2, max_points=4)
+```
 
 (core-coverage)=
 ## Cell coverage
 
-Raster cells cover an area, so a window or polygon can intersect only part of a cell. `coverage=` selects
-their contribution to raster reductions, filters, polygon statistics and rasterization:
+Raster cells cover an area, so **a polygon can intersect only part of a cell**:
 
-| Coverage | Contribution of an edge cell |
-|---|---|
-| `"center"` | Include its whole value when its center falls inside the area |
-| `"all_touched"` | Include its whole value when any part intersects the area |
-| `"fractional"` | Weight its value by the fraction of the cell covered by the window or polygon |
+| Coverage        | Contribution of an edge cell                                                 |
+|-----------------|------------------------------------------------------------------------------|
+| `"center"`      | Include its value when its center falls inside the area                      |
+| `"all_touched"` | Include its value when any part intersects the area                     |
+| `"fractional"`  | Weight its value by the fraction of the cell covered by the window or polygon |
 
 ```{eval-rst}
 .. plot:: diagrams/diagram_coverage.py
@@ -96,9 +148,19 @@ their contribution to raster reductions, filters, polygon statistics and rasteri
     :alt: Center, all touched and fractional coverage for the same circle, with every fractional percentage labeled.
 ```
 
-A cell with 25% coverage has a geometric weight of 0.25.
-Reprojection uses the output cell's footprint in the source grid unless an explicit window is supplied.
-Polygon examples are in {ref}`transformations-fractional` and {ref}`stats-fractional`.
+We can use **coverage rules similarly** for resampling at points, filtering, or computing zonal statistics:
+
+```{code-cell} ipython3
+fractional_samples = ds.rst.resample_at_points(
+    locations, resampling="mean", window=3, coverage="fractional"
+)
+fractional_filter = ds.rst.filter(
+    method="mean", window=3, window_shape="circular", coverage="fractional"
+)
+zonal_means = ds.rst.stats(statistics="mean", by={"zone": (zones, "zone")}, fractional=True)
+```
+
+See {ref}`transformations-fractional` and {ref}`stats-fractional` for other examples.
 
 (core-nodata)=
 ## Nodata propagation
@@ -151,25 +213,6 @@ already implemented in GeoUtils.
 
 ### Configuring methods and neighborhoods
 
-We create a small raster and compare two named calculations at the same locations:
-
-```{code-cell} ipython3
-import numpy as np
-from affine import Affine
-
-import geoutils as gu
-
-# Create a small elevation grid with 10 m cells in a projected CRS
-elevations = np.arange(25, dtype=float).reshape(5, 5)
-raster = gu.Raster.from_array(elevations, Affine(10, 0, 0, 0, -10, 50), 32631, nodata=-9999)
-locations = (np.array([20.0, 30.0]), np.array([30.0, 20.0]))
-
-# Predict elevations at the locations, then average a window around each one
-interpolated = raster.resample_at_points(locations, resampling="linear", backend="scipy", as_array=True)
-averaged = raster.resample_at_points(locations, resampling="mean", backend="scipy", window=3, as_array=True)
-interpolated, averaged
-```
-
 Operator objects group the method and its neighborhood settings. GridNeighbours supports square and circular
 windows, or explicit `(row, column)` offsets from the containing source cell:
 
@@ -186,15 +229,12 @@ cross = GridNeighbours(offsets=((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)))
 
 PointNeighbours combines a point count and radius. Distances use **horizontal X/Y coordinates in CRS units**;
 reproject geographic coordinates to a metric CRS for radii in metres. In gridding, this differs from the
-output pixels used by `radius` in grid():
+output pixels used by `radius` in {meth}`grid() <PointCloudBase.grid>`:
 
 ```{code-cell} ipython3
-# Create point measurements from the same grid
-points = raster.to_pointcloud()
-
 # Grid values using at most eight measurements within 25 m of each output cell
 nearby = PointNeighbours(max_points=8, radius=25)
-gridded = points.grid(ref=raster, resampling=InverseDistance(neighborhood=nearby))
+gridded = points.pc.grid(ref=ds, resampling=InverseDistance(neighborhood=nearby))
 gridded.shape
 ```
 
@@ -206,7 +246,7 @@ changes the coverage weights. A reducer must support those weights to use fracti
 ```{code-cell} ipython3
 # Average the parts of cells covered by a circle centered on each requested point
 circle = GridNeighbours(size=3, shape="circular", coverage="fractional")
-covered_mean = raster.resample_at_points(locations, resampling=Mean(neighborhood=circle), as_array=True)
+covered_mean = ds.rst.resample_at_points(locations, resampling=Mean(neighborhood=circle), as_array=True)
 covered_mean
 ```
 
@@ -215,12 +255,12 @@ a missing observation with a coefficient of zero does not affect the result. The
 
 ```{code-cell} ipython3
 # Create a missing observation in the window used by the first location
-with_gap = raster.copy()
-with_gap.data[1, 1] = np.ma.masked
+with_gap = ds.rst.copy()
+with_gap.values[1, 1] = np.nan
 
 # Compare an average of valid cells with propagation of the missing value
-ignored = with_gap.resample_at_points(locations, resampling=Mean(neighborhood=window), nodata_handling="ignore", as_array=True)
-propagated = with_gap.resample_at_points(locations, resampling=Mean(neighborhood=window), nodata_handling="propagate", as_array=True)
+ignored = with_gap.rst.resample_at_points(locations, resampling=Mean(neighborhood=window), nodata_handling="ignore", as_array=True)
+propagated = with_gap.rst.resample_at_points(locations, resampling=Mean(neighborhood=window), nodata_handling="propagate", as_array=True)
 ignored, propagated
 ```
 
@@ -250,7 +290,7 @@ class TrimmedMean(gu.operators.Reducer):
 
 
 # Apply the custom reducer to the same raster windows
-trimmed = raster.resample_at_points(locations, resampling=TrimmedMean(neighborhood=window), as_array=True)
+trimmed = ds.rst.resample_at_points(locations, resampling=TrimmedMean(neighborhood=window), as_array=True)
 trimmed
 ```
 
@@ -283,7 +323,7 @@ class DistanceMean(gu.operators.Interpolator):
 
 
 # Use the custom interpolation through the public raster API
-predicted = raster.resample_at_points(locations, resampling=DistanceMean(neighborhood=GridNeighbours(size=3)), backend="scipy", as_array=True)
+predicted = ds.rst.resample_at_points(locations, resampling=DistanceMean(neighborhood=GridNeighbours(size=3)), backend="scipy", as_array=True)
 predicted
 ```
 

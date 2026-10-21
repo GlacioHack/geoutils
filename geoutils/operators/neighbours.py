@@ -930,6 +930,9 @@ def _prepare_point_gridding_data(
         points = np.column_stack((pc.geometry.x.values, pc.geometry.y.values))
 
     # Coordinates must be finite for either values or nodata positions to affect the output
+    if values.dtype.kind == "O":
+        # Nullable integers use object storage; interpolation already calculates with floating values
+        values = values.astype(np.float64)
     finite_coordinates = np.isfinite(points).all(axis=1)
     valid = finite_coordinates & np.isfinite(values)
     valid_points = np.ascontiguousarray(points[valid], dtype=np.float64)
@@ -1146,6 +1149,7 @@ def _prepare_point_neighbours_data(
     res_y: float,
     radius: float,
     min_points: int,
+    max_points: int | None = None,
 ) -> tuple[list[LocalData], list[tuple[int, int]]]:
     """Find the points used by an interpolator/reducer for each output grid cell."""
 
@@ -1156,7 +1160,11 @@ def _prepare_point_neighbours_data(
     if len(points) == 0:
         return [], []
     builtin_method = _get_builtin_gridding_method(operator, default_neighborhood_only=False)
-    default_geometry = operator.default_neighborhood is None and builtin_method in ("nearest", "linear", "cubic")
+    default_geometry = (
+        operator.default_neighborhood is None
+        and builtin_method in ("nearest", "linear", "cubic")
+        and max_points is None
+    )
     finite_indexes = np.flatnonzero(valid)
     finite_tree = cKDTree(points[finite_indexes] / [res_x, res_y]) if default_geometry and len(finite_indexes) else None
     nearest_tree = cKDTree(points[finite_indexes]) if default_geometry and len(finite_indexes) else None
@@ -1165,14 +1173,18 @@ def _prepare_point_neighbours_data(
     neighborhood: PointNeighbours | None
     if isinstance(operator, Interpolator):
         neighborhood = _resolve_point_neighbours_for_interpolator(operator)
-        if builtin_method == "idw" and operator.default_neighborhood is None:
+        if operator.default_neighborhood is None and (
+            builtin_method == "idw" or (max_points is not None and builtin_method in ("nearest", "linear", "cubic"))
+        ):
             neighborhood = None
     else:
         neighborhood = _resolve_point_neighbours_for_reducer(operator)
     if neighborhood is not None:
+        if max_points is not None:
+            neighborhood = PointNeighbours(max_points=max_points, radius=neighborhood.radius)
         point_tree = cKDTree(points)
     else:
-        if not np.isfinite(radius):
+        if not np.isfinite(radius) and max_points is None:
             raise ValueError("Gridding Reducers require a finite dist_nodata_pixel support radius.")
         x_start = float(np.min(grid_coords[0]))
         y_start = float(np.min(grid_coords[1]))
@@ -1221,6 +1233,11 @@ def _prepare_point_neighbours_data(
                 scaled_target = np.asarray([(target_x - x_start) / res_x, (target_y - y_start) / res_y])
                 indexes = np.asarray(point_tree.query_ball_point(scaled_target, radius), dtype=np.int64)
                 distances = np.linalg.norm(points[indexes] - target, axis=1)
+
+            # Limit the nearest observations before checking finite counts or fitting the interpolation
+            if max_points is not None:
+                nearest = np.lexsort((indexes, distances))[:max_points]
+                indexes, distances = indexes[nearest], distances[nearest]
 
             # Exact IDW observations take precedence over min_points, just as in the optimized radius kernels
             exact_idw = builtin_method == "idw" and np.any(valid[indexes] & (distances == 0))

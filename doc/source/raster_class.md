@@ -20,12 +20,18 @@ In GeoUtils, georeferenced rasters are exposed through two interfaces:
 - The {class}`~geoutils.Raster`.
 
 For new workflows, we **recommend using the {class}`rst <geoutils.DataArrayRasterAccessor>` accessor**, and using either only accessors or only GeoUtils objects.
-Their behaviour is largely similar, with the main differences summarized below.
+
+Except for the differences outlined in {ref}`raster-accessor-comparison`, both interfaces provide the **same geospatial
+operations**, described in the feature pages linked in {ref}`feature-overview` and listed in {ref}`raster-api`.
+
+Below, we describe how to **open, create and save rasters with the accessor**, followed by the **attributes and behaviour
+of the {class}`~geoutils.Raster` object**.
 
 ```{important}
 The {class}`rst <geoutils.DatasetRasterAccessor>` accessor on a {class}`~xarray.Dataset` supports **processing several rasters at once**. See {ref}`core-datasets`.
 ```
 
+(raster-accessor-comparison)=
 ## Accessor {class}`rst <geoutils.DataArrayRasterAccessor>` versus {class}`~geoutils.Raster`
 
 The main differences are the following:
@@ -44,9 +50,42 @@ To avoid accidentally propagating raw nodata values through operations, **{func}
 While this increases memory usage, it can be mitigated by using **Dask**. See the {ref}`scalability-index` section for more details.
 ```
 
-(raster-obj-def)=
+## Raster accessor
 
-## Object definition and attributes
+### Open and save
+
+A raster is opened as a {class}`~xarray.DataArray` with {func}`~geoutils.open_raster`, and saved to file with
+{meth}`~geoutils.DataArrayRasterAccessor.to_file`:
+
+```python
+import geoutils as gu
+
+raster = gu.open_raster(gu.examples.get_path("exploradores_aster_dem"))
+raster.rst.to_file("raster.tif")
+```
+
+By default, pixel values are read only when needed. Passing `chunks={"x": 512, "y": 512}` enables Dask execution,
+while `parse_sensor_metadata=True` adds sensor information parsed from the filename. See {ref}`core-lazy-load` for details.
+
+### Create from arrays
+
+A georeferenced {class}`~xarray.DataArray` is created from an array, a geotransform and a CRS with
+{func}`~geoutils.raster.from_array`:
+
+```python
+import numpy as np
+from affine import Affine
+
+created = gu.raster.from_array(np.ones((3, 3)), Affine(10, 0, 0, 0, -10, 30), 32631)
+```
+
+Both {func}`~geoutils.open_raster` and {func}`~geoutils.raster.from_array` accept `as_object_type="dataset"` to return
+a {class}`~xarray.Dataset`. See {ref}`core-datasets` for working with several rasters at once.
+
+## The {class}`~geoutils.Raster` object
+
+(raster-obj-def)=
+### Object definition and attributes
 
 A **raster** has **four main attributes**:
 
@@ -88,7 +127,7 @@ The {attr}`~RasterBase.area_or_point` attribute records whether a value represen
 point sample (`"Point"`), or an unspecified interpretation (`None`). See {ref}`pixel-interpretation` for its effect
 on coordinates and raster–point operations.
 
-## Open and save
+### Open and save
 
 A **raster** is opened by instantiating with either a {class}`str`, a {class}`pathlib.Path`, a {class}`rasterio.io.DatasetReader` or a
 {class}`rasterio.io.MemoryFile`.
@@ -129,7 +168,7 @@ import os
 os.remove("myraster.tif")
 ```
 
-## Create from {class}`~numpy.ndarray`
+### Create from {class}`~numpy.ndarray`
 
 A **raster** is created from an array by calling the class method {meth}`~RasterBase.from_array` and passing the
 {ref}`four main attributes<raster-obj-def>`.
@@ -161,7 +200,7 @@ with a {attr}`~numpy.ma.MaskedArray.mask` on all {data}`~numpy.nan` and {data}`~
 matching the {attr}`~RasterBase.nodata` value passed to {meth}`~RasterBase.from_array`.
 ```
 
-## Get array
+### Get array
 
 The array of a **raster** is available in {attr}`~RasterBase.data` as a {class}`~numpy.ma.MaskedArray`.
 
@@ -190,7 +229,7 @@ Additionally, the **raster** will automatically cast between different {class}`d
 {attr}`nodatas<RasterBase.nodata>`.
 ```
 
-## Arithmetic
+### Arithmetic
 
 A **raster** can be applied any pythonic arithmetic operation ({func}`+<operator.add>`, {func}`-<operator.sub>`, {func}`/<operator.truediv>`, {func}`//<operator.floordiv>`, {func}`*<operator.mul>`,
 {func}`**<operator.pow>`, {func}`%<operator.mod>`) with another **raster**, {class}`~numpy.ndarray` or number. It will output one or two {class}`Rasters<geoutils.Raster>`. NumPy coercion rules apply for {class}`dtype<numpy.dtype>`.
@@ -210,7 +249,7 @@ rast < 100
 
 See {ref}`core-py-ops` for more details.
 
-## Array interface
+### Array interface
 
 A **raster** can be applied any NumPy universal functions and most mathematical, logical or masked-array functions with another
 **raster**, {class}`~numpy.ndarray` or number.
@@ -230,7 +269,7 @@ np.isclose(rast, rast+0.05, atol=0.1)
 
 See {ref}`core-array-funcs` for more details.
 
-## Export
+### Export
 
 A **raster** can be exported to different formats, to facilitate inter-compatibility with different packages and code versions.
 
@@ -255,7 +294,7 @@ rast.to_xarray()
 ```
 
 (mask-type)=
-# The georeferenced raster mask (boolean **raster**)
+# The mask (boolean **raster**)
 
 A raster mask is a boolean **raster** (True or False).
 

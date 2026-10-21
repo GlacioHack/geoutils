@@ -138,6 +138,51 @@ def _get_utm_ups_crs(df: gpd.GeoDataFrame, method: Literal["centroid"] | Literal
     return crs
 
 
+def _get_custom_crs(df: gpd.GeoDataFrame, *, center: tuple[float, float] | None = None) -> pyproj.CRS:
+    """
+    Get a metric stereographic CRS centered on a local lon/lat.
+
+    We unwrap longitudes before calculating the planar centroid of footprints (in case crossing the antimeridian).
+    """
+    from geoutils._dispatch import is_dask_dataframe
+
+    # Read geometries only when the center must be estimated
+    if center is None:
+        if is_dask_dataframe(df):
+            df = df.compute()
+        geographic = df.to_crs(epsg=4326)
+        coordinates = shapely.get_coordinates(geographic.geometry.array)
+        if len(coordinates) == 0:
+            raise ValueError("A custom metric CRS requires a non-empty geographic footprint or an explicit center.")
+
+        # Express footprints around their first longitude so that 179 and -179 stay adjacent
+        if np.ptp(coordinates[:, 0]) > 180:
+            reference_lon = coordinates[0, 0]
+
+            def unwrap_longitudes(values: NDArrayNum) -> NDArrayNum:
+                """Derive footprint longitudes within 180 degrees of their first coordinate."""
+                unwrapped = values.copy()
+                unwrapped[:, 0] = reference_lon + (values[:, 0] - reference_lon + 180) % 360 - 180
+                return unwrapped
+
+            geographic.geometry = shapely.transform(geographic.geometry.array, unwrap_longitudes)
+
+        # The unwrapped planar centroid approximates the center of a compact geographic footprint
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            centroid = geographic.dissolve().centroid.iloc[0]
+        lon, lat = (centroid.x + 180) % 360 - 180, centroid.y
+    else:
+        lon, lat = center
+
+    # Use the same projection at every latitude, with unit scale at the supplied or estimated center
+    if not np.isfinite([lon, lat]).all() or not (-180 <= lon <= 180 and -90 <= lat <= 90):
+        raise ValueError("Center must contain finite longitude/latitude in [-180, 180] and [-90, 90] degrees.")
+    return pyproj.CRS.from_dict(
+        {"proj": "stere", "lon_0": lon, "lat_0": lat, "k_0": 1, "datum": "WGS84", "units": "m", "type": "crs"}
+    )
+
+
 def bounds2poly(
     bounds_geom: tuple[float, ...] | Any,
     in_crs: CRS | None = None,

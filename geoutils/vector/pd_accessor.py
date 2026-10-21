@@ -88,16 +88,25 @@ def _replace_geodataframe(target: gpd.GeoDataFrame, source: gpd.GeoDataFrame) ->
         target.set_crs(source.crs, allow_override=True, inplace=True)
 
 
-def open_vector(filename: str, chunks: int | None = None, **kwargs: Any) -> gpd.GeoDataFrame | Any:
+def open_vector(
+    filename: str, chunks: int | None = None, *, load: bool = False, **kwargs: Any
+) -> gpd.GeoDataFrame | Any:
     """
-    Open a vector file using GeoPandas, or lazily with Dask-GeoPandas when passing ``chunks``.
+    Open a vector file.
 
     :param filename: Path to the vector file to open.
-    :param chunks: Number of features per Dask partition. If None, load eagerly with GeoPandas.
+    :param chunks: Number of features per Dask partition. None uses one partition, or eager GeoPandas with load=True.
+    :param load: Whether to read features immediately when chunks is None. The default False opens one Dask partition
+        and requires Dask-GeoPandas. Explicit chunks always stay lazy.
     :param kwargs: Keyword arguments passed to :func:`geopandas.read_file`.
-    :returns: An eager GeoDataFrame, or a lazy Dask-GeoPandas GeoDataFrame when ``chunks`` is passed.
+    :returns: A lazy Dask-GeoPandas GeoDataFrame, or an eager GeoDataFrame when load=True without chunks.
     """
 
+    if not load and chunks is None:
+        import pyogrio
+
+        info = pyogrio.read_info(filename, layer=kwargs.get("layer"))
+        chunks = max(1, info["features"])
     if chunks is not None:
         # Load the optional Dask backend and add ``.vct`` before returning the lazy GeoDataFrame
         if chunks <= 0:

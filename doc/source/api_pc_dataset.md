@@ -14,6 +14,7 @@ Below is the full class description specific to {class}`Dataset.pc <geoutils.Dat
 
 .. autoclass:: DatasetPointCloudAccessor
     :members:
+    :exclude-members: to_file, to_las, to_parquet
     :undoc-members: false
     :show-inheritance:
 ```

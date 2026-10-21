@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from importlib.util import find_spec
+from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
@@ -485,8 +486,59 @@ class TestSieveFilter:
         masked_result = raster.sieve(size=2, mask=excluded)
         assert np.array_equal(masked_result.data, array)
 
+    @pytest.mark.parametrize("dtype", ["uint8", "int16"])
+    @pytest.mark.parametrize("representation", ["dataarray", "dataset"])
+    def test_sieve__decoded_integer(
+        self, tmp_path: Path, dtype: str, representation: Literal["dataarray", "dataset"]
+    ) -> None:
+        """Checks that sieve() removes decoded integer regions and preserves missing pixels and encoding."""
+
+        # Write integer classes with one missing pixel and one isolated class
+        values = np.ones((5, 5), dtype=dtype)
+        values[2, 2] = 2
+        mask = np.zeros(values.shape, dtype=bool)
+        mask[0, 0] = True
+        raster = Raster.from_array(np.ma.array(values, mask=mask), rio.transform.from_origin(0, 5, 1, 1), 32631, 255)
+        filename = tmp_path / "classes.tif"
+        raster.to_file(filename)
+        source = gu.open_raster(str(filename), as_object_type=representation, data_name="classes")
+        variable = source if representation == "dataarray" else source.classes
+        assert variable.dtype.kind == "f"
+
+        # Sieve the decoded classes through either accessor
+        result = source.rst.sieve(size=2)
+        output = result if representation == "dataarray" else result.classes
+
+        # The isolated class becomes background, while nodata and storage settings remain unchanged
+        expected = np.ones(values.shape, dtype=np.float32)
+        expected[0, 0] = np.nan
+        np.testing.assert_array_equal(output.values, expected)
+        assert output.dtype == variable.dtype
+        assert output.encoding == variable.encoding
+        assert variable.values[2, 2] == 2
+
+    def test_sieve__decoded_fill_collision(self) -> None:
+        """Checks that sieve() processes valid physical zeros when the encoded fill value is zero."""
+
+        # Create a zero background with one isolated category and one genuinely missing pixel
+        values = np.zeros((5, 5), dtype=np.float32)
+        values[2, 2] = 1
+        values[0, 0] = np.nan
+        source = gu.DataArrayRasterAccessor.from_array(values, rio.transform.from_origin(0, 5, 1, 1), 32631)
+        source.rio.write_nodata(0, encoded=True, inplace=True)
+        source.encoding.update(dtype="int16", scale_factor=0.1, add_offset=100)
+
+        # Remove the isolated category without treating the valid background as missing
+        result = source.rst.sieve(size=2)
+
+        # Only the original NaN stays missing, and the input category remains unchanged
+        expected = values.copy()
+        expected[2, 2] = 0
+        np.testing.assert_array_equal(result.values, expected)
+        assert source.values[2, 2] == 1
+
     def test_sieve_errors(self) -> None:
-        """Checks that sieve() rejects floating values, a zero size, and invalid connectivity."""
+        """Checks that sieve() raises proper errors."""
 
         raster = Raster.from_array(
             np.ones((3, 3), dtype=np.float32),
@@ -499,6 +551,19 @@ class TestSieveFilter:
             raster.astype(np.uint8).sieve(size=0)
         with pytest.raises(ValueError, match="connectivity.*4 or 8"):
             raster.astype(np.uint8).sieve(size=2, connectivity=6)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("value", [1.5, 2**31])
+    def test_sieve__error_decoded_integer_values(self, value: float) -> None:
+        """Checks an error is raised instead of truncating fractional or overflowing decoded integer values."""
+
+        # Give a floating array integer storage encoding without changing its actual values
+        raster = Raster.from_array(np.full((3, 3), value, dtype=float), rio.transform.from_origin(0, 3, 1, 1), 32631)
+        array = raster.to_xarray()
+        array.encoding["dtype"] = "int16"
+
+        # Require an exact conversion to the integer categories supported by GDAL
+        with pytest.raises(ValueError, match="integer values representable as signed 32-bit integers"):
+            array.rst.sieve(size=2)
 
 
 class TestDistanceFilter:

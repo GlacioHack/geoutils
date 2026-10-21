@@ -10,6 +10,7 @@ import xarray as xr
 from geopandas.testing import assert_geodataframe_equal, assert_geoseries_equal
 from pandas.testing import assert_frame_equal, assert_series_equal
 from pyproj import CRS
+from xarray.core.utils import dict_equiv
 
 from geoutils import ErrorStructure, PointCloud, Variogram, Vector
 from geoutils._dispatch import _get_raster_interface
@@ -145,7 +146,7 @@ def assert_output_equal(output1: Any, output2: Any, use_allclose: bool = False, 
 
 
 def assert_xarray_equal(actual: xr.Dataset, expected: xr.Dataset) -> None:
-    """Compare complete Xarray Datasets, including dtype."""
+    """Compare complete Xarray Datasets, including dtype and encoding."""
 
     # Values, dimensions, coordinates, names and attributes must agree
     assert isinstance(actual, xr.Dataset)
@@ -153,6 +154,8 @@ def assert_xarray_equal(actual: xr.Dataset, expected: xr.Dataset) -> None:
     # And dtype as well (can be missed even with same values)
     for name in expected.variables:
         assert actual[name].dtype == expected[name].dtype
+        assert dict_equiv(actual[name].encoding, expected[name].encoding), name
+    assert dict_equiv(actual.encoding, expected.encoding)
 
 
 def assert_dataset_output_equal(
@@ -170,6 +173,7 @@ def assert_dataset_output_equal(
     # Output coordinates describe changed grids; independent values and Dataset attributes come from the source
     expected = xr.merge([xr.Dataset(outputs), independent], compat="override")
     expected.attrs = source.attrs
+    expected.encoding = source.encoding.copy()
 
     # An untouched raster still uses its original CRS description, even if an equivalent output WKT differs
     mappings = {variable.encoding.get("grid_mapping") for variable in independent.data_vars.values()}

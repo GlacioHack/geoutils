@@ -51,10 +51,10 @@ class TestPointCloudOpening:
 
         # Check proper data type is opened
         if as_object_type is None:
-            points = gu.open_pointcloud(filename, data_name=data_name, columns=["quality"])
+            points = gu.open_pointcloud(filename, data_name=data_name, columns=["quality"], load=True)
         else:
             points = gu.open_pointcloud(
-                filename, data_name=data_name, columns=["quality"], as_object_type=as_object_type
+                filename, data_name=data_name, columns=["quality"], as_object_type=as_object_type, load=True
             )
         if as_object_type == "dataset":
             assert isinstance(points, xr.Dataset)
@@ -98,7 +98,7 @@ class TestPointCloudOpening:
             cloud.to_las(filename)
 
         # Open each representation from the same file metadata
-        points = gu.open_pointcloud(filename, as_object_type=as_object_type)
+        points = gu.open_pointcloud(filename, as_object_type=as_object_type, load=True)
         attrs = points.attrs
         values = points["Z"] if as_object_type == "dataset" else points
 
@@ -147,6 +147,51 @@ class TestPointCloudOpening:
         assert values.pc.point_count == 3
         np.testing.assert_array_equal(values.pc.to_array(), expected.to_array())
 
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
+    def test_open_pointcloud__sensor_metadata(
+        self, tmp_path: Path, as_object_type: Literal["dataarray", "dataset"]
+    ) -> None:
+        """Checks that sensor metadata does not load point values."""
+        from geoutils.raster.satimg import parse_and_convert_metadata_from_filename
+
+        # Write points with ASTER filename
+        filename = tmp_path / "ASTGTM2_N00E108_dem.parquet"
+        points = gu.pointcloud.from_xyz([108.0], [0.0], [1.0], 4326)
+        points.pc.to_parquet(str(filename))
+        expected = parse_and_convert_metadata_from_filename(str(filename), silent=True)
+
+        # Open with and without sensor metadata parsing
+        plain = gu.open_pointcloud(filename)
+        assert "sensor" not in plain.attrs
+        result = gu.open_pointcloud(filename, as_object_type=as_object_type, parse_sensor_metadata=True)
+        attrs = result.attrs if isinstance(result, (xr.DataArray, xr.Dataset)) else _get_dataframe_attrs(result)
+        for key, value in expected.items():
+            assert attrs[key] == value
+
+        # Ensure point values are not loaded
+        variable = result.z if as_object_type == "dataset" else result
+        assert not variable.pc.is_loaded
+
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
+    def test_open_pointcloud__downsample_missing_values(
+        self, tmp_path: Path, as_object_type: Literal["dataarray", "dataset", "geodataframe"]
+    ) -> None:
+        """Checks that downsampling includes rows with missing values."""
+
+        # Write point cloud with missing values
+        values = np.arange(11.0)
+        values[::2] = np.nan
+        points = gu.pointcloud.from_xyz(np.arange(11.0), np.zeros(11), values, 32633)
+        filename = tmp_path / "missing.parquet"
+        points.pc.to_parquet(str(filename))
+        cloud = gu.PointCloud(filename, downsample=4)
+
+        # Open with downsampling and check equivalence
+        result = gu.open_pointcloud(filename, downsample=4, as_object_type=as_object_type)
+        variable = result.z if as_object_type == "dataset" else result
+        assert variable.pc.point_count == cloud.point_count == 3
+        np.testing.assert_array_equal(variable.pc.to_array(), cloud.to_array())
+
     @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
     @pytest.mark.parametrize("level", [0, 1, range(2), range(0, 3, 2), 99])
     @pytest.mark.parametrize("data_name", ["Z", "intensity"])
@@ -169,7 +214,7 @@ class TestPointCloudOpening:
 
         # Open with levels
         points = gu.open_pointcloud(
-            copc_file, level=level, columns="all", data_name=data_name, as_object_type=as_object_type
+            copc_file, level=level, columns="all", data_name=data_name, as_object_type=as_object_type, load=True
         )
 
         # We select only active values and "intensity" for comparison
@@ -221,6 +266,10 @@ class TestPointCloudOpening:
         np.testing.assert_array_equal(values.pc.to_array(), expected.to_array())
         np.testing.assert_array_equal(intensity, expected["intensity"])
 
+        # Check sampled points match the native object
+        cloud = gu.PointCloud(copc_file, downsample=downsample)
+        np.testing.assert_array_equal(cloud.to_array(), expected.to_array())
+
     @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
     @pytest.mark.parametrize(
         "options, selected_levels",
@@ -248,7 +297,7 @@ class TestPointCloudOpening:
             expected_sizes = [entry.point_count for entry in blocks if entry.point_count > 0]
 
         # Open full, explicitly selected and automatically sampled levels from the two-level fixture
-        points = gu.open_pointcloud(copc_file, as_object_type=as_object_type, **options)
+        points = gu.open_pointcloud(copc_file, as_object_type=as_object_type, **options, load=True)
 
         # Check metadata remains available even for an empty selection or a one-point sample
         assert points.attrs["copc_levels"] == [0, 1]
@@ -264,6 +313,44 @@ class TestPointCloudOpening:
 
 class TestPointCloudOpeningChunked:
     """Test module ``open_pointcloud()`` with chunked backends (Dask only)."""
+
+    @pytest.mark.parametrize("suffix", ["las", "parquet", "gpkg"])
+    @pytest.mark.parametrize("downsample", [1, 2.5])
+    @pytest.mark.parametrize("chunks", [None, 3])
+    def test_open_pointcloud__deferred_geodataframe(
+        self, tmp_path: Path, suffix: str, downsample: float, chunks: int | None
+    ) -> None:
+        """Checks that GeoDataFrame point reads are deferred."""
+        dask = import_optional("dask")
+
+        # Write one point cloud
+        cloud = gu.PointCloud.from_xyz(np.arange(7.0), np.zeros(7), np.arange(7.0), 32633, "Z")
+        filename = tmp_path / f"deferred.{suffix}"
+        if suffix == "las":
+            cloud.to_las(filename)
+        elif suffix == "parquet":
+            cloud.to_parquet(filename, chunks=3)
+        else:
+            cloud.to_file(str(filename))
+
+        # Open one point cloud eagerly
+        expected = gu.open_pointcloud(
+            filename, data_name="Z", as_object_type="geodataframe", downsample=downsample, load=True
+        )
+
+        # Open again with deferred I/O (and record tasks)
+        tasks = []
+        with dask.callbacks.Callback(pretask=lambda *args: tasks.append(1)):
+            result = gu.open_pointcloud(
+                filename, data_name="Z", as_object_type="geodataframe", downsample=downsample, chunks=chunks
+            )
+
+        # Ensure it is not loaded and no task ran
+        assert not tasks and not result.pc.is_loaded
+
+        # Load and check equivalence
+        assert_geodataframe_equal(result.compute(), expected)
+        assert not result.pc.is_loaded
 
     @pytest.mark.parametrize("suffix", ["las", "laz", "parquet", "parquet-partitioned"])
     @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
@@ -290,7 +377,7 @@ class TestPointCloudOpeningChunked:
             cloud.to_parquet(filename, chunks=3, partitioned=suffix == "parquet-partitioned")
         else:
             cloud.to_las(filename)
-        eager = gu.open_pointcloud(filename, as_object_type=as_object_type)
+        eager = gu.open_pointcloud(filename, as_object_type=as_object_type, load=True)
 
         # Inspect metadata while preventing Dask from reading any point values
         with Callback(pretask=lambda *args: pytest.fail("Disk metadata must not compute point values")):
@@ -338,7 +425,7 @@ class TestPointCloudOpeningChunked:
             cloud.to_file(str(filename))
 
         # Open eagerly/ lazily with an explicit type
-        eager = gu.open_pointcloud(filename, data_name=data_name, as_object_type=as_object_type)
+        eager = gu.open_pointcloud(filename, data_name=data_name, as_object_type=as_object_type, load=True)
         lazy = gu.open_pointcloud(filename, data_name=data_name, chunks=3, as_object_type=as_object_type)
         eager_values = eager[data_name] if as_object_type == "dataset" else eager
         lazy_values = lazy[data_name] if as_object_type == "dataset" else lazy
@@ -384,7 +471,7 @@ class TestPointCloudOpeningChunked:
         laspy = pytest.importorskip("laspy")
 
         # Open an eager reference with same options
-        eager = gu.open_pointcloud(copc_file, columns="all", as_object_type=as_object_type, **options)
+        eager = gu.open_pointcloud(copc_file, columns="all", as_object_type=as_object_type, **options, load=True)
         fetch_nodes = laspy.CopcReader._fetch_and_decompress_points_of_nodes
 
         # Below we'll record node offsets to check which levels are read

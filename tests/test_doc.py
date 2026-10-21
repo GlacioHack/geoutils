@@ -101,7 +101,7 @@ class TestReadmeChunked:
 
         # Compare the computed predictions exactly with the same method and fitted model on eager files
         eager_raster = gu.open_raster("dem.tif")
-        eager_points = gu.open_pointcloud("lidar.laz", data_name="Z")
+        eager_points = gu.open_pointcloud("lidar.laz", data_name="Z", load=True)
         expected_points = eager_raster.rst.resample_at_points(
             eager_points,
             resampling="kriging",

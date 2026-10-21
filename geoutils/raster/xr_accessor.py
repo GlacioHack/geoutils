@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import threading
 import warnings
-from collections.abc import Mapping, Sequence
+from collections.abc import Hashable, Mapping, Sequence
 from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -33,9 +33,12 @@ import rasterio
 import rioxarray as rioxr
 import xarray as xr
 from affine import Affine
+from pyproj import CRS as PyprojCRS
 from rasterio.crs import CRS
 from rioxarray.exceptions import MissingSpatialDimensionError
 from rioxarray.rioxarray import affine_to_coords
+from xarray.conventions import encode_cf_variable
+from xarray.core.utils import dict_equiv
 
 from geoutils._dispatch import is_dask_array
 from geoutils._misc import _validate_downsample, import_optional, silence_rasterio_message
@@ -62,6 +65,7 @@ def open_raster(
     *,
     as_object_type: Literal["dataarray", "dataset"] = "dataarray",
     data_name: str | None = None,
+    parse_sensor_metadata: bool = False,
     **kwargs: Any,
 ) -> xr.DataArray | xr.Dataset:
     """
@@ -94,6 +98,7 @@ def open_raster(
         variable, with multiple bands on its band dimension.
     :param data_name: Name of the DataArray or Dataset variable. Defaults to the source array name, or raster for
         an unnamed array returned as a Dataset.
+    :param parse_sensor_metadata: Parse sensor metadata from the filename and add it to the raster attributes.
     :param kwargs: Keyword arguments passed to :func:`rioxarray.open_rasterio`.
     :returns: The opened raster as a DataArray or Dataset with Rioxarray georeferencing.
     """
@@ -143,6 +148,13 @@ def open_raster(
     if is_mask:
         ds = ds.astype(bool)
 
+    # Parse sensor filenames without reading pixel values
+    if parse_sensor_metadata:
+        from geoutils.raster.satimg import parse_and_convert_metadata_from_filename
+
+        source_name = getattr(filename, "name", filename)
+        ds.attrs.update(parse_and_convert_metadata_from_filename(str(source_name), silent=True))
+
     # Name the raster and wrap its coordinates and lazy data in one Dataset variable when requested
     if data_name is not None:
         ds = ds.rename(data_name)
@@ -150,6 +162,8 @@ def open_raster(
         dataset = ds.to_dataset(name=ds.name or "raster")
         dataset.attrs.update(overview_metadata)
         dataset.attrs.update(disk_metadata)
+        if parse_sensor_metadata:
+            dataset.attrs.update(ds.attrs)
         return dataset
     return ds
 
@@ -169,7 +183,84 @@ def _write_raster(xarray_obj: xr.DataArray | xr.Dataset, *args: Any, **kwargs: A
 
         kwargs["lock"] = get_scheduler_lock(xarray_obj)
 
+    # Rioxarray's Dataset writer drops dtype when combining variables, so common packing must follow the values
+    if isinstance(xarray_obj, xr.Dataset):
+        fields = ("dtype", "scale_factor", "add_offset", "_FillValue")
+        encodings = [{key: value.encoding[key] for key in fields if key in value.encoding} for value in variables]
+        if any(not dict_equiv(encoding, encodings[0]) for encoding in encodings[1:]):
+            raise ValueError(
+                "Raster variables must share storage encoding; write differently encoded variables separately."
+            )
+        if any(encodings):
+            x_dimension, y_dimension = xarray_obj.rio.x_dim, xarray_obj.rio.y_dim
+            encoded = {name: encode_cf_variable(value.variable) for name, value in xarray_obj.data_vars.items()}
+            xarray_obj = xr.Dataset(encoded, coords=xarray_obj.coords, attrs=xarray_obj.attrs)
+            if len(encoded) == 1:
+                name, variable = next(iter(xarray_obj.data_vars.items()))
+                if variable.ndim == 3:
+                    xarray_obj = variable.assign_attrs({**variable.attrs, **xarray_obj.attrs})
+                    xarray_obj.attrs.setdefault("long_name", name)
+            xarray_obj.rio.set_spatial_dims(x_dimension, y_dimension, inplace=True)
+
+    # Encode first when the file's missing-data value cannot fit exactly in the in-memory dtype
+    if isinstance(xarray_obj, xr.DataArray) and xarray_obj.encoding.get("_FillValue") is not None:
+        fill_value = np.asarray(xarray_obj.encoding["_FillValue"]).item()
+        with np.errstate(invalid="ignore", over="ignore"):
+            compatible = np.isnan(fill_value) or np.asarray(fill_value).astype(xarray_obj.dtype).item() == fill_value
+        if not compatible:
+            x_dimension, y_dimension = xarray_obj.rio.x_dim, xarray_obj.rio.y_dim
+            xarray_obj = xr.DataArray(
+                encode_cf_variable(xarray_obj.variable), coords=xarray_obj.coords, name=xarray_obj.name
+            )
+            xarray_obj.rio.set_spatial_dims(x_dimension, y_dimension, inplace=True)
+
     return xarray_obj.rio.to_raster(*args, **kwargs)
+
+
+# Raster encoding
+
+
+def _set_raster_encoding(
+    array: xr.DataArray,
+    encoding: Mapping[str, Any],
+    nodata: int | float | None,
+    cast_nodata: bool = True,
+) -> None:
+    """
+    Copy storage encoding and adapt it to the output raster's nodata and grid mapping.
+
+    Integer storage needs a fill value for decoded NaNs. We use the array's dtype if that fill value is removed or
+    cannot fit in the stored dtype. Encoded fill values are assigned directly to avoid casting them to decoded floats.
+    """
+
+    # Copy settings before editing them, using the grid mapping belonging to the output coordinates
+    mapping = array.rio.grid_mapping
+    encoded = "_FillValue" in encoding or "dtype" in encoding
+    output_encoding = dict(encoding)
+    if mapping in array.coords:
+        output_encoding["grid_mapping"] = mapping
+
+    # Check the stored dtype without reading or computing the array's values
+    storage_dtype = np.dtype(output_encoding.get("dtype") or array.dtype)
+    with np.errstate(invalid="ignore", over="ignore"):
+        compatible = nodata is None or rasterio.dtypes.can_cast_dtype(nodata, storage_dtype)
+    if not compatible and not cast_nodata:
+        raise ValueError(f"Nodata value {nodata} incompatible with self.dtype {storage_dtype}.")
+    missing_without_fill = nodata is None and array.dtype.kind == "f" and storage_dtype.kind in "biu"
+    if not compatible or missing_without_fill:
+        for key in ("dtype", "rasterio_dtype", "_Unsigned"):
+            output_encoding.pop(key, None)
+
+    # Store encoded nodata only in encoding; unencoded arrays continue to use their attributes
+    if encoded:
+        array.attrs.pop("_FillValue", None)
+        if nodata is None:
+            output_encoding.pop("_FillValue", None)
+        else:
+            output_encoding["_FillValue"] = nodata
+    array.rio.set_encoding(output_encoding, inplace=True)
+    if not encoded:
+        array.rio.write_nodata(nodata, inplace=True)
 
 
 # DataArray accessor
@@ -202,17 +293,6 @@ class DataArrayRasterAccessor(RasterBase):
                 self._obj.attrs.pop("disk_chunks", None)
             else:
                 self._obj.attrs["disk_chunks"] = tuple(disk_chunks)
-
-        # We are never returning a DataArray that is unmasked, so the nodata plays a different role than in Rioxarray
-        # It is only used for file writing = always the encoded value if it exists
-        if self._obj.rio.encoded_nodata is not None:
-            encoded_nodata = self._obj.rio.encoded_nodata
-
-            # Move encoded nodata to the attributes without retaining a duplicate value
-            encoding = dict(self._obj.encoding)
-            encoding.pop("_FillValue", None)
-            self._obj.rio.set_encoding(encoding, inplace=True)
-            self._obj.rio.write_nodata(encoded_nodata, inplace=True)
 
     @property
     def gcps(self) -> tuple[list[rasterio.control.GroundControlPoint], rasterio.crs.CRS | None]:
@@ -273,20 +353,53 @@ class DataArrayRasterAccessor(RasterBase):
         self.set_transform(new_transform)
 
     def _set_transform(self, new_transform: Affine) -> None:
+        """Update affine coordinates and discard packing that no longer describes them."""
 
         # Rioxarray prioritizes coordinates over transform to re-define transform,
         # so we need to overwrite coordinates
         # See https://github.com/corteva/rioxarray/issues/698
         # Derive coordinate from new transform
-        coords = affine_to_coords(affine=new_transform, width=self._obj.sizes["x"], height=self._obj.sizes["y"])
+        x_dimension, y_dimension = self._obj.rio.x_dim, self._obj.rio.y_dim
+        coords = affine_to_coords(
+            affine=new_transform,
+            width=self._obj.sizes[x_dimension],
+            height=self._obj.sizes[y_dimension],
+            x_dim=x_dimension,
+            y_dim=y_dimension,
+        )
+        # Remove old map coordinates before assigning the new grid
+        for name in ("xc", "yc"):
+            if name in self._obj.coords:
+                del self._obj.coords[name]
+
         # This is lazy (doesn't load data), while calling the arrays directly is
-        self._obj = self._obj.assign_coords({"x": coords["x"], "y": coords["y"]})
+        for dimension, values in coords.items():
+            if values.ndim == 2:
+                name = "xc" if dimension == x_dimension else "yc"
+                self._obj.coords[name] = ((y_dimension, x_dimension), values)
+                values = np.arange(self._obj.sizes[dimension])
+            # New coordinates preserve attributes without inheriting outdated storage settings
+            self._obj.coords[dimension] = xr.IndexVariable(dimension, values, attrs=self._obj.coords[dimension].attrs)
 
         # Need to call write transform now
         self._obj.rio.write_transform(new_transform, inplace=True)
 
-    def _set_crs(self, new_crs: CRS) -> None:
+    def _set_crs(self, new_crs: CRS | None) -> None:
+        """Assign or clear the CRS while preserving the transform and custom grid metadata."""
         # Overloads abstract method in RasterBase
+        if new_crs is None:
+            mapping = self._obj.rio.grid_mapping
+            if mapping in self._obj.coords:
+                crs_fields = {"spatial_ref", "crs_wkt", "grid_mapping_name"}
+                if self.crs is not None:
+                    crs_fields.update(PyprojCRS.from_wkt(self.crs.to_wkt()).to_cf())
+                attributes = self._obj.coords[mapping].attrs
+                self._obj.coords[mapping].attrs = {
+                    key: value for key, value in attributes.items() if key not in crs_fields
+                }
+            self._obj.attrs.pop("crs", None)
+            self._obj.rio.set_attrs(self._obj.attrs, inplace=True)
+            return
         self._obj.rio.write_crs(new_crs, inplace=True)
 
     @property
@@ -294,20 +407,17 @@ class DataArrayRasterAccessor(RasterBase):
         return self._obj.rio.crs
 
     @crs.setter
-    def crs(self, new_crs: CRS) -> None:
+    def crs(self, new_crs: CRS | int | str | None) -> None:
         self.set_crs(new_crs)
 
     @property
     def nodata(self) -> int | float | None:
         # Overloads abstract method in RasterBase
-        return self._obj.attrs.get("_FillValue", None)
+        return self._obj.encoding.get("_FillValue", self._obj.attrs.get("_FillValue"))
 
     @nodata.setter
     def nodata(self, new_nodata: int | float | None) -> None:
-        # self.set_nodata(new_nodata=new_nodata)
-        self._nodata = new_nodata
-        # Update the Xarray attributes with a new "_FillValue"
-        self._obj.rio.write_nodata(self._nodata, inplace=True)
+        self.set_nodata(new_nodata)
 
     @property
     def area_or_point(self) -> Literal["Area", "Point"] | None:
@@ -394,15 +504,17 @@ class DataArrayRasterAccessor(RasterBase):
         Copy the raster in-memory.
 
         :param new_array: New array to use in the copied raster.
-        :param cast_nodata: Unused; accepted for compatibility with Raster.copy().
-
-
-        :return: Copy of the raster.
+        :param cast_nodata: Allow the storage dtype to change if it cannot represent nodata; otherwise raise an error.
+        :param deep: Whether to copy eager values as well as metadata. Dask values stay lazy.
+        :returns: A DataArray with copied metadata and optional replacement values.
         """
 
         # For a Xarray object, all the metadata should be stored (in .attrs, .encoding, or dimensions/variables),
         # so we simply wrap the copy function
-        return self._obj.copy(data=new_array, deep=deep)
+        result = self._obj.copy(data=new_array, deep=deep)
+        if new_array is not None:
+            _set_raster_encoding(result, result.encoding, self.nodata, cast_nodata=cast_nodata)
+        return result
 
     @classmethod
     def from_array(
@@ -417,7 +529,26 @@ class DataArrayRasterAccessor(RasterBase):
         *,
         gcps: tuple[list[rasterio.control.GroundControlPoint], rasterio.crs.CRS | None] | None = None,
         rpcs: rasterio.rpc.RPC | None = None,
+        encoding: Mapping[str, Any] | None = None,
+        name: Hashable | None = None,
     ) -> xr.DataArray:
+        """
+        Create a georeferenced DataArray with optional storage encoding.
+
+        :param data: Two-dimensional values, or bands/rows/columns for multiple bands.
+        :param transform: Affine transform locating the raster grid.
+        :param crs: Coordinate reference system, or None when unspecified.
+        :param nodata: Fill value for writing missing pixels. Overrides the fill value in encoding.
+        :param area_or_point: Pixel interpretation stored in the attributes.
+        :param tags: Raster attributes, separate from storage encoding.
+        :param cast_nodata: Allow a different storage dtype if the encoded dtype cannot represent nodata.
+        :param gcps: Ground control points and their CRS.
+        :param rpcs: Rational polynomial coefficients referenced to WGS84.
+        :param encoding: Xarray storage settings to copy, such as dtype, scale/offset, fill value and compression.
+            The grid mapping is updated to reference the output coordinates.
+        :param name: Name of the DataArray.
+        :returns: A DataArray with the supplied values, georeferencing and metadata.
+        """
 
         # Add area_or_point
         if tags is None:
@@ -475,7 +606,11 @@ class DataArrayRasterAccessor(RasterBase):
         out_ds.rio.write_transform(transform, inplace=True)
         if crs is not None:
             out_ds.rio.write_crs(crs, inplace=True)
-        out_ds.rio.write_nodata(nodata, inplace=True)
+        if encoding is None:
+            out_ds.rio.write_nodata(nodata, inplace=True)
+        else:
+            _set_raster_encoding(out_ds, encoding, nodata, cast_nodata=cast_nodata)
+        out_ds.name = name
         if gcps is not None and gcps[0]:
             out_ds.rio.write_gcps(gcps[0], gcps[1], inplace=True)
         if rpcs is not None:
@@ -719,7 +854,7 @@ class DatasetRasterAccessor:
                 task = dask.delayed(_run_raster_array_operation)(variable, operation, args, kwargs)
                 array = da.from_delayed(task, shape=variable.shape, dtype=dtype)
 
-                # Copy through the accessor so encoded nodata is normalized as it is for eager results
+                # Copy coordinates and encoding without computing the delayed values
                 result = variable.rst.copy(new_array=array, deep=False)
             else:
                 result = getattr(variable.rst, operation)(*args, **kwargs)
@@ -750,8 +885,7 @@ class DatasetRasterAccessor:
             result = result.transpose(*original.dims)
             if operation in ("filter", "fill_nodata", "sieve"):
                 # Value operations leave every original coordinate and grid mapping valid
-                result = xr.DataArray(result.variable, coords=original.coords, name=name)
-                result.encoding["grid_mapping"] = original.rio.grid_mapping
+                result = original.rst.copy(new_array=result.data, deep=False)
             transformed[name] = result.rename(name)
 
         # 4/ Combine transformed rasters into Dataset

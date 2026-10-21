@@ -279,7 +279,7 @@ plt.tight_layout()
 #### GCP/RPC reprojection
 
 Rasters referenced by **ground control points (GCPs)** or **rational polynomial coefficients (RPCs)** can also be
-reprojected. 
+reprojected.
 
 GeoUtils reads and uses the GCP/RPC models from file automatically. The result has a regular affine grid. GCPs use their stored CRS, and RPCs describe WGS84 coordinates.
 However, GCP/RPC reprojection **requires a Rasterio resampling method**, such as `"bilinear"`. Use GDAL transformer options control how GCPs/RPCs map pixel positions to ground coordinates
@@ -334,7 +334,7 @@ the extent. For vectors, the default `mode="intersects"` keeps every unchanged f
 `mode="within"` keeps only features fully contained by it.
 
 ```{note}
-A file-backed raster, vector or point cloud stores this selection as metadata and defer reading until its data are requested, much 
+A file-backed raster, vector or point cloud stores this selection as metadata and defer reading until its data are requested, much
 like Xarray's {meth}`~xarray.DataArray.isel`.
 See {ref}`Deferred I/O <core-lazy-load>` for details.
 ```
@@ -402,7 +402,7 @@ plt.tight_layout()
 {meth}`gdf.vct.clip() or Vector.clip() <VectorBase.clip>`<br>
 {meth}`gdf.pc.clip() or PointCloud.clip() <geoutils.pointcloud.base.GeometryPointCloudBase.clip>`
 
-Clipping **cuts values within exact geometry**. 
+Clipping **cuts values within exact geometry**.
 
 It masks raster cells outside the geometry, removes point cloud rows outside it, and cuts vector geometries at its boundary. Raster, vector and point cloud clipping support
 lazy Dask chunks or partitions and file-backed multiprocessing blocks.
@@ -695,7 +695,7 @@ f.colorbar(axes[1].images[0], cax=axes[2], label="Fraction of cell covered", tic
 plt.tight_layout()
 ```
 
-By default, the function returns one fractional layer per feature, but all features can also be combined together with `fractional="union"`, 
+By default, the function returns one fractional layer per feature, but all features can also be combined together with `fractional="union"`,
 returning the sum of fractional coverages per pixel over all features.
 
 See {ref}`core-coverage` for coverage semantics and {ref}`stats-fractional` for calculating zonal statistics directly,
@@ -883,7 +883,7 @@ plt.tight_layout()
 ### Point gridding
 
 Gridding of a point cloud **consists in estimating the values at 2D regular gridded coordinates based on an irregular
-point cloud** using Delaunay triangular interpolation with "bilinear" (default) or "cubic" resampling, inverse-distance 
+point cloud** using Delaunay triangular interpolation with "bilinear" (default) or "cubic" resampling, inverse-distance
 weighting or circular statistics.
 
 Choose an {ref}`interpolator <transformations-interpolators>` or {ref}`reducer <transformations-reducers>`

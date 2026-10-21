@@ -21,7 +21,7 @@ A match-reference argument can be **any object** implementing the georeferencing
 ```
 
 Here, reprojection to a raster reference matches its **CRS and grid** (pixel size, alignment and bounding box). Cropping uses the
-reference **bounding box**, preserving the source CRS and pixel size. 
+reference **bounding box**, preserving the source CRS and pixel size.
 
 ## Matching with a raster, vector or point cloud
 
@@ -42,9 +42,9 @@ An operation can use several of these together, as raster reprojection does with
 | **Point locations** (X/Y, projected into the source CRS) | {meth}`raster.resample_at_points() <RasterBase.resample_at_points>`, {meth}`raster.interp_at_points() <RasterBase.interp_at_points>`, {meth}`raster.reduce_at_points() <RasterBase.reduce_at_points>`; {meth}`vector.create_mask() <VectorBase.create_mask>` with a point cloud reference                                                                                                                                     |
 
 
-**When only a bounding box and CRS are supplied to an operation requiring a grid definition**, such as rasterization, gridding or reprojection, 
-then **one of resolution `res` or output shape `shape`** must be defined. Raster reprojection is an exception, as it can 
-estimate resolution from the source instead. 
+**When only a bounding box and CRS are supplied to an operation requiring a grid definition**, such as rasterization, gridding or reprojection,
+then **one of resolution `res` or output shape `shape`** must be defined. Raster reprojection is an exception, as it can
+estimate resolution from the source instead.
 
-Note that **outputs derived from a raster often need no external reference**: for example, {meth}`~RasterBase.polygonize` 
+Note that **outputs derived from a raster often need no external reference**: for example, {meth}`~RasterBase.polygonize`
 and {meth}`~RasterBase.proximity` inherit georeferencing of the source raster directly.

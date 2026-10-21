@@ -13,6 +13,7 @@ Below is the full class description specific to {class}`DataArray.pc <geoutils.D
 
 .. autoclass:: DataArrayPointCloudAccessor
     :members:
+    :exclude-members: to_file, to_las, to_parquet
     :inherited-members:
     :undoc-members: false
     :show-inheritance:

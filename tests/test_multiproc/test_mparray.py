@@ -29,7 +29,7 @@ from geoutils.multiproc.mparray import (
     _remove_tile_padding,
     block_bounds_from_chunks,
     compute_tiling,
-    map_blocks,
+    map_collect,
     map_multiproc_collect,
     map_overlap,
     map_overlap_multiproc_save,
@@ -272,7 +272,7 @@ class TestMultiproc:
             mapped = map_overlap_multiproc_save(_custom_func, raster, config, 1, 2)
         assert mapped.raster_equal(_custom_func(raster, 1, 2))
 
-        with pytest.warns(DeprecationWarning, match=r"Use map_blocks\(\)"):
+        with pytest.warns(DeprecationWarning, match=r"Use map_collect\(\)"):
             collected = map_multiproc_collect(_custom_func_stats, raster, config, return_tile=True)
         assert len(collected) == 4
         assert all(len(item) == 2 for item in collected)
@@ -392,17 +392,17 @@ class TestMultiproc:
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_rgb_path])
     @pytest.mark.parametrize("tile_size", [64, 100])
     @pytest.mark.parametrize("return_block_info", [False, True])
-    def test_map_blocks(
+    def test_map_collect(
         self, example: str, tile_size: int, cluster: None | AbstractCluster, return_block_info: bool
     ) -> None:
-        """Checks that map_blocks() statistics match the full raster without loading its source."""
+        """Checks that map_collect() statistics match the full raster without loading its source."""
 
         # Open single-band and multiband files with multiple tiles and shorter edge tiles
         raster = Raster(example)
         config = MultiprocConfig(tile_size, cluster=cluster)
 
         # Apply the multiproc map function
-        results = map_blocks(_custom_func_stats, raster, config, return_block_info=return_block_info)  # type: ignore
+        results = map_collect(_custom_func_stats, raster, config, return_block_info=return_block_info)  # type: ignore
         if return_block_info:
             list_stats = [result[0] for result in results]
             list_tiles = [result[1] for result in results]
@@ -421,7 +421,7 @@ class TestMultiproc:
         assert abs(total_stats["mean"] - tiled_mean) < tiled_mean * 1e-5
         assert total_stats["valid_count"] == tiled_count
 
-    def test_map_blocks_rectangular_chunks(self) -> None:
+    def test_map_collect_rectangular_chunks(self) -> None:
         """Collect block statistics correctly from unequal chunk dimensions."""
 
         # Use narrow column chunks so the first reported window is unambiguous
@@ -429,7 +429,7 @@ class TestMultiproc:
         config = MultiprocConfig(chunks=(10, 20))
 
         # Retain block locations alongside each worker result
-        results = map_blocks(_custom_func_stats, raster, config, return_block_info=True)  # type: ignore
+        results = map_collect(_custom_func_stats, raster, config, return_block_info=True)  # type: ignore
         list_stats = [result[0] for result in results]
         list_tiles = [result[1] for result in results]
 

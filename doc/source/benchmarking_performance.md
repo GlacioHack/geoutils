@@ -5,7 +5,7 @@ GeoUtils benchmarks its operations to ensure **efficiency and robustness to upda
 
 The benchmarks tests measure **execution time and memory usage**, check **lazy and out-of-core behaviour** with
 Dask and Multiprocessing, track **improvements or regressions over time**, and compare different **execution modes** and
-**calculation engines**, including external checks against [**GDAL CLI**](https://gdal.org/en/stable/programs/index.html) and PDAL. 
+**calculation engines**, including external checks against [**GDAL CLI**](https://gdal.org/en/stable/programs/index.html) and PDAL.
 
 The benchmarks use GeoUtils' profiling tool described in {ref}`profiling`.
 
