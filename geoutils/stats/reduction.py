@@ -924,8 +924,8 @@ def _aggregate_chunked(
     summarizes each block, _merge_blocks() combines small batches of summaries, and _finalize_blocks() builds the
     result columns. Both backends share these calculations, with the following execution differences:
 
-    - Dask schedules block reductions and an eight-way merge tree. Multiprocessing submits up to eight reductions
-      at a time, then merges their summaries in the caller using a bounded set of binary accumulation levels.
+    - Both backends submit up to eight block reductions at a time, then merge their summaries in the caller using
+      a bounded set of binary accumulation levels. Dask merges each batch on a worker before returning its summary.
       Different merge trees and block layouts can produce small floating-point differences.
     - Both backends find group memberships before collecting values and process group batches one at a time.
       Dask schedules collection and complete-group calculation as tasks; multiprocessing collects members in
@@ -1074,23 +1074,24 @@ def _aggregate_chunked(
     # Ask each block for only the counts, sums, means, or ranges needed by the request
     reduction_statistics = {alias for alias in statistics.aliases if alias is not None}
     dense = strategy == "dense"
-    if use_dask:
-        tasks = [
-            submit(_reduce_block)(
-                [blocks[index] for blocks in value_blocks], block, total_groups, dense, reduction_statistics
-            )
-            for index, block in enumerate(id_blocks)
-        ]
 
-        # Merge groups of eight tasks at each level so no single task receives every block summary
-        while len(tasks) > 1:
-            tasks = [submit(_merge_blocks)(tasks[start : start + 8]) for start in range(0, len(tasks), 8)]
-        summary = tasks[0].compute()
-    else:
-        assert mp_config is not None
-        # Combine worker results in small groups so finished summaries do not keep piling up in memory
-        levels: list[Any] = []
-        for start in range(0, len(id_blocks), 8):
+    # Limit submitted blocks so Dask cannot retain inputs from the whole raster while waiting for reductions
+    levels: list[Any] = []
+    for start in range(0, len(id_blocks), 8):
+        if use_dask:
+            tasks = [
+                submit(_reduce_block)(
+                    [blocks[index] for blocks in value_blocks],
+                    id_blocks[index],
+                    total_groups,
+                    dense,
+                    reduction_statistics,
+                )
+                for index in range(start, min(start + 8, len(id_blocks)))
+            ]
+            summary = submit(_merge_blocks)(tasks).compute()
+        else:
+            assert mp_config is not None
             handles = [
                 mp_config.cluster.submit(
                     _reduce_block,
@@ -1103,21 +1104,21 @@ def _aggregate_chunked(
                 for index in range(start, min(start + 8, len(id_blocks)))
             ]
             summary = _merge_blocks(mp_config.cluster.gather(handles))
-            depth = 0
+        depth = 0
 
-            # Keep at most one accumulated summary per level, merging equally sized batches in submission order
-            while depth < len(levels) and levels[depth] is not None:
-                summary = _merge_blocks([levels[depth], summary])
-                levels[depth] = None
-                depth += 1
-            if depth == len(levels):
-                # Add a level when this batch has combined with every earlier level
-                levels.append(summary)
-            else:
-                levels[depth] = summary
+        # Keep at most one accumulated summary per level, merging equally sized batches in submission order
+        while depth < len(levels) and levels[depth] is not None:
+            summary = _merge_blocks([levels[depth], summary])
+            levels[depth] = None
+            depth += 1
+        if depth == len(levels):
+            # Add a level when this batch has combined with every earlier level
+            levels.append(summary)
+        else:
+            levels[depth] = summary
 
-        # Combine the remaining occupied levels once all worker batches have finished
-        summary = _merge_blocks([level for level in levels if level is not None])
+    # Combine the remaining occupied levels once all worker batches have finished
+    summary = _merge_blocks([level for level in levels if level is not None])
     return _finalize_blocks(summary, statistics)
 
 
