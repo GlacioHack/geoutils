@@ -2,7 +2,7 @@
 Parsing sensor metadata
 =======================
 
-This example demonstrates the instantiation of a raster while parsing image sensor metadata.
+This example demonstrates opening a raster while parsing image sensor metadata.
 """
 
 import geoutils as gu
@@ -15,9 +15,11 @@ import os
 print(os.path.basename(filename_geoimg))
 
 # %%
-# We open it as a raster with the option to parse metadata, un-silencing the attribute retrieval to see it printed.
-img = gu.Raster(filename_geoimg, parse_sensor_metadata=True, silent=False)
+# We open it as a raster and parse its filename, un-silencing the attribute retrieval to see it printed.
+img = gu.open_raster(filename_geoimg)
+sensor_metadata = gu.raster.satimg.parse_and_convert_metadata_from_filename(filename_geoimg, silent=False)
+img.attrs.update(sensor_metadata)
 
 # %%
 # We have now retrieved the metadata, stored in the :attr:`geoutils.Raster.tags` attribute.
-img.tags
+img.rst.tags

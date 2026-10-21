@@ -1339,7 +1339,7 @@ def _draw_source_errors(
                 unit_field = _interpolate_inducing_field(inducing_field, coordinates)
             elif backend == "gstools":
                 gstools_variogram = variogram.to_gstools(dim=coordinates.shape[1])
-                gstools = import_optional("gstools", extra_name="geostat")
+                gstools = import_optional("gstools")
 
                 positions = (
                     tuple(coordinates[:, dimension] for dimension in range(coordinates.shape[1]))
@@ -1355,8 +1355,8 @@ def _draw_source_errors(
                     # GSTools uses X/Y order, whereas raster arrays use rows/columns
                     unit_field = unit_field.T
             else:
-                torch = import_optional("torch", extra_name="gp")
-                gpytorch = import_optional("gpytorch", extra_name="gp")
+                torch = import_optional("torch")
+                gpytorch = import_optional("gpytorch")
                 gpytorch_variogram = variogram.to_gpytorch(
                     active_dims=tuple(range(coordinates.shape[1])),
                     trainable=False,

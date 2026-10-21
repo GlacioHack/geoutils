@@ -7,6 +7,18 @@ div.cell details[open].above-input div.cell_input {
     border-top: None;
 }
 
+/* Match intentional warning outputs to the red exception styling */
+.cell_output .output.stderr,
+.expected-warning + .sphx-glr-script-out {
+  background: var(--mystnb-stderr-bg-color);
+  border: 1px solid var(--mystnb-traceback-border-color);
+}
+
+.cell_output .output.stderr .highlight,
+.expected-warning + .sphx-glr-script-out .highlight {
+  background: transparent;
+}
+
 /* -------------------------------------------
    GeoUtils tables: subsection rows
    ------------------------------------------- */

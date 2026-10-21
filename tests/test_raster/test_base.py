@@ -102,7 +102,7 @@ class TestClassVsAccessorConsistency:
         "coords",
         "outside_image",
         "info",
-        "get_bounds_projected",
+        "get_bbox_projected",
         "get_footprint_projected",
         "copy",
         "georeferenced_grid_equal",
@@ -263,7 +263,7 @@ class TestClassVsAccessorConsistency:
         ("coords", {"grid": True}),
         ("get_metric_crs", {"local_crs_type": "universal"}),
         ("get_footprint_projected", {"out_crs": CRS.from_epsg(4326)}),
-        ("get_bounds_projected", {"out_crs": CRS.from_epsg(4326)}),
+        ("get_bbox_projected", {"out_crs": CRS.from_epsg(4326)}),
         ("georeferenced_grid_equal", {"other": "self"}),
         ("outside_image", {"xi": [-2, 10000, 10], "yj": [10, 50, 20]}),
         # 1.2. In-place methods
@@ -326,6 +326,38 @@ class TestClassVsAccessorConsistency:
         # 2.2. In-place methods
         ("load", {}),
     ]
+
+    @pytest.mark.parametrize(
+        "method,kwargs",
+        [
+            (method, kwargs)
+            for method, kwargs in methods_and_kwargs
+            if method in ("copy", "crop", "icrop", "clip", "translate", "reproject", "filter", "sieve", "fill_nodata")
+            and not kwargs.get("inplace")
+        ],
+    )
+    def test_methods__metadata(self, method: str, kwargs: dict[str, Any]) -> None:
+        """Checks that operations preserve custom metadata."""
+
+        # Create integer raster with custom metadata
+        values = np.arange(36, dtype=np.int32).reshape(6, 6)
+        tags = {"title": "elevation survey", "units": "m"}
+        source = Raster.from_array(values, rio.transform.from_origin(0, 60, 10, 10), 32631, nodata=-99999, tags=tags)
+        original = source.copy()
+        options = kwargs.copy()
+        if method == "crop":
+            options["bbox"] = (10, 10, 50, 50)
+        elif method == "clip":
+            options["mask"] = (10, 10, 50, 50)
+        elif method == "copy" and "new_array" in options:
+            options["new_array"] = np.ones(source.shape, dtype=np.int32)
+
+        # Run each operation and check metadata is unchanged
+        result = getattr(source, method)(**options)
+        assert isinstance(result, Raster)
+        assert all(result.tags[name] == value for name, value in tags.items())
+        assert source.tags == original.tags
+        assert source.raster_equal(original)
 
     @pytest.mark.parametrize("path_index", [0, 1, 2])
     @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in methods_and_kwargs])
@@ -762,19 +794,21 @@ class TestRasterRemote:
         # Check that remote reads requested part of a file
         assert any(method == "GET" and byte_range for method, path, byte_range in remote_files.requests)
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "dataset"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
     def test_open_raster__remote(
         self,
         remote_files: RemoteFiles,
         remote_url: Callable[[str], str],
         remote_raster: str,
-        as_type: Literal["dataarray", "dataset"],
+        as_object_type: Literal["dataarray", "dataset"],
     ) -> None:
         """Checks that open_raster() works properly on a remote file in the cloud."""
 
         # Open both local/remote
-        expected = gu.open_raster(str(remote_files.directory / remote_raster), as_type=as_type, data_name="height")
-        remote = gu.open_raster(remote_url(remote_raster), as_type=as_type, data_name="height")
+        expected = gu.open_raster(
+            str(remote_files.directory / remote_raster), as_object_type=as_object_type, data_name="height"
+        )
+        remote = gu.open_raster(remote_url(remote_raster), as_object_type=as_object_type, data_name="height")
 
         # Check equality, and close the backing file handles
         try:
@@ -829,16 +863,16 @@ class TestRasterRemoteErrors:
         with pytest.raises(rio.errors.RasterioIOError):
             gu.Raster(remote_url("missing.tif"))
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "dataset"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
     @pytest.mark.parametrize("chunks", [None, {"x": 90, "y": 70}])
     def test_open_raster__error_missing_remote_file(
         self,
         remote_url: Callable[[str], str],
-        as_type: Literal["dataarray", "dataset"],
+        as_object_type: Literal["dataarray", "dataset"],
         chunks: dict[str, int] | None,
     ) -> None:
         """Checks an error is raised when open_raster() cannot find a remote file, with or without chunks."""
 
         filename = remote_url("missing.tif")
         with pytest.raises(rio.errors.RasterioIOError):
-            gu.open_raster(filename, as_type=as_type, chunks=chunks)
+            gu.open_raster(filename, as_object_type=as_object_type, chunks=chunks)

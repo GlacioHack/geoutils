@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+from dataclasses import replace
 from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,10 +25,15 @@ from benchmarks.asv_suite.render_results import (
     DOCUMENTATION_MEMORY_SCALING_PLOT,
     DOCUMENTATION_PDAL_PLOT,
     DOCUMENTATION_TIME_PLOT,
+    PARAMETER_REPORT_PAGE,
     PERFORMANCE_CHANGE_REPORT,
+    REFERENCE_REPORT_PAGE,
     SCALING_REPORT_PAGE,
+    _headline_summary_table,
     _PreviewResult,
     _render_preview,
+    _scaling_comparisons,
+    collect_comparison_measurements,
     render_documentation_snapshot,
 )
 from benchmarks.comparisons.flox import (
@@ -128,6 +135,25 @@ class TestComparisonReport:
         with pytest.raises(ValueError, match=f"Duplicate benchmark ID: {BENCHMARKS[0].id}"):
             collect_operation_modules(duplicate_modules)
 
+    def test_scaling__default_options(self) -> None:
+        """Checks that scaling compares execution modes with the default method, backend and chunk strategy."""
+
+        # Select scaling comparisons from the registry, which also includes alternative options and external tools
+        comparisons = _scaling_comparisons()
+        by_operation = {comparison.operation: comparison for comparison in comparisons}
+
+        # Each operation appears once, using only GeoUtils execution modes as separate lines
+        assert len(by_operation) == len(comparisons)
+        assert all(comparison.by == "execution" for comparison in comparisons)
+        assert all(case.implementation == "geoutils" for comparison in comparisons for case in comparison.cases)
+        assert by_operation["grid"].method == "nearest"
+        assert by_operation["random_field"].calculation_engine == "gpytorch"
+
+        # Grouped statistics must use the automatic strategy for both chunked modes
+        grouped = by_operation["grouped_stats"]
+        assert {case.execution for case in grouped.cases} == {"inmem", "dask", "multiprocessing"}
+        assert all(case.strategy == "auto" for case in grouped.cases if case.execution != "inmem")
+
     def test_render_preview__essential_files(self, tmp_path: Path) -> None:
         """Checks that preview rendering writes the main pages, data exports and plots."""
 
@@ -142,6 +168,8 @@ class TestComparisonReport:
             tmp_path / "index.html",
             report_directory / "index.html",
             report_directory / SCALING_REPORT_PAGE,
+            report_directory / REFERENCE_REPORT_PAGE,
+            report_directory / PARAMETER_REPORT_PAGE,
             report_directory / "comparisons.csv",
             report_directory / "comparisons.json",
             report_directory / PERFORMANCE_CHANGE_REPORT,
@@ -152,6 +180,84 @@ class TestComparisonReport:
         # The JSON export must contain measurements rather than only an empty report shell
         payload = json.loads((report_directory / "comparisons.json").read_text(encoding="utf-8"))
         assert payload["measurements"]
+
+        # Check the simpler overview and the order of its detailed pages
+        overview = (tmp_path / "index.html").read_text(encoding="utf-8")
+        assert "concept-map" not in overview
+        assert "<strong>Output format:</strong>" not in overview
+        assert "Peak additional RAM (MB)" in overview
+        assert overview.index(REFERENCE_REPORT_PAGE) < overview.index(SCALING_REPORT_PAGE)
+        assert overview.index(SCALING_REPORT_PAGE) < overview.index("comparisons/index.html")
+
+        # Scaling has a TOC and collapsible plots; other parameters have a separate page
+        scaling = (report_directory / SCALING_REPORT_PAGE).read_text(encoding="utf-8")
+        assert "default-reproject-raster-size.svg" in scaling
+        assert 'src="filter-chunk-size.svg"' not in scaling
+        assert '<a href="#reproject-raster-size">' in scaling
+        assert '<details class="plot-card" id="reproject-raster-size">' in scaling
+
+        # The simplified scaling plot includes all three execution modes and excludes the external GDAL reference
+        plot = (report_directory / "default-reproject-raster-size.svg").read_text(encoding="utf-8")
+        assert all(label in plot for label in ("In memory", "Dask", "Multiprocessing"))
+        assert "GDAL CLI" not in plot
+
+        # Option tables link to the detailed plots, since scaling now shows only default options
+        options = (report_directory / "index.html").read_text(encoding="utf-8")
+        assert f'href="{PARAMETER_REPORT_PAGE}#gridding-method-raster-size"' in options
+        assert 'href="scaling.html#gridding-method-raster-size"' not in options
+
+    def test_summary__exact_size_and_dask(self) -> None:
+        """Checks that the summary uses the requested raster size and Dask execution only."""
+
+        # Use a small-run result to check that smaller rasters do not fill the standard-size table
+        records = collect_comparison_measurements(_PreviewResult())
+        records = [record for record in records if record.parameter != 10_000]
+        empty_summary = _headline_summary_table(records)
+        assert set(re.findall(r"<td>(.*?)</td>", empty_summary)) == {"—"}
+
+        # Add distinct Dask and eager results at 10,000 × 10,000 so a wrong choice is easy to see
+        source = next(
+            record
+            for record in records
+            if record.comparison == "reproject-raster-size" and record.series_label == "Dask"
+        )
+        dask = replace(source, parameter=10_000, end_to_end_time_s=7.25, process_tree_mem_increase_mb=482.5)
+        eager = replace(dask, series_label="In memory", execution_mode="inmem", end_to_end_time_s=999)
+        summary = _headline_summary_table([*records, dask, eager])
+
+        # Check the displayed measurements and exclude the eager timing
+        assert "<td>482</td><td>7.25</td>" in summary
+        assert "<td>999</td>" not in summary
+
+    @pytest.mark.parametrize(
+        "default_comparison, default_series, other_comparison",
+        [
+            ("random-field-gpytorch", "Dask", "random-field-gstools"),
+            ("grouped-stats-raster-size", "Automatic", "grouped-stats-execution-size"),
+        ],
+    )
+    def test_summary__default_choices(
+        self, default_comparison: str, default_series: str, other_comparison: str
+    ) -> None:
+        """Checks that the summary uses the default numerical backend and chunk strategy."""
+
+        # Give the default and alternative choices distinct values so the selection is clear
+        records = collect_comparison_measurements(_PreviewResult())
+        default = next(
+            record
+            for record in records
+            if record.comparison == default_comparison and record.series_label == default_series
+        )
+        other = next(
+            record for record in records if record.comparison == other_comparison and record.series_label == "Dask"
+        )
+        default = replace(default, parameter=10_000, end_to_end_time_s=11, process_tree_mem_increase_mb=101)
+        other = replace(other, parameter=10_000, end_to_end_time_s=777, process_tree_mem_increase_mb=888)
+
+        # Render both choices and check that only the default appears in the table
+        summary = _headline_summary_table([default, other])
+        assert "<td>101</td><td>11</td>" in summary
+        assert "<td>777</td>" not in summary
 
     def test_render_documentation_snapshot__essential_files(self, tmp_path: Path) -> None:
         """Checks that documentation rendering writes its summary plots and numeric data."""
@@ -372,8 +478,7 @@ class TestBenchmarkOutputsChunked:
             assert not source.rst.is_loaded
             eager_source = source.compute()
             options = dict(operation.option_builder(case, runner.config))
-            if case.variant == "xarray":
-                options["backend"] = "xarray"
+            options["pointcloud_return_type"] = "dataarray" if case.variant == "xarray" else "geodataframe"
             eager_points = getattr(eager_source.rst, operation_name)(**options)
 
             # Run the benchmark and save the same public call on eager inputs for comparison

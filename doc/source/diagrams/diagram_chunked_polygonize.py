@@ -22,9 +22,7 @@ from geoutils.interface.vectorization import (
 )
 from geoutils.multiproc.chunked import ChunkedGeoGrid, GeoGrid
 
-# -----------------------------------------------------------------------------
 # Example raster data and chunk layout
-# -----------------------------------------------------------------------------
 
 ARR = np.array(
     [
@@ -57,11 +55,6 @@ STITCH_COLOR = "#F58518"
 POLYGON_COLOR = "#555555"
 
 
-# -----------------------------------------------------------------------------
-# Small containers
-# -----------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class BlockData:
     """Per-block arrays and metadata used for the schematic."""
@@ -76,9 +69,7 @@ class BlockData:
     gdf_geom: gpd.GeoDataFrame
 
 
-# -----------------------------------------------------------------------------
 # Coordinate helpers
-# -----------------------------------------------------------------------------
 
 
 def cell_xy(i: int, j: int, nrows: int) -> tuple[float, float]:
@@ -101,11 +92,6 @@ def centroid_from_cells(cells: list[tuple[int, int]], nrows: int) -> tuple[float
         xs.append(xc)
         ys.append(yc)
     return float(np.mean(xs)), float(np.mean(ys))
-
-
-# -----------------------------------------------------------------------------
-# Build block data using our package functions
-# -----------------------------------------------------------------------------
 
 
 def build_demo_blocks() -> tuple[ChunkedGeoGrid, list[GeoGrid], list[dict[str, int]], list[BlockData]]:
@@ -248,9 +234,7 @@ def build_seam_pairs(left: BlockData, right: BlockData) -> list[tuple[int, int, 
     return out
 
 
-# -----------------------------------------------------------------------------
 # Plot helpers
-# -----------------------------------------------------------------------------
 
 
 def draw_cells(ax: plt.Axes, arr: np.ndarray, *, alpha: float = 1.0) -> None:
@@ -505,7 +489,6 @@ def _add_visual_legend(ax: plt.Axes) -> None:
     Draw a compact multi-row visual legend inside the bottom-right of an axis.
     """
 
-    # Anchor in axis coordinates
     x0 = 1.6
     y0 = 0.74
     dy = 0.15
@@ -521,7 +504,6 @@ def _add_visual_legend(ax: plt.Axes) -> None:
         clip_on=False,
     )
 
-    # Row 1: pixel grid
     y = y0
     ax.plot(
         [x0, x0 + line_len],
@@ -535,7 +517,6 @@ def _add_visual_legend(ax: plt.Axes) -> None:
     )
     ax.text(x0 + text_dx, y, "Pixel grid", **text_kw)
 
-    # Row 2: chunk boundary
     y = y0 - dy
     ax.plot(
         [x0, x0 + line_len],
@@ -549,7 +530,6 @@ def _add_visual_legend(ax: plt.Axes) -> None:
     )
     ax.text(x0 + text_dx, y, "Chunk boundary", **text_kw)
 
-    # Row 3: polygon outlines
     y = y0 - 2 * dy
     ax.plot(
         [x0, x0 + line_len],
@@ -563,7 +543,6 @@ def _add_visual_legend(ax: plt.Axes) -> None:
     )
     ax.text(x0 + text_dx, y, "Polygon outlines", **text_kw)
 
-    # Row 4: vector stitch
     y = y0 - 3 * dy
     arrow = FancyArrowPatch(
         (x0, y),
@@ -579,7 +558,6 @@ def _add_visual_legend(ax: plt.Axes) -> None:
     ax.add_artist(arrow)
     ax.text(x0 + text_dx, y, "Vector stitch", **text_kw)
 
-    # Row 5: halo window
     y = y0 - 4 * dy
     rect = Rectangle(
         (x0, y - 0.025),
@@ -627,11 +605,6 @@ def _add_polygonize_title(fig: plt.Figure, strategy_axes: list[plt.Axes]) -> Non
         zorder=100,
     )
     fig.add_artist(line)
-
-
-# -----------------------------------------------------------------------------
-# Main figure
-# -----------------------------------------------------------------------------
 
 
 def make_chunked_polygonize_diagram() -> tuple[plt.Figure, np.ndarray]:

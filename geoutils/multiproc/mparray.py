@@ -535,7 +535,7 @@ def _write_multiproc_result(
 
 
 @overload
-def map_blocks(
+def map_collect(
     func: Callable[..., Any],
     raster_path: str | RasterBase,
     mp_config: MultiprocConfig,
@@ -547,7 +547,7 @@ def map_blocks(
 
 
 @overload
-def map_blocks(
+def map_collect(
     func: Callable[..., Any],
     raster_path: str | RasterBase,
     mp_config: MultiprocConfig,
@@ -559,7 +559,7 @@ def map_blocks(
 
 
 @overload
-def map_blocks(
+def map_collect(
     func: Callable[..., Any],
     raster_path: str | RasterBase,
     mp_config: MultiprocConfig,
@@ -570,7 +570,7 @@ def map_blocks(
 ) -> list[Any] | list[tuple[Any, NDArrayNum]]: ...
 
 
-def map_blocks(
+def map_collect(
     func: Callable[..., Any],
     raster_path: str | RasterBase,
     mp_config: MultiprocConfig,
@@ -589,6 +589,8 @@ def map_blocks(
 
     If `return_block_info=True`, the function returns a list of tuples, where each tuple contains
     the computed result and the corresponding block indices.
+
+    For a raster transformation written to disk, use map_overlap() with depth=0.
 
     :param func: A function to apply to each raster block. It should return any type *except* :class:`geoutils.Raster`.
     :param raster_path: Path to the input raster file or an existing :class:`geoutils.Raster` object.
@@ -653,7 +655,7 @@ def map_overlap_multiproc_save(
     return map_overlap(func, raster_path, mp_config, *args, depth=depth, **kwargs)
 
 
-@deprecate(details="Use map_blocks() with return_block_info instead.")
+@deprecate(details="Use map_collect() with return_block_info instead.")
 def map_multiproc_collect(
     func: Callable[..., Any],
     raster_path: str | RasterBase,
@@ -665,7 +667,7 @@ def map_multiproc_collect(
 ) -> list[Any] | list[tuple[Any, NDArrayNum]]:
     """Compatibility wrapper for the former multiprocessing collection name."""
 
-    return map_blocks(
+    return map_collect(
         func,
         raster_path,
         mp_config,

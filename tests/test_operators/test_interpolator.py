@@ -116,7 +116,7 @@ class TestInterpolator:
         points = gu.PointCloud.from_xyz([0, 1, 10], [0, 0, 0], [2, 4, 100], crs=32631)
         reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(0, 0, 1, 1), crs=32631)
         raster_operator = RangeInterpolator(method, neighborhood=GridNeighbours(size=3))
-        point_operator = RangeInterpolator(method, neighborhood=PointNeighbours(k=2))
+        point_operator = RangeInterpolator(method, neighborhood=PointNeighbours(max_points=2))
 
         # Check ranges (6 to 18 for raster window, 2 to 4 for nearest points)
         sampled = raster.resample_at_points((2.5, 2.5), raster_operator, as_array=True)
@@ -243,7 +243,7 @@ class TestInterpolatorRegular:
 
         # Reject point-count neighborhood for regular bilinear interpolation
         raster = gu.Raster.from_array(np.ones((3, 3)), rio.transform.from_origin(0, 3, 1, 1), crs=32631)
-        operator = Linear(neighborhood=PointNeighbours(k=4))
+        operator = Linear(neighborhood=PointNeighbours(max_points=4))
         with pytest.raises(ValueError, match="PointNeighbours applies to point sources"):
             raster.resample_at_points((1.2, 1.2), operator)
 
@@ -438,7 +438,8 @@ class TestPointInterpolationAccuracy:
 
     @pytest.mark.parametrize("operator_type", [Linear, Cubic])
     @pytest.mark.parametrize(
-        "neighborhood", [PointNeighbours(k=3), PointNeighbours(radius=2), PointNeighbours(k=3, radius=2)]
+        "neighborhood",
+        [PointNeighbours(max_points=3), PointNeighbours(radius=2), PointNeighbours(max_points=3, radius=2)],
     )
     def test_grid__triangulation_uses_selected_points(
         self, operator_type: type[Interpolator], neighborhood: PointNeighbours
@@ -463,7 +464,7 @@ class TestPointInterpolationAccuracy:
 
         # Three collinear points cannot define a two-dimensional triangle, and two points are also insufficient
         points = gu.PointCloud.from_xyz([0, 1, 2], [0, 0, 0], [2, 4, 8], crs=32631)
-        operator = operator_type(neighborhood=PointNeighbours(k=count))
+        operator = operator_type(neighborhood=PointNeighbours(max_points=count))
         reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(0.2, 0.2, 1, 1), crs=32631)
         result = points.grid(ref=reference, resampling=operator)
         assert np.isnan(result.to_nanarray()[0, 0])
@@ -480,7 +481,7 @@ class TestPointInterpolationAccuracy:
         # The output at X=0 coincides with a valid point; the point at X=1 is missing but lies inside the radius
         points = gu.PointCloud.from_xyz([0.0, 1.0], [0.0, 0.0], [2.0, np.nan], crs=32631)
         grid_coords = (np.array([0.0, 1.0]), np.array([0.0, 1.0]))
-        neighborhood = PointNeighbours(k=2, radius=1.1) if explicit_neighborhood else None
+        neighborhood = PointNeighbours(max_points=2, radius=1.1) if explicit_neighborhood else None
         operator = InverseDistance(neighborhood=neighborhood)
         if engine == "numba":
             import_optional("numba")
@@ -504,7 +505,7 @@ class TestPointInterpolationAccuracy:
         # The missing point sits at X=0, while the finite point at X=0.5 can supply that output cell
         points = gu.PointCloud.from_xyz([0.0, 0.5], [0.0, 0.0], [np.nan, 6.0], crs=32631)
         grid_coords = (np.array([0.0, 1.0]), np.array([0.0, 1.0]))
-        neighborhood = PointNeighbours(k=2, radius=1.1) if explicit_neighborhood else None
+        neighborhood = PointNeighbours(max_points=2, radius=1.1) if explicit_neighborhood else None
         operator = InverseDistance(neighborhood=neighborhood)
 
         # IDW calculates six from the finite point, then the nearest-point rule masks the result
@@ -888,7 +889,8 @@ class TestPointInterpolationEngines:
         [Nearest, InverseDistance],
     )
     @pytest.mark.parametrize(
-        "neighborhood", [PointNeighbours(k=3), PointNeighbours(radius=1.1), PointNeighbours(k=3, radius=1.1)]
+        "neighborhood",
+        [PointNeighbours(max_points=3), PointNeighbours(radius=1.1), PointNeighbours(max_points=3, radius=1.1)],
     )
     @pytest.mark.parametrize("nodata_handling", ["ignore", "nearest", "propagate"])
     def test_grid__numba_matches_scipy_for_explicit_neighborhoods(
@@ -1357,7 +1359,7 @@ class TestPointInterpolationUncertainty:
 
         # All targets have three finite neighbors with distinct distances
         points = gu.PointCloud.from_xyz([0, 0.8, 2.1, 3.3], [0, 0.1, 2.2, 0.3], [2, 4, 8, 16], crs=32631)
-        operator = operator_type(neighborhood=PointNeighbours(k=3))
+        operator = operator_type(neighborhood=PointNeighbours(max_points=3))
         grid_coords = (np.array([0.2, 1.2]), np.array([0.3, 1.3]))
         errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 0)])
 
@@ -1399,7 +1401,7 @@ class TestPointInterpolationUncertainty:
         points = gu.PointCloud.from_xyz([0], [0], [7], crs=32631)
         coords = (np.array([0.0, 1.0]), np.array([0.0, 1.0]))
         errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
-        for neighborhood in (None, PointNeighbours(k=1, radius=2)):
+        for neighborhood in (None, PointNeighbours(max_points=1, radius=2)):
             result = points.grid(
                 grid_coords=coords,
                 resampling=InverseDistance(neighborhood=neighborhood),

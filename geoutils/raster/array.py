@@ -82,7 +82,9 @@ def _masked_raster_data(source_raster: RasterLike) -> MArrayNum:
     # Combine masked, non-finite and explicit nodata representations across both raster classes
     invalid = np.ma.getmaskarray(array) | ~np.isfinite(array.data)
     nodata = getattr(source_raster, "nodata", None)
-    if nodata is not None:
+    xarray_obj = getattr(source_raster, "_obj", None)
+    decoded = xarray_obj is not None and xarray_obj.encoding.get("_FillValue") is not None
+    if nodata is not None and not decoded:
         invalid |= array.data == nodata
     return np.ma.array(array.data, mask=invalid, copy=False)
 
@@ -126,7 +128,14 @@ def get_mask_from_array(array: NDArrayNum | NDArrayBool | MArrayNum) -> NDArrayB
 
     :returns invalid_mask: boolean array, True where array is masked or Nan.
     """
-    mask = (np.ma.getmaskarray(array) | ~np.isfinite(array.data)) if np.ma.isMaskedArray(array) else ~np.isfinite(array)
+    masked = np.ma.isMaskedArray(array)
+    values = np.ma.getdata(array) if masked else array
+    if values.dtype.kind == "O":
+        # Check nullable numeric objects without changing the stored integer values or sampled IDs
+        values = values.astype(np.float64)
+    mask = ~np.isfinite(values)
+    if masked:
+        mask |= np.ma.getmaskarray(array)
     return mask.squeeze()
 
 

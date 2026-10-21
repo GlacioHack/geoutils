@@ -465,9 +465,9 @@ class TestPairSampleChunked:
         assert pairs["distance"].dtype == np.float32
 
     @pytest.mark.parametrize("mask_form", ["vector", "raster", "pointcloud"])
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_pairsample__point_masks_reuse_loaded_coordinates(
-        self, as_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, mask_form: str
+        self, as_object_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, mask_form: str
     ) -> None:
         """Checks that spatial masking reads each Dask source partition once and matches eager sampling."""
 
@@ -492,9 +492,9 @@ class TestPairSampleChunked:
             data_name=lazy_points_column,
             columns="all",
             chunks=lazy_points_chunks,
-            as_type=as_type,
+            as_object_type=as_object_type,
         )
-        if as_type == "dataarray":
+        if as_object_type == "dataarray":
             # An implicit index avoids Xarray loading stored row labels while constructing map_blocks()
             lazy_points = lazy_points.drop_vars("point")
             lazy_points = lazy_points.map_blocks(read_partition, template=lazy_points)
@@ -523,9 +523,9 @@ class TestPairSampleChunked:
         assert pairs.sizes["pair"] == 100
         assert np.all(pairs.x < 6)
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_pairsample__point_dask_mask_matches_eager(
-        self, as_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any
+        self, as_object_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any
     ) -> None:
         """Checks that a Dask point mask stays lazy and selects the same pairs as an eager point mask."""
 
@@ -544,11 +544,15 @@ class TestPairSampleChunked:
             data_name=lazy_points_column,
             columns="all",
             chunks=lazy_points_chunks,
-            as_type=as_type,
+            as_object_type=as_object_type,
         )
         lazy_mask_filename, lazy_mask_chunks, lazy_mask_column = pointcloud_file(point_mask.gdf, 4)
         lazy_mask = gu.open_pointcloud(
-            lazy_mask_filename, data_name=lazy_mask_column, columns="all", chunks=lazy_mask_chunks, as_type=as_type
+            lazy_mask_filename,
+            data_name=lazy_mask_column,
+            columns="all",
+            chunks=lazy_mask_chunks,
+            as_object_type=as_object_type,
         )
         options = {"n_pairs": 100, "sampling": "random_xy", "random_state": 9}
 
@@ -609,10 +613,10 @@ class TestPairSampleChunked:
             assert not file_mask.is_loaded
 
     @pytest.mark.parametrize("strategy", ["kdtree", "hashgrid", "nn_logvector"])
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_pairsample__point_chunked_loglag_matches_eager(
         self,
-        as_type: Literal["dataarray", "geodataframe"],
+        as_object_type: Literal["dataarray", "geodataframe"],
         pointcloud_file: Any,
         strategy: str,
         tmp_path: Path,
@@ -637,7 +641,7 @@ class TestPairSampleChunked:
             data_name=lazy_points_column,
             columns="all",
             chunks=lazy_points_chunks,
-            as_type=as_type,
+            as_object_type=as_object_type,
         )
         filename = tmp_path / "loglag-points.gpkg"
         points.to_file(filename)
@@ -889,9 +893,9 @@ class TestPairSampleErrors:
         "mask_change, message",
         [("crs", "does not share the support CRS"), ("order", "does not share the ordered support coordinates")],
     )
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_pairsample__error_dask_point_mask_support(
-        self, as_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, mask_change: str, message: str
+        self, as_object_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, mask_change: str, message: str
     ) -> None:
         """Checks an error is raised when a Dask point mask has a different CRS or row order."""
 
@@ -906,7 +910,7 @@ class TestPairSampleErrors:
         points = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), np.arange(16), crs=32633)
         source_filename, source_chunks, source_column = pointcloud_file(points.gdf, 2)
         source = gu.open_pointcloud(
-            source_filename, data_name=source_column, columns="all", chunks=source_chunks, as_type=as_type
+            source_filename, data_name=source_column, columns="all", chunks=source_chunks, as_object_type=as_object_type
         )
 
         # We reverse the mask, or change the CRS
@@ -917,7 +921,7 @@ class TestPairSampleErrors:
         )
         mask_filename, mask_chunks, mask_column = pointcloud_file(mask_points.gdf, 3)
         mask = gu.open_pointcloud(
-            mask_filename, data_name=mask_column, columns="all", chunks=mask_chunks, as_type=as_type
+            mask_filename, data_name=mask_column, columns="all", chunks=mask_chunks, as_object_type=as_object_type
         )
 
         # We check an error is raised

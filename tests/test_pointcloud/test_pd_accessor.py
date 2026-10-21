@@ -65,12 +65,12 @@ class TestPointCloudAccessor:
         header = laspy.LasHeader(point_format=6, version="1.4")
         header.add_crs(CRS.from_epsg(32633))
         laspy.LasData(header).write(path)
-        expected = gu.open_pointcloud(str(path), columns=columns, as_type="geodataframe")
+        expected = gu.open_pointcloud(str(path), columns=columns, as_object_type="geodataframe", load=True)
 
         # Build a lazy collection and inspect metadata without executing a partition
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(args[0])):
-            source = gu.open_pointcloud(str(path), columns=columns, chunks=3, as_type="geodataframe")
+            source = gu.open_pointcloud(str(path), columns=columns, chunks=3, as_object_type="geodataframe")
             assert isinstance(source, dgpd.GeoDataFrame)
             assert source.pc.point_count == 0
             assert source.pc.crs == expected.crs
@@ -90,8 +90,12 @@ class TestPointCloudAccessor:
         # (with chunk size not multiple of downsampling factor to check potential edge effects)
         filename = tmp_path / "points.gpkg"
         _point_grid().to_file(filename, index=False)
-        eager = gu.open_pointcloud(str(filename), data_name="value", downsample=4, as_type="geodataframe")
-        lazy = gu.open_pointcloud(str(filename), data_name="value", chunks=17, downsample=4, as_type="geodataframe")
+        eager = gu.open_pointcloud(
+            str(filename), data_name="value", downsample=4, as_object_type="geodataframe", load=True
+        )
+        lazy = gu.open_pointcloud(
+            str(filename), data_name="value", chunks=17, downsample=4, as_object_type="geodataframe"
+        )
 
         # Check source is lazy, and result is exactly the same with eager
         assert lazy.pc._is_dask
@@ -126,7 +130,7 @@ class TestPointCloudAccessor:
         """Construct an accessor-backed GeoDataFrame directly from X/Y/Z arrays."""
 
         # Use the same coordinates and values as the shared expected point cloud
-        ds = gu.GeoPandasPointCloudAccessor.from_xyz(
+        ds = gu.GeoDataFramePointCloudAccessor.from_xyz(
             x=self.arr_points[:, 0],
             y=self.arr_points[:, 1],
             z=self.arr_points[:, 2],
@@ -142,7 +146,7 @@ class TestPointCloudAccessor:
         """Return an Xarray accessor when gridding changes the geospatial data type."""
 
         # Build four points covering a small regular raster grid
-        ds = gu.GeoPandasPointCloudAccessor.from_xyz(
+        ds = gu.GeoDataFramePointCloudAccessor.from_xyz(
             x=np.array([0, 1, 0, 1]),
             y=np.array([0, 0, 1, 1]),
             z=np.array([1, 2, 3, 4]),
@@ -168,28 +172,10 @@ class TestPointCloudAccessor:
         self.gdf.to_file(temp_file)
 
         # The eager path should reproduce the original point cloud
-        ds = gu.open_pointcloud(temp_file, data_name="z", as_type="geodataframe")
+        ds = gu.open_pointcloud(temp_file, data_name="z", as_object_type="geodataframe", load=True)
 
         assert isinstance(ds, gpd.GeoDataFrame)
         assert ds.pc.to_geoutils().pointcloud_equal(gu.PointCloud(self.gdf, data_name="z"))
-
-    def test_open_pointcloud__dask(self) -> None:
-        """Keep point-cloud opening lazy when chunks request Dask-GeoPandas."""
-
-        # Skip cleanly when the optional lazy dataframe backend is unavailable
-        dgpd = pytest.importorskip("dask_geopandas")
-
-        # Write a source whose rows can be split into several Dask partitions
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.gpkg")
-        self.gdf.to_file(temp_file)
-
-        # Opening with chunks should expose metadata without reading every partition
-        ds = gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_type="geodataframe")
-
-        assert isinstance(ds, dgpd.GeoDataFrame)
-        assert not ds.pc.is_loaded
-        assert ds.pc.point_count == len(self.gdf)
 
     def test_accessor__rejects_invalid_dask_dataframes(self) -> None:
         """Reject plain Dask DataFrames and validate lazy geometry partitions as points."""
@@ -220,7 +206,7 @@ class TestPointCloudAccessor:
         temp_file = os.path.join(temp_dir.name, "test.gpkg")
         self.gdf.to_file(temp_file)
 
-        ds = gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_type="geodataframe")
+        ds = gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_object_type="geodataframe")
         reprojected = ds.pc.reproject(crs=3857)
 
         # Only the final comparison should compute the Dask collection
@@ -249,7 +235,7 @@ class TestPointCloudAccessor:
         temp_dir = tempfile.TemporaryDirectory()
         temp_file = os.path.join(temp_dir.name, "test.gpkg")
         self.gdf.to_file(temp_file)
-        ds = gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_type="geodataframe")
+        ds = gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_object_type="geodataframe")
         expected = getattr(self.gdf.pc, method)(**kwargs)
         source_count, source_bounds = ds.pc.point_count, ds.pc.bounds
 
@@ -287,8 +273,8 @@ class TestPointCloudAccessor:
             expected_values["z"] *= 2
             assert_geodataframe_equal(value_copy.compute(), expected_values)
 
-    def test_to_file__dask_geopandas(self) -> None:
-        """Write a lazy point cloud to a regular GeoPandas-supported vector file."""
+    def test_to_file__dask_geopandas(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Checks that GeoPackage writing computes separate Dask partitions and matches eager point output."""
 
         pytest.importorskip("dask_geopandas")
 
@@ -297,9 +283,16 @@ class TestPointCloudAccessor:
         temp_file = os.path.join(temp_dir.name, "test.gpkg")
         self.gdf.to_file(temp_file)
 
-        ds = gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_type="geodataframe").pc.reproject(crs=3857)
+        ds = gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_object_type="geodataframe").pc.reproject(
+            crs=3857
+        )
         assert not ds.pc.is_loaded
         output_file = os.path.join(temp_dir.name, "output.gpkg")
+
+        # Write each partition without computing the complete Dask GeoDataFrame
+        monkeypatch.setattr(
+            type(ds), "compute", lambda *args, **kwargs: pytest.fail("Writing must compute individual partitions")
+        )
         ds.pc.to_file(output_file)
 
         # Reopen through PointCloud to validate geometry, CRS and data values
@@ -318,7 +311,7 @@ class TestPointCloudAccessor:
         temp_file = os.path.join(temp_dir.name, "test.gpkg")
         self.gdf.to_file(temp_file)
 
-        ds = gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_type="geodataframe")
+        ds = gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_object_type="geodataframe")
         assert not ds.pc.is_loaded
         output_file = os.path.join(temp_dir.name, "output.parquet")
         ds.pc.to_file(output_file)
@@ -351,7 +344,7 @@ class TestPointCloudAccessor:
         # Replace the module-level optional importer used by ``open_pointcloud``
         monkeypatch.setattr(vector_pd_accessor, "import_optional", _missing_dask_geopandas)
         with pytest.raises(ImportError, match="Optional dependency 'dask-geopandas' required.*"):
-            gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_type="geodataframe")
+            gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_object_type="geodataframe")
 
     @pytest.mark.skipif(find_spec("laspy") is None, reason="Only runs if laspy is installed.")
     def test_open_pointcloud_las__dask(self) -> None:
@@ -360,7 +353,7 @@ class TestPointCloudAccessor:
         dgpd = pytest.importorskip("dask_geopandas")
 
         # Compare lazy metadata with the same source interpreted by PointCloud
-        ds = gu.open_pointcloud(self.fn_las, chunks=100, as_type="geodataframe")
+        ds = gu.open_pointcloud(self.fn_las, chunks=100, as_object_type="geodataframe")
         pc = gu.PointCloud(self.fn_las)
 
         assert isinstance(ds, dgpd.GeoDataFrame)
@@ -377,7 +370,7 @@ class TestPointCloudAccessor:
         dgpd = pytest.importorskip("dask_geopandas")
 
         # Load an eager reference independently of the lazy LAS partitions
-        ds = gu.open_pointcloud(self.fn_las, chunks=100, as_type="geodataframe")
+        ds = gu.open_pointcloud(self.fn_las, chunks=100, as_object_type="geodataframe")
         pc = gu.PointCloud(self.fn_las)
         pc.load()
 
@@ -422,7 +415,7 @@ class TestPointCloudAccessor:
         values = np.array([1, 2, 3], dtype=np.float32)
         identifiers = np.arange(3, dtype=np.uint64) + 2**63
         labels = pd.Series(["west", None, "east"], dtype=pd.StringDtype(storage=storage))
-        frame = gu.GeoPandasPointCloudAccessor.from_xyz([0, 1, 2], [3, 4, 5], values, crs=32633, data_name="height")
+        frame = gu.GeoDataFramePointCloudAccessor.from_xyz([0, 1, 2], [3, 4, 5], values, crs=32633, data_name="height")
         frame["label"] = labels
         frame["id"] = identifiers
         expected = frame.pc.to_xarray()
@@ -480,7 +473,7 @@ class TestPointCloudElevationMetadata:
 
         # Build a Dask GeoDataFrame directly, including empty and single-point collections
         coordinates = np.arange(point_count, dtype=float)
-        frame = gu.GeoPandasPointCloudAccessor.from_xyz(
+        frame = gu.GeoDataFramePointCloudAccessor.from_xyz(
             500000 + coordinates * 20,
             8600000 + coordinates * 20,
             coordinates,
@@ -510,7 +503,7 @@ class TestPointCloudElevationMetadata:
         """Checks that point cloud reprojection changes only the result CRS and keeps the source metadata."""
 
         # A small projected point cloud makes both the reference coordinates and metadata deterministic
-        frame = gu.GeoPandasPointCloudAccessor.from_xyz(
+        frame = gu.GeoDataFramePointCloudAccessor.from_xyz(
             [500000.0, 500020.0], [8600000.0, 8600020.0], [10.0, 20.0], crs=32633
         )
         source = frame
@@ -538,13 +531,13 @@ class TestPointCloudElevationMetadata:
         """Checks that 3D points can switch between geometry heights and a named data column."""
 
         # Keep elevations in 3D geometry and a distinct auxiliary column that must not become the main data
-        frame = gu.GeoPandasPointCloudAccessor.from_xyz([1.0, 2.0], [3.0, 4.0], [10.0, 20.0], crs=32633, use_z=True)
+        frame = gu.GeoDataFramePointCloudAccessor.from_xyz([1.0, 2.0], [3.0, 4.0], [10.0, 20.0], crs=32633, use_z=True)
         frame["intensity"] = np.array([2, 4], dtype=np.uint16)
         assert frame.pc.data_name is None
         np.testing.assert_array_equal(frame.pc.data, [10.0, 20.0])
 
         # Select intensity through another accessor; the shared dataframe keeps the new choice without changing Z
-        other = gu.GeoPandasPointCloudAccessor(frame)
+        other = gu.GeoDataFramePointCloudAccessor(frame)
         other.set_data_name("intensity")
         assert frame.pc.data_name == "intensity"
         np.testing.assert_array_equal(frame.geometry.z, [10.0, 20.0])

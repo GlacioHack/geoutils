@@ -184,7 +184,7 @@ class TestMultiRaster:
         assert np.count_nonzero(np.isnan(stacked_img.data)) == 0  # Check no NaNs introduced
 
         merged_bounds = gu.projtools.merge_bounds(
-            [rasters.img1.bounds, rasters.img2.get_bounds_projected(rasters.img1.crs)], resolution=rasters.img1.res[0]
+            [rasters.img1.bounds, rasters.img2.get_bbox_projected(rasters.img1.crs)], resolution=rasters.img1.res[0]
         )
         assert merged_bounds == stacked_img.bounds
 
@@ -331,7 +331,7 @@ class TestMultiRaster:
             assert rasters.img.shape == merged_img.shape
 
         merged_bounds = gu.projtools.merge_bounds(
-            [rasters.img1.bounds, rasters.img2.get_bounds_projected(rasters.img1.crs)], resolution=rasters.img1.res[0]
+            [rasters.img1.bounds, rasters.img2.get_bbox_projected(rasters.img1.crs)], resolution=rasters.img1.res[0]
         )
         assert merged_bounds == merged_img.bounds
 

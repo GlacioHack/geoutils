@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 import warnings
 from importlib.util import find_spec
 from pathlib import Path
@@ -164,7 +165,7 @@ class TestTransformation:
             r_cropped3 = r.crop(r_cropped_reproj)
 
         # Original CRS bounds can be deformed during transformation, but result should be equivalent to this
-        r_cropped4 = r.crop(bbox=r_cropped_reproj.get_bounds_projected(out_crs=r.crs))
+        r_cropped4 = r.crop(bbox=r_cropped_reproj.get_bbox_projected(out_crs=r.crs))
         assert r_cropped3.raster_equal(r_cropped4)
 
         # -- Test with inplace=True -- #
@@ -219,7 +220,7 @@ class TestTransformation:
 
         # Second, we check that bound reprojection is done automatically if the CRS differ
         r_cropped2 = r.crop(outlines)
-        r_cropped2_bbox_reproj = r.crop(bbox=outlines.get_bounds_projected(out_crs=r.crs))
+        r_cropped2_bbox_reproj = r.crop(bbox=outlines.get_bbox_projected(out_crs=r.crs))
         assert list(r_cropped2.bounds) == list(r_cropped2_bbox_reproj.bounds)
 
         # -- Test crop works as expected even if transform has been modified, e.g. through downsampling -- #
@@ -2092,6 +2093,32 @@ class TestReprojectionGDALOperators:
 class TestReprojectionOverlapBackends:
     """Test module for matching raster-cell coverage across Numba, ExactExtract, and Shapely."""
 
+    @pytest.mark.parametrize("dependency", ["numba", "exactextract"])
+    def test_reproject__multiple_opt_dep(self, dependency: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """
+        Checks that reproject() works properly when either Numba or ExactExtract is missing.
+
+        We use monkeypatch to hide one of these libraries and Flox.
+        We need this test because CI only tests environments with all optional dependencies or none.
+        """
+
+        # Use monkeypatch to make the other libraries unavailable
+        pytest.importorskip(dependency)
+        for other in {"numba", "exactextract", "flox"} - {dependency}:
+            monkeypatch.setitem(sys.modules, other, None)
+
+        # Create a constant raster and offset reference cells whose edges cut through source pixels
+        source = gu.Raster.from_array(np.full((6, 6), 3.0), Affine(1, 0, 0, 0, -1, 6), 32631, nodata=-9999)
+        reference = gu.Raster.from_array(np.zeros((3, 3)), Affine(1.5, 0, 0.25, 0, -1.5, 5.75), 32631)
+
+        # Reproject using whichever overlap library is available
+        result = source.reproject(reference, resampling="mean", backend="scipy", area_weighting="intersection")
+
+        # Check constant values and the reference grid
+        assert result is not None
+        np.testing.assert_array_equal(result.to_nanarray(), np.full((3, 3), 3.0))
+        assert result.georeferenced_grid_equal(reference)
+
     @pytest.mark.parametrize("geometry", ["shifted", "rotated", "sheared", "different_crs"])
     @pytest.mark.parametrize("backend", ["auto", "numba", "exactextract"])
     @pytest.mark.parametrize(
@@ -2537,7 +2564,7 @@ class TestReprojectionErrors:
         # Identical grids still validate the reducer configuration before any early return
         raster = gu.Raster.from_array(np.ones((4, 4)), rio.transform.from_origin(0, 4, 1, 1), crs=32631)
         with pytest.raises(ValueError, match="PointNeighbours applies to point sources"):
-            raster.reproject(raster, resampling=Mean(neighborhood=PointNeighbours(k=3)))
+            raster.reproject(raster, resampling=Mean(neighborhood=PointNeighbours(max_points=3)))
 
     @pytest.mark.parametrize("operator_type", [Nearest, Linear])
     def test_reproject__warn_regular_offsets(self, operator_type: type[Interpolator]) -> None:

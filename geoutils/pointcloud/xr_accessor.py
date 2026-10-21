@@ -142,18 +142,18 @@ class DataArrayPointCloudAccessor(PointCloudBase):
     @property
     def _is_dask(self) -> bool:
         """Whether values or per-point coordinates use Dask arrays."""
-        return any(is_dask_array(value.data) for value in (self._dataset, *self._dataset.coords.values()))
+        return any(value.chunks is not None for value in (self._dataset, *self._dataset.coords.values()))
 
     @property
     def is_loaded(self) -> bool:
-        return not self._is_dask
+        return all(value.variable._in_memory for value in (self._dataset, *self._dataset.coords.values()))
 
     @property
     def bounds(self) -> BoundingBox:
         """Horizontal extent, computing only coordinate reductions for a lazy array."""
         if self.point_count == 0:
             return BoundingBox(*(np.nan,) * 4)
-        x, y, _ = self.to_xyz()
+        x, y = (self._dataset.coords[name].data for name in ("x", "y"))
         extrema = [np.nanmin(x), np.nanmin(y), np.nanmax(x), np.nanmax(y)]
         if self._is_dask:
             extrema = import_optional("dask").compute(*extrema)
@@ -219,7 +219,7 @@ class DataArrayPointCloudAccessor(PointCloudBase):
 
         # We just pass input arrays (to avoid loading Dask or affect other array types)
         arrays = [value if hasattr(value, "ndim") else np.asarray(value) for value in (x, y, z)]
-        x, y, z = (np.atleast_1d(value) for value in arrays)
+        x, y, z = (value if isinstance(value, xr.Variable) else np.atleast_1d(value) for value in arrays)
         if any(value.ndim != 1 or value.shape != z.shape for value in (x, y, z)):
             raise ValueError("X, Y and point values must be one-dimensional arrays with the same length.")
         if not all(np.issubdtype(value.dtype, np.number) for value in (x, y)):
@@ -263,9 +263,7 @@ class DataArrayPointCloudAccessor(PointCloudBase):
 
     def _cast_pointcloud_output(self, output: xr.DataArray) -> xr.DataArray:
         """Return an array point result with independent metadata."""
-        output.attrs = self._dataset.attrs.copy()
-        output.encoding = {}
-        return output
+        return output.pc.copy(deep=False)
 
     def _cast_raster_output(self, raster: Any) -> xr.DataArray:
         """Expose a gridded result through the Xarray raster accessor."""
@@ -451,7 +449,7 @@ class DataArrayPointCloudAccessor(PointCloudBase):
             from geoutils.projtools import _get_bounds_projected
 
             bounds = BoundingBox(*_get_bounds_projected(bounds, CRS.from_user_input(crs), self.crs))
-        x, y, _ = self.to_xyz()
+        x, y = (self._dataset.coords[name].data for name in ("x", "y"))
         if mode == "within":
             mask = (x > bounds.left) & (x < bounds.right) & (y > bounds.bottom) & (y < bounds.top)
         else:
@@ -535,16 +533,17 @@ class DataArrayPointCloudAccessor(PointCloudBase):
         else:
             self.to_geoutils()._dataset.to_file(filename, **kwargs)
 
-    def to_las(self, filename: str, **kwargs: Any) -> None:
+    def to_las(self, filename: str, *, laz_chunk_size: int | None = None, **kwargs: Any) -> None:
         """
         Write LAS/LAZ in numeric row partitions without constructing point geometries.
 
         :param filename: Destination LAS or LAZ file.
+        :param laz_chunk_size: Number of points per compressed LAZ disk chunk. Requires Lazrs; None uses its default.
         :param kwargs: Header and partition options passed to the array LAS writer.
         """
         from geoutils.pointcloud.las import _write_array_las
 
-        _write_array_las(self._dataset, filename, **kwargs)
+        _write_array_las(self._dataset, filename, laz_chunk_size=laz_chunk_size, **kwargs)
 
     def to_parquet(self, filename: str, **kwargs: Any) -> None:
         """
@@ -559,6 +558,22 @@ class DataArrayPointCloudAccessor(PointCloudBase):
 
 
 # Dataset accessor
+
+
+def _pointcloud_array_to_dataset(points: xr.DataArray) -> xr.Dataset:
+    """Expose point attributes as Dataset variables with shared coordinates and CRS metadata."""
+
+    # Value attributes become separate variables while coordinates and lazy graphs stay shared
+    names = [name for name in points.pc.columns if name != points.name and name != "_geometry_z"]
+    dataset = points.rename({"x": "x_point", "y": "y_point"}).to_dataset().reset_coords(names)
+    dataset = dataset[[points.name, *names]]
+    for name in dataset.data_vars:
+        dataset[name].attrs["crs"] = points.attrs.get("crs")
+
+    # Copy point metadata and file encoding without loading the source arrays
+    dataset.attrs = points.attrs.copy()
+    dataset.encoding = points.encoding.copy()
+    return dataset
 
 
 def _point_variables(dataset: xr.Dataset) -> list[str]:
@@ -689,7 +704,7 @@ class DatasetPointCloudAccessor:
     coordinates or row selection would affect an unselected variable.
 
     A point variable is recognized as a 1D variable on the common point dimension with shared X/Y coordinates.
-    The ``variables`` property of the accessor lists all variables recognized as point values.
+    The ``compatible_variables`` property maps names to DataArrays for all variables recognized as point values.
     """
 
     def __init__(self, xarray_obj: xr.Dataset) -> None:
@@ -697,9 +712,14 @@ class DatasetPointCloudAccessor:
         self._obj = xarray_obj
 
     @property
-    def variables(self) -> list[str]:
-        """Names of aligned point value variables, in Dataset order."""
-        return _point_variables(self._obj)
+    def compatible_variables(self) -> Mapping[str, xr.DataArray]:
+        """
+        Compatible point variables as Xarray's mapping of names to DataArrays.
+
+        Use keys() to list their names in Dataset order. The mapping shares the original data without loading
+        file-backed values or computing Dask arrays.
+        """
+        return self._obj[_point_variables(self._obj)].data_vars
 
     def _wrap_output_point(
         self, operation: str, variables: Sequence[str] | None, /, *args: Any, **kwargs: Any
@@ -718,7 +738,7 @@ class DatasetPointCloudAccessor:
 
         # 1/ Check inputs, in particular their coordinates and CRS
         dataset = _prepare_point_dataset(self._obj)
-        selected = _select_dataset_variables(dataset, self.variables, variables)
+        selected = _select_dataset_variables(dataset, self.compatible_variables.keys(), variables)
         if operation == "subsample":
             mask = kwargs.pop("mask", None)
             random_state = kwargs.pop("random_state", None)
@@ -927,7 +947,7 @@ class DatasetPointCloudAccessor:
 
         # 1/ Checks to validate selection/arguments
         dataset = _prepare_point_dataset(self._obj)
-        selected = _select_dataset_variables(dataset, self.variables, variables)
+        selected = _select_dataset_variables(dataset, self.compatible_variables.keys(), variables)
 
         # 2/ We prepare point inputs and the destination grid for DataArray methods
 
@@ -988,7 +1008,7 @@ class DatasetPointCloudAccessor:
 
         # Validate every selected value before reading point arrays or sampling pairs
         dataset = _prepare_point_dataset(self._obj)
-        selected = _select_dataset_variables(dataset, self.variables, variables)
+        selected = _select_dataset_variables(dataset, self.compatible_variables.keys(), variables)
         if operation == "variogram" and any(dataset[name].dtype.kind not in "biuf" for name in selected):
             raise TypeError("Point variograms require numeric value variables.")
 
@@ -1006,7 +1026,7 @@ class DatasetPointCloudAccessor:
             point = support.pc.set_data_name(name)
 
             # Pair sampling reads only this variable and its spatial coordinates
-            point = point.drop_vars([other for other in self.variables if other != name])
+            point = point.drop_vars([other for other in self.compatible_variables if other != name])
             results[name] = getattr(point.pc, operation)(*args, **kwargs)
         return results
 
@@ -1040,7 +1060,7 @@ class DatasetPointCloudAccessor:
         :returns: Named statistics, a grouped table, or a grouped table and masks.
         """
         dataset = _prepare_point_dataset(self._obj)
-        selected = _select_dataset_variables(dataset, self.variables, variables)
+        selected = _select_dataset_variables(dataset, self.compatible_variables.keys(), variables)
         if "values" in kwargs:
             raise ValueError("Use 'variables' to select Dataset point values instead of 'values'.")
         support = _point_dataset_support(dataset, selected)
@@ -1055,11 +1075,18 @@ class DatasetPointCloudAccessor:
         :param kwargs: Options passed to the DataArray point writer.
         """
         dataset = _prepare_point_dataset(self._obj)
-        selected = _select_dataset_variables(dataset, self.variables, variables)
+        selected = _select_dataset_variables(dataset, self.compatible_variables.keys(), variables)
         support = _point_dataset_support(dataset[selected], selected)
         support.pc.to_file(filename, **kwargs)
 
-    def to_las(self, filename: str, *, variables: Sequence[str] | None = None, **kwargs: Any) -> None:
+    def to_las(
+        self,
+        filename: str,
+        *,
+        variables: Sequence[str] | None = None,
+        laz_chunk_size: int | None = None,
+        **kwargs: Any,
+    ) -> None:
         """
         Write points in the dataset to a LAS or LAZ file.
 
@@ -1067,12 +1094,13 @@ class DatasetPointCloudAccessor:
 
         :param filename: Destination LAS or LAZ file.
         :param variables: Point fields to write; None selects all aligned values. The first supplies LAS elevations.
+        :param laz_chunk_size: Number of points per compressed LAZ disk chunk. Requires Lazrs; None uses its default.
         :param kwargs: Header and partition options.
         """
         dataset = _prepare_point_dataset(self._obj)
-        selected = _select_dataset_variables(dataset, self.variables, variables)
+        selected = _select_dataset_variables(dataset, self.compatible_variables.keys(), variables)
         support = _point_dataset_support(dataset[selected], selected)
-        support.pc.to_las(filename, **kwargs)
+        support.pc.to_las(filename, laz_chunk_size=laz_chunk_size, **kwargs)
 
     def to_parquet(self, filename: str, *, variables: Sequence[str] | None = None, **kwargs: Any) -> None:
         """
@@ -1086,6 +1114,6 @@ class DatasetPointCloudAccessor:
         :param kwargs: Partition and compression options.
         """
         dataset = _prepare_point_dataset(self._obj)
-        selected = _select_dataset_variables(dataset, self.variables, variables)
+        selected = _select_dataset_variables(dataset, self.compatible_variables.keys(), variables)
         support = _point_dataset_support(dataset[selected], selected)
         support.pc.to_parquet(filename, **kwargs)

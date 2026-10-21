@@ -81,7 +81,7 @@ def run_sampling(runner: Any, case: Case) -> float:
         expected_count = int(runner.config.value("pointcloud_subsample_size"))
 
     if case.variant == "xarray":
-        points = getattr(raster.rst, operation)(**options, backend="xarray")
+        points = getattr(raster.rst, operation)(**options, pointcloud_return_type="dataarray")
         if points.pc.is_loaded:
             raise AssertionError("Dask Xarray point output must stay lazy before writing.")
         filename = runner.path(f"output-xarray.{case.output_driver.lower()}")
@@ -91,7 +91,7 @@ def run_sampling(runner: Any, case: Case) -> float:
         if points.pc.is_loaded or raster.rst.is_loaded:
             raise AssertionError("Writing Xarray points must leave the source and output arrays lazy.")
     elif runner.backend == "dask":
-        points = getattr(raster.rst, operation)(**options)
+        points = getattr(raster.rst, operation)(**options, pointcloud_return_type="geodataframe")
         if not is_dask_dataframe(points) or points.pc.is_loaded:
             raise AssertionError(f"Dask {operation}() output must remain lazy before computation.")
         filename = runner._output_path(suffix=f".{case.output_driver.lower()}")

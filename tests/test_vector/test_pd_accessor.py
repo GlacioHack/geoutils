@@ -5,6 +5,7 @@ from __future__ import annotations
 import os.path
 import tempfile
 from importlib.util import find_spec
+from typing import Any
 
 import geopandas as gpd
 import numpy as np
@@ -27,32 +28,10 @@ class TestVectorAccessor:
     def test_open_vector(self) -> None:
         """Open a vector file as the same eager GeoDataFrame used by Vector."""
 
-        ds = gu.open_vector(self.aster_outlines_path)
+        ds = gu.open_vector(self.aster_outlines_path, load=True)
 
         assert isinstance(ds, gpd.GeoDataFrame)
         assert_geodataframe_equal(ds, gu.Vector(self.aster_outlines_path).gdf)
-
-    def test_open_vector__dask_geopandas(self) -> None:
-        """Open and reproject vector partitions without eagerly loading them."""
-
-        dgpd = pytest.importorskip("dask_geopandas")
-
-        # Request one feature per partition to exercise the lazy open path
-        ds = gu.open_vector(self.aster_outlines_path, chunks=1)
-
-        assert isinstance(ds, dgpd.GeoDataFrame)
-        assert not ds.vct.is_loaded
-
-        # Build the expected result eagerly while Dask keeps its operation deferred
-        reprojected = ds.vct.reproject(crs=CRS.from_epsg(3857))
-        expected = gu.open_vector(self.aster_outlines_path).to_crs(CRS.from_epsg(3857))
-
-        # Compute only for the final geometry and CRS comparison
-        assert isinstance(reprojected, dgpd.GeoDataFrame)
-        assert not reprojected.vct.is_loaded
-        assert_geodataframe_equal(reprojected.compute(), expected)
-        assert not ds.vct.is_loaded
-        assert not reprojected.vct.is_loaded
 
     def test_bbox__dask_geopandas(self) -> None:
         """Checks that a lazy vector reads its bounding box without replacing its Dask collection."""
@@ -60,29 +39,11 @@ class TestVectorAccessor:
         # Open the same features through lazy and eager GeoPandas representations
         pytest.importorskip("dask_geopandas")
         lazy = gu.open_vector(self.aster_outlines_path, chunks=1)
-        eager = gu.open_vector(self.aster_outlines_path)
+        eager = gu.open_vector(self.aster_outlines_path, load=True)
 
         # Compute the total bounding box while keeping the accessor backed by Dask
         assert lazy.vct.bbox == rio.coords.BoundingBox(*eager.total_bounds)
         assert not lazy.vct.is_loaded
-
-    def test_translate_vector__dask_geopandas(self) -> None:
-        """Translate vector partitions lazily and match the eager accessor result."""
-
-        dgpd = pytest.importorskip("dask_geopandas")
-
-        # Apply the same offset through lazy and eager accessors
-        ds = gu.open_vector(self.aster_outlines_path, chunks=1)
-        translated = ds.vct.translate(xoff=1, yoff=2)
-        expected = gu.open_vector(self.aster_outlines_path).vct.translate(xoff=1, yoff=2)
-
-        # Translation must preserve laziness on both source and output
-        assert isinstance(translated, dgpd.GeoDataFrame)
-        assert not ds.vct.is_loaded
-        assert not translated.vct.is_loaded
-        assert_geodataframe_equal(translated.compute(), expected)
-        assert not ds.vct.is_loaded
-        assert not translated.vct.is_loaded
 
     def test_equality__dask_partitions(self) -> None:
         """Compare lazy vectors exactly and approximately without changing their collections."""
@@ -90,7 +51,7 @@ class TestVectorAccessor:
         dgpd = pytest.importorskip("dask_geopandas")
         import dask
 
-        eager = gu.open_vector(self.aster_outlines_path)
+        eager = gu.open_vector(self.aster_outlines_path, load=True)
         lazy = gu.open_vector(self.aster_outlines_path, chunks=1)
         with dask.config.set({"dataframe.convert-string": False}):
             differently_chunked = dgpd.from_geopandas(eager, npartitions=2)
@@ -125,46 +86,6 @@ class TestVectorAccessor:
             getattr(ds.vct, method)(**kwargs, inplace=True)
         assert not ds.vct.is_loaded
 
-    @pytest.mark.parametrize(
-        "method",
-        ["copy", "crop", "clip"],
-    )
-    def test_copy_crop_clip__dask_geopandas(self, method: str) -> None:
-        """Checks that Dask copy(), crop() and clip() stay lazy and match the in-memory result."""
-
-        dgpd = pytest.importorskip("dask_geopandas")
-
-        # Use the middle half of the source bounds so crop() and clip() remove some geometries
-        expected_source = gu.open_vector(self.aster_outlines_path)
-        left, bottom, right, top = expected_source.total_bounds
-        bbox = (
-            left + (right - left) / 4,
-            bottom + (top - bottom) / 4,
-            right - (right - left) / 4,
-            top - (top - bottom) / 4,
-        )
-        if method == "crop":
-            kwargs = {"bbox": bbox}
-        elif method == "clip":
-            kwargs = {"mask": bbox}
-        else:
-            kwargs = {}
-
-        # Apply the same operation to eager and lazy accessors
-        ds = gu.open_vector(self.aster_outlines_path, chunks=1)
-        expected = getattr(expected_source.vct, method)(**kwargs)
-        output = getattr(ds.vct, method)(**kwargs)
-
-        assert isinstance(output, dgpd.GeoDataFrame)
-        assert not ds.vct.is_loaded
-        assert not output.vct.is_loaded
-        computed_output = output.compute()
-
-        # Partition order is not meaningful, but every feature and its original index must remain exact
-        assert_geodataframe_equal(computed_output.sort_index(), expected.sort_index())
-        assert not ds.vct.is_loaded
-        assert not output.vct.is_loaded
-
     def test_open_vector__dask_geopandas_missing_dep(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Explain the missing optional dependency when chunked vector opening requests Dask."""
 
@@ -184,49 +105,67 @@ class TestVectorAccessor:
         with pytest.raises(ImportError, match="Optional dependency 'dask-geopandas' required.*"):
             gu.open_vector(self.aster_outlines_path, chunks=1)
 
-    def test_to_geoutils(self) -> None:
-        """Convert an accessor-backed dataframe to an equivalent Vector."""
-
-        ds = gu.open_vector(self.aster_outlines_path)
-        vector = ds.vct.to_geoutils()
-
-        assert isinstance(vector, gu.Vector)
-        assert vector.vector_equal(gu.Vector(self.aster_outlines_path))
-
     def test_copy_and_bounds(self) -> None:
         """Copy the dataframe independently while preserving its vector bounds."""
 
-        ds = gu.open_vector(self.aster_outlines_path)
+        ds = gu.open_vector(self.aster_outlines_path, load=True)
         ds_copy = ds.vct.copy()
 
         assert ds_copy is not ds
         assert ds.vct.bounds == gu.Vector(ds).bounds
         assert_geodataframe_equal(ds_copy, ds)
 
-    def test_methods(self) -> None:
-        """Match Vector outputs for common crop, reproject and translate methods."""
+    @pytest.mark.parametrize("as_pointcloud", [False, True])
+    @pytest.mark.parametrize(
+        "method,options",
+        [
+            ("copy", {}),
+            ("crop", {"bbox": (-1, -1, 3, 3)}),
+            ("clip", {"mask": (-1, -1, 3, 3)}),
+            ("reproject", {"crs": 4326}),
+            ("translate", {"xoff": 1, "yoff": 2}),
+            ("query", {"expression": "height > 1"}),
+        ],
+    )
+    def test_methods__metadata(self, method: str, options: dict[str, Any], as_pointcloud: bool) -> None:
+        """Checks that operations preserve custom metadata."""
 
-        # Wrap the same GeoDataFrame through both public interfaces
-        ds = gu.open_vector(self.aster_outlines_path)
-        vector = gu.Vector(ds)
+        dgpd = pytest.importorskip("dask_geopandas")
+        from dask.callbacks import Callback
 
-        # Compare each operation independently to make failures easy to locate
-        cropped_ds = ds.vct.crop(ds.vct.bounds)
-        cropped_vector = vector.crop(vector.bounds)
-        assert_geodataframe_equal(cropped_ds, cropped_vector.gdf)
+        from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
-        reproj_ds = ds.vct.reproject(crs=CRS.from_epsg(4326))
-        reproj_vector = vector.reproject(crs=CRS.from_epsg(4326))
-        assert_geodataframe_equal(reproj_ds, reproj_vector.gdf)
+        # Create dataframe with custom metadata
+        coordinates = np.arange(5, dtype=float)
+        geometries = gpd.points_from_xy(coordinates, coordinates)
+        if not as_pointcloud:
+            geometries = geometries.buffer(0.25)
+        frame = gpd.GeoDataFrame({"height": coordinates}, geometry=geometries, crs=32631)
+        frame.attrs["title"] = "survey features"
+        accessor = "pc" if as_pointcloud else "vct"
+        pd_accessor._register_dask_vector_accessor()
+        if as_pointcloud:
+            _register_dask_pointcloud_accessor()
+            frame.pc.set_data_name("height")
+        source = dgpd.from_geopandas(frame, chunksize=2, sort=False)
 
-        translated_ds = ds.vct.translate(xoff=1, yoff=2)
-        translated_vector = vector.translate(xoff=1, yoff=2)
-        assert_geodataframe_equal(translated_ds, translated_vector.gdf)
+        # Run each operation and check metadata is unchanged
+        tasks = []
+        with Callback(pretask=lambda *args: tasks.append(1)):
+            result = getattr(getattr(source, accessor), method)(**options)
+        assert not tasks
+        assert not getattr(source, accessor).is_loaded and not getattr(result, accessor).is_loaded
+        expected = getattr(getattr(frame, accessor), method)(**options)
+        actual = result.compute()
+        assert_geodataframe_equal(actual, expected)
+        assert actual.attrs["title"] == "survey features"
+        assert source._meta.attrs["title"] == "survey features"
+        assert not getattr(source, accessor).is_loaded and not getattr(result, accessor).is_loaded
 
     def test_to_file(self) -> None:
         """Write an eager accessor-backed dataframe through the Vector-compatible API."""
 
-        ds = gu.open_vector(self.aster_outlines_path)
+        ds = gu.open_vector(self.aster_outlines_path, load=True)
 
         # Use a temporary GeoPackage and reopen it through Vector for comparison
         temp_dir = tempfile.TemporaryDirectory()
@@ -250,7 +189,9 @@ class TestVectorAccessor:
 
         # Reopen the file eagerly and compare it with the projected source
         assert os.path.exists(temp_file)
-        assert gu.Vector(temp_file).vector_equal(gu.Vector(gu.open_vector(self.aster_outlines_path).to_crs(3857)))
+        assert gu.Vector(temp_file).vector_equal(
+            gu.Vector(gu.open_vector(self.aster_outlines_path, load=True).to_crs(3857))
+        )
         assert not ds.vct.is_loaded
 
     @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
@@ -269,7 +210,7 @@ class TestVectorAccessor:
 
         # Read through GeoPandas to validate the complete written dataset
         assert os.path.exists(temp_file)
-        assert_geodataframe_equal(gpd.read_parquet(temp_file), gu.open_vector(self.aster_outlines_path))
+        assert_geodataframe_equal(gpd.read_parquet(temp_file), gu.open_vector(self.aster_outlines_path, load=True))
         assert not ds.vct.is_loaded
 
     def test_cross_type_outputs_are_accessors(self) -> None:
@@ -311,7 +252,7 @@ class TestVectorAccessor:
         temp_dir = tempfile.TemporaryDirectory()
         temp_file = os.path.join(temp_dir.name, "points.gpkg")
         points.to_file(temp_file)
-        dask_points = gu.open_pointcloud(temp_file, data_name="id", chunks=2, as_type="geodataframe")
+        dask_points = gu.open_pointcloud(temp_file, data_name="id", chunks=2, as_object_type="geodataframe")
 
         # Compare lazy point-cloud output with the eager mask
         expected = vector.vct.create_mask(points=points)

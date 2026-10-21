@@ -33,8 +33,10 @@ from geoutils._dispatch import (
 from geoutils.projtools import _get_bounds_projected
 from geoutils.vector.plotting import (
     _create_axes,
+    _create_colorbar_axes,
     _get_reference_bbox,
     _plot_geodataframe,
+    _reduce_tick_label_overlap,
 )
 
 if TYPE_CHECKING:
@@ -43,7 +45,7 @@ if TYPE_CHECKING:
     from geoutils.pointcloud.base import PointCloudBase
 
 
-_AUTO_MAX_POINTS = 100_000
+_AUTO_MAX_POINTS = 10_000_000
 
 
 def _display_point_count(
@@ -156,7 +158,8 @@ def _plot_pointcloud(
         source, ax0, max_points, random_state, ref
     )
 
-    if column is None:
+    # Use the main data column unless the caller supplied one fixed color for every point
+    if column is None and "color" not in kwargs:
         column = source.data_name
 
     # We plot after GeoPandas sets the map aspect so geographic colorbars remain next to the data axes
@@ -164,19 +167,22 @@ def _plot_pointcloud(
         # Plot coordinate arrays directly (only the selected sample is computed)
         points = display._dataset.compute().pc
         x, y, _ = points.to_xyz()
-        colors = np.asarray(points._get_column_values(column))
         kwargs["s"] = kwargs.pop("markersize", kwargs.get("s", 20))
-        artist = ax0.scatter(x, y, c=colors, cmap=cmap, vmin=vmin, vmax=vmax, alpha=alpha, **kwargs)
+        if column is None:
+            artist = ax0.scatter(x, y, alpha=alpha, **kwargs)
+        else:
+            colors = np.asarray(points._get_column_values(column))
+            artist = ax0.scatter(x, y, c=colors, cmap=cmap, vmin=vmin, vmax=vmax, alpha=alpha, **kwargs)
         if points.crs is not None and points.crs.is_geographic:
             ax0.set_aspect(1 / np.cos(np.deg2rad((display_bbox.bottom + display_bbox.top) / 2)))
         else:
             ax0.set_aspect("equal")
         cax = None
-        if add_cbar:
-            colorbar = ax0.figure.colorbar(artist, ax=ax0, pad=0.02)
+        if add_cbar and column is not None:
+            cax = _create_colorbar_axes(ax0)
+            colorbar = ax0.figure.colorbar(artist, cax=cax)
             if cbar_title is not None:
                 colorbar.set_label(cbar_title)
-            cax = colorbar.ax
     else:
         dataframe = display._dataset.compute() if is_dask_dataframe(display._dataset) else display._dataset
         cax = _plot_geodataframe(
@@ -208,6 +214,7 @@ def _plot_pointcloud(
         )
         ax0.autoscale_view()
     plt.sca(ax0)
+    _reduce_tick_label_overlap(ax0)
 
     if savefig_fname:
         plt.savefig(savefig_fname)

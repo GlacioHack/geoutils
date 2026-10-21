@@ -14,9 +14,62 @@ kernelspec:
 
 # The georeferenced vector
 
-Below, a summary of the {class}`~geoutils.Vector` object and its methods.
+In GeoUtils, georeferenced vectors are exposed through two interfaces:
 
-## Object definition and attributes
+- The GeoPandas {class}`vct <geoutils.GeoDataFrameVectorAccessor>` accessor for a {class}`geopandas.GeoDataFrame`,
+- The {class}`~geoutils.Vector`.
+
+For new workflows, we **recommend using the {class}`vct <geoutils.GeoDataFrameVectorAccessor>` accessor**, and using either only accessors or only GeoUtils objects.
+
+Except for the differences outlined in {ref}`vector-accessor-comparison`, both interfaces provide the **same geospatial
+operations**, described in the feature pages linked in {ref}`feature-overview` and listed in {ref}`vector-api`.
+
+Below, we describe how to **open, create and save vectors with the accessor**, followed by the **attributes and behaviour
+of the {class}`~geoutils.Vector` object**.
+
+(vector-accessor-comparison)=
+## Accessor {class}`vct <geoutils.GeoDataFrameVectorAccessor>` versus {class}`~geoutils.Vector`
+
+The main differences are the following:
+
+1. A {class}`~geoutils.Vector`'s **geometric operations always return a {class}`~geoutils.Vector`**, while the accessor follows GeoPandas' distinction between a {class}`~geopandas.GeoSeries` and a {class}`~geopandas.GeoDataFrame`.
+
+2. A {class}`~geoutils.Vector` supports **Multiprocessing**, while the accessor supports **Dask**, allowing lazy graph building.
+
+## Vector accessor
+
+### Open and save
+
+A vector is opened as a {class}`~geopandas.GeoDataFrame` with {func}`~geoutils.open_vector`, and saved to file with
+{meth}`~geoutils.GeoDataFrameVectorAccessor.to_file`:
+
+```python
+import geoutils as gu
+
+features = gu.open_vector(gu.examples.get_path("exploradores_rgi_outlines"))
+features.vct.to_file("features.gpkg")
+```
+
+By default, the file is opened with Dask-GeoPandas in a single partition, and features are read only when needed
+(`load=False`). Passing `chunks=1000` splits the data into partitions of 1000 features, while `load=True` reads the
+data into memory with GeoPandas. The native {meth}`~geopandas.GeoDataFrame.to_file` and
+{meth}`~geopandas.GeoDataFrame.to_parquet` methods can also be used to save the vector.
+
+### Create from geometries
+
+A vector is created from geometries by constructing a {class}`~geopandas.GeoDataFrame` directly. GeoUtils operations
+are then available through its {class}`vct <geoutils.GeoDataFrameVectorAccessor>` accessor:
+
+```python
+import geopandas as gpd
+from shapely.geometry import box
+
+created = gpd.GeoDataFrame(geometry=[box(0, 0, 10, 10)], crs=32631)
+```
+
+## The {class}`~geoutils.Vector` object
+
+### Object definition and attributes
 
 A {class}`~geoutils.Vector` contains **a single main attribute**: a {class}`~geopandas.GeoDataFrame` as {attr}`~geoutils.Vector.gdf`.
 
@@ -29,16 +82,16 @@ In short, {class}`~geoutils.Vector` is a "convenience" composition class built o
 directly on the {class}`~geopandas.GeoDataFrame`. Dataframe functionalities from Pandas can be called from its {attr}`~geoutils.Vector.gdf`.
 
 ```{caution}
-The {attr}`~geoutils.Vector.bbox` attribute of a {class}`~geoutils.Vector` corresponds to the {attr}`~geopandas.GeoDataFrame.total_bounds` attribute of a
+The {attr}`~VectorBase.bbox` attribute of a {class}`~geoutils.Vector` corresponds to the {attr}`~geopandas.GeoSeries.total_bounds` attribute of a
 {class}`~geopandas.GeoDataFrame` converted to a {class}`rasterio.coords.BoundingBox`, for consistency between rasters and vectors.
 
-The equivalent of {attr}`geopandas.GeoDataFrame.bounds` (i.e., a per-feature bounds) for {class}`Vectors<geoutils.Vector>` is {attr}`~geoutils.Vector.geom_bounds`.
+The equivalent of {attr}`geopandas.GeoDataFrame.bounds <geopandas.GeoSeries.bounds>` (i.e., a per-feature bounds) for {class}`Vectors<geoutils.Vector>` is {attr}`~geoutils.Vector.geom_bounds`.
 ```
 
-## Open and save
+### Open and save
 
 A {class}`~geoutils.Vector` is opened by instantiating with either a {class}`str`, a {class}`pathlib.Path`, a {class}`geopandas.GeoDataFrame`,
-a {class}`geopandas.GeoSeries` or a {class}`shapely.Geometry`.
+a {class}`geopandas.GeoSeries` or a {external+shapely:doc}`shapely.Geometry <geometry>`.
 
 
 ```{code-cell} ipython3
@@ -52,14 +105,14 @@ vect = gu.Vector(filename_vect)
 vect
 ```
 
-Detailed information on the {class}`~geoutils.Vector` is printed using {func}`~geoutils.Vector.info`:
+Detailed information on the {class}`~geoutils.Vector` is printed using {meth}`~VectorBase.info`:
 
 ```{code-cell} ipython3
 # Print details of vector
 vect.info()
 ```
 
-A {class}`~geoutils.Vector` is saved to file by calling {func}`~geoutils.Raster.to_file` with a {class}`str` or a {class}`pathlib.Path`.
+A {class}`~geoutils.Vector` is saved to file by calling {meth}`~geoutils.Vector.to_file` with a {class}`str` or a {class}`pathlib.Path`.
 
 ```{code-cell} ipython3
 # Save vector to disk
@@ -72,22 +125,22 @@ os.remove("myvector.gpkg")
 ```
 
 ```{note}
-GeoPandas functions with the same behaviour such as {func}`geopandas.GeoDataFrame.to_file` can also be used directly on a {class}`~geoutils.Vector`,
-for example calling {func}`geoutils.Vector.to_file`.
+GeoPandas functions with the same behaviour such as {meth}`geopandas.GeoDataFrame.to_file` can also be used directly on a {class}`~geoutils.Vector`,
+for example calling {meth}`geoutils.Vector.to_file`.
 ```
 
 
-## From Shapely and GeoPandas
+### From Shapely and GeoPandas
 
 Nearly all geometric attributes and functions of GeoPandas (and sometimes, under the hood, Shapely) can be called from a {class}`~geoutils.Vector`.
 
 In {class}`~geoutils.Vector`, those have three types of behaviour:
 
-1. Methods that return a geometric output (e.g., {attr}`~geoutils.Vector.boundary` or {func}`~geoutils.Vector.symmetric_difference`), which are cast into a
+1. Methods that return a geometric output (e.g., {attr}`~geoutils.Vector.boundary` or {meth}`~geoutils.Vector.symmetric_difference`), which are cast into a
    {class}`~geoutils.Vector`,
-2. Methods that return a non-geometric series of same length as the number of features (e.g., {attr}`~geoutils.Vector.area` or {func}`~geoutils.Vector.overlaps`),
-   which can optionally be appended to the {class}`~geoutils.Vector` (instead of returning of the default {class}`pandas.Series`),
-3. Methods that return any other type of output (e.g., {func}`~geoutils.Vector.has_sindex` or {func}`~geoutils.Vector.to_feather`), for which the output is
+2. Methods that return a non-geometric series of the same length as the number of features (e.g., {attr}`~geoutils.Vector.area` or {meth}`~geoutils.Vector.overlaps`),
+   which return a {class}`pandas.Series` that can be assigned to a column of {attr}`~geoutils.Vector.gdf`,
+3. Methods that return any other type of output (e.g., {attr}`~geoutils.Vector.has_sindex` or {meth}`~geoutils.Vector.to_feather`), for which the output is
    preserved.
 
 ```{important}
@@ -95,7 +148,15 @@ See the full list of supported methods in the {ref}`dedicated section of the API
 ```
 
 These behaviours aim to simplify the analysis of vectors, removing the need to operate on many different objects due to varying function outputs
-({class}`geopandas.GeoDataFrame`, {class}`geopandas.GeoSeries`, {class}`shapely.Geometry`, {class}`pandas.Series`).
+({class}`geopandas.GeoDataFrame`, {class}`geopandas.GeoSeries`, {external+shapely:doc}`shapely.Geometry <geometry>`, {class}`pandas.Series`).
+
+```{code-cell} ipython3
+:tags: [remove-cell]
+
+# Show intentional warnings as just their type and message
+import warnings
+warnings.formatwarning = lambda message, category, *args, **kwargs: f"{category.__name__}: {message}\n"
+```
 
 ```{code-cell} ipython3
 # Example of method with geometric output
@@ -117,127 +178,15 @@ vect.area
 vect.to_json()
 ```
 
-## Reproject
+### Related features
 
-Reprojecting a {class}`~geoutils.Vector` is done through the {func}`~geoutils.Vector.reproject` function, which enforces a new {attr}`~geoutils.Vector.crs`.
+For more details on features applicable to vectors, refer to the following pages!
 
-```{important}
-As with all geospatial handling methods, the {func}`~geoutils.Vector.reproject` function can be passed a
-{class}`~geoutils.Raster` or {class}`~geoutils.Vector` as a reference to match its {class}`~geoutils.Raster.crs`.
-In that case, no other argument is necessary.
-
-See {ref}`core-match-ref` for more details.
-```
-
-The {func}`~geoutils.Vector.reproject` function can also be passed a `dst_crs` argument directly.
-
-```{code-cell} ipython3
-# Original CRS
-print(vect.crs)
-```
-
-```{code-cell} ipython3
-# Open a raster for which we want to match the CRS
-filename_rast = gu.examples.get_path("exploradores_aster_dem")
-rast = gu.Raster(filename_rast)
-# Reproject the vector to the raster's CRS
-vect_reproj = vect.reproject(rast)
-# New CRS
-print(vect_reproj.crs)
-```
-
-```{note}
-Calling {func}`geoutils.Vector.to_crs` is also possible, but mirrors GeoPandas' API (a match-reference argument cannot be passed).
-```
-
-## Crop and clip
-
-Cropping a {class}`~geoutils.Vector` with {func}`~geoutils.Vector.crop` selects features relative to a rectangular
-extent without changing their geometries.
-
-
-```{important}
-As with all geospatial handling methods, the {func}`~geoutils.Vector.crop` function can be passed a {class}`~geoutils.Raster` or
-{class}`~geoutils.Vector` as a reference to match. In that case, no other argument is necessary.
-
-See {ref}`core-match-ref` for more details.
-```
-
-The {func}`~geoutils.Vector.crop` function can also be passed a {class}`list` or {class}`tuple` of bounds (`xmin`,
-`ymin`, `xmax`, `ymax`). Unloaded vectors defer this selection until their data are requested.
-
-By default, crop returns a new {class}`~geoutils.Vector` containing every unchanged geometry that intersects the
-extent. Pass `mode="within"` to keep only geometries fully contained by it. Use {func}`~geoutils.Vector.clip` to cut
-intersecting geometries exactly at a mask boundary.
-
-```{code-cell} ipython3
-# Select fully contained features, or cut geometries to the same extent
-bbox = (-73.5, -46.6, -73.4, -46.5)
-vect_crop = vect.crop(bbox, mode="within")
-vect_clip = vect.clip(bbox)
-```
-
-## Rasterize
-
-Rasterizing a {class}`~geoutils.Vector` to a {class}`~geoutils.Raster` is done through the {func}`~geoutils.Vector.rasterize` function, which converts vector
-geometries into gridded values.
-
-By default, the value of index of the {class}`~geoutils.Vector`'s {attr}`~geoutils.Vector.gdf` is burned on a raster grid for each respective geometry.
-
-```{note}
-If an `out_value` of `0` (default) and `in_value` value of `1` are passed (i.e., boolean output), {func}`~geoutils.Vector.rasterize` will automatically cast
-the output to a raster mask, i.e a boolean {class}`~geoutils.Raster`.
-```
-
-To define the grid on which to rasterize, a reference {class}`~geoutils.Raster` to match can be passed. Alternatively, a {attr}`~geoutils.Raster.res` or
-{attr}`~geoutils.Raster.shape` can be passed to define the grid.
-
-```{code-cell} ipython3
-# Rasterize all geometries by index
-rasterized_vect = vect.rasterize(rast)
-rasterized_vect
-```
-
-## Create a raster mask
-
-Creating a raster mask, i.e. a boolean {class}`~geoutils.Raster`, from a {class}`~geoutils.Vector` is done through the {func}`~geoutils.Vector.create_mask`
-function, which converts vector geometries into boolean gridded values for all features.
-
-Similarly as for {func}`~geoutils.Vector.rasterize`, the function expects parameters to define the grid on which to rasterize the output. A reference
-{class}`~geoutils.Raster` to match can be passed or, alternatively, individual parameters.
-
-```{code-cell} ipython3
-# Create a mask of all geometries on the raster grid
-mask_vect = vect.create_mask(rast)
-mask_vect
-```
-
-## Proximity
-
-Computing proximity from a {class}`~geoutils.Vector` is done through by the {func}`~geoutils.Vector.proximity` function, which computes the closest distance
-to any geometry in the {class}`~geoutils.Vector`.
-
-Similarly as for {func}`~geoutils.Vector.rasterize`, the function expects parameters to define the grid on which to rasterize the output. A reference
-{class}`~geoutils.Raster` to match can be passed or, alternatively, individual parameters.
-
-```{code-cell} ipython3
-# Compute proximity from vector on the raster grid
-proximity_to_vect = vect.proximity(rast)
-proximity_to_vect
-```
-
-## Metric buffering
-
-Computing a buffer accurately in a local metric projection is done through the {func}`~geoutils.Vector.buffer_metric` function, which computes the buffer in
-a local UTM zone.
-
-```{code-cell} ipython3
-:tags: [hide-output]
-
-# Compute buffer of 100 m on the vector
-buffered_vect = vect.buffer_metric(100)
-buffered_vect
-```
-
-Additionally, to prevent buffers from overlapping, the {func}`~geoutils.Vector.buffer_without_overlap` function uses Voronoi polygons to reconcile the buffer
-output of each feature.
+| Topic | Documentation |
+|---|---|
+| CRS, bounds, footprints, and local metric projections | {ref}`referencing` |
+| Reprojection, cropping, clipping, rasterization, and masking | {ref}`transformations` |
+| Proximity and metric buffering | {ref}`proximity` |
+| Match-reference arguments | {ref}`core-match-ref` |
+| Lazy and out-of-memory execution | {ref}`scalability-index` |
+| Complete GeoUtils method and attribute listing | {ref}`vector-api` |

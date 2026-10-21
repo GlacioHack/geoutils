@@ -378,11 +378,11 @@ class TestRandomFieldChunked:
                 assert np.allclose(saved, reference, equal_nan=True)
 
     @pytest.mark.parametrize("backend", ["gstools", "gpytorch"])
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_random_field__point_dask_mp_equal(
         self,
         pointcloud_file: Any,
-        as_type: Literal["dataarray", "geodataframe"],
+        as_object_type: Literal["dataarray", "geodataframe"],
         tmp_path: Path,
         backend: Literal["gstools", "gpytorch"],
     ) -> None:
@@ -419,7 +419,7 @@ class TestRandomFieldChunked:
             data_name=dask_points_column,
             columns="all",
             chunks=dask_points_chunks,
-            as_type=as_type,
+            as_object_type=as_object_type,
         )
 
         lazy = dask_points.pc.random_field(
@@ -455,7 +455,7 @@ class TestRandomFieldChunked:
             gpytorch_inducing_points=inducing_points,
         )
         assert all(
-            isinstance(result, xr.DataArray if as_type == "dataarray" else dask_geopandas.GeoDataFrame)
+            isinstance(result, xr.DataArray if as_object_type == "dataarray" else dask_geopandas.GeoDataFrame)
             for result in (lazy, rechunked, requested, array_lazy)
         )
         assert hasattr(lazy, "compute") and hasattr(rechunked, "compute") and hasattr(requested, "compute")
@@ -467,7 +467,9 @@ class TestRandomFieldChunked:
         file_points = gu.PointCloud(source_path, data_name=points.data_name)
         from geoutils.pointcloud.loading import open_pointcloud
 
-        file_dataframe = open_pointcloud(str(source_path), data_name=points.data_name, chunks=4, as_type=as_type)
+        file_dataframe = open_pointcloud(
+            str(source_path), data_name=points.data_name, chunks=4, as_object_type=as_object_type
+        )
         file_lazy = file_dataframe.pc.random_field(
             structure,
             predictors={"quality": "quality"},
@@ -476,7 +478,7 @@ class TestRandomFieldChunked:
             backend=backend,
             gpytorch_inducing_points=inducing_points,
         )
-        assert isinstance(file_lazy, xr.DataArray if as_type == "dataarray" else dask_geopandas.GeoDataFrame)
+        assert isinstance(file_lazy, xr.DataArray if as_object_type == "dataarray" else dask_geopandas.GeoDataFrame)
         assert not file_points.is_loaded and not file_lazy.pc.is_loaded
         with MpCluster({"nb_workers": 2}) as cluster:
             config = MultiprocConfig(chunks=4, outfile=str(tmp_path / "field.gpkg"), cluster=cluster)
@@ -567,8 +569,10 @@ class TestRandomFieldChunked:
         assert np.allclose(np.asarray(lazy.compute()), np.asarray(expected), equal_nan=True)
 
     @pytest.mark.skipif(find_spec("gstools") is None, reason="Requires GSTools")
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
-    def test_random_field__point_default(self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path) -> None:
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
+    def test_random_field__point_default(
+        self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
+    ) -> None:
         """Checks that Dask point chunks write field values to geometry Z when no data column exists."""
 
         # Create a synthetic point cloud
@@ -586,7 +590,7 @@ class TestRandomFieldChunked:
 
         source_path = tmp_path / "points.gpkg"
         points.to_file(source_path)
-        dask_points = open_pointcloud(str(source_path), data_name=None, chunks=3, as_type=as_type)
+        dask_points = open_pointcloud(str(source_path), data_name=None, chunks=3, as_object_type=as_object_type)
         lazy = dask_points.pc.random_field(structure, random_state=3, chunksizes=3)
         assert not lazy.pc.is_loaded
         result = lazy.compute().pc.to_geoutils()
@@ -688,9 +692,9 @@ class TestRandomFieldErrors:
         with pytest.raises(ValueError, match="Multiprocessing raster fields require a Raster input"):
             source.rst.random_field(structure, mp_config=config)
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_random_field__error_multiproc_dask_points(
-        self, as_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, tmp_path: Path
+        self, as_object_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, tmp_path: Path
     ) -> None:
         """Checks an error is raised for MP on Dask input."""
 
@@ -706,7 +710,7 @@ class TestRandomFieldErrors:
             data_name=dask_points_column,
             columns="all",
             chunks=dask_points_chunks,
-            as_type=as_type,
+            as_object_type=as_object_type,
         )
 
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])

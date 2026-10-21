@@ -148,10 +148,29 @@ except ImportError:
 #####################################
 
 
+def _raster_overview_metadata(source: rio.io.DatasetReader, overview_level: int | None = None) -> dict[str, Any]:
+    """Read available overview metadata."""
+
+    factors = source.overviews(1)
+    selected_level = -1 if overview_level is None else int(overview_level)
+    selected_factor = factors[selected_level] if selected_level >= 0 else 1
+    metadata: dict[str, Any] = {
+        "overview_factors": factors,
+        "overview_selected_level": selected_level,
+        "overview_selected_factor": selected_factor,
+    }
+
+    # Include creation method only if it exists
+    resampling = source.tags(ns="rio_overview").get("resampling")
+    if resampling is not None:
+        metadata["overview_resampling"] = resampling
+    return metadata
+
+
 def _overview_level_for_downsample(source: rio.io.DatasetReader, downsample: float) -> int | None:
     """Return the closest suitable stored overview level for a downsampling factor."""
 
-    # Match GDAL's nearest-neighbor overview selection by allowing up to 20% oversampling
+    # Match GDAL nearest-neighbor overview selection by allowing up to 20% oversampling
     overview_level = None
     for level, overview_factor in enumerate(source.overviews(1)):
         if overview_factor > downsample * 1.2:
@@ -307,6 +326,11 @@ def _check_reproj_nodata_dtype(
     # --- Set source nodata if provided -- #
     if force_source_nodata is None:
         src_nodata = source_raster.nodata
+        encoding = source_raster._obj.encoding if source_raster._obj is not None else {}
+        decoded_packing = encoding.get("scale_factor", 1) != 1 or encoding.get("add_offset", 0) != 0
+        if encoding.get("_FillValue") is not None and decoded_packing:
+            # Xarray values are decoded; an encoded fill value can also be a valid physical value
+            src_nodata = np.nan
     else:
         src_nodata = force_source_nodata
         # Raise warning if a different nodata value exists for this raster than the forced one (not None)
@@ -1629,7 +1653,8 @@ def _reproject(
 
     # 4/ Check if reprojection is needed, otherwise return source raster with warning
     if not is_operator and _is_reproj_needed(src_shape=source_raster.shape, reproj_kwargs=reproj_kwargs):
-        if (nodata == src_nodata) or (nodata is None):
+        original_nodata = source_raster.nodata if source_raster._is_xr and force_source_nodata is None else src_nodata
+        if (nodata == original_nodata) or (nodata is None):
             if not silent:
                 warnings.warn("Output projection, bounds and grid size are identical -> returning self (not a copy!)")
             return True, None, None, None, None
@@ -1643,6 +1668,13 @@ def _reproject(
             return True, None, None, None, None
 
     # 5/ Perform reprojection
+    if (
+        source_raster._is_xr
+        and np.issubdtype(np.dtype(dtype), np.floating)
+        and (src_nodata is None or np.isnan(src_nodata))
+    ):
+        # Missing output pixels use NaN until the encoded nodata value is applied when writing
+        reproj_kwargs["dst_nodata"] = np.nan
     reproj_kwargs.update({"num_threads": n_threads, "warp_mem_limit": memory_limit})
     # Cannot use Multiprocessing backend and Dask backend simultaneously
     mp_backend = mp_config is not None
@@ -1718,7 +1750,7 @@ def _reproject(
         reproj_kwargs = {**(transformer_options or {}), **reproj_kwargs}
         dst_arr = _rio_reproject(src_arr=source_raster.data, reproj_kwargs=reproj_kwargs)
 
-    result = False, dst_arr, reproj_kwargs["dst_transform"], reproj_kwargs["dst_crs"], reproj_kwargs["dst_nodata"]
+    result = False, dst_arr, reproj_kwargs["dst_transform"], reproj_kwargs["dst_crs"], nodata
     return result
 
 
@@ -1777,7 +1809,7 @@ def _crop(
     if source_raster._is_xr:
         (rowmin, rowmax), (colmin, colmax) = final_window.toranges()
         assert source_raster._obj is not None
-        crop_img = source_raster._obj.isel(y=slice(rowmin, rowmax), x=slice(colmin, colmax))
+        crop_img = source_raster._obj.isel(y=slice(rowmin, rowmax), x=slice(colmin, colmax)).copy(deep=False)
 
     elif source_raster.is_loaded:
         # In case data is loaded on disk, can extract directly from np array
@@ -1996,7 +2028,8 @@ def _clip(
 
     if source_raster._is_xr:
         assert source_raster._obj is not None
-        return source_raster._obj.where(inside)
+        masked = source_raster._obj.where(inside)
+        return source_raster.copy(new_array=masked.data, deep=False)
 
     clipped = _apply_clip_geometry(source_raster.data, inside=inside, nodata=source_raster.nodata)
     return source_raster.copy(new_array=clipped)

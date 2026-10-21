@@ -740,6 +740,14 @@ def _resampling_point_output(source_raster: RasterBase, x: NDArrayNum, y: NDArra
 
     from geoutils.pointcloud import PointCloud
 
+    # Construct numeric coordinates directly when the accessor's configured output is Xarray
+    output_type = source_raster._resolve_pointcloud_output_type()
+    if output_type != "geodataframe":
+        from geoutils.pointcloud.xr_accessor import DataArrayPointCloudAccessor
+
+        points = DataArrayPointCloudAccessor.from_xyz(x, y, values, crs=source_raster.crs)
+        return source_raster._cast_pointcloud_output(points, pointcloud_return_type=output_type)
+
     if not hasattr(values, "compute"):
         return source_raster._cast_pointcloud_output(PointCloud.from_xyz(x, y, values, crs=source_raster.crs))
 

@@ -238,8 +238,8 @@ def _gpytorch_inducing_fields(
             fields.append(None)
             continue
         assert isinstance(correlation, VariogramModel)
-        torch = import_optional("torch", extra_name="gp")
-        gpytorch = import_optional("gpytorch", extra_name="gp")
+        torch = import_optional("torch")
+        gpytorch = import_optional("gpytorch")
 
         # A regular inducing grid covers the complete output extent, including rotated raster corners
         selected_bounds = (
@@ -724,7 +724,7 @@ def _chunked_point_fields_dask(
             columns=list(like._nongeo_columns),
             chunks=chunksize,
             downsample=getattr(like, "_downsample", 1),
-            as_type="geodataframe",
+            as_object_type="geodataframe",
         )
     else:
         dask_geopandas = import_optional("dask_geopandas")

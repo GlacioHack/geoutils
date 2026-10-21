@@ -48,6 +48,55 @@ def _create_axes(ax: matplotlib.axes.Axes | Literal["new"] | None) -> matplotlib
     raise ValueError("ax must be a matplotlib.axes.Axes instance, 'new' or None.")
 
 
+def _create_colorbar_axes(ax: matplotlib.axes.Axes) -> matplotlib.axes.Axes:
+    """Create a colorbar axes beside a map without changing the map axes size."""
+
+    return ax.inset_axes((1.02, 0, 0.05, 1))
+
+
+def _tick_labels_overlap(ax: matplotlib.axes.Axes, axis_name: Literal["x", "y"]) -> bool:
+    """Check whether adjacent visible tick labels overlap along an axes dimension."""
+
+    labels = ax.get_xticklabels() if axis_name == "x" else ax.get_yticklabels()
+    visible_labels = [label for label in labels if label.get_visible() and label.get_text()]
+    if len(visible_labels) < 2:
+        return False
+
+    # Compare neighboring labels in display coordinates, where their rendered text size is known
+    renderer = ax.figure.canvas.get_renderer()
+    label_boxes = [label.get_window_extent(renderer=renderer) for label in visible_labels]
+    coordinate = "x0" if axis_name == "x" else "y0"
+    label_boxes.sort(key=lambda box: getattr(box, coordinate))
+    return any(first.overlaps(second) for first, second in zip(label_boxes[:-1], label_boxes[1:]))
+
+
+def _reduce_tick_label_overlap(ax: matplotlib.axes.Axes) -> None:
+    """Reduce automatic major tick frequency until adjacent labels no longer overlap."""
+
+    from matplotlib.ticker import AutoLocator, LinearLocator, MaxNLocator
+
+    # Lay out the artists without rasterizing the complete map whenever Matplotlib supports it
+    draw_figure = getattr(ax.figure, "draw_without_rendering", ax.figure.canvas.draw)
+    draw_figure()
+    axis_names: tuple[Literal["x", "y"], ...] = ("x", "y")
+    for axis_name, axis in zip(axis_names, (ax.xaxis, ax.yaxis)):
+        if not isinstance(axis.get_major_locator(), AutoLocator):
+            continue
+
+        # Try progressively fewer intervals while keeping at least two labeled positions
+        visible_labels = [label for label in axis.get_ticklabels() if label.get_visible() and label.get_text()]
+        for maximum_intervals in range(len(visible_labels) - 2, 0, -1):
+            if not _tick_labels_overlap(ax, axis_name):
+                break
+            axis.set_major_locator(MaxNLocator(nbins=maximum_intervals, min_n_ticks=2))
+            draw_figure()
+
+        # MaxNLocator may keep three rounded ticks even with one requested interval; fall back to the two limits
+        if _tick_labels_overlap(ax, axis_name):
+            axis.set_major_locator(LinearLocator(numticks=2))
+            draw_figure()
+
+
 def _get_reference_bbox(reference: Any) -> rio.coords.BoundingBox | None:
     """Return the total bounding box of a georeferenced plotting reference."""
 
@@ -82,8 +131,8 @@ def _plot_geodataframe(
     """
     Plot a GeoDataFrame and return the continuous colorbar axes when one is created.
 
-    GeoPandas creates its colorbar after setting the map aspect, which keeps the colorbar next to geographic plots.
-    The new figure axes are captured so Vector.plot() and PointCloud.plot() can retain their return-axes behavior.
+    The default continuous colorbar uses axes-relative bounds so its height and gap follow the map axes when their
+    extent changes. It does not resize the map axes. An explicitly supplied colorbar axes is kept unchanged.
     """
 
     # Prepare GeoPandas legend options without changing a dictionary supplied by the caller
@@ -95,7 +144,7 @@ def _plot_geodataframe(
     if cbar_title is not None:
         legend_kwds["label"] = cbar_title
 
-    # Use a two-percent continuous colorbar gap while leaving categorical legend options untouched
+    # Identify continuous colorbars while leaving categorical legend options untouched
     continuous = (
         legend
         and column is not None
@@ -104,13 +153,19 @@ def _plot_geodataframe(
         and not kwargs.get("categorical", False)
         and kwargs.get("scheme") is None
     )
-    if continuous:
-        legend_kwds.setdefault("pad", 0.02)
 
-    # Let GeoPandas create the colorbar against the final map aspect unless explicit axes were supplied
+    # Attach the bar to the map without changing the space allocated to the map axes
     cax = kwargs.pop("cax", None)
-    previous_axes = list(ax.figure.axes)
-    dataframe.plot(
+    if cax is None and continuous:
+        cax = _create_colorbar_axes(ax)
+
+    # Keep boolean data continuous for plotting so masks use a colorbar instead of GeoPandas' categorical legend
+    plot_dataframe = dataframe
+    if column is not None and column in dataframe.columns and pd.api.types.is_bool_dtype(dataframe[column]):
+        plot_dataframe = dataframe.assign(**{column: dataframe[column].astype("uint8")})
+
+    # Draw the geometries and let GeoPandas populate the prepared colorbar or a categorical legend
+    plot_dataframe.plot(
         ax=ax,
         cax=cax,
         column=column,
@@ -122,9 +177,6 @@ def _plot_geodataframe(
         legend_kwds=legend_kwds if legend else None,
         **kwargs,
     )
-    if cax is None and continuous:
-        added_axes = [figure_axes for figure_axes in ax.figure.axes if figure_axes not in previous_axes]
-        cax = added_axes[-1] if added_axes else None
 
     # Apply the requested transparency to a continuous colorbar created by GeoPandas
     if cax is not None and alpha is not None:

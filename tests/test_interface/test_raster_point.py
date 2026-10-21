@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ import numpy as np
 import pytest
 import rasterio as rio
 import xarray as xr
+from affine import Affine
 from numpy.typing import NDArray
 from rasterio.transform import from_origin
 from shapely.geometry import Point
@@ -352,6 +354,40 @@ class TestRasterPoint:
             raster.to_pointcloud(**options)
 
 
+class TestRasterPointArrayChunked:
+    """Test module for Dask point conversion when some optional dependencies are missing."""
+
+    @pytest.mark.parametrize("subsample", [1, 5])
+    def test_to_pointcloud__multiple_opt_dep(self, subsample: int, monkeypatch: pytest.MonkeyPatch) -> None:
+        """
+        Checks that to_pointcloud() works properly when Dask-GeoPandas, LasPy and PyArrow are missing.
+
+        We use monkeypatch to hide Dask-GeoPandas, LasPy and PyArrow while Dask remains available.
+        We need this test because CI only tests environments with all optional dependencies or none.
+        """
+
+        # Make the optional geometry and file readers unavailable
+        pytest.importorskip("dask")
+        for other in ("dask_geopandas", "laspy", "pyarrow"):
+            monkeypatch.setitem(sys.modules, other, None)
+
+        # Split raster rows/columns into chunks of 2/2/1 and 3/3/1
+        # Shorter edge chunks help reveal missing points or changes in their order
+        source = gu.raster.from_array(np.arange(35.0).reshape(5, 7), Affine(1, 0, 0, 0, -1, 5), 32631)
+        lazy = source.chunk({"y": 2, "x": 3})
+        options = {"subsample": subsample, "random_state": 42, "pointcloud_return_type": "dataarray"}
+
+        # Convert the loaded and chunked rasters with the same options
+        expected = source.rst.to_pointcloud(**options)
+        result = lazy.rst.to_pointcloud(**options)
+
+        # Compare the points and check that the Dask input and result stay lazy
+        assert source.rst.is_loaded and expected.pc.is_loaded
+        assert not lazy.rst.is_loaded and not result.pc.is_loaded
+        xr.testing.assert_identical(result.compute(scheduler="synchronous"), expected)
+        assert not lazy.rst.is_loaded and not result.pc.is_loaded
+
+
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestRasterPointChunked:
     """
@@ -397,7 +433,8 @@ class TestRasterPointChunked:
 
         # 3/ Convert every backend with the same options and matching 3 x 4 chunks
         expected = eager.to_pointcloud(**options)
-        dask_output = dask_source.rst.to_pointcloud(**options)
+        # Choose GeoPandas output for the geometry comparisons below
+        dask_output = dask_source.rst.to_pointcloud(**options, pointcloud_return_type="geodataframe")
         point_output = tmp_path / f"points-{subsample}-{skip_nodata}.gpkg"
         with MpCluster({"nb_workers": 2}) as cluster:
             multiprocessing_output = multiprocessing_source.to_pointcloud(
@@ -478,7 +515,7 @@ class TestRasterPointChunked:
         expected_values = expected["b1"].to_numpy()
         assert expected_values.dtype == np.dtype("float64")
         assert np.isin(expected_values, values).all()
-        np.testing.assert_array_equal(np.sort(dask_result["b1"].to_numpy()), np.sort(expected_values))
+        np.testing.assert_array_equal(np.sort(dask_result.pc.data), np.sort(expected_values))
         np.testing.assert_array_equal(np.sort(multiprocessing_result["b1"].to_numpy()), np.sort(expected_values))
         assert not multiprocessing_source.is_loaded
 
@@ -552,7 +589,7 @@ class TestRasterPointChunked:
         values[2, 4] = np.nan
         raster = gu.DataArrayRasterAccessor.from_array(values, from_origin(0, 5, 1, 1), 32633)
         lazy = raster.chunk({"x": 3, "y": 2})
-        options = {"backend": "xarray", "subsample": subsample, "random_state": 42}
+        options = {"pointcloud_return_type": "dataarray", "subsample": subsample, "random_state": 42}
 
         # Count selected cells as needed, while point values and coordinates remain lazy
         expected = raster.rst.to_pointcloud(**options)
@@ -573,7 +610,7 @@ class TestRasterPointChunked:
         transform = Affine(2.1, 0.3, 500000.1, 0.2, -1.7, 10000.2)
         raster = gu.Raster.from_array(np.arange(77).reshape(7, 11).astype(np.int16), transform, 32633)
         lazy = raster.to_xarray().chunk(y=3, x=4)
-        options = {"backend": "xarray", "force_pixel_offset": offset}
+        options = {"pointcloud_return_type": "dataarray", "force_pixel_offset": offset}
 
         # The full conversion uses raw band arrays without an index shuffle
         expected = raster.to_pointcloud(**options)

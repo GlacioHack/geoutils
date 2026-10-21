@@ -13,9 +13,7 @@ from shapely.geometry import LineString, MultiLineString, MultiPolygon, Polygon
 
 from geoutils.multiproc.chunked import ChunkedGeoGrid, GeoGrid, cached_cumsum
 
-# -----------------------------------------------------------------------------
 # Plotting utilities
-# -----------------------------------------------------------------------------
 
 
 def _geom_to_lines(geom) -> list[np.ndarray]:
@@ -182,12 +180,10 @@ def _add_chunk_size_arrows(
     """
     left, bottom, right, top = chunk.bounds
 
-    # Chunk corners in data coordinates
     p_bl = np.array([left, bottom])
     p_br = np.array([right, bottom])
     p_tl = np.array([left, top])
 
-    # Transform to display coordinates
     to_disp = ax.transData.transform
     to_data = ax.transData.inverted().transform
 
@@ -195,11 +191,10 @@ def _add_chunk_size_arrows(
     br_d = to_disp(p_br)
     tl_d = to_disp(p_tl)
 
-    # Visual chunk size in display units
     width_d = br_d[0] - bl_d[0]
     height_d = tl_d[1] - bl_d[1]
 
-    # Offsets/padding in display units, so appearance is consistent
+    # Scale arrow spacing to the smaller displayed chunk dimension
     ref_d = min(abs(width_d), abs(height_d))
     off_d = 0.25 * ref_d
     pad_d = 0.15 * ref_d
@@ -235,7 +230,7 @@ def _add_chunk_size_arrows(
         color=color,
     )
 
-    # Vertical arrow left of chunk (in display coordinates)
+    # Place the vertical arrow to the left of the chunk
     v0_d = np.array([bl_d[0] - off_d, bl_d[1] - pad_d])
     v1_d = np.array([bl_d[0] - off_d, tl_d[1] + pad_d])
 
@@ -289,7 +284,6 @@ def _add_line_legend(
     y_top = -0.40
     y_bot = -0.58
 
-    # Thin pixel line
     ax.plot(
         [x0, x2],
         [y_top, y_top],
@@ -313,7 +307,6 @@ def _add_line_legend(
         zorder=3,
     )
 
-    # Thick source chunk line (blue)
     ax.plot(
         [x0, x1],
         [y_bot, y_bot],
@@ -325,7 +318,6 @@ def _add_line_legend(
         zorder=1,
     )
 
-    # Thick destination chunk line (orange)
     ax.plot(
         [x1 + 0.01, x2 + 0.01],
         [y_bot, y_bot],
@@ -385,9 +377,6 @@ def plot_reprojection_chunk_diagram(
     Left: Source raster with source chunks in source CRS.
     Right: Same source chunks projected to destination CRS, with destination chunk grid overlaid.
     """
-    # -------------------------------------------------------------------------
-    # Styling
-    # -------------------------------------------------------------------------
     source_fill_alpha = 0.07
     source_chunk_alpha = 0.22
     intersect_alpha = 0.58
@@ -400,9 +389,7 @@ def plot_reprojection_chunk_diagram(
     neutral_color = "#333333"
     pixel_grid_color = "0.75"
 
-    # -------------------------------------------------------------------------
-    # Geometries
-    # -------------------------------------------------------------------------
+    # Prepare footprints in the source and destination CRSs
     src_full = source_chunked_grid.grid.footprint
     src_blocks = source_chunked_grid.get_block_footprints()
 
@@ -412,9 +399,6 @@ def plot_reprojection_chunk_diagram(
     src_full_in_dst = source_chunked_grid.grid.footprint_projected(destination_chunked_grid.grid.crs)
     src_blocks_in_dst = source_chunked_grid.get_block_footprints(crs=destination_chunked_grid.grid.crs)
 
-    # -------------------------------------------------------------------------
-    # Create figure
-    # -------------------------------------------------------------------------
     fig, axes = plt.subplots(
         1,
         2,
@@ -423,9 +407,7 @@ def plot_reprojection_chunk_diagram(
     )
     ax0, ax1 = axes
 
-    # -------------------------------------------------------------------------
     # Left panel: source raster
-    # -------------------------------------------------------------------------
     _add_rectilinear_grid(
         ax0,
         source_chunked_grid.grid,
@@ -500,9 +482,7 @@ def plot_reprojection_chunk_diagram(
         thick_color_2=destination_color,
     )
 
-    # -------------------------------------------------------------------------
-    # Right panel: projected source + destination raster
-    # -------------------------------------------------------------------------
+    # Right panel: source chunks in the destination CRS
     _add_rectilinear_grid(
         ax1,
         destination_chunked_grid.grid,
@@ -595,16 +575,13 @@ def plot_reprojection_chunk_diagram(
 
     _set_ax_extent_from_gdfs(ax1, [src_full_in_dst, src_blocks_in_dst, dst_full, dst_blocks])
 
-    # -------------------------------------------------------------------------
-    # Annotation for highlighted destination chunk
-    # -------------------------------------------------------------------------
+    # Label the source chunks needed by the highlighted destination chunk
     n_intersections = len(src_intersect)
     target = dst_blocks_one.geometry.iloc[0].centroid
     tx, ty = target.x, target.y
 
     from matplotlib.offsetbox import AnnotationBbox, HPacker, TextArea, VPacker
 
-    # Build colored text pieces
     line1 = HPacker(
         children=[
             TextArea("Destination chunk", textprops=dict(color=destination_color, fontsize=9)),
@@ -665,7 +642,7 @@ def plot_reprojection_chunk_diagram(
 
     ax1.add_artist(ann)
 
-    # Ensure annotation is above the chunk polygons
+    # Keep the annotation and its arrow above the chunk polygons
     ann.set_zorder(20)
 
     if ann.arrow_patch is not None:
@@ -675,9 +652,6 @@ def plot_reprojection_chunk_diagram(
     if ann.patch is not None:
         ann.patch.set_zorder(20)
 
-    # -------------------------------------------------------------------------
-    # Panel labels
-    # -------------------------------------------------------------------------
     ax1.text(
         0.5,
         1.01,
@@ -703,13 +677,10 @@ def plot_reprojection_chunk_diagram(
         alpha=0.95,
     )
 
-    # -------------------------------------------------------------------------
-    # Grouped title + underline + reprojection arrow
-    # -------------------------------------------------------------------------
     src_crs = source_chunked_grid.grid.crs.to_epsg()
     dst_crs = destination_chunked_grid.grid.crs.to_epsg()
 
-    # Finalize layout before placing figure-level decorations
+    # Resolve axes positions before placing the title and arrow
     fig.canvas.draw()
 
     pos_left = ax0.get_position()
@@ -719,7 +690,6 @@ def plot_reprojection_chunk_diagram(
     y_text = pos_left.y1 + 0.085
     y_line = pos_left.y1 + 0.077
 
-    # Grey grouped title
     fig.text(
         x_center,
         y_text,
@@ -731,7 +701,6 @@ def plot_reprojection_chunk_diagram(
         color="0.35",
     )
 
-    # Underline spanning both panels
     line = LineCollection(
         [np.array([[pos_left.x0, y_line], [pos_right.x1, y_line]])],
         colors="0.6",
@@ -742,7 +711,6 @@ def plot_reprojection_chunk_diagram(
     )
     fig.add_artist(line)
 
-    # Curved arrow and label between panels
     label = f"EPSG:{src_crs} → EPSG:{dst_crs}\nResolution × 2"
 
     arrow = FancyArrowPatch(
@@ -787,9 +755,6 @@ def plot_reprojection_chunk_diagram(
         bbox=bbox_info,
         zorder=10,
     )
-    # -------------------------------------------------------------------------
-    # Final layout polish
-    # -------------------------------------------------------------------------
     fig.subplots_adjust(
         left=0,
         right=1,
@@ -801,12 +766,7 @@ def plot_reprojection_chunk_diagram(
     return fig, axes
 
 
-# -----------------------------------------------------------------------------
-# Main figure
-# -----------------------------------------------------------------------------
-
-# Source grid in a projected CRS, with a fairly large extent to accentuate
-# visible deformation after reprojection to geographic coordinates.
+# Use a broad projected extent to make the CRS deformation visible
 src_grid = GeoGrid(
     transform=rio.transform.from_origin(
         west=350_000,
@@ -818,26 +778,21 @@ src_grid = GeoGrid(
     crs=rio.crs.CRS.from_epsg(32633),  # UTM 33N
 )
 
-# Regular chunking for a cleaner schematic
-# Use chunk sizes divisible by 2 so the destination chunking can be scaled
-# consistently with the resolution change.
+# Use even chunk sizes so they can be halved on the coarser grid
 src_chunks = (
     (4, 4, 4, 4, 4),
     (4, 4, 4, 4, 4),
 )
 src_chunked = ChunkedGeoGrid(grid=src_grid, chunks=src_chunks)
 
-# Destination grid: same extent, but 2x coarser resolution in both dimensions
-# Since the source is 20x20 pixels, the destination becomes 10x10 pixels.
+# Reproject the 20 × 20 source onto a 10 × 10 geographic grid
 dst_grid = build_demo_destination_grid(
     source_grid=src_grid,
     dst_crs=rio.crs.CRS.from_epsg(4326),
     dst_shape=(10, 10),
 )
 
-# Scale chunk sizes with the resolution change so chunk footprints remain
-# approximately comparable between source and destination.
-# Source chunk size of 4x4 so we'll have a destination chunk size of 2x2 px
+# Match source chunk footprints with 2 × 2 destination chunks
 dst_chunks = (
     (2, 2, 2, 2, 2),
     (2, 2, 2, 2, 2),

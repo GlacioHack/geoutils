@@ -353,6 +353,7 @@ def _grid_from_points(
     min_points: int,
     nodata_propagation: NodataPropagation,
     engine: Literal["scipy", "numba"] = "scipy",
+    max_points: int | None = None,
 ) -> NDArrayNum:
     """
     Grid onto raster from nearby points with a custom Interpolator/Reducer.
@@ -374,6 +375,7 @@ def _grid_from_points(
         res_y=res_y,
         radius=radius,
         min_points=min_points,
+        max_points=max_points,
     )
 
     # 2/ Leave cells without selected points as NaN, then fill the cells we can calculate

@@ -26,6 +26,7 @@ import pathlib
 import tempfile
 from collections.abc import Iterable
 from contextlib import ExitStack
+from functools import partial
 from typing import Any, Literal
 
 import geopandas as gpd
@@ -96,6 +97,8 @@ def _point_parquet_metadata(filename: str | pathlib.Path) -> dict[str, Any]:
     count = 0
     extents = []
     row_groups = []
+    null_columns: set[str] = set()
+    unknown_null_columns: set[str] = set()
     metadata = None
     schema = None
     for path in _parquet_files(filename):
@@ -151,6 +154,19 @@ def _point_parquet_metadata(filename: str | pathlib.Path) -> dict[str, Any]:
                 for group in range(file.metadata.num_row_groups)
             )
 
+            # Integer and boolean arrays need a different dtype when their rows contain nulls
+            for group in range(file.metadata.num_row_groups):
+                row_group = file.metadata.row_group(group)
+                if row_group.num_rows == 0:
+                    continue
+                for column_index in range(row_group.num_columns):
+                    column = row_group.column(column_index)
+                    statistics = column.statistics
+                    if statistics is None or statistics.null_count is None:
+                        unknown_null_columns.add(column.path_in_schema)
+                    elif statistics.null_count > 0:
+                        null_columns.add(column.path_in_schema)
+
             # Native coords stats give a complete extent even when the optional file bbox is absent
             if "bbox" not in geometry and geometry["encoding"] == "point":
                 axis_statistics = {"x": [], "y": []}
@@ -182,21 +198,42 @@ def _point_parquet_metadata(filename: str | pathlib.Path) -> dict[str, Any]:
         extent = [bounds[:, 0].min(), bounds[:, 1].min(), bounds[:, 2].max(), bounds[:, 3].max()]
     else:
         extent = [np.nan] * 4
-    metadata.update(point_count=count, bounds=BoundingBox(*extent), schema=schema, row_groups=row_groups)
+    metadata.update(
+        point_count=count,
+        bounds=BoundingBox(*extent),
+        schema=schema,
+        row_groups=row_groups,
+        null_columns=null_columns,
+        unknown_null_columns=unknown_null_columns,
+    )
     return metadata
 
 
-def _read_point_parquet_group(filename: str, group: int, geometry_name: str, columns: list[str]) -> dict[str, Any]:
-    """Decode one Parquet row group, reading native coordinate fields directly."""
+def _read_point_parquet_group(
+    filename: str, group: int, geometry_name: str | None, columns: list[str]
+) -> dict[str, Any]:
+    """Decode selected attributes and optional point coordinates from one Parquet row group."""
 
-    import_optional("pyarrow")
+    pa = import_optional("pyarrow")
     import pyarrow.parquet as pq
 
-    # Read the selected attributes and geometry together for this row group
+    # Read geometry only when coordinates are requested
+    read_columns = columns if geometry_name is None else [geometry_name, *columns]
     with pq.ParquetFile(filename, filesystem=_get_filesystem(filename)) as file:
-        table = file.read_row_group(group, columns=[geometry_name, *columns])
+        table = file.read_row_group(group, columns=read_columns)
+    arrays = {}
+    for name in columns:
+        column = table[name]
+        # A nullable 64-bit integer cannot pass through floating point without rounding large IDs
+        if pa.types.is_integer(column.type) and column.type.bit_width == 64 and column.null_count:
+            arrays[name] = np.asarray(column.to_pylist(), dtype=object)
+        else:
+            arrays[name] = column.to_numpy()
+    if geometry_name is None:
+        return arrays
+
+    # Decode native coordinates directly, or convert WKB geometry for existing files
     geometry = table[geometry_name].combine_chunks()
-    arrays = {name: table[name].to_numpy() for name in columns}
     geo = json.loads(table.schema.metadata[b"geo"])
     if geo["columns"][geometry_name]["encoding"] == "point":
         # Native point fields give numeric coordinates without creating Shapely objects
@@ -305,6 +342,7 @@ def _open_point_parquet(
     data_name: str | None = None,
     columns: Literal["all", "main"] | list[str] = "all",
     chunks: int | None = None,
+    load: bool = True,
 ) -> xr.DataArray:
     """
     Open point arrays in-memory or with Dask from independently readable Parquet row groups.
@@ -334,12 +372,21 @@ def _open_point_parquet(
             field_type = metadata["schema"].field(name).type
             # Dictionary attributes contain labels in arrays rather than a Pandas categorical dtype
             dtypes[name] = object if pa.types.is_dictionary(field_type) else field_type.to_pandas_dtype()
+            if np.dtype(dtypes[name]).kind in "iub":
+                if name in metadata["unknown_null_columns"]:
+                    # Without null statistics, object arrays can represent either integers or missing values
+                    dtypes[name] = object
+                elif name in metadata["null_columns"]:
+                    dtypes[name] = (
+                        object if pa.types.is_boolean(field_type) or field_type.bit_width == 64 else np.float64
+                    )
     if chunks is not None:
         dask = import_optional("dask")
         import dask.array as da
 
     # Share one physical row-group read across coordinates and selected attributes
-    for path, group, count in metadata["row_groups"]:
+    row_groups = metadata["row_groups"] if load or chunks is not None else []
+    for path, group, count in row_groups:
         if chunks is None:
             values = _read_point_parquet_group(path, group, metadata["geometry_name"], stored)
             for name in arrays:
@@ -347,13 +394,25 @@ def _open_point_parquet(
         else:
             values = dask.delayed(_read_point_parquet_group)(path, group, metadata["geometry_name"], stored)
             for name in arrays:
-                arrays[name].append(da.from_delayed(values[name], shape=(count,), dtype=dtypes[name]))
+                arrays[name].append(
+                    da.from_delayed(values[name].astype(dtypes[name]), shape=(count,), dtype=dtypes[name])
+                )
 
     # Join ordered row groups, then split lazy arrays into the requested chunk size
     combined = {}
     for name, parts in arrays.items():
-        if chunks is None:
-            combined[name] = np.concatenate(parts) if parts else np.empty(0, dtype=dtypes[name])
+        if not load and chunks is None:
+            from geoutils.pointcloud.loading import _deferred_point_variable
+
+            combined[name] = _deferred_point_variable(
+                metadata["point_count"],
+                dtypes[name],
+                partial(_read_point_parquet_attribute, metadata, name, dtypes[name]),
+            )
+        elif chunks is None:
+            combined[name] = (
+                np.concatenate(parts).astype(dtypes[name], copy=False) if parts else np.empty(0, dtype=dtypes[name])
+            )
         elif parts:
             combined[name] = da.concatenate(parts).rechunk(chunks)
         else:
@@ -373,15 +432,33 @@ def _open_point_parquet(
         use_z=use_z,
     )
     result.attrs.update({key: value for key, value in metadata["attrs"].items() if key.startswith("dataframe_")})
+    result.attrs["row_group_sizes"] = [count for _, _, count in metadata["row_groups"]]
     if row_labels is not None:
         # Leave stored labels lazy without asking Xarray to create an eager Pandas index
-        coordinates = xr.Coordinates({"point": ("point", row_labels)}, indexes={})
+        labels = row_labels if isinstance(row_labels, xr.Variable) else xr.Variable("point", row_labels)
+        coordinates = xr.Coordinates({"point": labels}, indexes={})
         result = result.assign_coords(coordinates)
         descriptors = metadata["pandas_metadata"].get("columns", [])
         index_descriptor = next(item for item in descriptors if item["field_name"] == index_columns[0])
         result.attrs["dataframe_index_name"] = index_descriptor["name"]
     result.encoding["source"] = str(filename)
     return result
+
+
+def _read_point_parquet_attribute(metadata: dict[str, Any], name: str, dtype: Any, start: int, count: int) -> Any:
+    """Read an attribute from only the Parquet row groups intersecting a selected row range."""
+    geometry_name = metadata["geometry_name"] if name in ("x", "y", "_geometry_z") else None
+    columns = [] if geometry_name is not None else [name]
+    parts = []
+    offset = 0
+    for path, group, length in metadata["row_groups"]:
+        if offset < start + count and offset + length > start:
+            values = _read_point_parquet_group(path, group, geometry_name, columns)[name]
+            lower = max(0, start - offset)
+            upper = min(length, start + count - offset)
+            parts.append(values[lower:upper])
+        offset += length
+    return np.concatenate(parts).astype(dtype, copy=False)
 
 
 def _open_parquet_geodataframe(
@@ -455,6 +532,7 @@ def _open_parquet_geodataframe(
 
     # Cache counts and extents from footers, so lazy metadata queries do not run row readers
     attrs = {key: metadata[key] for key in ("point_count", "crs", "bounds", "geometry_type")}
+    attrs["row_group_sizes"] = [count for _, _, count in metadata["row_groups"]]
     return _build_pointcloud_output(
         frame, data_name=active_column, as_dataframe=True, attrs=attrs, preserve_locations=True
     )

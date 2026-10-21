@@ -56,7 +56,8 @@ from geoutils.interface.gridding import (
     _grid_pointcloud_to_raster,
     _resolve_gridding_operator,
 )
-from geoutils.operators.interpolator import Kriging, KrigingBackend
+from geoutils.operators.interpolator import Interpolator, Kriging, KrigingBackend
+from geoutils.operators.methods import ResamplingBackend, ResamplingMethod, _resampling_backend, _resampling_operator
 from geoutils.operators.neighbours import _DefaultNeighbour
 from geoutils.operators.nodata import NodataChoice
 from geoutils.operators.overlap import OverlapBackend
@@ -313,32 +314,37 @@ class PointCloudBase(ABC):
         method: PointFilterMethod = "median",
         radius: float | None | _DefaultNeighbour = _DefaultNeighbour.VALUE,
         *,
-        k: int | None | _DefaultNeighbour = _DefaultNeighbour.VALUE,
+        max_points: int | None | _DefaultNeighbour = _DefaultNeighbour.VALUE,
         include_self: bool = True,
         min_points: int = 0,
         nodata_propagation: Literal["ignore", "propagate"] | None = None,
         n_threads: int = 0,
         batch_size: int = 65_536,
         mp_config: MultiprocConfig | None = None,
+        backend: ResamplingBackend = "auto",
+        method_kwargs: dict[str, Any] | None = None,
     ) -> PointCloudLike:
         """
         Filter the point cloud.
 
         For each point, this method selects neighbors by horizontal X/Y distance and replaces the data attribute or
-        elevation with the requested statistic. ``radius`` uses coordinate-system units, ``k`` selects the nearest
-        points, and passing both first applies the radius and then the count limit. A point with too few finite
-        neighbors receives NaN.
+        elevation with the requested statistic. ``radius`` uses coordinate-system units, while ``max_points`` limits
+        the number of nearest points. Passing both first applies the radius and then the count limit. A point with
+        too few finite neighbors receives NaN.
 
         Dask returns a lazy point dataframe and requires active values in a named column. Multiprocessing reads a
         surrounding area needed by each row partition and writes the result selected by ``mp_config``. Both chunked
         paths require a finite radius. Xarray inputs instead return lazy arrays with Dask.
 
-        Omitted radius/k arguments use the Reducer's PointNeighbours, or a radius of one when none is configured.
-        Explicit None removes that limit; supplied limits apply only to this call.
+        Omitted radius/max_points arguments use the Reducer's PointNeighbours, or a radius of one when none is
+        configured. Explicit None removes that limit; supplied limits apply only to this call.
 
-        :param method: Reducer or built-in name such as ``"median"``, ``"mean"``, ``"min"`` or ``"std"``.
+        :param method: Statistic name, such as "median", "mean" or "std", or an advanced Reducer.
+            Defaults to the median.
+        :param backend: "auto" or "scipy" for point-neighborhood filtering.
+        :param method_kwargs: Settings for a named statistic, such as a quantile q.
         :param radius: Maximum neighbor distance in CRS units. Required for Dask and multiprocessing execution.
-        :param k: Optional maximum number of nearest neighbors inside the radius.
+        :param max_points: Optional maximum number of nearest neighbors inside the radius.
         :param include_self: Whether each point contributes its current value to its own neighborhood.
         :param min_points: Minimum number of finite neighbors, combined with the Reducer's own minimum requirement.
         :param nodata_propagation: Omit invalid neighbors (``"ignore"``), propagate them, or use the Reducer default.
@@ -355,13 +361,15 @@ class PointCloudBase(ABC):
             self,
             method=method,
             radius=radius,
-            k=k,
+            max_points=max_points,
             include_self=include_self,
             min_points=min_points,
             nodata_propagation=nodata_propagation,
             n_threads=n_threads,
             batch_size=batch_size,
             mp_config=mp_config,
+            backend=backend,
+            method_kwargs=method_kwargs,
         )
 
     def stats(
@@ -682,7 +690,7 @@ class PointCloudBase(ABC):
             The aliases "average", "min" and "max" select "mean", "minimum" and "maximum".
         :param resample_method: Raster interpolation using the SciPy methods "nearest", "linear", "cubic", "quintic",
             "slinear", "pchip" or "splinef2d". Window reduction ("reduce") is not implemented.
-        :param grid_kwargs: Options for PointCloud.grid(), e.g. {"dist_nodata_pixel": 2, "min_points": 3} sets a
+        :param grid_kwargs: Options for PointCloud.grid(), e.g. {"radius": 2, "min_points": 3} sets a
             two-pixel radius and minimum of three finite points for circular methods. Other options include
             "distance_power" for IDW and "engine" ("scipy" or "numba").
             Set locations and method with at and grid_method.
@@ -899,6 +907,7 @@ class PointCloudBase(ABC):
         )
 
     @_deprecate_keyword("data_column", "data_name")
+    @_deprecate_keyword("dist_nodata_pixel", "radius")
     @profiler.profile("geoutils.pointcloud.base.grid", memprof=True)
     def grid(
         self,
@@ -907,19 +916,23 @@ class PointCloudBase(ABC):
         res: float | tuple[float, float] | None = None,
         shape: tuple[int, int] | None = None,
         bounds: tuple[float, float, float, float] | None = None,
-        resampling: GriddingMethod = "linear",
-        dist_nodata_pixel: float = 1.0,
+        resampling: ResamplingMethod | Interpolator | Reducer = "linear",
+        radius: float = 1.0,
         nodata: int | float = -9999,
         *,
         data_name: str | None = None,
         nodata_handling: NodataChoice | None = None,
         distance_power: float = 2.0,
         min_points: int = 1,
-        engine: GriddingEngine = "scipy",
+        max_points: int | None = None,
+        engine: GriddingEngine | None = None,
         chunksizes: tuple[int, int] | None = None,
         mp_config: MultiprocConfig | None = None,
         n_threads: int = 0,
         error_structure: ErrorStructure | None = None,
+        backend: ResamplingBackend = "auto",
+        resampling_kwargs: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> Any:
         """
         Grid the point cloud into a raster.
@@ -934,7 +947,10 @@ class PointCloudBase(ABC):
         :param bounds: Output bounds as ``(left, bottom, right, top)``. Defaults to the point-cloud bounds.
         :param resampling: Interpolation, circular statistic or distance method. ``average``, ``min`` and ``max`` are
             aliases for ``mean``, ``minimum`` and ``maximum``.
-        :param dist_nodata_pixel: Maximum point distance or circular neighborhood radius in output pixels.
+        :param backend: "auto" uses SciPy; "numba" selects supported built-in gridding methods.
+            "gstools" and "gpytorch" select a kriging solver. Advanced callers can pass an operator in resampling.
+        :param resampling_kwargs: Method settings, such as a quantile q or a fitted kriging model.
+        :param radius: Maximum point distance or circular neighborhood radius in output pixels.
             A Reducer configured with PointNeighbours uses its point count or radius in coordinate units instead.
         :param nodata: Nodata value of the output raster.
         :param data_name: Point values to grid. None uses the active point values.
@@ -945,15 +961,35 @@ class PointCloudBase(ABC):
             Interpolators default to the configured choice.
         :param distance_power: Distance exponent used for inverse-distance weighting.
         :param min_points: Minimum number of finite points required inside a circular neighborhood.
-        :param engine: Calculation engine, either ``scipy`` or ``numba``.
+        :param max_points: Maximum number of nearest observations used for each cell, including missing values.
+            None uses the method's existing point limit.
+        :param engine: Legacy alias for backend ("scipy" or "numba").
         :param chunksizes: Output chunk size as ``(rows, columns)`` for Dask or multiprocessing execution.
         :param mp_config: Multiprocessing configuration for computing output chunks in workers.
         :param n_threads: Number of SciPy threads for eager nearest gridding. ``0`` uses all but one available CPU.
         :param error_structure: Optional observation error model used for weighting and fitting.
             Use geoutils.uncertainty.propagate() to calculate output uncertainty.
+        :param kwargs: Deprecated aliases, including dist_nodata_pixel for radius.
         :returns: A gridded raster matching the concrete PointCloud or dataframe accessor interface.
         """
 
+        # Deprecated keywords are translated before this call; reject any remaining unknown options
+        if kwargs:
+            name = next(iter(kwargs))
+            raise TypeError(f"grid() got an unexpected keyword argument '{name}'.")
+        if max_points is not None and (
+            isinstance(max_points, (bool, np.bool_)) or not isinstance(max_points, (int, np.integer)) or max_points < 1
+        ):
+            raise ValueError("Argument 'max_points' must be a positive integer or None.")
+
+        # Resolve string choices before eager, Dask or multiprocessing gridding
+        selected_backend = _resampling_backend(
+            backend, default="scipy", allowed=("scipy", "numba", "gstools", "gpytorch"), engine=engine
+        )
+        operator_backend: ResamplingBackend = "auto" if backend == "auto" else selected_backend
+        resampling = _resampling_operator(
+            resampling, backend=operator_backend, options=resampling_kwargs, distance_power=distance_power
+        )
         if error_structure is not None:
             resampling = _with_error_structure(
                 _resolve_gridding_operator(resampling, distance_power=distance_power), error_structure
@@ -967,13 +1003,14 @@ class PointCloudBase(ABC):
             shape=shape,
             bounds=bounds,
             resampling=resampling,
-            dist_nodata_pixel=dist_nodata_pixel,
+            dist_nodata_pixel=radius,
             nodata=nodata,
             data_name=data_name,
             nodata_handling=nodata_handling,
             distance_power=distance_power,
             min_points=min_points,
-            engine=engine,
+            max_points=max_points,
+            engine="numba" if selected_backend == "numba" else "scipy",
             chunksizes=chunksizes,
             mp_config=mp_config,
             dask=self._is_dask,
@@ -1043,7 +1080,7 @@ class PointCloudBase(ABC):
             shape=shape,
             bounds=bounds,
             resampling=operator,
-            dist_nodata_pixel=0,
+            radius=0,
             nodata=nodata,
             data_name=data_name,
             min_points=min_points,
@@ -1105,7 +1142,7 @@ class GeometryPointCloudBase(PointCloudBase, VectorBase):
     """
     Represent points as GeoPandas geometries with a selected data attribute or geometry elevations.
 
-    PointCloud and GeoPandasPointCloudAccessor use this class for vector operations and geometry I/O.
+    PointCloud and GeoDataFramePointCloudAccessor use this class for vector operations and geometry I/O.
     The dataframe contains the points; data_name selects the values used by the shared point calculations.
     """
 
@@ -1276,7 +1313,7 @@ class GeometryPointCloudBase(PointCloudBase, VectorBase):
         :param return_axes: Whether to return the plot and colorbar axes.
         :param savefig_fname: Optional path at which to save the current figure.
         :param max_points: The default ``"auto"`` limits the sample to the smaller of the Matplotlib axes pixel area
-            and 1,000,000 points, as set by the figure size and DPI. An integer sets an explicit point limit, and None
+            and 10,000,000 points, as set by the figure size and DPI. An integer sets an explicit point limit, and None
             plots every point.
         :param random_state: Random generator or seed used for deterministic point selection.
         :returns: None, or the plot axes and optional colorbar axes when ``return_axes=True``.
@@ -1645,8 +1682,15 @@ class GeometryPointCloudBase(PointCloudBase, VectorBase):
         """
         if pathlib.Path(filename).suffix.lower() == ".parquet" or driver == "PARQUET":
             self.to_parquet(filename, **kwargs)
+        elif self._is_dask and (pathlib.Path(filename).suffix.lower() == ".gpkg" or driver == "GPKG"):
+            # Write one partition at a time so the complete point cloud never occupies client memory
+            options = dict(kwargs)
+            for partition in self._dataset.to_delayed():
+                dataframe = partition.compute()
+                dataframe.to_file(filename, driver=driver, schema=schema, index=index, **options)
+                options["mode"] = "a"
         else:
-            # Vector and VectorAccessor supply the concrete writer through multiple inheritance
+            # Vector and GeoDataFrameVectorAccessor supply the concrete writer through multiple inheritance
             super().to_file(filename, driver=driver, schema=schema, index=index, **kwargs)  # type: ignore[misc]
 
     def to_parquet(

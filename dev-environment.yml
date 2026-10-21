@@ -23,20 +23,35 @@ dependencies:
   - pip
 
   # Optional dependencies
-  - matplotlib=3.* # For plotting
-  - pyarrow>=14 # For GeoParquet support
-  - laspy # For LAS file support
-  - lazrs-python # For LAZ file support
+
+  # Cloud
   - fsspec # For remote point cloud files
   - aiohttp # For HTTP range reads
   - s3fs # For S3 point cloud files
-  - psutil # For profiler
-  - plotly # For profiler
-  - numba # For filters and point cloud gridding
+
+  # I/O
+  - pyarrow>=14 # For GeoParquet support
+  - laspy # For LAS file support
+  - lazrs-python # For LAZ file support
+  - netcdf4
+  - zarr
+
+  # Parallel
   - dask # For out-of-memory operations
+  - distributed # For distributed Dask execution and profiling
   - dask-geopandas # For out-of-memory vector/point operations
+
+  # Numerics
+  - numba # For filters and point cloud gridding
   - flox # For grouped statistics
   - exactextract>=0.3 # For fast exact polygon-cell coverage
+
+  # Plotting
+  - matplotlib=3.* # For plotting
+
+  # Profiling
+  - psutil # For profiler
+  - plotly # For profiler
 
   # Test dependencies
   - gdal<3.13.3  # To benchmark functionalities against GDAL
@@ -50,7 +65,6 @@ dependencies:
   - sybil>=9.3,<10
   - coveralls
   - pyyaml
-  - netcdf4  # To write synthetic data with chunksizes
 
   # Doc dependencies
   - sphinx
@@ -69,6 +83,7 @@ dependencies:
 
   - pip:
       - -e ./
+      # Geostats
       - scikit-gstat>=1.0.23 # For variogram fitting
       - gstools>=1.3 # For variogram conversion, kriging and random fields
       - gpytorch>=1.11 # For Gaussian-process covariance conversion

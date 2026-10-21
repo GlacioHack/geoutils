@@ -45,7 +45,7 @@ def run_random_field(runner: Any, case: Case) -> float:
     raster = runner.make_raster()
     if case.implementation == "native_gstools":
         # Match GeoUtils's model, component seed and pixel spacing in the native draw
-        gstools = import_optional("gstools", extra_name="geostat")
+        gstools = import_optional("gstools")
         model = gstools.Gaussian(dim=2, var=1, len_scale=FIELD_EFFECTIVE_RANGE, rescale=2)
         seed = int(np.random.default_rng(FIELD_SEED).integers(0, np.iinfo(np.uint32).max, dtype=np.uint32))
         columns = np.arange(raster.shape[1]) * abs(float(raster.transform.a))

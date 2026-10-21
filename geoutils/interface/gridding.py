@@ -162,6 +162,7 @@ def _grid_pointcloud(
     min_points: int = 1,
     n_threads: int = 1,
     engine: GriddingEngine = "scipy",
+    max_points: int | None = None,
 ) -> tuple[NDArrayNum, affine.Affine]:
     """
     Grid irregular points to a regular raster using interpolation or circular neighborhoods.
@@ -180,6 +181,7 @@ def _grid_pointcloud(
     :param grid_res: Grid resolution, used for chunks with a single row or column.
     :param distance_power: Distance exponent used for inverse-distance weighting (defaults to 2).
     :param min_points: Minimum number of finite points required inside a circular neighborhood (defaults to 1).
+    :param max_points: Optional maximum number of nearest observations selected for each output cell.
     :param engine: Calculation engine, either ``scipy`` (default) or ``numba``. Numba supports nearest and circular
         methods except ``average_distance_pts``.
     :param n_threads: Number of SciPy threads used for nearest-neighbor queries (defaults to 1).
@@ -195,6 +197,9 @@ def _grid_pointcloud(
         raise ValueError("IDW distance_power must be finite and strictly positive.")
     operator = _resolve_gridding_operator(resampling, distance_power=distance_power)
     optimized_kernel = _get_builtin_gridding_method(operator)
+    if max_points is not None:
+        # Apply the count limit before evaluating the selected observations
+        optimized_kernel = None
     engine_method = _get_builtin_gridding_method(operator, default_neighborhood_only=False)
     reducer_neighborhood = _resolve_point_neighbours_for_reducer(operator) if isinstance(operator, Reducer) else None
     if engine == "numba" and engine_method is None:
@@ -243,6 +248,7 @@ def _grid_pointcloud(
             min_points=int(min_points),
             nodata_propagation=propagation,
             engine=engine,
+            max_points=max_points,
         )
     elif len(points) == 0:
         aligned_dem = np.full((len(grid_coords[1]), len(grid_coords[0])), np.nan, dtype=np.float64)
@@ -261,7 +267,8 @@ def _grid_pointcloud(
 
     # Interpolators check the nearest original point; reducers use their finite result
     needs_nodata_mask = (propagation == "nearest" and isinstance(operator, Interpolator)) or (
-        propagation == "propagate" and (not uses_local_method or operator.default_neighborhood is None)
+        propagation == "propagate"
+        and (not uses_local_method or (operator.default_neighborhood is None and max_points is None))
     )
     if len(invalid_points) > 0 and needs_nodata_mask:
         mask_propagation = cast(Literal["nearest", "propagate"], propagation)
@@ -593,6 +600,7 @@ def _grid_pointcloud_to_raster(
     nodata_handling: NodataChoice | None = None,
     distance_power: float = 2.0,
     min_points: int = 1,
+    max_points: int | None = None,
     chunksizes: tuple[int, int] | None = None,
     mp_config: MultiprocConfig | None = None,
     dask: bool = False,
@@ -672,6 +680,7 @@ def _grid_pointcloud_to_raster(
             nodata_handling=nodata_handling,
             distance_power=distance_power,
             min_points=min_points,
+            max_points=max_points,
             n_threads=resolved_threads,
             engine=engine,
         )

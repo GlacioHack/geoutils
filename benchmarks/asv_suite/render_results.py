@@ -11,16 +11,19 @@ import math
 import os
 import tempfile
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
+from inspect import signature
 from pathlib import Path
 from typing import Any, Literal
 
-from benchmarks.workflows.core import IMPLEMENTATION_LABELS, Comparison, ComparisonDimension, ExecutionMode
+from benchmarks.workflows.core import IMPLEMENTATION_LABELS, Case, Comparison, ComparisonDimension, ExecutionMode
 from benchmarks.workflows.operations import (
     BENCHMARK_BY_CLASS,
     BENCHMARK_CASE_BY_CLASS,
     COMPARISONS,
+    OPERATIONS,
 )
+from geoutils.raster.base import RasterBase
 
 GDAL_CLI_LABEL = IMPLEMENTATION_LABELS["gdal"]
 PDAL_CLI_LABEL = IMPLEMENTATION_LABELS["pdal"]
@@ -29,6 +32,8 @@ PDAL_CLI_LABEL = IMPLEMENTATION_LABELS["pdal"]
 COMPARISON_BENCHMARK_MODULE = "asv_suite.parameter_sweeps"
 COMPARISON_REPORT_DIRECTORY = "comparisons"
 SCALING_REPORT_PAGE = "scaling.html"
+REFERENCE_REPORT_PAGE = "gdal-pdal.html"
+PARAMETER_REPORT_PAGE = "parameters.html"
 HISTORY_REPORT_PAGE = "history.html"
 DOCUMENTATION_TIME_PLOT = "time_relative_to_gdal.svg"
 DOCUMENTATION_MEMORY_PLOT = "memory_increase_by_operation.svg"
@@ -37,6 +42,8 @@ DOCUMENTATION_PDAL_PLOT = "time_relative_to_pdal.svg"
 DOCUMENTATION_DATA = "benchmark_snapshot.json"
 PERFORMANCE_CHANGE_REPORT = "performance-change.md"
 PREVIEW_WEBSITE_DIRECTORY = Path("benchmarks/results/asv/preview")
+SUMMARY_RASTER_SIZE = 10_000
+SUMMARY_POINT_COUNT = 100_000_000
 
 # Colors stay consistent between the detailed ASV plots and the concise documentation snapshot
 SERIES_COLORS = {
@@ -173,6 +180,8 @@ class _PreviewResult:
         # Create all keys normally read from saved ASV results so every report section can render
         for comparison in COMPARISONS:
             parameter_values = comparison.benchmark.values
+            if comparison.benchmark.parameter_name == "raster_size" and SUMMARY_RASTER_SIZE not in parameter_values:
+                parameter_values = (*parameter_values, SUMMARY_RASTER_SIZE)
             parameter_count = len(parameter_values)
 
             for series_index, (_, class_name) in enumerate(comparison.series, start=1):
@@ -398,8 +407,10 @@ def _plot_comparison(
     comparison: Comparison,
     records: list[ComparisonMeasurement],
     output: Path,
+    *,
+    include_operation: bool = True,
 ) -> None:
-    """Write aligned operation-only, elapsed-time and peak-memory plots."""
+    """Plot elapsed time and peak additional RAM, optionally adding operation-only time."""
 
     # Keep Matplotlib caches in a writable disposable location under sandboxed runs
     os.environ.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "geoutils-matplotlib-cache"))
@@ -407,7 +418,13 @@ def _plot_comparison(
     # Import plotting only for explicit rendering commands
     import matplotlib.pyplot as plt
 
-    figure, axes = plt.subplots(3, 1, figsize=(9, 10), sharex=True, layout="constrained")
+    metrics = [
+        ("end_to_end_time_s", "Elapsed time (s)"),
+        ("process_tree_mem_increase_mb", "Peak additional RAM (MB)"),
+    ]
+    if include_operation:
+        metrics.insert(0, ("operation_time_s", "Operation only (s)"))
+    figure, axes = plt.subplots(len(metrics), 1, figsize=(9, 3 * len(metrics)), sharex=True, layout="constrained")
     for series_label, _ in comparison.series:
         # Stable parameter sorting keeps lines readable if ASV changes storage order
         selected = sorted(
@@ -419,26 +436,18 @@ def _plot_comparison(
             key=lambda record: record.parameter,
         )
         parameters = [record.parameter for record in selected]
-        axes[0].plot(parameters, [record.operation_time_s for record in selected], marker="o", label=series_label)
-        axes[1].plot(parameters, [record.end_to_end_time_s for record in selected], marker="o", label=series_label)
-        axes[2].plot(
-            parameters,
-            [record.process_tree_mem_increase_mb for record in selected],
-            marker="o",
-            label=series_label,
-        )
+        for axis, (metric, _) in zip(axes, metrics):
+            axis.plot(parameters, [getattr(record, metric) for record in selected], marker="o", label=series_label)
 
     # Separate panels keep initialized work, complete execution and memory unambiguous
     axes[0].set_title(comparison.title)
-    axes[0].set_ylabel("Operation only (s)")
-    axes[1].set_ylabel("Elapsed time (s)")
-    axes[2].set_ylabel("Additional combined memory (MB)")
-    axes[2].set_xlabel(comparison.parameter_label)
-    for axis in axes:
+    axes[-1].set_xlabel(comparison.parameter_label)
+    for axis, (_, label) in zip(axes, metrics):
+        axis.set_ylabel(label)
         axis.grid(True, alpha=0.3)
         axis.legend()
     if comparison.logarithmic_x:
-        axes[2].set_xscale("log", base=2)
+        axes[-1].set_xscale("log", base=2)
 
     # SVG stays sharp in local reports and on the published benchmark website
     figure.savefig(output, format="svg")
@@ -1209,96 +1218,135 @@ def _summary_reference_parameter(comparison: Comparison, records: list[Compariso
     return _largest_shared_parameter(comparison, records)
 
 
+def _default_cases(comparison: Comparison, *, execution: ExecutionMode | None = None) -> tuple[Case, ...]:
+    """Select GeoUtils cases using the default numerical backend and chunk strategy."""
+
+    cases = []
+    for case in comparison.cases:
+        if case.implementation != "geoutils" or (execution is not None and case.execution != execution):
+            continue
+
+        # These operations also benchmark choices that differ from their public defaults
+        if comparison.operation == "random_field":
+            backend = signature(RasterBase.random_field).parameters["backend"].default
+            if case.engine not in (None, backend):
+                continue
+        if comparison.operation == "grouped_stats":
+            strategy = signature(RasterBase.stats).parameters["strategy"].default
+            if case.strategy not in (None, strategy):
+                continue
+        cases.append(case)
+    return tuple(cases)
+
+
+def _default_comparisons() -> tuple[Comparison, ...]:
+    """Choose one comparison per operation and method, preferring default Dask cases."""
+
+    selected: dict[tuple[str, str | None], Comparison] = {}
+    for comparison in COMPARISONS:
+        if not comparison.summary or comparison.by not in ("execution", "strategy"):
+            continue
+        if not any(case.execution == "dask" and case.implementation == "geoutils" for case in comparison.cases):
+            continue
+        key = (comparison.operation, comparison.method)
+        current = selected.get(key)
+        preferred_axis = (
+            "Number of source points per axis" if comparison.operation == "grid" else "Size of raster (pixels per side)"
+        )
+        priority = (bool(_default_cases(comparison, execution="dask")), comparison.parameter_label == preferred_axis)
+        if current is None:
+            selected[key] = comparison
+            continue
+
+        # Prefer public defaults, then a comparison that varies the requested input size
+        current_priority = (bool(_default_cases(current, execution="dask")), current.parameter_label == preferred_axis)
+        if priority > current_priority:
+            selected[key] = comparison
+    return tuple(selected.values())
+
+
+def _scaling_comparisons() -> tuple[Comparison, ...]:
+    """Choose raster-size comparisons of execution modes with other settings at their defaults."""
+
+    selected: dict[str, Comparison] = {}
+    for comparison in COMPARISONS:
+        if comparison.by != "execution" or comparison.benchmark.parameter_name != "raster_size":
+            continue
+
+        # Use the usual method for each operation, rather than repeating every alternative
+        operation = comparison.benchmark.operation
+        if operation.large_data_cases and comparison.method != operation.large_data_cases[0].method:
+            continue
+        cases = _default_cases(comparison)
+        if not any(case.execution == "dask" for case in cases):
+            continue
+
+        # A comparison may include an external tool or force a non-default chunk strategy
+        comparison = replace(comparison, cases=cases)
+        current = selected.get(comparison.operation)
+        if current is None or len(comparison.cases) > len(current.cases):
+            selected[comparison.operation] = comparison
+    return tuple(selected.values())
+
+
 def _headline_summary_table(records: list[ComparisonMeasurement]) -> str:
-    """List engines and execution modes in separate columns beside the external GDAL CLI."""
+    """Show exact-size Dask measurements without substituting smaller workloads."""
 
-    engine_order = ("rasterio", "scipy", "numba", "numpy")
-    mode_order: tuple[ExecutionMode, ...] = ("inmem", "dask", "multiprocessing")
-    engine_comparisons = {
-        (comparison.operation, comparison.method): comparison for comparison in _engine_summary_comparisons()
-    }
-    execution_comparisons = {
-        (comparison.operation, comparison.method): comparison for comparison in _execution_summary_comparisons()
-    }
-    comparison_keys = tuple(
-        dict.fromkeys(
-            (comparison.operation, comparison.method)
-            for comparison in COMPARISONS
-            if (comparison.operation, comparison.method) in engine_comparisons
-            or (comparison.operation, comparison.method) in execution_comparisons
-        )
-    )
-    rows: list[tuple[Comparison, str]] = []
-    for comparison_key in comparison_keys:
-        engine_comparison = engine_comparisons.get(comparison_key)
-        execution_comparison = execution_comparisons.get(comparison_key)
-        comparison = engine_comparison or execution_comparison
-        assert comparison is not None
-        parameter = _summary_reference_parameter(comparison, records)
-
-        if engine_comparison is None:
-            implementations: dict[str, ComparisonMeasurement] = {}
-        else:
-            _, implementations = _inmem_implementation_measurements(engine_comparison, records, parameter)
-
-        if execution_comparison is None:
-            modes: dict[ExecutionMode, ComparisonMeasurement] = {}
-        else:
-            _, modes = _execution_mode_measurements(execution_comparison, records, parameter)
-
-        gdal = implementations.get("gdal_cli")
-        engine_cells = [
-            _format_measurement_cell(
-                implementations.get(engine),
-                reference=None,
-                reference_label="",
-                best_time=None,
-                lowest_memory=None,
+    # Include supported operations even when no parameter comparison has measured them yet
+    comparisons = _default_comparisons()
+    represented = {comparison.operation for comparison in comparisons}
+    rows: list[tuple[int, str]] = []
+    for operation in OPERATIONS:
+        if operation.name not in represented and any(case.execution == "dask" for case in operation.large_data_cases):
+            rows.append(
+                (
+                    operation.order,
+                    f'<tr><th scope="row">{html.escape(operation.display_name)}</th><td>—</td><td>—</td></tr>',
+                )
             )
-            for engine in engine_order
-        ]
-        execution_cells = [
-            _format_measurement_cell(
-                modes.get(mode),
-                reference=None,
-                reference_label="",
-                best_time=None,
-                lowest_memory=None,
-            )
-            for mode in mode_order
-        ]
-        gdal_cell = _format_measurement_cell(
-            gdal,
-            reference=None,
-            reference_label="",
-            best_time=None,
-            lowest_memory=None,
-        )
 
+    # Use explicit size parameters so older runs with different fixed defaults cannot be mislabelled
+    for comparison in comparisons:
+        operation = comparison.benchmark.operation
+        label = operation.display_name
+        if comparison.method is not None:
+            label += f" — {comparison.choice_label('method', comparison.method)}"
+        measurements = []
+        default_cases = _default_cases(comparison, execution="dask")
+        for series_label, class_name in comparison.series:
+            case = BENCHMARK_CASE_BY_CLASS[class_name]
+            if case not in default_cases:
+                continue
+            for record in records:
+                if record.comparison != comparison.slug or record.series_label != series_label:
+                    continue
+                if operation.name == "grid":
+                    matches = (
+                        comparison.parameter_label == "Number of source points per axis"
+                        and record.parameter**2 == SUMMARY_POINT_COUNT
+                    )
+                else:
+                    matches = (
+                        comparison.parameter_label == "Size of raster (pixels per side)"
+                        and record.parameter == SUMMARY_RASTER_SIZE
+                    )
+                if matches:
+                    measurements.append(record)
+        measurement = max(measurements, key=lambda item: item.parameter) if measurements else None
+        memory = f"{measurement.process_tree_mem_increase_mb:,.3g}" if measurement is not None else "—"
+        elapsed = f"{measurement.end_to_end_time_s:,.3g}" if measurement is not None else "—"
         rows.append(
-            (
-                comparison,
-                "<tr>"
-                f'<th scope="row">{html.escape(_operation_and_method_label(comparison))}</th>'
-                f"<td>{_workload_html(comparison, parameter)}</td>"
-                + "".join(f"<td>{cell}</td>" for cell in (*engine_cells, *execution_cells))
-                + f'<td class="external-cell">{gdal_cell}</td></tr>',
-            )
+            (operation.order, f'<tr><th scope="row">{html.escape(label)}</th><td>{memory}</td><td>{elapsed}</td></tr>')
         )
+    rows.sort(key=lambda item: item[0])
     return "".join(
         [
-            '<div class="table-wrap"><table class="summary-table"><thead>',
-            '<tr><th class="row-heading" rowspan="2" scope="col">Operation and method</th>',
-            '<th class="workload-heading" rowspan="2" scope="col">Reference workload</th>',
-            '<th class="group-heading" colspan="4" scope="colgroup">GeoUtils calculation engine</th>',
-            '<th class="group-heading" colspan="3" scope="colgroup">GeoUtils execution mode</th>',
-            '<th class="external-heading group-heading" scope="colgroup">External reference</th></tr>',
-            '<tr><th scope="col">Rasterio/GDAL</th><th scope="col">SciPy</th><th scope="col">Numba</th>',
-            '<th scope="col">NumPy</th>',
-            '<th scope="col">In memory</th><th scope="col">Dask</th><th scope="col">Multiprocessing</th>',
-            '<th class="external-heading" scope="col">GDAL CLI</th></tr></thead>',
-            _group_operation_rows(rows, column_count=10),
-            "</table></div>",
+            '<div class="table-wrap"><table class="summary-table"><thead><tr>',
+            '<th scope="col" class="row-heading">Operation / method</th>',
+            '<th scope="col">Peak additional RAM (MB)</th><th scope="col">Time (s)</th>',
+            "</tr></thead><tbody>",
+            *(row for _, row in rows),
+            "</tbody></table></div>",
         ]
     )
 
@@ -1337,7 +1385,7 @@ def _choice_tables(
             '<div class="table-wrap"><table class="choice-table"><thead>'
             f'<tr><th colspan="{len(measurements)}" scope="colgroup">{choice_title}</th></tr>'
             f"<tr>{headers}</tr></thead><tbody><tr>{cells}</tr></tbody></table></div>"
-            f'<p><a href="scaling.html#{html.escape(comparison.slug)}">View how this comparison scales</a></p>'
+            f'<p><a href="{PARAMETER_REPORT_PAGE}#{html.escape(comparison.slug)}">View this comparison plot</a></p>'
             "</article>"
         )
     return "".join(articles)
@@ -1372,132 +1420,57 @@ def _markdown_report(result: Any, *, includes_performance_change: bool = False) 
 
 
 _SITE_STYLE = """
-:root {
-  color-scheme: light;
-  --ink: #172033;
-  --muted: #5b6475;
-  --line: #dce2ea;
-  --surface: #ffffff;
-  --soft: #f5f7fb;
-  --blue: #1463df;
-  --blue-soft: #eaf2ff;
-  --teal: #087f74;
-  --teal-soft: #e6f7f4;
-  --purple: #7452b8;
-  --purple-soft: #f1edfa;
-  --amber: #a46008;
-  --amber-soft: #fff3df;
-  --external: #5c6675;
-}
+:root { color-scheme: light; --ink: #222; --muted: #555; --line: #ddd; --soft: #f5f5f5; }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
-body {
-  margin: 0;
-  color: var(--ink);
-  background: var(--surface);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  line-height: 1.55;
-}
-a { color: #075dcc; text-underline-offset: .16em; }
-.site-header { position: sticky; top: 0; z-index: 20; border-bottom: 1px solid var(--line); background: #fffffff2; backdrop-filter: blur(10px); }
-.header-inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; max-width: 1440px; margin: 0 auto; padding: .75rem 1.25rem; }
-.brand { color: var(--ink); font-weight: 750; text-decoration: none; white-space: nowrap; }
-.site-nav { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .25rem; }
-.site-nav a { color: var(--muted); padding: .45rem .7rem; border-radius: .45rem; font-size: .92rem; text-decoration: none; }
-.site-nav a:hover, .site-nav a[aria-current="page"] { color: var(--ink); background: var(--blue-soft); }
-main { max-width: 1400px; margin: 0 auto; padding: 2.5rem 1.25rem 5rem; }
-.hero { max-width: 960px; margin-bottom: 2rem; }
-.eyebrow { color: var(--blue); font-size: .78rem; font-weight: 750; letter-spacing: .09em; text-transform: uppercase; }
-h1 { margin: .25rem 0 .65rem; font-size: clamp(2rem, 4vw, 3.35rem); line-height: 1.08; letter-spacing: -.035em; }
-h2 { margin-top: 3rem; font-size: clamp(1.45rem, 2.4vw, 2rem); line-height: 1.2; }
-h3 { line-height: 1.25; }
-.lede { color: var(--muted); font-size: 1.12rem; }
-.run-meta { color: var(--muted); font-size: .9rem; }
+body { margin: 0; color: var(--ink); background: white; font: 16px/1.6 system-ui, sans-serif; }
+a { color: #175ca2; text-underline-offset: .15em; }
+.site-header { border-bottom: 1px solid var(--line); }
+.header-inner { max-width: 1140px; margin: auto; padding: 1rem; }
+.brand { color: var(--ink); font-weight: 700; text-decoration: none; }
+.site-nav { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: .5rem; }
+.site-nav a[aria-current="page"] { color: var(--ink); font-weight: 700; }
+main { max-width: 1140px; margin: auto; padding: 1.5rem 1rem 3rem; }
+h1 { font-size: 1.9rem; line-height: 1.25; }
+h2 { margin-top: 2rem; font-size: 1.4rem; }
+h3 { margin-top: 1.5rem; font-size: 1.1rem; }
+li { margin: .3rem 0; }
+img { display: block; max-width: 100%; height: auto; margin: 1rem 0; }
+.run-meta, .section-intro, .comparison-note, .lede { color: var(--muted); }
+.run-meta, .ratio, .workload { font-size: .9rem; }
+.eyebrow { display: none; }
 code { overflow-wrap: anywhere; }
-.concept-map { display: grid; grid-template-columns: minmax(220px, .8fr) minmax(0, 2.6fr); gap: 1rem; align-items: stretch; }
-.concept-core, .concept-card, .external-card { border: 1px solid var(--line); border-radius: .8rem; padding: 1.1rem; }
-.concept-core { display: flex; flex-direction: column; justify-content: center; background: var(--blue-soft); border-color: #a9c9f7; }
-.concept-core strong { font-size: 1.18rem; }
-.concept-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
-.concept-card { background: var(--soft); }
-.concept-card.engine { background: var(--purple-soft); }
-.concept-card.mode { background: var(--teal-soft); }
-.concept-card.method { background: var(--amber-soft); }
-.concept-card strong, .external-card strong { display: block; margin-bottom: .25rem; }
-.chips { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .65rem; }
-.chip { display: inline-block; padding: .18rem .48rem; border: 1px solid #8490a255; border-radius: 999px; background: #ffffffb8; color: var(--ink); font-size: .78rem; }
-.external-card { grid-column: 1 / -1; border-style: dashed; border-color: #8b95a3; background: #f1f3f6; }
-.section-intro { max-width: 980px; color: var(--muted); }
-.metric-guide { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .7rem 1.25rem; margin: 1.2rem 0; padding: .8rem 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); color: var(--muted); font-size: .88rem; }
-.metric-guide strong { display: block; color: var(--ink); }
-.data-note { margin: .75rem 0 1.1rem; color: var(--muted); font-size: .82rem; }
-.comparison-note { max-width: 1050px; margin: 1rem 0 1.3rem; padding-left: .8rem; border-left: 3px solid #a9c9f7; color: var(--muted); font-size: .92rem; }
-.comparison-note strong { color: var(--ink); }
-.table-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: .65rem; background: var(--surface); }
-table { width: 100%; border-collapse: collapse; min-width: 780px; font-size: .9rem; }
-th, td { padding: .7rem .75rem; border-bottom: 1px solid var(--line); text-align: right; vertical-align: middle; }
-thead th { background: var(--soft); color: #344054; font-size: .8rem; letter-spacing: .015em; text-align: center; }
-thead th.row-heading { text-align: left; }
-tbody th { min-width: 175px; text-align: left; }
-tbody tr:last-child th, tbody tr:last-child td { border-bottom: 0; }
-tbody tr:hover { background: #f8faff; }
-.group-heading { text-align: center; }
-.external-heading { background: #eceff3; color: var(--external); text-align: center; }
-.operation-group th { min-width: 0; padding: .48rem .75rem; border-top: 1px solid #b8c5d8; background: var(--blue-soft); color: #244c83; font-size: .78rem; letter-spacing: .035em; }
-.operation-group:hover { background: var(--blue-soft); }
+.table-wrap { width: 100%; overflow-x: auto; margin: 1rem 0; }
+table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+.table-wrap > table:not(.summary-table) { min-width: 780px; }
+th, td { padding: .55rem .75rem; border-bottom: 1px solid var(--line); text-align: right; vertical-align: top; }
+thead th { background: var(--soft); }
+tbody th, .row-heading { text-align: left; }
+.operation-group th { background: var(--soft); }
+.summary-table { max-width: 900px; }
+.summary-table td { white-space: nowrap; }
 .metric { display: flex; flex-direction: column; align-items: flex-end; white-space: nowrap; }
 .metric + .metric { margin-top: .45rem; padding-top: .4rem; border-top: 1px solid var(--line); }
-.metric.best { color: #06685f; font-weight: 750; }
-.metric-label { color: var(--muted); font-size: .67rem; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
-.ratio { display: block; color: var(--muted); font-size: .72rem; font-weight: 400; }
-.workload-list { display: flex; flex-direction: column; gap: .12rem; text-align: left; }
-.workload-heading { text-align: center !important; }
-.summary-table { min-width: 1360px; }
-.summary-table td:nth-child(n+3) { min-width: 120px; }
-.external-cell { background: #fafbfc; }
-.unavailable { color: #9aa3b1; }
-.workload { color: var(--muted); font-size: .9rem; }
-.page-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; }
-.page-card { display: block; min-height: 120px; padding: 1.1rem; border: 1px solid var(--line); border-radius: .75rem; color: var(--ink); text-decoration: none; background: var(--surface); box-shadow: 0 8px 30px #1a2b4b0b; }
-.page-card:hover { border-color: #8cb5ef; transform: translateY(-1px); }
-.page-card strong { display: block; margin-bottom: .3rem; font-size: 1.05rem; }
-.page-card span { color: var(--muted); }
-.local-links { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.2rem 0 2rem; }
-.local-links a { padding: .35rem .65rem; border: 1px solid var(--line); border-radius: 999px; text-decoration: none; }
-.option-section { scroll-margin-top: 5rem; }
-.choice-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 1rem; }
-.choice-card { min-width: 0; padding: 1rem; border: 1px solid var(--line); border-radius: .7rem; background: var(--soft); }
-.choice-card h3 { margin-top: 0; }
-.choice-card table { min-width: 460px; background: var(--surface); }
+.metric-label { color: var(--muted); font-size: .75rem; font-weight: 400; }
+.ratio { color: var(--muted); font-size: .75rem; font-weight: 400; }
+.metric.best { font-weight: 700; }
+.metric-guide { display: flex; flex-direction: column; gap: .3rem; margin: 1.5rem 0; color: var(--muted); }
+.workload-list { display: flex; flex-direction: column; text-align: left; min-width: 160px; }
+.unavailable { color: var(--muted); }
+.local-links { display: flex; flex-wrap: wrap; gap: 1rem; margin: 1rem 0; }
+.choice-card { margin: 1.5rem 0; }
 .choice-table th, .choice-table td { text-align: center; }
 .choice-table .metric { align-items: center; }
-.scaling-layout { display: grid; grid-template-columns: minmax(230px, 290px) minmax(0, 1fr); gap: 2rem; align-items: start; }
-.plot-toc { position: sticky; top: 5.2rem; max-height: calc(100vh - 6.2rem); overflow: auto; padding: 1rem; border: 1px solid var(--line); border-radius: .7rem; background: var(--soft); }
-.plot-toc strong { display: block; margin-bottom: .5rem; }
-.plot-toc ul { margin: 0; padding-left: 1.2rem; }
-.plot-toc li { margin: .42rem 0; }
-.scaling-section { scroll-margin-top: 5rem; }
-.plot-card { scroll-margin-top: 5rem; margin: 1rem 0; border: 1px solid var(--line); border-radius: .75rem; background: var(--surface); box-shadow: 0 6px 24px #1a2b4b09; }
-.plot-card summary { display: flex; justify-content: space-between; gap: 1rem; padding: 1rem 1.1rem; cursor: pointer; list-style-position: outside; }
-.plot-card summary strong { display: block; }
-.plot-card summary small { display: block; max-width: 780px; margin-top: .25rem; color: var(--muted); }
-.plot-content { padding: 0 1rem 1rem; border-top: 1px solid var(--line); }
-.plot-content img { display: block; width: 100%; height: auto; margin-top: 1rem; }
-.plot-kind { align-self: start; flex: 0 0 auto; }
-.history-intro { max-width: 960px; margin-bottom: 1.25rem; }
-.history-intro h1 { font-size: clamp(1.8rem, 3vw, 2.6rem); }
-.history-frame { display: block; width: 100%; min-height: 720px; height: calc(100vh - 240px); border: 1px solid var(--line); border-radius: .75rem; background: var(--surface); }
-.footer-links { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--muted); }
+.scaling-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 2rem; align-items: start; }
+.plot-toc { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow: auto; }
+.plot-toc ul { padding-left: 1.4rem; }
+.plot-card { margin: 1rem 0; border-bottom: 1px solid var(--line); }
+.plot-card summary { cursor: pointer; padding: .6rem 0; }
+.plot-kind { margin-left: 1rem; color: var(--muted); font-size: .9rem; }
+.history-frame { width: 100%; height: 80vh; min-height: 600px; border: 1px solid var(--line); }
+.footer-links { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--line); }
 @media (max-width: 900px) {
-  .concept-map, .scaling-layout { grid-template-columns: 1fr; }
-  .plot-toc { position: static; max-height: none; }
-  .page-cards { grid-template-columns: 1fr; }
-}
-@media (max-width: 650px) {
-  .header-inner { align-items: flex-start; flex-direction: column; }
-  .site-nav { justify-content: flex-start; }
-  .concept-grid { grid-template-columns: 1fr; }
-  main { padding-top: 1.5rem; }
+    .scaling-layout { grid-template-columns: 1fr; }
+    .plot-toc { position: static; max-height: none; }
 }
 """
 
@@ -1507,8 +1480,9 @@ def _site_navigation(active_page: str, relative_root: str, include_asv_history: 
 
     links = [
         ("summary", f"{relative_root}index.html", "Summary"),
-        ("options", f"{relative_root}comparisons/index.html", "Options"),
+        ("references", f"{relative_root}comparisons/{REFERENCE_REPORT_PAGE}", "GDAL / PDAL"),
         ("scaling", f"{relative_root}comparisons/{SCALING_REPORT_PAGE}", "Scaling"),
+        ("options", f"{relative_root}comparisons/index.html", "Options"),
     ]
     if include_asv_history:
         links.append(("history", f"{relative_root}{HISTORY_REPORT_PAGE}", "Performance history"))
@@ -1581,64 +1555,60 @@ def _gdal_reference_note() -> str:
     """Explain the purpose and limits of the external GDAL comparison."""
 
     return (
-        '<p class="comparison-note"><strong>GDAL CLI reference.</strong> It appears only where a standalone GDAL '
-        "command performs an equivalent operation. GeoUtils aims for comparable single-worker costs while supporting "
-        "Python workflows, alternative engines and data larger than memory; it need not be faster for every isolated "
-        "call. For reprojection, GDAL receives a memory budget based on the GeoUtils chunk size.</p>"
+        '<p class="comparison-note">Equivalent GDAL commands use matching inputs and output grids. '
+        "Reprojection uses a memory budget based on the GeoUtils chunk size.</p>"
     )
 
 
 def _pdal_reference_note() -> str:
     """Explain the purpose and limits of the external PDAL comparison."""
 
-    return (
-        '<p class="comparison-note"><strong>PDAL CLI reference.</strong> Raster point conversion uses a '
-        "readers.gdal pipeline, followed by writers.ogr for GeoPackage or writers.las for LAS/LAZ. Subsampling adds "
-        "filters.randomize with seed 42 and filters.head to match the requested output count. LAS/LAZ output maps "
-        "the first raster band to native elevation.</p>"
-    )
+    return '<p class="comparison-note">PDAL pipelines perform the same raster sampling and point cloud conversion.</p>'
 
 
-def _data_size_note() -> str:
-    """Give compact raw-data context for the representative workload."""
-
-    return (
-        '<p class="data-note"><strong>Data-size context:</strong> a one-band 2,048² raster is 16.8 MB as Float32 '
-        "(33.6 MB as Float64; 4.2 MB as UInt8), while 17² Float64 XYZ points are about 0.007 MB before object "
-        "overhead.</p>"
-    )
-
-
-def _concept_map() -> str:
-    """Introduce the four GeoUtils choices and keep external CLIs visibly separate."""
+def _comparison_parameters() -> str:
+    """List the settings and input characteristics varied by the benchmarks."""
 
     return "".join(
         [
-            '<div class="concept-map">',
-            '<div class="concept-core"><strong>GeoUtils operation</strong>',
-            "<span>The task being measured, such as reprojection, filtering or gridding.</span></div>",
-            '<div class="concept-grid">',
-            '<div class="concept-card method"><strong>Method</strong><span>The algorithm selected for a specific '
-            'operation.</span><div class="chips"><span class="chip">Gridding — IDW</span>'
-            '<span class="chip">Gridding — Circular mean</span>'
-            '<span class="chip">Reprojection — Bilinear</span></div></div>',
-            '<div class="concept-card engine"><strong>Calculation engine</strong><span>The library GeoUtils uses to '
-            'carry out the calculation.</span><div class="chips"><span class="chip">Rasterio / GDAL</span>'
-            '<span class="chip">SciPy</span><span class="chip">Numba</span><span class="chip">NumPy</span></div></div>',
-            '<div class="concept-card mode"><strong>Execution mode</strong><span>How an operation runs: '
-            "in-memory or chunked out-of-memory.</span>"
-            '<div class="chips"><span class="chip">In memory</span><span class="chip">Dask</span>'
-            '<span class="chip">Multiprocessing</span></div></div>',
-            '<div class="concept-card"><strong>Chunk strategy</strong><span>How a chunked operation reconciles '
-            'separate partial results.</span><div class="chips"><span class="chip">Subsampling — Sequential</span>'
-            '<span class="chip">Subsampling — Top-k</span>'
-            '<span class="chip">Polygonization — Label stitch</span>'
-            '<span class="chip">Grouped statistics — Dense / Sparse / Complete groups</span></div></div>',
-            "</div>",
-            '<div class="external-card"><strong>External references: GDAL and PDAL CLI</strong>',
-            "<span>Standalone file-to-file commands run outside GeoUtils. GDAL covers raster and gridding "
-            "operations, while PDAL covers raster point conversion and subsampling.</span></div></div>",
+            "<ul>",
+            "<li><strong>Execution backend:</strong> in memory, Dask or Multiprocessing.</li>",
+            "<li><strong>Numerical backend:</strong> Rasterio/GDAL, SciPy, Numba, NumPy, GSTools or GPyTorch.</li>",
+            "<li><strong>Method:</strong> the algorithm used for each operation.</li>",
+            "<li><strong>Chunk strategy:</strong> how results from separate chunks are combined.</li>",
+            "<li><strong>Input size:</strong> raster dimensions and point counts.</li>",
+            "<li><strong>Chunk size:</strong> pixels or points processed together.</li>",
+            "<li><strong>Operation settings:</strong> sample size, group count, pair count and variogram lags.</li>",
+            "<li><strong>External tools:</strong> equivalent GDAL and PDAL commands.</li>",
+            "</ul>",
         ]
+    )
+
+
+def _reference_html(result: Any, *, include_asv_history: bool = True) -> str:
+    """Show the GDAL and PDAL comparisons on their own page."""
+
+    body = "".join(
+        [
+            "<h1>Comparison with GDAL and PDAL</h1>",
+            "<p>These plots compare GeoUtils execution time and peak additional RAM with equivalent GDAL and PDAL "
+            "commands, using one worker and one thread.</p>",
+            _run_metadata(result),
+            "<h2>GDAL</h2>",
+            _gdal_reference_note(),
+            f'<img src="../documentation/{DOCUMENTATION_TIME_PLOT}" alt="Execution time relative to GDAL">',
+            f'<img src="../documentation/{DOCUMENTATION_MEMORY_PLOT}" alt="Peak additional RAM by operation">',
+            "<h2>PDAL</h2>",
+            _pdal_reference_note(),
+            f'<img src="../documentation/{DOCUMENTATION_PDAL_PLOT}" alt="Execution time relative to PDAL">',
+        ]
+    )
+    return _html_page(
+        "GeoUtils compared with GDAL and PDAL",
+        "references",
+        body,
+        relative_root="../",
+        include_asv_history=include_asv_history,
     )
 
 
@@ -1660,9 +1630,10 @@ def _comparison_html(
         [
             '<section class="hero"><span class="eyebrow">Options</span>',
             "<h1>Compare GeoUtils options</h1>",
-            '<p class="lede">Each section changes one option at a common workload while keeping the others '
-            "fixed. Runs use one worker and one thread.</p>",
+            '<p class="lede">These tables compare execution modes, numerical backends, methods and chunk strategies '
+            "at fixed workloads, using one worker and one thread.</p>",
             _run_metadata(result),
+            f'<p><a href="{PARAMETER_REPORT_PAGE}">All option and input-size plots</a></p>',
             '<div class="local-links"><a href="#execution-modes">Execution modes</a>',
             '<a href="#calculation-engines">Calculation engines</a><a href="#operation-methods">Methods</a>',
             '<a href="#chunk-strategies">Chunk strategies</a><a href="#point-output-formats">Point output formats</a>',
@@ -1706,7 +1677,51 @@ def _comparison_html(
     )
 
 
-def _scaling_html(
+def _scaling_html(result: Any, *, include_asv_history: bool = True) -> str:
+    """Show collapsible raster-size plots comparing execution modes with default options."""
+
+    toc = []
+    plots = []
+    for comparison in _scaling_comparisons():
+        slug = html.escape(comparison.slug)
+        label = html.escape(comparison.benchmark.operation.display_name)
+        toc.append(f'<li><a href="#{slug}">{label}</a></li>')
+        plots.append(
+            f'<details class="plot-card" id="{slug}"><summary><strong>{label}</strong></summary>'
+            f'<img loading="lazy" src="default-{slug}.svg" '
+            f'alt="Time and peak additional RAM for {label} as raster size grows"></details>'
+        )
+    body = "".join(
+        [
+            "<h1>Scaling with raster size</h1>",
+            "<p>These plots show how execution time and peak additional RAM grow with raster size, comparing "
+            "eager, Dask and Multiprocessing execution with default options.</p>",
+            _run_metadata(result),
+            "<p>Raster width and height vary together; chunk size stays fixed. Select an operation to show its plot.</p>",
+            '<div class="scaling-layout"><nav class="plot-toc" aria-label="Scaling operations">',
+            "<strong>Operations</strong><ul>",
+            *toc,
+            "</ul></nav><div>",
+            *plots,
+            "</div></div>",
+        ]
+    )
+    script = (
+        "<script>function openLinkedPlot(){const id=location.hash.slice(1);const target=document.getElementById(id);"
+        "if(target&&target.tagName==='DETAILS')target.open=true;}addEventListener('hashchange',openLinkedPlot);"
+        "openLinkedPlot();</script>"
+    )
+    return _html_page(
+        "GeoUtils scaling benchmarks",
+        "scaling",
+        body,
+        relative_root="../",
+        include_asv_history=include_asv_history,
+        script=script,
+    )
+
+
+def _parameter_html(
     result: Any,
     *,
     include_asv_history: bool = True,
@@ -1748,10 +1763,10 @@ def _scaling_html(
         )
     body = "".join(
         [
-            '<section class="hero"><span class="eyebrow">Scaling</span>',
-            "<h1>Performance as inputs grow</h1>",
-            '<p class="lede">Each section varies one input size while other settings stay fixed. Select a comparison '
-            "to show or hide its plot.</p>",
+            '<section class="hero"><span class="eyebrow">Options</span>',
+            "<h1>Option and input-size plots</h1>",
+            '<p class="lede">These plots compare GeoUtils options as input size, chunk size or operation settings '
+            "vary. Select a comparison to show its plot.</p>",
             _run_metadata(result),
             "</section>",
             _metric_guide(include_operation=True, include_ratios=False),
@@ -1770,8 +1785,8 @@ def _scaling_html(
         "openLinkedPlot();</script>"
     )
     return _html_page(
-        "GeoUtils scaling benchmarks",
-        "scaling",
+        "GeoUtils option and parameter plots",
+        "options",
         body,
         relative_root="../",
         include_asv_history=include_asv_history,
@@ -1786,8 +1801,7 @@ def _history_html(result: Any) -> str:
         [
             '<section class="history-intro"><span class="eyebrow">History</span>',
             "<h1>Performance history</h1>",
-            '<p class="lede">Explore ASV measurements across commits, including its benchmark grid, detailed '
-            "history plots and detected regressions.</p>",
+            '<p class="lede">This page tracks execution time and memory usage across commits using ASV.</p>',
             _run_metadata(result),
             "</section>",
             '<iframe class="history-frame" src="asv/index.html" title="ASV performance history"></iframe>',
@@ -1810,52 +1824,43 @@ def _site_index(
     includes_performance_change: bool = False,
     include_asv_history: bool = True,
 ) -> str:
-    """Return the benchmark landing page with definitions and one headline table."""
+    """Show the compared parameters and a table of default Dask measurements."""
 
-    cards = [
-        '<a class="page-card" href="comparisons/index.html"><strong>Compare options</strong>'
-        "<span>Isolate execution modes, calculation engines, methods and chunk strategies at one workload.</span></a>",
-        f'<a class="page-card" href="comparisons/{SCALING_REPORT_PAGE}"><strong>Scaling</strong>'
-        "<span>See how elapsed time and additional memory change as raster, chunk, point or sample size grows."
-        "</span></a>",
+    # Link detailed results in the same order as the page navigation
+    links = [
+        f'<li><a href="comparisons/{REFERENCE_REPORT_PAGE}">Comparison with GDAL and PDAL</a></li>',
+        f'<li><a href="comparisons/{SCALING_REPORT_PAGE}">Scaling with raster size</a></li>',
+        '<li><a href="comparisons/index.html">Comparison with options</a></li>',
     ]
     if include_asv_history:
-        cards.append(
-            f'<a class="page-card" href="{HISTORY_REPORT_PAGE}"><strong>Performance history</strong>'
-            "<span>Inspect detailed ASV measurements and changes across commits.</span></a>"
-        )
+        links.append(f'<li><a href="{HISTORY_REPORT_PAGE}">Performance history</a></li>')
     change_link = (
-        f'<p><a href="comparisons/{PERFORMANCE_CHANGE_REPORT}">View the before/after branch summary</a></p>'
+        f'<p><a href="comparisons/{PERFORMANCE_CHANGE_REPORT}">Before/after branch summary</a></p>'
         if includes_performance_change
         else ""
     )
+
     body = "".join(
         [
-            '<section class="hero"><span class="eyebrow">Summary</span>',
-            "<h1>GeoUtils performance benchmarks</h1>",
-            '<p class="lede">Representative time and memory measurements for raster, vector and point cloud '
-            "operations.</p>",
+            "<h1>GeoUtils benchmarks</h1>",
+            "<p>These benchmarks measure execution time and peak additional RAM for GeoUtils operations, "
+            "with comparisons across settings, input sizes and external tools.</p>",
+            "<p><strong>Preview only: values are synthetic.</strong></p>"
+            if getattr(result, "_env_name", "") == "preview"
+            else "",
             _run_metadata(result),
-            "</section>",
-            "<section><h2>How GeoUtils operations vary</h2>",
-            '<p class="section-intro">Each comparison changes one option at a time. GDAL and PDAL CLI are '
-            "separate external references.</p>",
-            _concept_map(),
-            "</section>",
-            "<section><h2>Performance table</h2>",
-            '<p class="section-intro">Each row shows elapsed time and additional memory for a fixed workload (operation '
-            "parameters and input size). All options run without parallelism: one computational process using one "
-            "thread.</p>",
-            _gdal_reference_note(),
-            _pdal_reference_note(),
-            _metric_guide(include_ratios=False),
-            _data_size_note(),
+            "<p>The benchmarks compare:</p>",
+            _comparison_parameters(),
+            '<h2 id="performance-summary">Summary</h2>',
+            "<p>Dask execution with the default numerical backend and chunk strategy, on a "
+            "10,000 × 10,000 raster or 100,000,000 input points. Substantially different methods have separate rows.</p>",
+            "<p>Time includes completed output. Peak additional RAM is the combined process-tree peak minus its "
+            "initialized baseline. A dash means that this workload has not been measured.</p>",
             _headline_summary_table(records),
-            "</section>",
+            "<h2>Detailed comparisons</h2><ol>",
+            *links,
+            "</ol>",
             change_link,
-            '<section><h2>Explore the results further</h2><div class="page-cards">',
-            *cards,
-            "</div></section>",
             '<p class="footer-links"><a href="comparisons/comparisons.csv">Download CSV</a> · '
             '<a href="comparisons/comparisons.json">Download JSON</a></p>',
         ]
@@ -1887,6 +1892,24 @@ def render_comparisons(
     records = collect_comparison_measurements(result)
     for comparison in COMPARISONS:
         _plot_comparison(comparison, records, report_directory / f"{comparison.slug}.svg")
+
+    # Scaling compares execution modes with the usual method, numerical backend and chunk strategy
+    for comparison in _scaling_comparisons():
+        _plot_comparison(
+            comparison,
+            records,
+            report_directory / f"default-{comparison.slug}.svg",
+            include_operation=False,
+        )
+
+    # Use the same reference graphics in the website and documentation
+    render_documentation_snapshot(result, website_directory / "documentation")
+    (report_directory / REFERENCE_REPORT_PAGE).write_text(
+        _reference_html(result, include_asv_history=include_asv_history), encoding="utf-8"
+    )
+    (report_directory / PARAMETER_REPORT_PAGE).write_text(
+        _parameter_html(result, include_asv_history=include_asv_history), encoding="utf-8"
+    )
 
     # JSON retains run metadata while CSV remains convenient for independent analysis
     payload = _result_payload(result, records)
@@ -1998,7 +2021,9 @@ def main() -> None:
     if not args.doc_only:
         website_directory = args.website_directory or Path("benchmarks/results/asv/html")
         render_comparisons(result, website_directory, baseline_result=baseline_result)
-    if args.doc_dir is not None:
+    if args.doc_dir is not None and (
+        args.doc_only or args.doc_dir.resolve() != (website_directory / "documentation").resolve()
+    ):
         render_documentation_snapshot(result, args.doc_dir)
     elif args.doc_only:
         parser.error("--doc-only requires --doc-dir")

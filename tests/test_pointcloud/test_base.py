@@ -27,10 +27,10 @@ from shapely.geometry import Polygon, box
 
 import geoutils as gu
 from geoutils import PointCloud, Raster
-from geoutils._dispatch import is_dask_array, is_dask_dataframe
+from geoutils._dispatch import is_dask_dataframe
 from geoutils.multiproc import MultiprocConfig
 from geoutils.pointcloud.base import GeometryPointCloudBase, PointCloudBase
-from geoutils.pointcloud.pd_accessor import GeoPandasPointCloudAccessor
+from geoutils.pointcloud.pd_accessor import GeoDataFramePointCloudAccessor
 from geoutils.pointcloud.xr_accessor import DataArrayPointCloudAccessor
 from tests.accessor_helpers import assert_output_equal
 from tests.remote_helpers import RemoteFiles
@@ -62,15 +62,15 @@ class TestClassVsAccessorConsistency:
     methods = [m for m in methods if m not in ["get_stats", "set_data_column"]]
 
     @pytest.mark.parametrize(
-        "prop,as_type",
+        "prop,as_object_type",
         [
-            (prop, as_type)
+            (prop, as_object_type)
             for prop in properties
-            for as_type in ("geodataframe", "dataarray")
-            if as_type == "geodataframe" or hasattr(DataArrayPointCloudAccessor, prop)
+            for as_object_type in ("geodataframe", "dataarray")
+            if as_object_type == "geodataframe" or hasattr(DataArrayPointCloudAccessor, prop)
         ],
     )
-    def test_properties__equality_and_loading(self, prop: str, as_type: str) -> None:
+    def test_properties__equality_and_loading(self, prop: str, as_object_type: str) -> None:
         """
         Test that properties are exactly equal between a PointCloud and a GeoDataFrame using the "pc" accessor.
         """
@@ -79,13 +79,13 @@ class TestClassVsAccessorConsistency:
         ds = self.ds.copy()
         ds.pc.set_data_name("b1")
 
-        if as_type == "dataarray":
+        if as_object_type == "dataarray":
             ds = ds.pc.to_xarray()
 
         output_pc = getattr(pc, "gdf" if prop == "ds" else prop)
         output_ds = getattr(ds.pc, prop)
 
-        if prop == "columns" and as_type == "dataarray":
+        if prop == "columns" and as_object_type == "dataarray":
             output_pc = output_pc.drop("geometry")
         assert_output_equal(output_pc, output_ds)
         assert pc.is_loaded
@@ -94,6 +94,7 @@ class TestClassVsAccessorConsistency:
     methods_and_kwargs = [
         ("set_data_name", {"new_data_name": "b2"}),
         ("copy", {}),
+        ("crop", {"bbox": (-0.1, -0.1, 1.1, 0.5)}),
         ("clip", {"mask": Polygon([(-0.1, -0.1), (0.5, -0.1), (0.5, 1.1), (-0.1, 1.1)])}),
         ("reproject", {"crs": 4326}),
         ("filter", {"method": "median", "radius": 1.1}),
@@ -163,25 +164,81 @@ class TestClassVsAccessorConsistency:
         ),
     ]
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
-    @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in methods_and_kwargs])
-    def test_methods__equality_and_loading(self, as_type: str, method: str, kwargs: dict[str, Any]) -> None:
-        """
-        Test that method output and loading are the same between a PointCloud and a GeoDataFrame "pc" accessor.
-        """
+    @pytest.mark.parametrize("representation", ["pointcloud", "geodataframe", "dataframe", "dataarray"])
+    @pytest.mark.parametrize(
+        "method,kwargs",
+        [
+            (method, kwargs)
+            for method, kwargs in methods_and_kwargs
+            if method in ("copy", "clip", "reproject", "filter", "subsample")
+        ],
+    )
+    def test_methods__metadata(self, method: str, kwargs: dict[str, Any], representation: str) -> None:
+        """Checks that operations preserve custom metadata."""
 
-        pc = PointCloud(self.ds, data_name="b1")
-        ds = self.ds.copy()
-        ds.pc.set_data_name("b1")
-        if as_type == "dataarray":
-            ds = ds.pc.to_xarray()
-            if method == "to_xarray":
-                # The array already has the requested representation
-                assert pc.to_xarray().identical(ds)
-                return
+        # Create point cloud with custom metadata
+        frame = self.ds.copy()
+        frame.pc.set_data_name("b1")
+        if representation == "dataarray":
+            source = frame.pc.to_xarray()
+            source.encoding.update(dtype="int16", scale_factor=0.1, add_offset=100, _FillValue=-32768)
+            encoding = source.encoding.copy()
+        elif representation == "dataframe":
+            source = pd.DataFrame(frame)
+        else:
+            source = PointCloud(frame, data_name="b1") if representation == "pointcloud" else frame
+        attributes = source.gdf.attrs if isinstance(source, PointCloud) else source.attrs
+        attributes["title"] = "elevation survey"
+        original = source.copy()
+
+        # Run each operation and check metadata is unchanged
+        interface = source if isinstance(source, PointCloud) else source.pc
+        result = getattr(interface, method)(**kwargs)
+        output_attributes = result.gdf.attrs if isinstance(result, PointCloud) else result.attrs
+        assert output_attributes["title"] == "elevation survey"
+        assert attributes["title"] == "elevation survey"
+        assert_output_equal(source, original)
+        if isinstance(source, xr.DataArray):
+            assert result.encoding == encoding
+            assert source.encoding == encoding
+
+    @pytest.mark.parametrize("loaded,chunks", [(True, None), (False, None), (False, 3)])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("method, kwargs", methods_and_kwargs)
+    def test_methods__equality_and_loading(
+        self,
+        tmp_path: Path,
+        as_object_type: Literal["dataarray", "geodataframe"],
+        method: str,
+        kwargs: dict[str, Any],
+        loaded: bool,
+        chunks: int | None,
+    ) -> None:
+        """Checks that point methods load as needed and match eager class and accessor outputs."""
+
+        if not loaded and (as_object_type == "geodataframe" or chunks is not None):
+            pytest.importorskip("dask_geopandas")
+
+        # Write four points so chunks of 3 leave a shorter final partition
+        filename = tmp_path / "points.gpkg"
+        self.ds.to_file(filename, index=False)
+        eager_reference = loaded or chunks is not None
+        pc = PointCloud(self.ds.copy(), data_name="b1") if eager_reference else PointCloud(filename, data_name="b1")
+        if loaded:
+            ds = self.ds.copy()
+            ds.pc.set_data_name("b1")
+            if as_object_type == "dataarray":
+                ds = ds.pc.to_xarray()
+        else:
+            ds = gu.open_pointcloud(
+                filename, data_name="b1", columns="all", as_object_type=as_object_type, chunks=chunks
+            )
+        assert pc.is_loaded is eager_reference
+        assert ds.pc.is_loaded is loaded
         if method == "variogram":
             pytest.importorskip("skgstat")
 
+        # Run each operation through the class and accessor
         args_pc = kwargs.copy()
         args_ds = kwargs.copy()
         if isinstance(args_pc.get("other"), str) and args_pc["other"] == "self":
@@ -190,7 +247,7 @@ class TestClassVsAccessorConsistency:
         elif isinstance(args_pc.get("other"), PointCloud):
             other_ds = args_pc["other"].gdf.copy()
             other_ds.pc.set_data_name("b1")
-            args_ds["other"] = other_ds.pc.to_xarray() if as_type == "dataarray" else other_ds
+            args_ds["other"] = other_ds.pc.to_xarray() if as_object_type == "dataarray" else other_ds
         if args_pc.get("pc") == "self":
             args_pc["pc"] = pc
             args_ds["pc"] = ds
@@ -198,9 +255,28 @@ class TestClassVsAccessorConsistency:
         output_pc = getattr(pc, method)(**args_pc)
         output_ds = getattr(ds.pc, method)(**args_ds)
 
+        # Check loading before comparing values, which can load deferred outputs
+        assert pc.is_loaded is (eager_reference or method not in ("set_data_name", "crop", "grid", "krige"))
+        assert ds.pc.is_loaded is loaded
+        if isinstance(output_pc, (PointCloud, Raster)):
+            assert output_pc.is_loaded is (eager_reference or method != "crop")
+        if isinstance(output_ds, PointCloud):
+            assert output_ds.is_loaded
+        elif isinstance(output_ds, (gpd.GeoDataFrame, xr.DataArray)) or is_dask_dataframe(output_ds):
+            output_interface = output_ds.rst if method in ("grid", "krige") else output_ds.pc
+            output_loaded = loaded
+            if method in ("cosample", "grid", "krige") and as_object_type == "dataarray" and chunks is None:
+                output_loaded = True
+            assert output_interface.is_loaded is output_loaded
+
+        # Compare eager and deferred values through both representations
+        if method == "to_xarray":
+            # File readers can omit the implicit point index; compare point values and coordinates
+            output_pc = output_pc.pc.to_geoutils()
+            output_ds = output_ds.pc.to_geoutils()
         if method == "set_data_name":
             assert output_pc is None
-            if as_type == "dataarray":
+            if as_object_type == "dataarray":
                 assert isinstance(output_ds, xr.DataArray)
                 assert_output_equal(pc, output_ds)
                 assert ds.pc.data_name == "b1"
@@ -210,8 +286,7 @@ class TestClassVsAccessorConsistency:
         else:
             assert_output_equal(output_pc, output_ds, use_allclose=method in ("grid", "krige"), strict_masked=False)
 
-        assert pc.is_loaded
-        assert ds.pc.is_loaded
+        assert ds.pc.is_loaded is loaded
 
     class_methods_and_kwargs = [
         (
@@ -261,7 +336,7 @@ class TestClassVsAccessorConsistency:
         # Check that the protocol includes each point and both numeric data columns
         assert pointcloud.__geo_interface__ == expected_interface
 
-    @pytest.mark.parametrize("accessor", [GeoPandasPointCloudAccessor, DataArrayPointCloudAccessor])
+    @pytest.mark.parametrize("accessor", [GeoDataFramePointCloudAccessor, DataArrayPointCloudAccessor])
     @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in class_methods_and_kwargs])
     def test_classmethods__equality(self, accessor: type, method: str, kwargs: dict[str, Any]) -> None:
         """Test class method output exactly the same objects."""
@@ -554,7 +629,7 @@ class TestArrayVsGeometryConsistency:
 
         # Synthetic raster data for cosampling (upper-left grid nodes)
         raster = gu.Raster.from_array(np.arange(12, dtype=np.float32).reshape(3, 4), from_origin(0, 3, 1, 1), 32633)
-        points = raster.to_pointcloud(backend="xarray", force_pixel_offset="ul")
+        points = raster.to_pointcloud(pointcloud_return_type="dataarray", force_pixel_offset="ul")
         expected = points.rename("self").assign_coords(other=points.variable)
 
         # Equal cosampling output
@@ -631,8 +706,8 @@ class TestAccessorDask:
     # Use the same compact fixture as the eager class-versus-accessor tests
     ds = TestClassVsAccessorConsistency.ds
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
-    def test_open__dask(self, as_type: Literal["dataarray", "geodataframe"]) -> None:
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
+    def test_open__dask(self, as_object_type: Literal["dataarray", "geodataframe"]) -> None:
         """
         Checks that open_pointcloud() returns lazy point arrays or GeoDataFrame partitions when chunks is supplied.
         """
@@ -646,14 +721,14 @@ class TestAccessorDask:
         self.ds.to_file(temp_file)
 
         # Metadata queries should not force the Dask collection into memory
-        ds = gu.open_pointcloud(temp_file, data_name="b1", chunks=2, as_type=as_type)
+        ds = gu.open_pointcloud(temp_file, data_name="b1", chunks=2, as_object_type=as_object_type)
 
-        assert isinstance(ds, xr.DataArray if as_type == "dataarray" else dgpd.GeoDataFrame)
+        assert isinstance(ds, xr.DataArray if as_object_type == "dataarray" else dgpd.GeoDataFrame)
         assert not ds.pc.is_loaded
         assert ds.pc.point_count == len(self.ds)
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
-    def test_bbox__dask(self, as_type: Literal["dataarray", "geodataframe"]) -> None:
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
+    def test_bbox__dask(self, as_object_type: Literal["dataarray", "geodataframe"]) -> None:
         """Checks that a lazy point cloud reads its bounding box without replacing its Dask collection."""
 
         # Write the eager points and reopen them as two lazy row partitions
@@ -661,14 +736,16 @@ class TestAccessorDask:
         temp_dir = tempfile.TemporaryDirectory()
         temp_file = os.path.join(temp_dir.name, "test.gpkg")
         self.ds.to_file(temp_file)
-        lazy = gu.open_pointcloud(temp_file, data_name="b1", chunks=2, as_type=as_type)
+        lazy = gu.open_pointcloud(temp_file, data_name="b1", chunks=2, as_object_type=as_object_type)
 
         # Read the saved bounding box while keeping the accessor backed by Dask
         assert lazy.pc.bbox == rio.coords.BoundingBox(left=0, bottom=0, right=1, top=1)
         assert not lazy.pc.is_loaded
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
-    def test_chunked_methods__equality_loading_laziness(self, as_type: Literal["dataarray", "geodataframe"]) -> None:
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
+    def test_chunked_methods__equality_loading_laziness(
+        self, as_object_type: Literal["dataarray", "geodataframe"]
+    ) -> None:
         """
         Checks that chunked point methods match eager outputs and preserve their expected loading and laziness.
         """
@@ -684,7 +761,7 @@ class TestAccessorDask:
         temp_file = os.path.join(temp_dir.name, "test.gpkg")
         self.ds.to_file(temp_file)
 
-        ds = gu.open_pointcloud(temp_file, data_name="b1", chunks=2, as_type=as_type)
+        ds = gu.open_pointcloud(temp_file, data_name="b1", chunks=2, as_object_type=as_object_type)
         pc = PointCloud(self.ds, data_name="b1")
 
         # Array conversion should create a Dask array with the eager values
@@ -700,9 +777,9 @@ class TestAccessorDask:
         assert_output_equal(pc, loaded)
         assert not ds.pc.is_loaded
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_chunked_equality__compares_values_without_loading(
-        self, as_type: Literal["dataarray", "geodataframe"]
+        self, as_object_type: Literal["dataarray", "geodataframe"]
     ) -> None:
         """Check that lazy equality detects changed coordinates and values without replacing either input."""
 
@@ -716,8 +793,8 @@ class TestAccessorDask:
             changed_ds.geometry = changed_ds.geometry.translate(xoff=10)
             changed_ds.to_file(changed)
 
-            lazy = gu.open_pointcloud(source, data_name="b1", chunks=3, as_type=as_type)
-            lazy_changed = gu.open_pointcloud(changed, data_name="b1", chunks=2, as_type=as_type)
+            lazy = gu.open_pointcloud(source, data_name="b1", chunks=3, as_object_type=as_object_type)
+            lazy_changed = gu.open_pointcloud(changed, data_name="b1", chunks=2, as_object_type=as_object_type)
             eager = PointCloud(self.ds, data_name="b1")
 
             assert lazy.pc.pointcloud_equal(eager)
@@ -727,45 +804,14 @@ class TestAccessorDask:
             assert not lazy.pc.is_loaded
             assert not lazy_changed.pc.is_loaded
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
-    def test_chunked_reduction_methods__equality_loading_laziness(
-        self, as_type: Literal["dataarray", "geodataframe"]
-    ) -> None:
-        """Test Dask point-cloud reductions/subsampling compute small outputs without loading the source."""
-
-        pytest.importorskip("dask_geopandas")
-
-        # Open the same source lazily and eagerly for reduction comparisons
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.gpkg")
-        self.ds.to_file(temp_file)
-
-        ds = gu.open_pointcloud(temp_file, data_name="b1", chunks=2, as_type=as_type)
-        pc = PointCloud(self.ds, data_name="b1")
-
-        # Statistics compute a small dictionary without loading the accessor source
-        assert_output_equal(
-            pc.stats(["mean", "max", "valid_count"]),
-            ds.pc.stats(["mean", "max", "valid_count"]),
-        )
-        assert not ds.pc.is_loaded
-
-        # Subsampling keeps the requested point rows lazy until the Dask result is computed
-        expected = pc.subsample(subsample=2, random_state=42)
-        result = ds.pc.subsample(subsample=2, random_state=42)
-        assert is_dask_array(result.data) if as_type == "dataarray" else is_dask_dataframe(result)
-        assert result.pc.data_name == "b1"
-        assert_output_equal(expected, result.compute())
-        assert not ds.pc.is_loaded
-
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
-    def test_open_las__multiprocessing_and_dask(self, as_type: Literal["dataarray", "geodataframe"]) -> None:
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
+    def test_open_las__multiprocessing_and_dask(self, as_object_type: Literal["dataarray", "geodataframe"]) -> None:
         """Check LAS chunked loading through Multiprocessing and Dask."""
 
         pytest.importorskip("laspy")
         pytest.importorskip("lazrs")
         pytest.importorskip("dask")
-        if as_type == "geodataframe":
+        if as_object_type == "geodataframe":
             dgpd = pytest.importorskip("dask_geopandas")
 
         # Establish one eager reference for both chunked backends
@@ -782,8 +828,8 @@ class TestAccessorDask:
         assert pc_mp.pointcloud_equal(pc)
 
         # Dask represents the same LAS chunks as a lazy GeoDataFrame
-        ds = gu.open_pointcloud(fn_las, chunks=100, as_type=as_type)
-        assert isinstance(ds, xr.DataArray if as_type == "dataarray" else dgpd.GeoDataFrame)
+        ds = gu.open_pointcloud(fn_las, chunks=100, as_object_type=as_object_type)
+        assert isinstance(ds, xr.DataArray if as_object_type == "dataarray" else dgpd.GeoDataFrame)
         assert not ds.pc.is_loaded
         assert ds.pc.point_count == pc.point_count
 
@@ -794,14 +840,14 @@ class TestAccessorDask:
         assert np.allclose(ds_pc.data, pc.data)
         assert not ds.pc.is_loaded
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
-    def test_grid_las__multiprocessing_and_dask(self, as_type: Literal["dataarray", "geodataframe"]) -> None:
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
+    def test_grid_las__multiprocessing_and_dask(self, as_object_type: Literal["dataarray", "geodataframe"]) -> None:
         """Test LAS point-cloud gridding with Dask and Multiprocessing."""
 
         pytest.importorskip("laspy")
         pytest.importorskip("lazrs")
         da = pytest.importorskip("dask.array")
-        if as_type == "geodataframe":
+        if as_object_type == "geodataframe":
             pytest.importorskip("dask_geopandas")
 
         # Build a small eager grid that both chunked implementations must match
@@ -817,7 +863,7 @@ class TestAccessorDask:
         )
 
         # Dask selects and grids point partitions separately for every output block
-        ds = gu.open_pointcloud(fn_las, chunks=100, as_type=as_type)
+        ds = gu.open_pointcloud(fn_las, chunks=100, as_object_type=as_object_type)
         output_dask = ds.pc.grid(
             shape=(3, 3),
             bounds=pc.bbox,
@@ -851,65 +897,17 @@ class TestAccessorDask:
         assert not pc_file.is_loaded
         assert output_mp.is_loaded
 
-    @pytest.mark.parametrize(
-        "method, options",
-        [
-            ("copy", {}),
-            ("filter", {"radius": 1.1}),
-            ("reproject", {"crs": 4326}),
-            ("crop", {"bbox": (0.0, -1.0, 6.0, 1.0), "mode": "within"}),
-            ("subsample", {"subsample": 5, "random_state": 42}),
-            ("cosample", {}),
-        ],
-    )
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
-    def test_methods__loading_laziness(
-        self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path, method: str, options: dict[str, Any]
-    ) -> None:
-        """Checks that point operations return lazy Dask arrays whether they use DataArrays or GeoDataFrames."""
-        pytest.importorskip("dask")
-        pytest.importorskip("pyarrow")
-        if as_type == "geodataframe":
-            pytest.importorskip("dask_geopandas")
-
-        # Write then read a chunked point cloud file as Geodataframe/DatArray
-        points = gu.DataArrayPointCloudAccessor.from_xyz(
-            np.arange(11.0),
-            np.zeros(11),
-            np.arange(11.0),
-            32633,
-            auxiliary={"id": np.arange(11, dtype=np.uint64)},
-        )
-        filename = tmp_path / "points.parquet"
-        points.pc.to_parquet(filename, chunks=4)
-        points = gu.open_pointcloud(filename, columns="all", as_type=as_type)
-        lazy = gu.open_pointcloud(filename, columns="all", chunks=4, as_type=as_type)
-        eager_options = {**options, **({"other": points} if method == "cosample" else {})}
-        lazy_options = {**options, **({"other": lazy} if method == "cosample" else {})}
-
-        # Run the same operation
-        expected = getattr(points.pc, method)(**eager_options)
-        result = getattr(lazy.pc, method)(**lazy_options)
-
-        # Check laziness and equality
-        assert not lazy.pc.is_loaded
-        assert not result.pc.is_loaded
-        assert not result.pc.is_loaded
-        assert_output_equal(expected.pc.to_geoutils(), result.compute())
-        assert not lazy.pc.is_loaded
-        assert not result.pc.is_loaded
-
     @pytest.mark.parametrize("operation", ["predict_magnitude", "random_field"])
     @pytest.mark.parametrize("correlated", [False, True])
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_uncertainty__loading_laziness(
-        self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path, operation: str, correlated: bool
+        self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path, operation: str, correlated: bool
     ) -> None:
         """Checks that uncertainty maps stay lazy and agree exactly across uneven point chunks."""
 
         pytest.importorskip("dask")
         pytest.importorskip("pyarrow")
-        if as_type == "geodataframe":
+        if as_object_type == "geodataframe":
             pytest.importorskip("dask_geopandas")
         if correlated:
             pytest.importorskip("gstools")
@@ -927,8 +925,8 @@ class TestAccessorDask:
         )
         filename = tmp_path / "points.parquet"
         points.pc.to_parquet(filename, chunks=4)
-        points = gu.open_pointcloud(filename, columns="all", as_type=as_type)
-        lazy = gu.open_pointcloud(filename, columns="all", chunks=4, as_type=as_type)
+        points = gu.open_pointcloud(filename, columns="all", as_object_type=as_object_type, load=True)
+        lazy = gu.open_pointcloud(filename, columns="all", chunks=4, as_object_type=as_object_type)
         predictors = {"quality": "quality"}
 
         # Exact equality and laziness checks
@@ -944,13 +942,13 @@ class TestAccessorDask:
         assert_output_equal(expected.pc.to_geoutils(), result.compute())
         assert not lazy.pc.is_loaded
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
-    def test_grid__loading_laziness(self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path) -> None:
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
+    def test_grid__loading_laziness(self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path) -> None:
         """Checks that grid keeps laziness on both point cloud types."""
 
         pytest.importorskip("dask")
         pytest.importorskip("pyarrow")
-        if as_type == "geodataframe":
+        if as_object_type == "geodataframe":
             pytest.importorskip("dask_geopandas")
 
         # Open file lazily
@@ -958,8 +956,8 @@ class TestAccessorDask:
         points = gu.DataArrayPointCloudAccessor.from_xyz(x.ravel(), y.ravel(), (x + y).ravel(), 32633)
         filename = tmp_path / "points.parquet"
         points.pc.to_parquet(filename, chunks=7)
-        points = gu.open_pointcloud(filename, columns="all", as_type=as_type)
-        lazy = gu.open_pointcloud(filename, chunks=7, as_type=as_type)
+        points = gu.open_pointcloud(filename, columns="all", as_object_type=as_object_type, load=True)
+        lazy = gu.open_pointcloud(filename, chunks=7, as_object_type=as_object_type)
         options = {"grid_coords": (np.arange(4.0), np.arange(4.0)), "resampling": "nearest"}
 
         # Run operation
@@ -980,14 +978,14 @@ class TestPointCloudNames:
     and deprecated ``ds`` main attribute for PointCloud class through Vector (now renamed ``gdf``).
     """
 
-    @pytest.mark.parametrize("as_type", ["pointcloud", "geodataframe", "dataarray"])
-    def test_data_name__deprecated_property(self, as_type: str) -> None:
+    @pytest.mark.parametrize("as_object_type", ["pointcloud", "geodataframe", "dataarray"])
+    def test_data_name__deprecated_property(self, as_object_type: str) -> None:
         """Checks that using the old data_column property warns once and returns the same name as data_name."""
 
         # Create a point cloud in each type
         cloud = PointCloud.from_xyz([0.0, 1.0], [0.0, 1.0], [2.0, 3.0], 32633, data_name="height")
         interfaces = {"pointcloud": cloud, "geodataframe": cloud.gdf.pc, "dataarray": cloud.to_xarray().pc}
-        points = interfaces[as_type]
+        points = interfaces[as_object_type]
 
         # Check calling the property raises a warning, but works the same
         with pytest.warns(DeprecationWarning, match="data_column.*data_name") as recorded:
@@ -997,14 +995,14 @@ class TestPointCloudNames:
         assert description is not None
         assert "Name of the point cloud's data." in description
 
-    @pytest.mark.parametrize("as_type", ["pointcloud", "geodataframe"])
-    def test_data_name__deprecated_setter(self, as_type: str) -> None:
+    @pytest.mark.parametrize("as_object_type", ["pointcloud", "geodataframe"])
+    def test_data_name__deprecated_setter(self, as_object_type: str) -> None:
         """Checks that setting the old data_column warns and selects the proper point values."""
 
         # Create a point cloud in each type
         cloud = PointCloud.from_xyz([0.0, 1.0], [0.0, 1.0], [2.0, 3.0], 32633, data_name="height")
         cloud.gdf["quality"] = [4.0, 5.0]
-        points = cloud if as_type == "pointcloud" else cloud.gdf.pc
+        points = cloud if as_object_type == "pointcloud" else cloud.gdf.pc
 
         # Check warning and proper behaviour
         with pytest.warns(DeprecationWarning, match="data_column.*data_name"):
@@ -1012,20 +1010,20 @@ class TestPointCloudNames:
         assert points.data_name == "quality"
         np.testing.assert_array_equal(points.data, [4.0, 5.0])
 
-    @pytest.mark.parametrize("as_type", ["pointcloud", "geodataframe", "dataarray"])
-    def test_set_data_name__deprecated_method(self, as_type: str) -> None:
+    @pytest.mark.parametrize("as_object_type", ["pointcloud", "geodataframe", "dataarray"])
+    def test_set_data_name__deprecated_method(self, as_object_type: str) -> None:
         """Checks that set_data_column() warns and follows set_data_name() for every point representation."""
 
         # Create a point cloud in each type
         cloud = PointCloud.from_xyz([0.0, 1.0], [0.0, 1.0], [2.0, 3.0], 32633, data_name="height")
         cloud.gdf["quality"] = [4.0, 5.0]
         interfaces = {"pointcloud": cloud, "geodataframe": cloud.gdf.pc, "dataarray": cloud.to_xarray().pc}
-        points = interfaces[as_type]
+        points = interfaces[as_object_type]
 
         # Check warning and proper behaviour
         with pytest.warns(DeprecationWarning, match="set_data_column.*set_data_name"):
             result = points.set_data_column("quality")
-        selected = result.pc if as_type == "dataarray" else points
+        selected = result.pc if as_object_type == "dataarray" else points
         assert selected.data_name == "quality"
         np.testing.assert_array_equal(selected.data, [4.0, 5.0])
 
@@ -1151,9 +1149,9 @@ def remote_native_points(request: pytest.FixtureRequest, remote_files: RemoteFil
     suffix = request.param
     if suffix == "gpkg":
         return request.getfixturevalue("remote_points")
-    if suffix == "copc-depths":
-        # Copy a COPC file with two depths
-        filename = remote_files.directory / "depths.copc.laz"
+    if suffix == "copc-levels":
+        # Copy a COPC file with two levels
+        filename = remote_files.directory / "levels.copc.laz"
         shutil.copyfile(request.getfixturevalue("copc_file"), filename)
         return filename.name
 
@@ -1198,18 +1196,18 @@ _REMOTE_POINT_OPEN_CASES = [
     pytest.param(suffix, data_name, {}, id=suffix) for suffix, data_name in _REMOTE_POINT_FILES
 ] + [
     pytest.param("parquet-partitioned", None, {}, id="parquet-partitioned"),
-    pytest.param("copc-depths", None, {"level": 0}, id="copc-root"),
-    pytest.param("copc-depths", None, {"level": range(2)}, id="copc-levels"),
-    pytest.param("copc-depths", None, {"downsample": 4.5}, id="copc-downsample"),
+    pytest.param("copc-levels", None, {"level": 0}, id="copc-root"),
+    pytest.param("copc-levels", None, {"level": range(2)}, id="copc-levels"),
+    pytest.param("copc-levels", None, {"downsample": 4.5}, id="copc-downsample"),
 ]
 _REMOTE_POINT_READERS = [
     pytest.param(gu.PointCloud, {}, id="pointcloud"),
-    pytest.param(gu.open_pointcloud, {"as_type": "dataarray"}, id="dataarray"),
-    pytest.param(gu.open_pointcloud, {"as_type": "dataset"}, id="dataset"),
-    pytest.param(gu.open_pointcloud, {"as_type": "geodataframe"}, id="geodataframe"),
-    pytest.param(gu.open_pointcloud, {"as_type": "dataarray", "chunks": 3}, id="dataarray-chunked"),
-    pytest.param(gu.open_pointcloud, {"as_type": "dataset", "chunks": 3}, id="dataset-chunked"),
-    pytest.param(gu.open_pointcloud, {"as_type": "geodataframe", "chunks": 3}, id="geodataframe-chunked"),
+    pytest.param(gu.open_pointcloud, {"as_object_type": "dataarray"}, id="dataarray"),
+    pytest.param(gu.open_pointcloud, {"as_object_type": "dataset"}, id="dataset"),
+    pytest.param(gu.open_pointcloud, {"as_object_type": "geodataframe"}, id="geodataframe"),
+    pytest.param(gu.open_pointcloud, {"as_object_type": "dataarray", "chunks": 3}, id="dataarray-chunked"),
+    pytest.param(gu.open_pointcloud, {"as_object_type": "dataset", "chunks": 3}, id="dataset-chunked"),
+    pytest.param(gu.open_pointcloud, {"as_object_type": "geodataframe", "chunks": 3}, id="geodataframe-chunked"),
 ]
 
 
@@ -1251,26 +1249,26 @@ class TestPointCloudRemote:
     @pytest.mark.parametrize(
         "remote_native_points,data_name,options", _REMOTE_POINT_OPEN_CASES, indirect=["remote_native_points"]
     )
-    @pytest.mark.parametrize("as_type", ["dataarray", "dataset", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
     def test_open_pointcloud__remote(
         self,
         remote_files: RemoteFiles,
         remote_url: Callable[[str], str],
         remote_native_points: str,
         data_name: str | None,
-        as_type: Literal["dataarray", "dataset", "geodataframe"],
+        as_object_type: Literal["dataarray", "dataset", "geodataframe"],
         options: dict[str, Any],
     ) -> None:
         """Checks that open_pointcloud() opens a remote point cloud file properly."""
 
         # Open local and remote
         filename = remote_native_points
-        options = {"data_name": data_name, "columns": "all", "as_type": as_type, **options}
+        options = {"data_name": data_name, "columns": "all", "as_object_type": as_object_type, "load": True, **options}
         expected = gu.open_pointcloud(remote_files.directory / filename, **options)
         remote = gu.open_pointcloud(remote_url(filename), **options)
 
         # Check exact equality
-        remote_values = remote[next(iter(remote.data_vars))] if as_type == "dataset" else remote
+        remote_values = remote[next(iter(remote.data_vars))] if as_object_type == "dataset" else remote
         assert remote_values.pc.is_loaded
         assert_output_equal(remote, expected)
 
@@ -1296,8 +1294,8 @@ class TestPointCloudRemote:
 
         # Open local and remote files through GDAL, LasPy or PyArrow
         filename = remote_native_points
-        expected = gu.open_pointcloud(remote_files.directory / filename, data_name=data_name, columns="all")
-        remote = gu.open_pointcloud(remote_url(filename), data_name=data_name, columns="all")
+        expected = gu.open_pointcloud(remote_files.directory / filename, data_name=data_name, columns="all", load=True)
+        remote = gu.open_pointcloud(remote_url(filename), data_name=data_name, columns="all", load=True)
 
         # For query URLs, the server refuses requests that lose the token
         xr.testing.assert_identical(remote, expected)
@@ -1373,33 +1371,33 @@ class TestPointCloudRemoteChunked:
     @pytest.mark.parametrize(
         "remote_native_points,data_name,options", _REMOTE_POINT_OPEN_CASES, indirect=["remote_native_points"]
     )
-    @pytest.mark.parametrize("as_type", ["dataarray", "dataset", "geodataframe"])
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
     def test_open_pointcloud__remote_laziness(
         self,
         remote_files: RemoteFiles,
         remote_url: Callable[[str], str],
         remote_native_points: str,
         data_name: str | None,
-        as_type: Literal["dataarray", "dataset", "geodataframe"],
+        as_object_type: Literal["dataarray", "dataset", "geodataframe"],
         options: dict[str, Any],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Checks that remote point chunks stay lazy and compute exactly the eager local points."""
 
         pytest.importorskip("dask")
-        if as_type == "geodataframe" or remote_native_points.endswith(".gpkg"):
+        if as_object_type == "geodataframe" or remote_native_points.endswith(".gpkg"):
             pytest.importorskip("dask_geopandas")
 
         copc_selection = bool(options)
         if copc_selection:
-            # Open remote chunks on COPC (bigger based on fixture example, for levels of details)
+            # Open remote COPC chunks for level selection (larger to match the fixture)
             chunks = 7001
         else:
             # Open local/remote with chunks (smaller for other files)
             chunks = 3
         filename = remote_native_points
-        options = {"data_name": data_name, "columns": "all", "as_type": as_type, **options}
-        expected = gu.open_pointcloud(remote_files.directory / filename, **options)
+        options = {"data_name": data_name, "columns": "all", "as_object_type": as_object_type, **options}
+        expected = gu.open_pointcloud(remote_files.directory / filename, load=True, **options)
 
         # We record when points are decoded
         read_offsets = []
@@ -1415,8 +1413,8 @@ class TestPointCloudRemoteChunked:
 
         # Open local and remote selections
         remote = gu.open_pointcloud(remote_url(filename), chunks=chunks, **options)
-        expected_values = expected[next(iter(expected.data_vars))] if as_type == "dataset" else expected
-        remote_values = remote[next(iter(remote.data_vars))] if as_type == "dataset" else remote
+        expected_values = expected[next(iter(expected.data_vars))] if as_object_type == "dataset" else expected
+        remote_values = remote[next(iter(remote.data_vars))] if as_object_type == "dataset" else remote
         assert expected_values.pc.is_loaded
         assert not remote_values.pc.is_loaded
         expected_count = expected_values.pc.point_count if copc_selection else 7
@@ -1426,7 +1424,7 @@ class TestPointCloudRemoteChunked:
         # Compute and check equality without loading the original object
         computed = remote.compute(scheduler="synchronous")
         assert_output_equal(computed, expected)
-        computed_values = computed[next(iter(computed.data_vars))] if as_type == "dataset" else computed
+        computed_values = computed[next(iter(computed.data_vars))] if as_object_type == "dataset" else computed
         assert computed_values.pc.is_loaded
         assert not remote_values.pc.is_loaded
         if copc_selection:
@@ -1445,7 +1443,7 @@ class TestPointCloudRemoteChunked:
         pytest.importorskip("dask")
 
         # Open local/remote with chunks (Dask)
-        expected = gu.open_pointcloud(remote_files.directory / remote_native_points, columns="all")
+        expected = gu.open_pointcloud(remote_files.directory / remote_native_points, columns="all", load=True)
         remote = gu.open_pointcloud(remote_url(remote_native_points), columns="all", chunks=3)
         assert expected.pc.is_loaded
         assert not remote.pc.is_loaded

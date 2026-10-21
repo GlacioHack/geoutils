@@ -36,20 +36,20 @@ from tests.operator_helpers import LocalMeanInterpolator
 class TestPointNeighbours:
     """Test module for point neighborhoods."""
 
-    @pytest.mark.parametrize("k,radius", [(3, None), (None, 5.0), (3, 5.0)])
-    def test_point_neighbours(self, k: int | None, radius: float | None) -> None:
+    @pytest.mark.parametrize("max_points,radius", [(3, None), (None, 5.0), (3, 5.0)])
+    def test_point_neighbours(self, max_points: int | None, radius: float | None) -> None:
         """Checks point neighborhood basic definition."""
 
         # Should accept max number of neighbors, radius or both
-        neighborhood = PointNeighbours(k=k, radius=radius)
-        assert neighborhood.k == k
+        neighborhood = PointNeighbours(max_points=max_points, radius=radius)
+        assert neighborhood.max_points == max_points
         assert neighborhood.radius == radius
 
     def test_point_neighbours__zero_radius(self) -> None:
         """Checks edge case of zero radius works in principle (to select only center observation itself)."""
 
-        neighborhood = PointNeighbours(k=2, radius=0)
-        assert neighborhood.k == 2
+        neighborhood = PointNeighbours(max_points=2, radius=0)
+        assert neighborhood.max_points == 2
         assert neighborhood.radius == 0
 
     def test_point_neighbours__error_missing(self) -> None:
@@ -61,10 +61,10 @@ class TestPointNeighbours:
     @pytest.mark.parametrize(
         "kwargs",
         [
-            {"k": 0},
-            {"k": -1},
-            {"k": True},
-            {"k": 1.5},
+            {"max_points": 0},
+            {"max_points": -1},
+            {"max_points": True},
+            {"max_points": 1.5},
             {"radius": -1},
             {"radius": float("inf")},
             {"radius": float("nan")},
@@ -262,8 +262,8 @@ class TestNeighbourDefaults:
     @pytest.mark.parametrize(
         "operator,expected",
         [
-            pytest.param(Nearest(), PointNeighbours(k=1), id="nearest"),
-            pytest.param(LocalMeanInterpolator(), PointNeighbours(k=8), id="custom_interpolator"),
+            pytest.param(Nearest(), PointNeighbours(max_points=1), id="nearest"),
+            pytest.param(LocalMeanInterpolator(), PointNeighbours(max_points=8), id="custom_interpolator"),
             pytest.param(
                 Kriging(VariogramModel("gaussian", effective_range=4, partial_sill=1), max_overlap=2),
                 PointNeighbours(radius=2),
@@ -614,7 +614,9 @@ class TestPointNeighbourSelection:
             geometry=gpd.points_from_xy([0, 1, 3], [0, 0, 0]),
             crs=32631,
         )
-        neighborhood = PointNeighbours(k=2 if limit != "radius" else None, radius=1 if limit != "count" else None)
+        neighborhood = PointNeighbours(
+            max_points=2 if limit != "radius" else None, radius=1 if limit != "count" else None
+        )
         operator = LocalMeanInterpolator(neighborhood=neighborhood)
         inputs, indexes = _prepare_point_neighbours_data(
             points,

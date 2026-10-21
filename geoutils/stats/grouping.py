@@ -1032,7 +1032,7 @@ def _groupby_reduce_flox(
 ) -> Any:
     """Run one eager or Dask Flox reduction over every grouping variable."""
 
-    flox = import_optional("flox", extra_name="flox")
+    flox = import_optional("flox")
     expected: Any = expected_groups[0] if len(expected_groups) == 1 else tuple(expected_groups)
     axes = tuple(range(-group_values[0].ndim, 0))
     return flox.groupby_reduce(

@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 import pathlib
 import tempfile
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, get_args
 
 import numpy as np
 
@@ -31,19 +31,17 @@ from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
 from geoutils.operators.base import LocalData
+from geoutils.operators.methods import (
+    ResamplingBackend,
+    ResamplingMethod,
+    _resampling_backend,
+    _resampling_operator,
+)
 from geoutils.operators.neighbours import PointNeighbours, _DefaultNeighbour, _query_point_neighbours
 from geoutils.operators.nodata import NodataHandling
 from geoutils.operators.reducer import (
     Count,
-    Maximum,
-    Mean,
-    Median,
-    Minimum,
-    Range,
     Reducer,
-    RootMeanSquare,
-    StandardDeviation,
-    Sum,
     _can_reduce_arrays,
     _reduce_grouped_values,
 )
@@ -56,42 +54,10 @@ if TYPE_CHECKING:
     from geoutils.pointcloud.pointcloud import PointCloudLike
 
 
-PointFilterMethod = (
-    Literal[
-        "mean",
-        "median",
-        "minimum",
-        "min",
-        "maximum",
-        "max",
-        "range",
-        "count",
-        "sum",
-        "stdev",
-        "std",
-        "rms",
-        "rmse",
-    ]
-    | Reducer
-)
+PointFilterMethod = ResamplingMethod | Reducer
 
 _POINT_FILTER_ID_COLUMN_BASE = "_geoutils_filter_id"
 _POINT_FILTER_QUERY_BATCH_SIZE = 65_536
-_POINT_FILTER_REDUCER_TYPES: dict[str, type[Reducer]] = {
-    "mean": Mean,
-    "median": Median,
-    "minimum": Minimum,
-    "min": Minimum,
-    "maximum": Maximum,
-    "max": Maximum,
-    "range": Range,
-    "count": Count,
-    "sum": Sum,
-    "stdev": StandardDeviation,
-    "std": StandardDeviation,
-    "rms": RootMeanSquare,
-    "rmse": RootMeanSquare,
-}
 
 
 ######################################
@@ -99,15 +65,16 @@ _POINT_FILTER_REDUCER_TYPES: dict[str, type[Reducer]] = {
 ######################################
 
 
-def _resolve_point_filter(method: PointFilterMethod) -> Reducer:
-    """Convert a filter name to a Reducer, or return the Reducer supplied by the user."""
+def _resolve_point_filter(method: ResamplingMethod | Reducer, options: dict[str, Any] | None = None) -> Reducer:
+    """Resolve a named statistic and check that it can summarize a point neighborhood."""
 
-    if isinstance(method, Reducer):
-        return method
-    if method not in _POINT_FILTER_REDUCER_TYPES:
-        available = ", ".join(repr(name) for name in _POINT_FILTER_REDUCER_TYPES)
-        raise ValueError(f"Unknown point filter method {method!r}. Available names are: {available}.")
-    return _POINT_FILTER_REDUCER_TYPES[method]()
+    # Use shared method definitions while preserving errors for unknown point-filter names
+    if isinstance(method, str) and method not in get_args(ResamplingMethod):
+        raise ValueError(f"Unknown point filter method {method!r}.")
+    operator = _resampling_operator(method, options=options)
+    if not isinstance(operator, Reducer):
+        raise ValueError("Point filtering requires a reducer method.")
+    return operator
 
 
 def _point_filter_nodata_handling(
@@ -770,13 +737,15 @@ def _filter_pointcloud(
     method: PointFilterMethod = "median",
     radius: float | None | _DefaultNeighbour = _DefaultNeighbour.VALUE,
     *,
-    k: int | None | _DefaultNeighbour = _DefaultNeighbour.VALUE,
+    max_points: int | None | _DefaultNeighbour = _DefaultNeighbour.VALUE,
     include_self: bool = True,
     min_points: int = 0,
     nodata_propagation: Literal["ignore", "propagate"] | None = None,
     n_threads: int = 0,
     batch_size: int = _POINT_FILTER_QUERY_BATCH_SIZE,
     mp_config: MultiprocConfig | None = None,
+    backend: ResamplingBackend = "auto",
+    method_kwargs: dict[str, Any] | None = None,
 ) -> Any:
     """
     Filter point values using nearby points, in memory or with Dask/multiprocessing.
@@ -785,7 +754,7 @@ def _filter_pointcloud(
         An X/Y/value array tuple returns filtered values, with one row per point and an optional column per variable.
     :param method: Built-in reducer name or a Reducer instance.
     :param radius: Maximum X/Y neighbor distance in CRS units. Required for Dask and multiprocessing execution.
-    :param k: Optional maximum number of nearest neighbors inside radius. Omit to use every point inside radius.
+    :param max_points: Optional maximum number of nearest neighbors inside radius. None removes the count limit.
     :param include_self: Whether to include a point's own value when calculating its filtered value.
     :param min_points: Minimum number of finite neighbors, combined with the Reducer's own minimum requirement.
     :param nodata_propagation: Ignore missing neighbour values (``"ignore"``), return NaN when missing values
@@ -794,19 +763,22 @@ def _filter_pointcloud(
     :param batch_size: Maximum target points queried together. Smaller batches use less temporary memory when
         neighborhoods are dense.
     :param mp_config: Worker count, row partition size and output file for multiprocessing execution.
+    :param backend: "auto" or "scipy" for point filtering.
+    :param method_kwargs: Settings for a named statistic, such as a quantile q.
     :returns: Point cloud with unchanged rows, X/Y coordinates and attributes and filtered active values.
         For an array tuple, returns filtered values with the same shape as the input values.
     """
 
     # 1/ Resolve the filter options and check inputs
-    reducer = _resolve_point_filter(method)
+    _resampling_backend(backend, default="scipy", allowed=("scipy",))
+    reducer = _resolve_point_filter(method, options=method_kwargs)
     defaults = reducer.default_neighborhood
     if defaults is None:
         defaults = PointNeighbours(radius=1.0)
     if not isinstance(defaults, PointNeighbours):
         raise TypeError("Point filtering requires PointNeighbours.")
     neighborhood = PointNeighbours(
-        k=defaults.k if isinstance(k, _DefaultNeighbour) else k,
+        max_points=defaults.max_points if isinstance(max_points, _DefaultNeighbour) else max_points,
         radius=defaults.radius if isinstance(radius, _DefaultNeighbour) else radius,
     )
     nodata_handling = _point_filter_nodata_handling(reducer, nodata_propagation)

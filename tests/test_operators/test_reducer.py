@@ -120,7 +120,7 @@ class TestReducer:
         assert all(reducer.default_neighborhood is window for reducer in reducers)
 
         # Using point neighborhoods on different reducers as well
-        nearby = PointNeighbours(k=2, radius=5)
+        nearby = PointNeighbours(max_points=2, radius=5)
         point_reducers = [
             SumReducer(neighborhood=nearby),
             Mean(neighborhood=nearby),
@@ -684,7 +684,8 @@ class TestPointReducerEngines:
         [Mean, Minimum, Maximum, Range, Count, StandardDeviation, AverageDistance],
     )
     @pytest.mark.parametrize(
-        "neighborhood", [PointNeighbours(k=3), PointNeighbours(radius=1.1), PointNeighbours(k=3, radius=1.1)]
+        "neighborhood",
+        [PointNeighbours(max_points=3), PointNeighbours(radius=1.1), PointNeighbours(max_points=3, radius=1.1)],
     )
     @pytest.mark.parametrize("nodata_handling", ["ignore", "propagate"])
     def test_grid__numba_matches_scipy_for_explicit_neighborhoods(
@@ -1149,7 +1150,8 @@ class TestReducerUncertainty:
         ["scipy", pytest.param("numba", marks=pytest.mark.skipif(find_spec("numba") is None, reason="Requires numba"))],
     )
     @pytest.mark.parametrize(
-        "neighborhood", [PointNeighbours(k=2), PointNeighbours(radius=1), PointNeighbours(k=2, radius=1)]
+        "neighborhood",
+        [PointNeighbours(max_points=2), PointNeighbours(radius=1), PointNeighbours(max_points=2, radius=1)],
     )
     def test_grid__selected_observations_and_uncertainty(
         self, engine: Literal["scipy", "numba"], neighborhood: PointNeighbours
@@ -1207,7 +1209,7 @@ class TestReducerUncertainty:
 
         # All targets have three finite neighbors with distinct distances
         points = gu.PointCloud.from_xyz([0, 0.8, 2.1, 3.3], [0, 0.1, 2.2, 0.3], [2, 4, 8, 16], crs=32631)
-        operator = operator_type(neighborhood=PointNeighbours(k=3))
+        operator = operator_type(neighborhood=PointNeighbours(max_points=3))
         grid_coords = (np.array([0.2, 1.2]), np.array([0.3, 1.3]))
         errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 0)])
 

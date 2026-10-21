@@ -50,9 +50,9 @@ def _register_dask_vector_accessor() -> None:
     """
     Add the ``.vct`` property to Dask DataFrames when lazy vector support is first needed.
 
-    The Pandas decorator on VectorAccessor does not affect Dask DataFrames because Dask keeps its own accessor list.
-    Registering here gives lazy GeoDataFrames the same GeoUtils vector API while keeping Dask DataFrame optional until
-    a caller requests chunked vector data.
+    The Pandas decorator on GeoDataFrameVectorAccessor does not affect Dask DataFrames because Dask keeps its own
+    accessor list. Registering here gives lazy GeoDataFrames the same GeoUtils vector API while keeping Dask DataFrame
+    optional until a caller requests chunked vector data.
     """
 
     global _DASK_ACCESSOR_REGISTERED
@@ -61,14 +61,14 @@ def _register_dask_vector_accessor() -> None:
     if _DASK_ACCESSOR_REGISTERED:
         return
 
-    # Import Dask only when a lazy vector is requested, then attach VectorAccessor as its ``.vct`` property
+    # Import Dask only when a lazy vector is requested, then attach GeoDataFrameVectorAccessor as its ``.vct`` property
     import_optional("dask")
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=FutureWarning, module="dask.dataframe")
         warnings.filterwarnings("ignore", message="registration of accessor.*", category=UserWarning)
         from dask.dataframe.accessor import register_dataframe_accessor
 
-        register_dataframe_accessor("vct")(VectorAccessor)
+        register_dataframe_accessor("vct")(GeoDataFrameVectorAccessor)
 
     _DASK_ACCESSOR_REGISTERED = True
 
@@ -88,16 +88,25 @@ def _replace_geodataframe(target: gpd.GeoDataFrame, source: gpd.GeoDataFrame) ->
         target.set_crs(source.crs, allow_override=True, inplace=True)
 
 
-def open_vector(filename: str, chunks: int | None = None, **kwargs: Any) -> gpd.GeoDataFrame | Any:
+def open_vector(
+    filename: str, chunks: int | None = None, *, load: bool = False, **kwargs: Any
+) -> gpd.GeoDataFrame | Any:
     """
-    Open a vector file using GeoPandas, or lazily with Dask-GeoPandas when passing ``chunks``.
+    Open a vector file.
 
     :param filename: Path to the vector file to open.
-    :param chunks: Number of features per Dask partition. If None, load eagerly with GeoPandas.
+    :param chunks: Number of features per Dask partition. None uses one partition, or eager GeoPandas with load=True.
+    :param load: Whether to read features immediately when chunks is None. The default False opens one Dask partition
+        and requires Dask-GeoPandas. Explicit chunks always stay lazy.
     :param kwargs: Keyword arguments passed to :func:`geopandas.read_file`.
-    :returns: An eager GeoDataFrame, or a lazy Dask-GeoPandas GeoDataFrame when ``chunks`` is passed.
+    :returns: A lazy Dask-GeoPandas GeoDataFrame, or an eager GeoDataFrame when load=True without chunks.
     """
 
+    if not load and chunks is None:
+        import pyogrio
+
+        info = pyogrio.read_info(filename, layer=kwargs.get("layer"))
+        chunks = max(1, info["features"])
     if chunks is not None:
         # Load the optional Dask backend and add ``.vct`` before returning the lazy GeoDataFrame
         if chunks <= 0:
@@ -111,7 +120,7 @@ def open_vector(filename: str, chunks: int | None = None, **kwargs: Any) -> gpd.
 
 
 @pd.api.extensions.register_dataframe_accessor("vct")
-class VectorAccessor(VectorBase):
+class GeoDataFrameVectorAccessor(VectorBase):
     """
     Pandas accessor ``vct`` for GeoPandas GeoDataFrames.
 

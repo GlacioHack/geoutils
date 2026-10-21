@@ -118,6 +118,47 @@ class TestProjTools:
         assert vect_north.get_metric_crs() == pyproj.CRS.from_epsg(32661)
         assert vect_south.get_metric_crs() == pyproj.CRS.from_epsg(32761)
 
+    @pytest.mark.parametrize("latitude,center", [(-85, None), (0, None), (85, None), (45, (125, -70))])
+    @pytest.mark.parametrize("interface", ["raster", "rst", "vector", "vct"])
+    def test_get_metric_crs__custom(self, latitude: float, interface: str, center: tuple[float, float] | None) -> None:
+        """Checks that custom stereographic projections have their origin and true scale at the proper center."""
+        from affine import Affine
+
+        # We create a footprint
+        longitude = 15
+        if interface in ("raster", "rst"):
+            transform = Affine(1, 0, longitude - 0.5, 0, -1, latitude + 0.5)
+            raster = gu.Raster.from_array(np.ones((1, 1)), transform, 4326)
+            source = raster if interface == "raster" else raster.to_xarray().rst
+        else:
+            frame = gpd.GeoDataFrame(geometry=[Point(longitude, latitude)], crs=4326)
+            source = gu.Vector(frame) if interface == "vector" else frame.vct
+
+        # We choose the custom CRS and compare independently with PROJ
+        crs = source.get_metric_crs(local_crs_type="custom", center=center)
+        projection = pyproj.Proj(crs)
+        expected_center = (longitude, latitude) if center is None else center
+        factors = projection.get_factors(*expected_center)
+        assert crs.is_projected
+        assert all(axis.unit_name == "metre" for axis in crs.axis_info)
+        np.testing.assert_allclose(projection(*expected_center), 0, atol=1e-8, rtol=0)
+        np.testing.assert_allclose([factors.meridional_scale, factors.parallel_scale], 1, atol=1e-8, rtol=0)
+        assert source.get_metric_crs(local_crs_type="custom", method="geopandas", center=center) == crs
+
+    def test_get_metric_crs__antimeridian(self) -> None:
+        """Checks edge case that a footprint crossing the antimeridian is properly centered at longitude 180."""
+
+        # We create a polygon symmetry around lon 180 and lat 45
+        polygon = Polygon([(179, 44), (-179, 44), (-179, 46), (179, 46)])
+        frame = gpd.GeoDataFrame(geometry=[polygon], crs=4326)
+
+        # Estimate CRS
+        crs = frame.vct.get_metric_crs(local_crs_type="custom")
+
+        # Both representations of longitude 180 map to the origin without changing the polygon
+        np.testing.assert_allclose(pyproj.Proj(crs)([180, -180], [45, 45]), 0, atol=1e-8, rtol=0)
+        assert frame.geometry.iloc[0].equals(polygon)
+
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_latlon_reproject(self, example: str) -> None:
         """
@@ -219,3 +260,30 @@ class TestProjTools:
         # Check that densification yields a logical amount of points
         # (4 initial corner points times the densification factor + the last point)
         assert len(footprint.geometry[0].exterior.coords[:]) == densify_points * 4 + 1
+
+
+class TestProjToolsErrors:
+    """Test module for errors/warnings in projtools functions."""
+
+    @pytest.mark.parametrize("center", [(np.nan, 0), (0, np.inf), (181, 0), (0, 91)])
+    def test_get_metric_crs__error_invalid_center(self, center: tuple[float, float]) -> None:
+        """Checks error is raised for NaN or invalid geographic coords."""
+
+        frame = gpd.GeoDataFrame(geometry=[Point(0, 0)], crs=4326)
+        with pytest.raises(ValueError, match="Center must contain finite longitude/latitude"):
+            frame.vct.get_metric_crs(local_crs_type="custom", center=center)
+
+    def test_get_metric_crs__error_universal_center(self) -> None:
+        """Checks error is raised when a center is supplied for a universal CRS."""
+
+        frame = gpd.GeoDataFrame(geometry=[Point(0, 0)], crs=4326)
+        with pytest.raises(ValueError, match="center is only supported for a custom metric CRS"):
+            frame.vct.get_metric_crs(center=(15, 45))
+
+    @pytest.mark.parametrize("geometry", [[], [None], [Point()]])
+    def test_get_metric_crs__error_empty_footprint(self, geometry: list[Point | None]) -> None:
+        """Checks an error is raised when no geometry can define the custom projection center."""
+
+        frame = gpd.GeoDataFrame(geometry=geometry, crs=4326)
+        with pytest.raises(ValueError, match="requires a non-empty geographic footprint"):
+            frame.vct.get_metric_crs(local_crs_type="custom")

@@ -413,6 +413,21 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
             self._apply_downsample()
             return
 
+        # Match accessor level selection before sampling a COPC file
+        if self._downsample > 1 and not self._crop_filters and _load_laspy_metadata(self.name).is_copc:
+            from geoutils.pointcloud.loading import open_pointcloud
+
+            self._ds = open_pointcloud(
+                self.name,
+                data_name=self.data_name,
+                columns=columns,
+                downsample=self._downsample,
+                as_object_type="geodataframe",
+                load=True,
+            )
+            self._downsample_applied = True
+            return
+
         if columns == "all":
             columns_to_load = self._nongeo_columns
         elif columns == "main":
@@ -450,15 +465,12 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
         if self._downsample_applied or self._downsample == 1:
             return
 
-        # Match Raster opening behavior by preserving at least one row and rounding the target size upward
-        source_count = len(self.gdf)
-        target_count = max(1, int(np.ceil(source_count / self._downsample)))
-        if target_count < source_count:
-            request: int | float = target_count if target_count > 1 else 1 / source_count
-            sampled = self.subsample(request, random_state=0)
-            source_name = self._name
-            self.gdf = sampled._dataset
-            self._name = source_name
+        from geoutils.pointcloud.loading import _downsample_open_pointcloud
+
+        # Share row selection with accessors, including rows with missing measurements
+        source_name = self._name
+        self.gdf = _downsample_open_pointcloud(self.gdf, self._downsample)
+        self._name = source_name
         self._downsample_applied = True
 
     @overload
@@ -529,6 +541,7 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
         scales: tuple[float, float, float] | None = None,
         chunks: int | None = None,
         mp_config: MultiprocConfig | None = None,
+        laz_chunk_size: int | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -541,6 +554,7 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
         :param scales: Scales for X/Y/Z.
         :param chunks: Optional number of points per write chunk.
         :param mp_config: Optional multiprocessing configuration for chunked writing.
+        :param laz_chunk_size: Number of points per compressed LAZ disk chunk. Requires Lazrs; None uses its default.
         :param kwargs: Other keyword arguments to set the LAS file header (e.g., "offsets", "scales").
         """
 
@@ -554,6 +568,7 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
             scales=scales,
             chunks=chunks,
             mp_config=mp_config,
+            laz_chunk_size=laz_chunk_size,
             **kwargs,
         )
 

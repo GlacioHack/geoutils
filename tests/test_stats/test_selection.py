@@ -296,8 +296,10 @@ class TestSelectionChunked:
         assert result == pytest.approx(expected)
         assert isinstance(lazy_raster.data, da.Array) and isinstance(lazy_keep.data, da.Array)
 
-    @pytest.mark.parametrize("as_type", ["dataarray", "geodataframe"])
-    def test_stats__dask_point_vector_mask(self, as_type: Literal["dataarray", "geodataframe"], tmp_path: Path) -> None:
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
+    def test_stats__dask_point_vector_mask(
+        self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
+    ) -> None:
         """Checks that eager and Dask points agree on points lying along a polygon boundary."""
 
         # Write a point file to disk with two points inside the polygon, one on its edge, and one outside it
@@ -310,7 +312,9 @@ class TestSelectionChunked:
         mask = gu.Vector(gpd.GeoDataFrame(geometry=[box(0, 0, 2, 2)], crs=points.crs))
         filename = tmp_path / "masked_points.gpkg"
         points.to_file(filename)
-        lazy_points = gu.open_pointcloud(str(filename), data_name=points.data_name, chunks=2, as_type=as_type).pc
+        lazy_points = gu.open_pointcloud(
+            str(filename), data_name=points.data_name, chunks=2, as_object_type=as_object_type
+        ).pc
         assert not lazy_points.is_loaded
 
         # Calculate the same masked summary from Dask partitions and eager points

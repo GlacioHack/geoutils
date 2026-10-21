@@ -13,7 +13,7 @@ To get in touch with us to coordinate larger contributions, use either the GitHu
 
 With the recent rise of AI-assisted contributions, we repeat our AI policy below (find its original version in the [CONTRIBUTING file](https://github.com/GlacioHack/geoutils/blob/main/CONTRIBUTING.md)).
 
-“AI” herein refers to **generative AI tools like large language models (LLMs)** that can generate, edit,
+“AI” herein refers to **tools like large language models (LLMs)** that can generate, edit,
 and review software code, create and manipulate images, or generate text for communication.
 
 We welcome AI-assisted contributions under the following conditions:
@@ -38,4 +38,4 @@ Maintainers may decline PRs whose descriptions appear predominantly AI-generated
 human understanding and validation, or attention to copyright and source.
 
 This AI policy was inspired from that of [NumPy](https://numpy.org/devdocs/dev/ai_policy.html) and [SciPy](https://docs.scipy.org/doc/scipy/dev/conduct/ai_policy.html) as of September 2026,
-which were themselves inspired by that of [SymPy]([https://www.sympy.org/en/index.html](https://docs.sympy.org/dev/contributing/ai-generated-code-policy.html)).
+which were themselves inspired by that of [SymPy](https://docs.sympy.org/dev/contributing/ai-generated-code-policy.html).

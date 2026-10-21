@@ -6,6 +6,7 @@ from collections.abc import Callable
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -90,10 +91,155 @@ class TestDataArrayPointCloudAccessor:
         self.gdf.to_file(filename)
 
         # Then open it eagerly and check its type, loading state and exact point cloud equality
-        ds = gu.open_pointcloud(filename, data_name="z")
+        ds = gu.open_pointcloud(filename, data_name="z", load=True)
         assert isinstance(ds, xr.DataArray)
         assert ds.pc.is_loaded
         assert ds.pc.to_geoutils().pointcloud_equal(gu.PointCloud(self.gdf, data_name="z"))
+
+    @pytest.mark.parametrize("suffix", ["las", "parquet", "gpkg"])
+    @pytest.mark.parametrize(
+        "selection", [slice(2, 5), slice(None, None, -2), [3, 2, 3], slice(0, 0), slice(2, 5, -1), []]
+    )
+    @pytest.mark.parametrize("downsample", [1, 2.5])
+    def test_open_pointcloud__deferred_reads(
+        self, tmp_path: Path, suffix: str, selection: Any, downsample: float
+    ) -> None:
+        """Checks that point cloud reads and row selections are deferred."""
+        if suffix == "las":
+            pytest.importorskip("laspy")
+        elif suffix == "parquet":
+            pytest.importorskip("pyarrow")
+        from geoutils.pointcloud import las, loading, parquet
+
+        # Write point cloud with integer attributes
+        name = "Z" if suffix == "las" else "height"
+        points = gu.pointcloud.from_xyz(
+            np.arange(10.0),
+            np.zeros(10),
+            np.arange(10.0),
+            32633,
+            name,
+            auxiliary={"quality": np.arange(10, dtype=np.uint16)},
+        )
+        filename = tmp_path / f"deferred.{suffix}"
+        if suffix == "parquet":
+            points.pc.to_parquet(str(filename), chunks=3)
+        else:
+            points.pc.to_file(str(filename))
+
+        # Open one point cloud eagerly
+        eager = gu.open_pointcloud(filename, data_name=name, columns="all", downsample=downsample, load=True)
+
+        # Open again with deferred I/O (and record reads)
+        module, reader = {
+            "las": (las, "_read_las_records"),
+            "parquet": (parquet, "_read_point_parquet_group"),
+            "gpkg": (loading.pyogrio, "read_dataframe"),
+        }[suffix]
+        with patch.object(module, reader, wraps=getattr(module, reader)) as reads:
+            source = gu.open_pointcloud(filename, data_name=name, columns="all", downsample=downsample)
+            result = source.isel(point=selection)
+
+            # Ensure data are not loaded and no data were read
+            assert not source.pc.is_loaded and not result.pc.is_loaded
+            assert source.chunks is None and result.chunks is None
+            assert source.pc.crs == eager.pc.crs
+            assert source.pc.point_count == eager.pc.point_count
+            if suffix == "las":
+                assert all(call.args[2] == 0 for call in reads.call_args_list)
+            else:
+                assert reads.call_count == 0
+
+            # Load and check equivalence
+            result.load()
+            xr.testing.assert_identical(result, eager.isel(point=selection))
+            assert result.pc.is_loaded and not source.pc.is_loaded
+
+            # Check only selected rows or row groups were read
+            if suffix == "las" and downsample == 1 and selection == slice(2, 5):
+                data_reads = [call for call in reads.call_args_list if call.args[2] > 0]
+                assert data_reads and all(call.args[1:3] == (2, 3) for call in data_reads)
+            if suffix == "gpkg" and downsample == 1 and selection == slice(2, 5):
+                assert all(call.kwargs["skip_features"] == 2 for call in reads.call_args_list)
+                assert all(call.kwargs["max_features"] == 3 for call in reads.call_args_list)
+            if suffix == "parquet" and downsample == 1 and selection == slice(2, 5):
+                assert {call.args[1] for call in reads.call_args_list} == {0, 1}
+
+    @pytest.mark.parametrize("data_name", [None, "height"])
+    def test_open_pointcloud__deferred_geometry_z(self, tmp_path: Path, data_name: str | None) -> None:
+        """Checks that deferred reads preserve geometry heights."""
+
+        # Write 3D points with separate height values
+        cloud = gu.PointCloud.from_xyz([0.0, 1.0], [2.0, 3.0], [4.0, 5.0], 32633, use_z=True)
+        cloud.gdf["height"] = [10.0, 20.0]
+        filename = tmp_path / "geometry_z.gpkg"
+        cloud.gdf.to_file(filename)
+
+        # Open eagerly and with deferred I/O
+        expected = gu.open_pointcloud(filename, data_name=data_name, load=True)
+        result = gu.open_pointcloud(filename, data_name=data_name)
+
+        # Ensure data are not loaded
+        assert not result.pc.is_loaded
+
+        # Load and check equivalence
+        xr.testing.assert_identical(result.load(), expected)
+        np.testing.assert_array_equal(result.pc.to_geoutils().geometry.z, cloud.geometry.z)
+
+    @pytest.mark.parametrize("options", [{}, {"level": 0}, {"level": 99}, {"downsample": 4.5}])
+    def test_open_pointcloud__deferred_copc(self, copc_file: Path, options: dict[str, Any]) -> None:
+        """Checks that COPC reads and row selections are deferred."""
+        from geoutils.pointcloud import las
+
+        # Open one point cloud eagerly
+        expected = gu.open_pointcloud(copc_file, columns=["intensity"], **options, load=True)
+        selection = slice(1, 4)
+
+        # Open again with deferred I/O (and record reads)
+        with patch.object(las, "_read_las_records", wraps=las._read_las_records) as reads:
+            source = gu.open_pointcloud(copc_file, columns=["intensity"], **options)
+            result = source.isel(point=selection)
+
+            # Ensure data are not loaded and no data were read
+            assert not source.pc.is_loaded and not result.pc.is_loaded
+            assert all(call.args[2] == 0 for call in reads.call_args_list)
+
+            # Load and check equivalence
+            result.load()
+            xr.testing.assert_identical(result, expected.isel(point=selection))
+            assert result.pc.is_loaded and not source.pc.is_loaded
+
+    @pytest.mark.parametrize("method", ["bounds", "crop", "clip"])
+    def test_open_pointcloud__deferred_spatial_selection(self, tmp_path: Path, method: str) -> None:
+        """Checks that spatial selections read only coordinates."""
+        pytest.importorskip("laspy")
+        from geoutils.pointcloud import las
+
+        # Write LAS point cloud
+        filename = tmp_path / "spatial.las"
+        points = gu.pointcloud.from_xyz(np.arange(10.0), np.zeros(10), np.arange(10.0), 32633, "Z")
+        points.pc.to_las(str(filename))
+        bounds = (2, -1, 5, 1)
+        eager = gu.open_pointcloud(filename, load=True)
+
+        # Run spatial selection (and record reads)
+        with patch.object(las, "_read_las_arrays", wraps=las._read_las_arrays) as reads:
+            source = gu.open_pointcloud(filename)
+            result = source.pc.bounds if method == "bounds" else getattr(source.pc, method)(bounds)
+
+            # Ensure only coordinates were read
+            assert not source.pc.is_loaded
+            data_reads = [call for call in reads.call_args_list if call.args[3] > 0]
+            assert data_reads and all(call.args[1] == [] for call in data_reads)
+            assert not source.variable._in_memory
+
+            # Load if needed and check equivalence
+            if method == "bounds":
+                assert result == eager.pc.bounds
+            else:
+                assert not result.pc.is_loaded
+                xr.testing.assert_identical(result.load(), getattr(eager.pc, method)(bounds))
+                assert not source.pc.is_loaded
 
     def test_from_xyz(self) -> None:
         """Checks that DataArray construction from X/Y/Z arrays."""
@@ -164,7 +310,7 @@ class TestDataArrayPointCloudAccessor:
 
         # Check inheritance and distinguish 1D arrays from rasters
         assert isinstance(cloud, GeometryPointCloudBase)
-        assert isinstance(frame.pc, gu.GeoPandasPointCloudAccessor)
+        assert isinstance(frame.pc, gu.GeoDataFramePointCloudAccessor)
         assert isinstance(points.pc, gu.DataArrayPointCloudAccessor)
         assert all(isinstance(interface, PointCloudBase) for interface in (cloud, frame.pc, points.pc))
         assert _is_pointcloud(points)
@@ -223,7 +369,7 @@ class TestDataArrayPointCloudAccessor:
         reference.to_parquet(filename, chunks=3)
 
         # Then open all point attributes (eagerly or in chunks)
-        source = gu.open_pointcloud(filename, columns="all", chunks=3 if lazy else None)
+        source = gu.open_pointcloud(filename, columns="all", chunks=3 if lazy else None, load=not lazy)
         graph = source.data
         assert source.pc.is_loaded is not lazy
 
@@ -296,8 +442,15 @@ class TestDatasetPointCloudAccessor:
         assert isinstance(mixed_dataset.pc, gu.DatasetPointCloudAccessor)
         assert not isinstance(mixed_dataset.pc, PointCloudBase)
         assert isinstance(mixed_dataset.point_z.pc, gu.DataArrayPointCloudAccessor)
-        assert mixed_dataset.pc.variables == ["point_z", "point_sigma"]
+        assert list(mixed_dataset.pc.compatible_variables.keys()) == ["point_z", "point_sigma"]
         assert not hasattr(mixed_dataset.pc, "ds")
+
+        # Check the native Xarray mapping exposes DataArrays sharing the original values
+        points = mixed_dataset.pc.compatible_variables
+        assert isinstance(points, type(mixed_dataset.data_vars))
+        for name, variable in points.items():
+            xr.testing.assert_identical(variable, mixed_dataset[name])
+            assert variable.data is mixed_dataset[name].data
 
         # Check Dataset dispatch and no access to spatial metadata at Dataset level (only DataArray)
         assert _get_pointcloud_interface(mixed_dataset) is None
@@ -331,6 +484,8 @@ class TestDatasetPointCloudAccessor:
         # 1/ Use the mixed Xarray Dataset from the mixed_dataset fixture
         # Use the current CRS when leaving point values unselected
         source = mixed_dataset
+        for name in source.pc.compatible_variables:
+            source[name].encoding.update(dtype="int16", scale_factor=0.1, add_offset=100, _FillValue=-32768)
         if lazy:
             pytest.importorskip("dask")
             from dask.callbacks import Callback
@@ -343,13 +498,13 @@ class TestDatasetPointCloudAccessor:
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(1)) if lazy else nullcontext():
             result = getattr(source.pc, method)(variables=variables, **options)
-        names = source.pc.variables if variables is None else variables
+        names = list(source.pc.compatible_variables.keys()) if variables is None else variables
         if lazy:
             # Check that construction is lazy and independent raster values are unchanged
             assert not tasks
-            assert all(source[name].chunks and result[name].chunks for name in source.pc.variables)
+            assert all(source[name].chunks and result[name].chunks for name in source.pc.compatible_variables)
             assert result.dem.data is source.dem.data
-            for name in source.pc.variables:
+            for name in source.pc.compatible_variables:
                 if name not in names:
                     assert result[name].data is source[name].data
         outputs = {}
@@ -361,9 +516,11 @@ class TestDatasetPointCloudAccessor:
 
         # 3/ Check exact equality
         assert_dataset_output_equal(source, result.compute() if lazy else result, outputs)
+        for name in names:
+            assert result[name].encoding == source[name].encoding
         xr.testing.assert_identical(source, original)
         if lazy:
-            assert all(source[name].chunks for name in source.pc.variables)
+            assert all(source[name].chunks for name in source.pc.compatible_variables)
 
     @pytest.mark.parametrize("lazy", [False, True])
     @pytest.mark.parametrize(
@@ -407,13 +564,13 @@ class TestDatasetPointCloudAccessor:
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(1)) if lazy else nullcontext():
             result = getattr(source.pc, method)(variables=variables, **options)
-        names = source.pc.variables if variables is None else variables
+        names = list(source.pc.compatible_variables.keys()) if variables is None else variables
         if lazy:
             # Check that construction is lazy and independent raster values are unchanged
             assert not tasks
             assert all(source[name].chunks and result[name].chunks for name in names)
             assert result.dem.data is source.dem.data
-            for name in source.pc.variables:
+            for name in source.pc.compatible_variables:
                 if name not in names:
                     assert result[name].data is source[name].data
         outputs = {}
@@ -426,7 +583,7 @@ class TestDatasetPointCloudAccessor:
         assert_dataset_output_equal(source, result.compute() if lazy else result, outputs)
         xr.testing.assert_identical(source, original)
         if lazy:
-            assert all(source[name].chunks for name in source.pc.variables)
+            assert all(source[name].chunks for name in source.pc.compatible_variables)
             assert source.x_point.chunks and source.y_point.chunks
 
     @pytest.mark.parametrize("lazy", [False, True])
@@ -493,7 +650,7 @@ class TestDatasetPointCloudAccessor:
             source.northing.attrs["axis"] = "Y"
 
         # Copy the method options and optionally exclude row 2 with the same mask for both calculations
-        names = source.pc.variables if variables is None else variables
+        names = list(source.pc.compatible_variables.keys()) if variables is None else variables
         options = options.copy()
         if with_mask:
             options["mask"] = np.arange(9) != 2
@@ -544,7 +701,7 @@ class TestDatasetPointCloudAccessor:
             # Check that selected tasks ran without reading the unused field or changing the lazy source arrays
             assert tasks
             assert not read_unused.called
-            assert all(source[name].chunks for name in source.pc.variables)
+            assert all(source[name].chunks for name in source.pc.compatible_variables)
             assert source.dem.chunks
             if method == "variogram":
                 assert all(isinstance(variogram.semivariance, np.ndarray) for variogram in result.values())
@@ -583,6 +740,10 @@ class TestDatasetPointCloudAccessor:
             classification=("point", np.array(["ground", "tree", "other"] * 3)),
             identifier=("point", np.arange(9, dtype=np.uint64) + 2**63),
         ).assign_coords(point=np.arange(9) // 2)
+
+        # Set custom encoding for point measurements
+        for name in ("point_z", "point_sigma"):
+            source[name].encoding.update(dtype="int16", scale_factor=0.1, add_offset=100, _FillValue=-32768)
 
         # Add missing uncertainty values and optionally rename X/Y with CF axis attributes
         source.point_sigma.data[::2] = np.nan
@@ -626,7 +787,7 @@ class TestDatasetPointCloudAccessor:
         if lazy:
             # Check that construction is lazy and independent raster values are unchanged
             assert not tasks
-            assert all(source[name].chunks and result[name].chunks for name in source.pc.variables)
+            assert all(source[name].chunks and result[name].chunks for name in source.pc.compatible_variables)
             assert result.dem.data is source.dem.data
 
         # 3/ Compare values and metadata
@@ -637,7 +798,7 @@ class TestDatasetPointCloudAccessor:
         assert_xarray_equal(result.compute() if lazy else result, expected.compute() if lazy else expected)
         xr.testing.assert_identical(source, original)
         if lazy:
-            assert all(source[name].chunks for name in source.pc.variables)
+            assert all(source[name].chunks for name in source.pc.compatible_variables)
 
             # Subsampling can leave X/Y lazy because its row count is already known
             if method == "subsample":
@@ -734,7 +895,7 @@ class TestDatasetPointCloudAccessor:
         # We copy the mixed dataset and describe the point CRS only in a Dataset attribute
         source = mixed_dataset.copy(deep=True)
         source.attrs[attribute] = 32631
-        for name in source.pc.variables:
+        for name in source.pc.compatible_variables:
             source[name].attrs.pop("crs")
         original = source.copy(deep=True)
 
@@ -745,7 +906,7 @@ class TestDatasetPointCloudAccessor:
         np.testing.assert_array_equal(result.y_point, expected.y)
 
         # Check the point CRS, unchanged raster georeferencing and updated Dataset-level point_crs
-        assert all(result[name].pc.crs.to_epsg() == 4326 for name in result.pc.variables)
+        assert all(result[name].pc.crs.to_epsg() == 4326 for name in result.pc.compatible_variables)
         if attribute == "point_crs":
             assert CRS.from_user_input(result.attrs[attribute]).to_epsg() == 4326
         xr.testing.assert_identical(result.dem, mixed_dataset.dem)
@@ -771,7 +932,7 @@ class TestDatasetPointCloudAccessor:
             source.point_ref.attrs.pop("crs_wkt")
 
         # Link point variables to the new mapping instead of their CRS attributes
-        for name in source.pc.variables:
+        for name in source.pc.compatible_variables:
             source[name].attrs.pop("crs")
             source[name].encoding["grid_mapping"] = "point_ref"
         if description == "cf_and_epsg":
@@ -784,7 +945,7 @@ class TestDatasetPointCloudAccessor:
         result = source.pc.reproject(crs=4326)
 
         # Check point CRS updates and unchanged raster metadata
-        for name in source.pc.variables:
+        for name in source.pc.compatible_variables:
             assert result[name].pc.crs.to_epsg() == 4326
             assert result[name].encoding.get("grid_mapping") == source[name].encoding.get("grid_mapping")
         xr.testing.assert_identical(result.spatial_ref.variable, source.spatial_ref.variable)
@@ -810,7 +971,9 @@ class TestDatasetPointCloudAccessor:
             return query(*args, **kwargs)
 
         # We filter every DataArray first, then run Dataset filtering with the neighbor counter installed
-        expected = {name: mixed_dataset[name].pc.filter("mean", radius=2) for name in mixed_dataset.pc.variables}
+        expected = {
+            name: mixed_dataset[name].pc.filter("mean", radius=2) for name in mixed_dataset.pc.compatible_variables
+        }
         monkeypatch.setattr(irregular, "_query_point_neighbours", count_query)
         result = mixed_dataset.pc.filter("mean", radius=2)
 
@@ -874,6 +1037,36 @@ class TestDatasetPointCloudAccessor:
         assert result.sizes["point"] == 0
         assert result.classification.dtype == np.uint8
 
+    def test_open_pointcloud__deferred_variables(self, pointcloud_file: Any) -> None:
+        """Checks that Dataset variables and row labels stay unloaded."""
+        from geoutils.pointcloud import parquet
+
+        # Write points with row labels and another variable
+        frame = gu.PointCloud.from_xyz(np.arange(9.0), np.zeros(9), np.arange(9.0), 32633, "height").gdf
+        frame["quality"] = np.arange(9, dtype=np.uint16)
+        frame.index = pd.Index([f"row-{row}" for row in range(9)], name="label")
+        filename, _, column = pointcloud_file(frame, partitions=3)
+
+        # Open one Dataset eagerly
+        expected = gu.open_pointcloud(filename, data_name=column, columns="all", as_object_type="dataset", load=True)
+
+        # Open again with deferred I/O (and record reads)
+        with patch.object(parquet, "_read_point_parquet_group", wraps=parquet._read_point_parquet_group) as reads:
+            source = gu.open_pointcloud(filename, data_name=column, columns="all", as_object_type="dataset")
+            result = source.isel(point=slice(2, 5))
+
+            # Ensure variables and row labels are not loaded
+            assert all(not source[name].pc.is_loaded for name in source.pc.compatible_variables)
+            assert "point" not in source.indexes
+            assert reads.call_count == 0
+
+            # Load and check equivalence
+            result.load()
+            xr.testing.assert_identical(result, expected.isel(point=slice(2, 5)))
+            assert all(result[name].pc.is_loaded for name in result.pc.compatible_variables)
+            assert all(not source[name].pc.is_loaded for name in source.pc.compatible_variables)
+            assert {call.args[1] for call in reads.call_args_list} == {0, 1}
+
     def test_to_file__selected_variables(self, mixed_dataset: xr.Dataset, tmp_path: Path) -> None:
         """
         Checks that to_file() writes selected point values and shared coordinates without independent rasters.
@@ -888,10 +1081,10 @@ class TestDatasetPointCloudAccessor:
         mixed_dataset.pc.to_file(filename, variables=["point_sigma"], chunks=4)
 
         # Reopen all stored columns as a Dataset
-        reopened = gu.open_pointcloud(filename, columns="all", as_type="dataset")
+        reopened = gu.open_pointcloud(filename, columns="all", as_object_type="dataset")
 
         # Check that only the selected point values were written, with their original coordinates and CRS
-        assert reopened.pc.variables == ["point_sigma"]
+        assert list(reopened.pc.compatible_variables.keys()) == ["point_sigma"]
         np.testing.assert_array_equal(reopened.point_sigma.data, mixed_dataset.point_sigma.data)
         assert reopened.point_sigma.pc.georeferenced_coords_equal(mixed_dataset.point_sigma)
 
@@ -945,15 +1138,15 @@ class TestDatasetPointCloudAccessor:
         lazy.pc.to_parquet(filename, chunks=4, partitioned=partitioned)
 
         # Reopen in chunks and check stored point variables, row count and lazy values
-        reopened = gu.open_pointcloud(filename, columns="all", chunks=4, as_type="dataset")
-        assert reopened.pc.variables == source.pc.variables
+        reopened = gu.open_pointcloud(filename, columns="all", chunks=4, as_object_type="dataset")
+        assert list(reopened.pc.compatible_variables.keys()) == list(source.pc.compatible_variables.keys())
         assert reopened.sizes["point"] == 9
         assert lazy.point_z.chunks and reopened.point_z.chunks
 
         # 3/ Compare values, metadata and loading behaviour
         # Compute stored points and compare their values, dtypes, labels, coordinates and CRS with the source
         actual = reopened.compute()
-        for name in lazy.pc.variables:
+        for name in lazy.pc.compatible_variables:
             np.testing.assert_array_equal(actual[name].data, source[name].data)
             assert actual[name].dtype == source[name].dtype
         np.testing.assert_array_equal(actual.point.data, source.point.data)
@@ -994,13 +1187,15 @@ class TestDatasetPointCloudAccessor:
             index=pd.Index(np.arange(7) * 10, name="point_id"),
         )
         filename, chunks, column = pointcloud_file(frame, 3)
-        eager = gu.open_pointcloud(filename, data_name=column, columns="all", as_type="dataset")
+        eager = gu.open_pointcloud(filename, data_name=column, columns="all", as_object_type="dataset", load=True)
 
         # 2/ Open in chunks and run the point operation without reading the file
         # Record Dask tasks to check that neither opening nor constructing the result reads point values or labels
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(1)):
-            lazy = gu.open_pointcloud(filename, data_name=column, columns="all", chunks=chunks, as_type="dataset")
+            lazy = gu.open_pointcloud(
+                filename, data_name=column, columns="all", chunks=chunks, as_object_type="dataset"
+            )
             result = getattr(lazy.pc, method)(**options)
 
         # Check that values and labels stay lazy and labels are not loaded into an Xarray index
@@ -1013,6 +1208,39 @@ class TestDatasetPointCloudAccessor:
         expected = getattr(eager.pc, method)(**options)
         assert_xarray_equal(result.compute(), expected)
         assert lazy.height.chunks and lazy.point.chunks
+
+
+class TestDatasetPointCloudAccessorChunked:
+    """Test module for lazy discovery and shared arrays in compatible point variables."""
+
+    def test_compatible_variables__loading_laziness(self, mixed_dataset: xr.Dataset) -> None:
+        """Checks that compatible point discovery and access share Dask arrays without running tasks."""
+
+        pytest.importorskip("dask")
+        from dask.callbacks import Callback
+
+        # Split point rows into 4/4/1, with independent rasters in chunks of 3/2 rows and 4/3 columns
+        source = mixed_dataset.chunk({"point": 4, "y": 3, "x": 4})
+        assert source.point_z.chunks and source.point_sigma.chunks
+
+        # Discover and access the point variables without computing their chunks
+        tasks = []
+        with Callback(pretask=lambda *args: tasks.append(1)):
+            variables = source.pc.compatible_variables
+            names = list(variables.keys())
+            arrays = dict(variables.items())
+
+        # Check exact names, no executed tasks and shared lazy arrays
+        assert names == ["point_z", "point_sigma"]
+        assert not tasks
+        for name, variable in arrays.items():
+            assert variable.chunks == source[name].chunks
+            assert variable.data is source[name].data
+
+        # Compute each view and compare values and metadata with the original eager fixture
+        for name, variable in arrays.items():
+            xr.testing.assert_identical(variable.compute(), mixed_dataset[name])
+            assert variable.chunks and source[name].chunks
 
 
 class TestDatasetPointCloudAccessorErrors:

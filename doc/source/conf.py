@@ -7,10 +7,18 @@ import os
 import sys
 
 # Allow conf.py to find the geoutils module
-sys.path.append(os.path.abspath("../.."))
-sys.path.append(os.path.abspath("../../geoutils/"))
-sys.path.append(os.path.abspath(".."))
-sys.path.insert(0, os.path.dirname(__file__))
+source_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(source_dir))
+sys.path.insert(0, project_root)
+sys.path.append(os.path.join(project_root, "geoutils"))
+sys.path.append(os.path.dirname(source_dir))
+sys.path.insert(0, source_dir)
+
+# Use this checkout in notebook kernels and other subprocesses as well
+python_paths = [project_root]
+if os.environ.get("PYTHONPATH"):
+    python_paths.append(os.environ["PYTHONPATH"])
+os.environ["PYTHONPATH"] = os.pathsep.join(python_paths)
 
 from sphinx_gallery.sorting import ExampleTitleSortKey, ExplicitOrder
 
@@ -56,8 +64,19 @@ nb_execution_raise_on_error = True  # To fail documentation build on notebook ex
 nb_execution_show_tb = True  # To show full traceback on notebook execution error
 nb_output_stderr = "warn"  # To warn if an error is raised in a notebook cell (if intended, override to "show" in cell)
 
+# Sphinx-Gallery stores callables in its configuration, which Sphinx cannot pickle between builds
+suppress_warnings = ["config.cache"]
+
+# These DOI links are stable, but their publishers reject automated link-check requests with HTTP 403
+linkcheck_ignore = [
+    r"https://doi\.org/10\.1080/00031305\.1983\.10483115",
+    r"https://doi\.org/10\.1145/2660193\.2660195",
+]
+linkcheck_retries = 2
+linkcheck_timeout = 15
+
 intersphinx_mapping = {
-    "python": ("https://docs.python.org/", None),
+    "python": ("https://docs.python.org/3/", None),
     "rasterio": ("https://rasterio.readthedocs.io/en/latest", None),
     "numpy": ("https://numpy.org/doc/stable", None),
     "matplotlib": ("https://matplotlib.org/stable", None),
@@ -66,10 +85,11 @@ intersphinx_mapping = {
     "shapely": ("https://shapely.readthedocs.io/en/stable/", None),
     "xarray": ("https://docs.xarray.dev/en/stable/", None),
     "xdem": ("https://xdem.readthedocs.io/en/stable", None),
-    "rioxarray": ("https://corteva.github.io/rioxarray/stable/", None),
+    "rioxarray": ("https://vylor.github.io/rioxarray/stable/", None),
     "pandas": ("https://pandas.pydata.org/docs/", None),
     "scipy": ("https://docs.scipy.org/doc/scipy/", None),
     "dask": ("https://docs.dask.org/en/stable/", None),
+    "distributed": ("https://distributed.dask.org/en/stable/", None),
 }
 
 example_path = os.path.join("../", "../", "examples")
@@ -122,6 +142,10 @@ extlinks = {
 # For matplotlib figures generate with sphinx plot: (suffix, dpi)
 plot_formats = [(".png", 500)]
 
+# Hide download links beside plots; code cells already show the examples
+plot_html_show_source_link = False
+plot_html_show_formats = False
+
 # To avoid long path names in inheritance diagrams
 inheritance_alias = {
     "geoutils.raster.raster.Raster": "geoutils.Raster",
@@ -129,6 +153,14 @@ inheritance_alias = {
     "geoutils.vector.Vector": "geoutils.Vector",
     "xdem.dem.DEM": "xdem.DEM",
 }
+
+# Keep references in APIs concise when linking to their Base-class documentation
+base_class_reference_aliases = {
+    "RasterBase": "geoutils.raster.base.RasterBase",
+    "VectorBase": "geoutils.vector.base.VectorBase",
+    "PointCloudBase": "geoutils.pointcloud.base.PointCloudBase",
+}
+autodoc_type_aliases = base_class_reference_aliases
 
 # To have an edge color that works in both dark and light mode
 inheritance_edge_attrs = {"color": "dodgerblue1"}
@@ -166,11 +198,43 @@ def clean_gallery_files(app, exception):
         os.remove(fn_myvector)
 
 
+def resolve_base_class_reference(app, env, node, contnode):
+    """Resolve concise Base-class member references to their API targets."""
+
+    if node.get("refdomain") != "py":
+        return None
+
+    base_name, separator, member_name = node.get("reftarget", "").partition(".")
+    if not separator or base_name not in base_class_reference_aliases:
+        return None
+
+    qualified_target = f"{base_class_reference_aliases[base_name]}.{member_name}"
+    return env.get_domain("py").resolve_xref(
+        env,
+        node["refdoc"],
+        app.builder,
+        node["reftype"],
+        qualified_target,
+        node,
+        contnode,
+    )
+
+
+def configure_linkcheck(app):
+    """Ignore HTML-only directives when checking external links."""
+
+    if app.builder.name == "linkcheck":
+        # The HTML build still validates every margin directive
+        app.config.suppress_warnings.append("myst.directive_unknown")
+
+
 # To ignore warnings due to having myst-nb reading the .ipynb created by sphinx-gallery
 # Should eventually be fixed, see: https://github.com/executablebooks/MyST-NB/issues/363
 def setup(app):
     # Ignore .ipynb files
     app.registry.source_suffix.pop(".ipynb", None)
+    app.connect("builder-inited", configure_linkcheck)
+    app.connect("missing-reference", resolve_base_class_reference)
     app.connect("build-finished", clean_gallery_files)
 
 
@@ -242,6 +306,10 @@ html_static_path = ["_static"]
 
 html_css_files = [
     "css/custom.css",
+]
+
+html_js_files = [
+    "js/collapse-attributes.js",
 ]
 
 # Add any paths that contain custom static files (such as style sheets) here,
