@@ -106,6 +106,7 @@ class TestPointParquet:
 
     def test_open_pointcloud__deferred_fields(self, tmp_path: Path) -> None:
         """Checks that deferred reads load only requested fields."""
+        pytest.importorskip("pyarrow")
 
         # Write points with another attribute
         points = gu.pointcloud.from_xyz(
@@ -145,6 +146,7 @@ class TestPointParquet:
     @pytest.mark.parametrize("write_statistics", [True, False])
     def test_open_pointcloud__nullable_attributes(self, tmp_path: Path, write_statistics: bool) -> None:
         """Checks that deferred reads preserve nullable dtypes."""
+        pytest.importorskip("pyarrow")
 
         # Write point cloud with nullable attributes
         frame = gu.PointCloud.from_xyz(np.arange(3.0), np.zeros(3), np.arange(3.0), 32633, "height").gdf
@@ -178,6 +180,7 @@ class TestPointParquet:
         self, tmp_path: Path, write_statistics: bool, row_group_size: int, load: bool
     ) -> None:
         """Checks that nullable integer IDs preserve every bit across row groups and deferred reads."""
+        pytest.importorskip("pyarrow")
 
         # Write IDs above float64's exact range with a missing row in the middle
         frame = gu.PointCloud.from_xyz(np.arange(3.0), np.zeros(3), np.arange(3.0), 32633, "height").gdf
@@ -202,6 +205,7 @@ class TestPointParquet:
         self, tmp_path: Path, nullable: bool, dtype: str
     ) -> None:
         """Checks that integer measurements without Parquet statistics support analysis and sampling."""
+        pytest.importorskip("pyarrow")
 
         # Write integer measurements, optionally with one missing value and no null statistics
         frame = gu.PointCloud.from_xyz(np.arange(3.0), np.zeros(3), np.arange(3.0), 32633, "height").gdf

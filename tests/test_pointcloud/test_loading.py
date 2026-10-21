@@ -11,7 +11,6 @@ from geopandas.testing import assert_geodataframe_equal
 from rasterio.coords import BoundingBox
 
 import geoutils as gu
-from geoutils._misc import import_optional
 from geoutils.pointcloud.dataframe import _get_dataframe_attrs
 from geoutils.pointcloud.loading import (
     _concat_point_parts,
@@ -106,11 +105,11 @@ class TestPointCloudOpening:
         if suffix.startswith("parquet"):
             assert attrs["row_group_sizes"] == [3, 3, 1]
         else:
-            laspy = import_optional("laspy")
+            laspy = pytest.importorskip("laspy")
             with laspy.open(filename) as source:
                 assert attrs["point_record_size"] == source.header.point_format.size
                 if suffix == "laz":
-                    lazrs = import_optional("lazrs")
+                    lazrs = pytest.importorskip("lazrs")
                     compression = lazrs.LazVlr(source.header.vlrs.get("LasZipVlr")[0].record_data)
                     assert attrs["laz_chunk_size"] == compression.chunk_size()
                 else:
@@ -126,6 +125,8 @@ class TestPointCloudOpening:
         self, tmp_path: Path, suffix: str, as_object_type: Literal["dataarray", "dataset", "geodataframe"]
     ) -> None:
         """Checks that every opening type/format uses the same deterministic downsampling."""
+        if as_object_type == "geodataframe":
+            pytest.importorskip("dask_geopandas")
         if suffix == "las":
             pytest.importorskip("laspy")
         elif suffix == "parquet":
@@ -152,6 +153,7 @@ class TestPointCloudOpening:
         self, tmp_path: Path, as_object_type: Literal["dataarray", "dataset"]
     ) -> None:
         """Checks that sensor metadata does not load point values."""
+        pytest.importorskip("pyarrow")
         from geoutils.raster.satimg import parse_and_convert_metadata_from_filename
 
         # Write points with ASTER filename
@@ -177,6 +179,9 @@ class TestPointCloudOpening:
         self, tmp_path: Path, as_object_type: Literal["dataarray", "dataset", "geodataframe"]
     ) -> None:
         """Checks that downsampling includes rows with missing values."""
+        pytest.importorskip("pyarrow")
+        if as_object_type == "geodataframe":
+            pytest.importorskip("dask_geopandas")
 
         # Write point cloud with missing values
         values = np.arange(11.0)
@@ -291,7 +296,7 @@ class TestPointCloudOpening:
         """Checks that COPC attributes distinguish all stored levels from those selected for reading."""
 
         # Inspect every block in the small fixture's first hierarchy page without reading its points
-        laspy = import_optional("laspy")
+        laspy = pytest.importorskip("laspy")
         with laspy.CopcReader.open(copc_file) as source:
             blocks = sorted(source.root_page.entries.values(), key=lambda entry: entry.offset)
             expected_sizes = [entry.point_count for entry in blocks if entry.point_count > 0]
@@ -321,7 +326,12 @@ class TestPointCloudOpeningChunked:
         self, tmp_path: Path, suffix: str, downsample: float, chunks: int | None
     ) -> None:
         """Checks that GeoDataFrame point reads are deferred."""
-        dask = import_optional("dask")
+        dask = pytest.importorskip("dask")
+        pytest.importorskip("dask_geopandas")
+        if suffix == "las":
+            pytest.importorskip("laspy")
+        elif suffix == "parquet":
+            pytest.importorskip("pyarrow")
 
         # Write one point cloud
         cloud = gu.PointCloud.from_xyz(np.arange(7.0), np.zeros(7), np.arange(7.0), 32633, "Z")

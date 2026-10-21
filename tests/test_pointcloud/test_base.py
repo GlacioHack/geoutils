@@ -224,9 +224,15 @@ class TestClassVsAccessorConsistency:
         self.ds.to_file(filename, index=False)
         eager_reference = loaded or chunks is not None
         pc = PointCloud(self.ds.copy(), data_name="b1") if eager_reference else PointCloud(filename, data_name="b1")
-        ds = gu.open_pointcloud(
-            filename, data_name="b1", columns="all", as_object_type=as_object_type, load=loaded, chunks=chunks
-        )
+        if loaded:
+            ds = self.ds.copy()
+            ds.pc.set_data_name("b1")
+            if as_object_type == "dataarray":
+                ds = ds.pc.to_xarray()
+        else:
+            ds = gu.open_pointcloud(
+                filename, data_name="b1", columns="all", as_object_type=as_object_type, chunks=chunks
+            )
         assert pc.is_loaded is eager_reference
         assert ds.pc.is_loaded is loaded
         if method == "variogram":

@@ -18,7 +18,6 @@ from shapely.geometry import box
 
 import geoutils as gu
 import geoutils.vector.pd_accessor as pd_accessor
-from geoutils._misc import import_optional
 
 
 class TestVectorAccessor:
@@ -131,7 +130,7 @@ class TestVectorAccessor:
     def test_methods__metadata(self, method: str, options: dict[str, Any], as_pointcloud: bool) -> None:
         """Checks that operations preserve custom metadata."""
 
-        dgpd = import_optional("dask_geopandas", package_name="dask-geopandas")
+        dgpd = pytest.importorskip("dask_geopandas")
         from dask.callbacks import Callback
 
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor

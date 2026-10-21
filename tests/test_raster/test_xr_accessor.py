@@ -18,7 +18,6 @@ from shapely.geometry import box
 
 import geoutils as gu
 from geoutils import examples, open_raster
-from geoutils._misc import import_optional
 from geoutils.raster.base import RasterBase
 from tests.accessor_helpers import (
     assert_dataset_output_equal,
@@ -674,7 +673,7 @@ class TestDataArrayRasterAccessor:
         array = array.rename("height")
         array.attrs.update(title="elevation survey", units="m")
         if storage == "netcdf":
-            import_optional("netCDF4")
+            pytest.importorskip("netCDF4")
             array.rio.write_nodata(0, encoded=True, inplace=True)
             array.encoding.update(
                 dtype="int16", scale_factor=0.1, add_offset=100, zlib=True, complevel=1, chunksizes=(3, 4)
@@ -693,7 +692,7 @@ class TestDataArrayRasterAccessor:
         # Open raster eagerly or in chunks of 3 rows and 4 columns
         chunks = {"y": 3, "x": 4} if lazy else None
         if lazy:
-            import_optional("dask")
+            pytest.importorskip("dask")
         if storage == "netcdf":
             opened = xr.open_dataset(filename, engine="netcdf4", decode_coords="all", chunks=chunks)
         else:
@@ -843,6 +842,8 @@ class TestDataArrayRasterAccessor:
         self, tmp_path: Path, representation: Literal["dataarray", "dataset"], lazy: bool, nodata: int | None
     ) -> None:
         """Checks that clipping preserves missing pixels and valid zeros."""
+        if lazy:
+            pytest.importorskip("dask")
 
         # Write integer raster with a valid zero
         values = np.ones((5, 7), dtype=np.uint8)
@@ -894,7 +895,7 @@ class TestDataArrayRasterAccessor:
     def test_reproject__encoding_overrides(self, tmp_path: Path, dtype: str | None, nodata: int) -> None:
         """Checks that reproject() applies requested dtype and nodata."""
 
-        import_optional("netCDF4")
+        pytest.importorskip("netCDF4")
 
         # Create raster with integer encoding and a gap
         values = np.arange(35, dtype=np.float32).reshape(5, 7)
@@ -1078,7 +1079,7 @@ class TestDataArrayRasterAccessor:
     def test_to_file__georeferencing(self, raster_gcp_rpc: gu.Raster, tmp_path: Path, compute: bool) -> None:
         """Checks that immediate/deferred chunked writes preserve GCP/RPC metadata and exactly match eager files."""
 
-        dask = import_optional("dask")
+        dask = pytest.importorskip("dask")
         from dask.callbacks import Callback
 
         # Load an eager reference and split the same image into chunks of 7/9, including shorter final chunks
@@ -1790,7 +1791,7 @@ class TestDatasetRasterAccessor:
         for name in dataset.data_vars:
             dataset[name].attrs["title"] = name
         if lazy:
-            import_optional("dask")
+            pytest.importorskip("dask")
             dataset = dataset.chunk({"x": 4, "y": 3})
         encodings = {name: variable.encoding.copy() for name, variable in dataset.data_vars.items()}
 

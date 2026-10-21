@@ -105,6 +105,10 @@ class TestDataArrayPointCloudAccessor:
         self, tmp_path: Path, suffix: str, selection: Any, downsample: float
     ) -> None:
         """Checks that point cloud reads and row selections are deferred."""
+        if suffix == "las":
+            pytest.importorskip("laspy")
+        elif suffix == "parquet":
+            pytest.importorskip("pyarrow")
         from geoutils.pointcloud import las, loading, parquet
 
         # Write point cloud with integer attributes
@@ -208,6 +212,7 @@ class TestDataArrayPointCloudAccessor:
     @pytest.mark.parametrize("method", ["bounds", "crop", "clip"])
     def test_open_pointcloud__deferred_spatial_selection(self, tmp_path: Path, method: str) -> None:
         """Checks that spatial selections read only coordinates."""
+        pytest.importorskip("laspy")
         from geoutils.pointcloud import las
 
         # Write LAS point cloud
