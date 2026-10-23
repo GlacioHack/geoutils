@@ -63,6 +63,7 @@ Optional dependencies are grouped in the following pip extras (**`opt`** include
   and [netCDF4](https://unidata.github.io/netcdf4-python/) and [Zarr](https://zarr.readthedocs.io/) for array storage.
 - **`paral`**: [Dask](https://www.dask.org/), [Distributed](https://distributed.dask.org/en/stable/) and [Dask-GeoPandas](https://dask-geopandas.readthedocs.io/en/stable/) for out-of-memory and distributed parallel execution.
 - **`num`**: [Numba](https://numba.pydata.org/) for faster filters and point cloud gridding,
-  [Flox](https://flox.readthedocs.io/en/latest/) for grouped statistics, and [ExactExtract](https://isciences.github.io/exactextract/) for fractional polygon coverage.
+  [Flox](https://flox.readthedocs.io/en/latest/) for grouped statistics, [Crick](https://github.com/dask/crick) for approximate quantiles,
+  and [ExactExtract](https://isciences.github.io/exactextract/) for fractional polygon coverage.
 - **`plot`**: [Matplotlib](https://matplotlib.org/) for raster, vector and statistical plots.
 - **`prof`**: [Psutil](https://psutil.readthedocs.io/en/latest/) and [Plotly](https://plotly.com/) for profiling execution time and memory.
