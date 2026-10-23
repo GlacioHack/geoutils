@@ -9,7 +9,7 @@ from dataclasses import replace
 from importlib.util import find_spec
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Literal
+from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
