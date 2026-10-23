@@ -2016,8 +2016,8 @@ class TestGroupedStatsChunked:
             np.testing.assert_allclose(result[("value", name)], exact[("value", name)], atol=0.02, rtol=0)
 
     @pytest.mark.parametrize("scheduler", ["distributed", "synchronous"])
-    def test_stats__groupwise_shared_source_reads(self, scheduler: str) -> None:
-        """Checks that exact groups share cluster reads and respect an explicit local scheduler."""
+    def test_stats__groupwise_shared_reads(self, scheduler: str) -> None:
+        """Checks that groupwise shares cluster reads and respects scheduler."""
 
         dask = pytest.importorskip("dask")
         da = pytest.importorskip("dask.array")
@@ -2026,7 +2026,7 @@ class TestGroupedStatsChunked:
         pytest.importorskip("distributed")
         from distributed import Client, LocalCluster, get_task_stream
 
-        # Create four groups crossing different pairs of blocks, with separate missing values in two columns
+        # Create 4 groups crossing different blocks, with NaNs
         values = np.arange(30, dtype=float)
         groups = np.repeat(np.arange(4), [6, 9, 6, 9])
         eager_values = {
@@ -2040,8 +2040,6 @@ class TestGroupedStatsChunked:
 
         # Give each source read a distinct task key so both schedulers can report repeated reads
         def read_values(start: int) -> NDArrayNum:
-            """Read one ten-value source block."""
-
             return values[start : start + 10]
 
         read_keys = [f"read-grouped-values-{start}" for start in range(0, 30, 10)]
@@ -2056,13 +2054,12 @@ class TestGroupedStatsChunked:
         }
         local_reads = []
 
+        # Record reads
         def record_read(key: Any, *args: Any) -> None:
-            """Record source tasks executed by a local scheduler."""
-
             if key in read_keys:
                 local_reads.append(key)
 
-        # Run exact statistics with a cluster available, including an explicit synchronous override
+        # Run statistics with cluster/scheduler
         assert all(isinstance(array, da.Array) for array in lazy_values.values())
         with LocalCluster(
             n_workers=1, threads_per_worker=1, processes=False, memory_limit=0, dashboard_address=None
@@ -2077,7 +2074,7 @@ class TestGroupedStatsChunked:
                         method="groupwise",
                     )
 
-        # Cluster batches read each source once, while local batches load only their contributing blocks
+        # Check cluster batches read once
         pd.testing.assert_frame_equal(result, expected, check_exact=True)
         assert all(isinstance(array, da.Array) for array in lazy_values.values())
         if scheduler == "distributed":
