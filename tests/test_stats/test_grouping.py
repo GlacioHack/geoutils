@@ -2015,6 +2015,79 @@ class TestGroupedStatsChunked:
         for name in ("median", "90thpercentile"):
             np.testing.assert_allclose(result[("value", name)], exact[("value", name)], atol=0.02, rtol=0)
 
+    @pytest.mark.parametrize("scheduler", ["distributed", "synchronous"])
+    def test_stats__groupwise_shared_source_reads(self, scheduler: str) -> None:
+        """Checks that exact groups share cluster reads and respect an explicit local scheduler."""
+
+        dask = pytest.importorskip("dask")
+        da = pytest.importorskip("dask.array")
+        from dask.callbacks import Callback
+
+        pytest.importorskip("distributed")
+        from distributed import Client, LocalCluster, get_task_stream
+
+        # Create four groups crossing different pairs of blocks, with separate missing values in two columns
+        values = np.arange(30, dtype=float)
+        groups = np.repeat(np.arange(4), [6, 9, 6, 9])
+        eager_values = {
+            "signal": np.where(values % 7 != 0, values, np.nan),
+            "offset": np.where(values % 5 != 0, 2 * values + 10, np.nan),
+        }
+        statistics = ["median", "nmad"]
+        expected = gu.stats.stats(
+            eager_values, by={"zone": groups}, categories={"zone": range(4)}, statistics=statistics, method="groupwise"
+        )
+
+        # Give each source read a distinct task key so both schedulers can report repeated reads
+        def read_values(start: int) -> NDArrayNum:
+            """Read one ten-value source block."""
+
+            return values[start : start + 10]
+
+        read_keys = [f"read-grouped-values-{start}" for start in range(0, 30, 10)]
+        blocks = [
+            da.from_delayed(dask.delayed(read_values)(start, dask_key_name=key), shape=(10,), dtype=float)
+            for start, key in zip(range(0, 30, 10), read_keys)
+        ]
+        source = da.concatenate(blocks)
+        lazy_values = {
+            "signal": da.where(source % 7 != 0, source, np.nan),
+            "offset": da.where(source % 5 != 0, 2 * source + 10, np.nan),
+        }
+        local_reads = []
+
+        def record_read(key: Any, *args: Any) -> None:
+            """Record source tasks executed by a local scheduler."""
+
+            if key in read_keys:
+                local_reads.append(key)
+
+        # Run exact statistics with a cluster available, including an explicit synchronous override
+        assert all(isinstance(array, da.Array) for array in lazy_values.values())
+        with LocalCluster(
+            n_workers=1, threads_per_worker=1, processes=False, memory_limit=0, dashboard_address=None
+        ) as cluster:
+            with Client(cluster) as client, dask.config.set(scheduler=scheduler), Callback(pretask=record_read):
+                with get_task_stream(client=client) as tasks:
+                    result = gu.stats.stats(
+                        lazy_values,
+                        by={"zone": groups},
+                        categories={"zone": range(4)},
+                        statistics=statistics,
+                        method="groupwise",
+                    )
+
+        # Cluster batches read each source once, while local batches load only their contributing blocks
+        pd.testing.assert_frame_equal(result, expected, check_exact=True)
+        assert all(isinstance(array, da.Array) for array in lazy_values.values())
+        if scheduler == "distributed":
+            cluster_reads = [task["key"] for task in tasks.data if task["key"] in read_keys]
+            assert sorted(cluster_reads) == sorted(read_keys)
+            assert not local_reads
+        else:
+            assert not tasks.data
+            assert sorted(set(local_reads)) == sorted(read_keys)
+
     @pytest.mark.parametrize("engine", ["numpy", "numba", "flox"])
     def test_stats__flox_engines(self, engine: str) -> None:
         """Checks that Flox engines give roughly equivalent chunked results."""

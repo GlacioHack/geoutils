@@ -25,6 +25,7 @@ import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
+from sys import modules
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -1339,7 +1340,7 @@ def _aggregate_complete_groups_chunked(
                 dask.delayed(_collect_block)([blocks[index] for blocks in value_blocks], id_blocks[index], labels)
                 for index in cohort_blocks
             ]
-            table = dask.delayed(_aggregate_collected)(members, statistics).compute()
+            table = dask.delayed(_aggregate_collected)(members, statistics)
         else:
             assert mp_config is not None
 
@@ -1353,6 +1354,19 @@ def _aggregate_complete_groups_chunked(
             members = mp_config.cluster.gather(handles)
             table = _aggregate_collected(members, statistics)
         tables.append(table)
+
+    if use_dask:
+        from dask.base import get_scheduler
+
+        # Submit one graph to a cluster so batches share source reads and graph scheduling
+        scheduler = get_scheduler()
+        distributed = modules.get("distributed")
+        client = getattr(scheduler, "__self__", None)
+        if distributed is not None and isinstance(client, distributed.Client):
+            tables = list(dask.compute(*tables))
+        else:
+            # Local schedulers have no spilling, so finish one bounded batch at a time
+            tables = [table.compute() for table in tables]
 
     # Keep exact integer columns when another batch contains only missing extrema
     if tables:
