@@ -291,6 +291,7 @@ class TestErrorStructureEstimation:
         np.testing.assert_allclose(result.predict_correlation(distances), expected.predict_correlation(distances))
         assert result.empirical_variogram is not None
         assert expected.empirical_variogram is not None
+        assert result.empirical_variogram.estimator == "matheron"
         np.testing.assert_allclose(result.empirical_variogram.semivariance, expected.empirical_variogram.semivariance)
 
     def test_estimate_error_structure__in_memory_raster_accessor_variable_correlation(self) -> None:

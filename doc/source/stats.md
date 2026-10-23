@@ -428,6 +428,10 @@ formats such as GSTools or GPyTorch for kriging, random field generation and oth
 (stats-spatial-estimators)=
 ### Estimators
 
+The default estimator is **Matheron**, which calculates half the mean squared pair difference using exact chunk
+reductions without optional reduction packages. It is sensitive to outliers. Set `estimator="dowd"` for a robust
+median-based estimate; its default t-digest reduction requires `crick`, available through `geoutils[num]`.
+
 For mergeable estimators listed below, we also implement a specific aggregation routine
 to derive them without holding more than a chunk in memory.
 

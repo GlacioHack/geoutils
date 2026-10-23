@@ -867,7 +867,7 @@ class ErrorStructure:
         spread_estimator: Callable[[Any], Any] | None = None,
         min_count: int = 100,
         subsample_magnitude: int | float = 1_000_000,
-        variogram_estimator: str | Callable[[Any], float] = "dowd",
+        variogram_estimator: str | Callable[[Any], float] = "matheron",
         n_pairs: int = 1_000_000,
         pair_sampling: Literal["loglag", "random_xy"] = "loglag",
         n_lags: int = 24,
@@ -970,7 +970,7 @@ class ErrorStructure:
         :param spread_estimator: Spread estimator used for the error magnitude (default nmad).
         :param min_count: Smallest grouped sample retained in the magnitude model.
         :param subsample_magnitude: Maximum observations used to fit the magnitude.
-        :param variogram_estimator: Empirical variogram estimator name or callable.
+        :param variogram_estimator: Empirical variogram estimator name or callable (default "matheron").
         :param n_pairs: Target spatial pairs per variogram run.
         :param pair_sampling: Pair sampling scheme exposed by GeoUtils spatial objects.
         :param n_lags: Number of empirical lag classes.

@@ -282,6 +282,36 @@ class TestVariogramPlot:
 class TestVariogramEstimation:
     """Test module for variogram estimation and fitting through raster and point cloud methods."""
 
+    @pytest.mark.parametrize("source_kind", ["raster", "pointcloud"])
+    @pytest.mark.parametrize("api", ["method", "function"])
+    def test_variogram__default_matheron(self, source_kind: str, api: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Checks that variogram() defaults to Matheron, avoiding the need of crick like Dowd."""
+
+        # Create a small grid or point cloud with the same values
+        y, x = np.mgrid[:4, :4]
+        values = (x + 2 * y).astype(float)
+        source: gu.Raster | gu.PointCloud
+        if source_kind == "raster":
+            source = gu.Raster.from_array(values, from_origin(0, 4, 1, 1), 32633)
+        else:
+            source = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), values.ravel(), crs=32633)
+
+        # Run the estimator while optional packages are unavailable
+        monkeypatch.setitem(sys.modules, "crick", None)
+        monkeypatch.setitem(sys.modules, "skgstat", None)
+        options: dict[str, Any] = {"n_pairs": 30, "n_lags": 3, "random_state": 7}
+        if api == "method":
+            result = source.variogram(**options)
+        else:
+            result = gu.stats.variogram(source, **options)
+        expected = source.variogram(estimator="matheron", **options)
+
+        # Check the estimator and exact equality
+        assert result.estimator == "matheron"
+        np.testing.assert_array_equal(result.counts, expected.counts)
+        np.testing.assert_array_equal(result.lags, expected.lags)
+        np.testing.assert_array_equal(result.semivariance, expected.semivariance)
+
     @pytest.mark.parametrize("read_strategy", ["native", "packed_validity"])
     def test_variogram__raster_default_cache(self, read_strategy: str, monkeypatch: pytest.MonkeyPatch) -> None:
         """Checks that raster variograms reuse accepted values and honor supplied read strategies."""
@@ -473,6 +503,29 @@ class TestVariogramEstimation:
 
 class TestVariogramReduction:
     """Test module for variogram reduction."""
+
+    def test_from_pairs__default_matheron(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Checks that from_pairs() defaults to half the mean squared difference without optional packages."""
+
+        # Create two bins with known endpoint differences
+        differences = np.array([1.0, 3.0, 5.0, 7.0])
+        pairs = xr.Dataset(
+            {
+                "distance": ("pair", [1.0, 2.0, 3.0, 4.0]),
+                "value": (("pair", "endpoint"), np.column_stack((np.zeros(4), differences))),
+            }
+        )
+
+        # Reduce the pairs with the default estimator while optional packages are unavailable
+        monkeypatch.setitem(sys.modules, "crick", None)
+        monkeypatch.setitem(sys.modules, "skgstat", None)
+        result = gu.Variogram.from_pairs(pairs, bins=[0, 2, 4])
+
+        # Check half the mean squared difference for [1, 3] and [5, 7]
+        assert result.estimator == "matheron"
+        np.testing.assert_array_equal(result.counts, [2, 2])
+        np.testing.assert_array_equal(result.semivariance, [2.5, 18.5])
+        assert "approximation" not in result.attrs
 
     @pytest.mark.parametrize("estimator", ["matheron", "cressie", "dowd", "genton", "minmax", "entropy", "percentile"])
     def test_from_pairs__skgstat_estimators(self, estimator: str) -> None:
@@ -1647,7 +1700,7 @@ class TestVariogramErrors:
         with pytest.raises(ImportError, match="flox"):
             gu.Variogram.from_pairs(pairs, estimator="matheron", bins=[1, 3], reduction_backend="flox")
         with pytest.raises(ImportError, match="crick"):
-            gu.Variogram.from_pairs(pairs, bins=[1, 3], reduction_backend="flox", method="map-reduce")
+            gu.Variogram.from_pairs(pairs, estimator="dowd", bins=[1, 3], reduction_backend="flox", method="map-reduce")
 
         # Check native reduction works without either package
         native = gu.Variogram.from_pairs(pairs, estimator="matheron", bins=[1, 3])

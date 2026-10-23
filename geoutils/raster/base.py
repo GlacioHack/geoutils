@@ -3609,7 +3609,7 @@ class RasterBase(ABC):
         band: int = 1,
         n_pairs: int = 1_000_000,
         sampling: Literal["loglag", "random_xy"] = "loglag",
-        estimator: str | Callable[[NDArrayNum], float] = "dowd",
+        estimator: str | Callable[[NDArrayNum], float] = "matheron",
         percentile: float = 50,
         reduction_backend: Literal["geoutils", "flox"] = "geoutils",
         flox_engine: str | None = None,
@@ -3633,7 +3633,7 @@ class RasterBase(ABC):
         :param n_pairs: Number of finite pairs targeted in each run (e.g. 100_000).
         :param sampling: How to select pairs: ``"loglag"`` balances short and long distances, while ``"random_xy"``
             selects endpoints independently.
-        :param estimator: Semivariance estimator from SciKit-GStat: ``"dowd"``, ``"matheron"``, ``"cressie"``,
+        :param estimator: Semivariance estimator from SciKit-GStat: ``"matheron"`` (default), ``"dowd"``, ``"cressie"``,
             ``"genton"``, ``"minmax"``, ``"entropy"`` or ``"percentile"``. A function can instead map absolute pair
             differences to one value per distance bin.
         :param percentile: Percentile from 0 to 100 for estimator="percentile" (default 50), exact or approximate.

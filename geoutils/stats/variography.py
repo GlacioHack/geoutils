@@ -588,7 +588,7 @@ class Variogram:
         cls,
         pairs: xr.Dataset,
         *,
-        estimator: str | Callable[[NDArrayNum], float] = "dowd",
+        estimator: str | Callable[[NDArrayNum], float] = "matheron",
         percentile: float = 50,
         bins: Literal["log", "uniform"] | Iterable[float] = "log",
         reduction_backend: Literal["geoutils", "flox"] = "geoutils",
@@ -607,7 +607,7 @@ class Variogram:
         soon as the per-distance statistics have been computed.
 
         :param pairs: Dataset returned by Raster.pairsample() or PointCloud.pairsample().
-        :param estimator: SciKit-GStat estimator name ("matheron", "cressie", "dowd", "genton", "minmax",
+        :param estimator: SciKit-GStat estimator name ("matheron" by default, "cressie", "dowd", "genton", "minmax",
             "entropy" or "percentile") or a function accepting absolute pair differences. Exact chunk reductions
             support "matheron", "cressie" and "minmax". With either backend, map-reduce uses t-digests for "dowd"
             and "percentile" estimates. Use method="groupwise" for exact complete-bin calculations.
@@ -1626,7 +1626,7 @@ def variogram(
     band: int | None = None,
     n_pairs: int = 1_000_000,
     sampling: Literal["loglag", "random_xy"] = "loglag",
-    estimator: str | Callable[[NDArrayNum], float] = "dowd",
+    estimator: str | Callable[[NDArrayNum], float] = "matheron",
     percentile: float = 50,
     reduction_backend: Literal["geoutils", "flox"] = "geoutils",
     flox_engine: str | None = None,
@@ -1670,7 +1670,7 @@ def variogram(
     :param n_pairs: Number of finite pairs targeted in each run (e.g. 100_000).
     :param sampling: How to select pairs: ``"loglag"`` balances short and long distances, while ``"random_xy"``
         selects endpoints independently.
-    :param estimator: Semivariance estimator from SciKit-GStat: ``"dowd"``, ``"matheron"``, ``"cressie"``,
+    :param estimator: Semivariance estimator from SciKit-GStat: ``"matheron"`` (default), ``"dowd"``, ``"cressie"``,
         ``"genton"``, ``"minmax"``, ``"entropy"`` or ``"percentile"``. A function can instead map absolute pair
         differences to one value per distance bin.
     :param percentile: Percentile from 0 to 100 for estimator="percentile" (default 50), exact or approximate.
