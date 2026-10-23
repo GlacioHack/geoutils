@@ -109,7 +109,7 @@ from geoutils.raster.testing import _array_equal_or_close
 from geoutils.raster.transformation import _clip, _crop, _reproject, _resolve_reprojection_operator, _translate
 from geoutils.sampling.subsampling import _subsample, _subsample_raster
 from geoutils.stats.stats import stats as _stats
-from geoutils.stats.stats import variogram as _variogram
+from geoutils.stats.variography import variogram as _variogram
 
 # Input/output is a RasterType (= Raster or DataArrayRasterAccessor subclass)
 RasterType = TypeVar("RasterType", bound="RasterBase")
@@ -1023,8 +1023,12 @@ class RasterBase(ABC):
         subsample: int | float = 1,
         subsample_per_group: bool = False,
         random_state: int | np.random.Generator | None = None,
-        strategy: Literal["auto", "dense", "sparse", "groupwise"] = "auto",
+        method: Literal["auto", "map-reduce", "blockwise", "cohorts", "groupwise"] = "auto",
+        reindex: bool | None = None,
+        split_every: int | None = None,
         backend: Literal["geoutils", "flox"] = "geoutils",
+        flox_engine: str | None = None,
+        tdigest_compression: float = 100,
         subsampling_strategy: Literal["sequential", "topk"] = "topk",
         interpolation: InterpolationMethod = "linear",
         align: Literal["raise", "reproject"] = "raise",
@@ -1081,11 +1085,19 @@ class RasterBase(ABC):
         :param subsample_per_group: Apply subsample within each combined group (True, stratified sampling) or once
             across all groups (False). Without by, both use one global sample.
         :param random_state: Seed to reproduce subsampling (e.g. 42), or an existing random generator.
-        :param strategy: Combine chunk statistics for all groups ("dense"), only groups present in each chunk
-            ("sparse"), or gather each complete group ("groupwise"). "auto" chooses from the statistics and group count;
-            exact quantiles and custom functions require "auto" or "groupwise" for chunked data.
-        :param backend: Use the GeoUtils reducer ("geoutils") or optional Flox reducer ("flox") for grouped statistics;
-            see stats() for the Flox restrictions.
+        :param method: Combine chunk statistics ("map-reduce"), or gather each complete group ("groupwise").
+            "auto" chooses from the statistics and group count; exact quantiles and custom functions require "auto"
+            or "groupwise" for chunked data. Flox also supports "blockwise" and "cohorts".
+        :param reindex: Combine chunk statistics for all groups (True) or only groups present in each chunk (False).
+            None lets the backend choose.
+        :param split_every: Maximum block summaries per merge (at least 2). None uses Dask configuration or the backend
+            default (8 for GeoUtils).
+        :param backend: Use the GeoUtils reducer ("geoutils") or optional Flox reducer ("flox") for global or
+            grouped statistics. Both support Dask and multiprocessing. Exact quantiles collect complete groups;
+            map-reduce uses t-digests for quantiles. Group masks and custom functions require GeoUtils.
+        :param flox_engine: Local Flox reduction algorithm: None (automatic), "numpy", "numba", "flox" or "numbagg".
+            This is independent of Dask/MP execution. The "numbagg" engine does not support t-digests.
+        :param tdigest_compression: Digest accuracy/memory setting from 20 to 1000 (default 100).
         :param subsampling_strategy: "topk" keeps the same sampled locations across chunk layouts for a fixed seed;
             "sequential" draws random locations using traversal order and can depend on the chunks.
         :param interpolation: Raster values at point locations use interp_points() with SciPy methods "nearest",
@@ -1120,8 +1132,12 @@ class RasterBase(ABC):
             subsample=subsample,
             subsample_per_group=subsample_per_group,
             random_state=random_state,
-            strategy=strategy,
+            method=method,
+            reindex=reindex,
+            split_every=split_every,
             backend=backend,
+            flox_engine=flox_engine,
+            tdigest_compression=tdigest_compression,
             subsampling_strategy=subsampling_strategy,
             interpolation=interpolation,
             align=align,
@@ -1739,7 +1755,7 @@ class RasterBase(ABC):
         Any resampling algorithm implemented in Rasterio can be passed as a string.
 
         Rasters referenced by ground control points (GCPs) or rational polynomial coefficients (RPCs) use their
-        stored model instead of the affine transform. Eager, lazy Dask and multiprocessing execution all support
+        stored model instead of the affine transform. In-memory, lazy Dask and multiprocessing execution all support
         these models with Rasterio resampling methods. GCPs use their stored CRS; RPCs use WGS84 (EPSG:4326).
         The result has a regular affine grid.
 
@@ -1842,7 +1858,7 @@ class RasterBase(ABC):
         selected_backend = _resampling_backend(
             backend, default=default_backend, allowed=("gdal", "scipy", "gstools", "gpytorch")
         )
-        # Resolve the method before eager, Dask or multiprocessing reprojection
+        # Resolve the method before in-memory, Dask or multiprocessing reprojection
         if selected_backend == "gdal":
             if needs_operator:
                 raise ValueError("The GDAL backend accepts string methods without operator or window options.")
@@ -2029,7 +2045,7 @@ class RasterBase(ABC):
         :param mp_config: Worker, tile and output file settings for a Raster.
         :param backend: Library used to draw correlated errors. Chunked GPyTorch fields use an inducing grid.
         :param gpytorch_inducing_points: Target grid size for approximate GPyTorch fields. "auto" uses 256 points
-            for eager and chunked rasters; None requests an exact eager draw.
+            for in-memory and chunked rasters; None requests an exact in-memory draw.
         :returns: One result of the same raster type, or a list when n_fields is greater than one.
         """
 
@@ -2525,7 +2541,7 @@ class RasterBase(ABC):
         :returns: Resampled values.
         """
 
-        # Resolve the public choices once before dispatching eager or chunked inputs
+        # Resolve the public choices once before dispatching in-memory or chunked inputs
         method = _resampling_keyword(method, resampling, default=config["interpolation_method"])
         selected_backend = _resampling_backend(backend, default="scipy", allowed=("scipy", "gstools", "gpytorch"))
         if isinstance(method, (str, Interpolator, Reducer)):
@@ -2573,7 +2589,7 @@ class RasterBase(ABC):
         """
         Reduce raster values around point coordinates.
 
-        Samples the first band by default, or the requested band. Window reductions share the eager, Dask
+        Samples the first band by default, or the requested band. Window reductions share the in-memory, Dask
         and multiprocessing paths of resample_at_points(), with overlap covering the selected neighborhood.
 
         :param points: Point(s) at which to interpolate raster value. Can be either a tuple of array-like of X/Y
@@ -3036,7 +3052,7 @@ class RasterBase(ABC):
         :param data_name: Data attribute name to be associated with target values in the output vector
             (defaults to "id").
         :param strategy: Strategy used to reconcile polygons across chunk boundaries. Defaults to ``"label_stitch"``
-            and has no effect for eager execution.
+            and has no effect for in-memory execution.
 
         :returns: Vector containing the polygonized geometries associated to target values.
         """
@@ -3370,7 +3386,7 @@ class RasterBase(ABC):
         identify the primary input whose grid or point ordering they follow.
 
         Spatial inputs, explicit output support and raster or point masks must use one family: Raster/PointCloud
-        objects, or DataArray/GeoDataFrame objects. The latter may mix eager and Dask storage. Plain arrays and
+        objects, or DataArray/GeoDataFrame objects. The latter may mix in-memory and Dask storage. Plain arrays and
         vector outlines are accepted with either family.
 
         :param other: Dataset to sample alongside this raster. A plain array follows this raster's grid.
@@ -3406,7 +3422,7 @@ class RasterBase(ABC):
             Point inputs must still share the same ordered coordinates when sampled at points.
         :param mp_config: Worker and tile settings for multiprocessing. Raster output uses its outfile; cannot be
             combined with Dask inputs.
-        :returns: Raster or point cloud on the selected support; Xarray DataArray or eager/lazy GeoDataFrame for
+        :returns: Raster or point cloud on the selected support; Xarray DataArray or in-memory/lazy GeoDataFrame for
             accessor calls. Bands or columns contain "self", "other", then auxiliaries in mapping order. Raster
             band names are stored in ``tags["long_name"]`` (Xarray ``attrs["long_name"]``). Point outputs use
             "self" as their active data attribute and preserve the support index and order.
@@ -3460,6 +3476,11 @@ class RasterBase(ABC):
         index_dtype: DTypeLike = np.int32,
         distance_dtype: DTypeLike = np.float64,
         mp_config: MultiprocConfig | None = None,
+        force_output_to_memory: bool = False,
+        output_chunks: int = 100_000,
+        read_strategy: Literal["native", "reuse_values", "packed_validity"] = "native",
+        output_storage: Literal["memory", "disk"] = "memory",
+        output_directory: str | pathlib.Path | None = None,
     ) -> xr.Dataset:
         """Sample cell pairs in the raster.
 
@@ -3488,8 +3509,27 @@ class RasterBase(ABC):
         ``n_pairs`` limits the returned data held in memory, while ``batch_pairs`` limits temporary candidate arrays.
         For Dask and Multiprocessing inputs, finite cells are counted separately by chunk or tile. Pair geometry is
         generated from the raster grid, then only chunks or tiles containing candidate endpoints are read. The
-        complete raster band is not collected in memory and the Raster stays unloaded. Pair selection and the
-        returned Xarray Dataset are eager for both backends.
+        complete raster band is not collected in memory and the Raster stays unloaded. Pair selection and geometry
+        are calculated before returning. Dask inputs return every data column as a Dask array without writing files;
+        in-memory inputs return NumPy arrays. ``force_output_to_memory=True`` returns all columns in memory. Sampling
+        still reads candidate values to reject invalid pairs, and selected pair indexes occupy memory.
+
+        ``read_strategy`` changes source access independently of pair generation. ``"reuse_values"`` saves accepted
+        values during rejection checks, avoiding their final reread. ``"packed_validity"`` packs finite, unmasked
+        cells during one source scan, then checks candidates against that bitmap and reads only accepted values.
+        The bitmap uses roughly one byte per eight cells plus chunk padding, held on the client; at most 64 packed
+        chunks are assembled at once. With ``"random_xy"``, this adds a scan that native sampling does not need.
+
+        For Dask inputs, reused values are already materialized and are wrapped in Dask output chunks. Packed
+        validity instead defers accepted values through one shared indexing graph. Its intermediate endpoint chunks
+        can contain as many values as a source chunk has cells; ``output_chunks`` bounds the returned chunks.
+
+        With multiprocessing, ``output_storage="disk"`` writes accepted batches immediately, including their indexes,
+        coordinates and distances. Every pair column is then Dask-backed unless ``force_output_to_memory=True``.
+        Memory grows with candidate and output batch sizes rather than the total pair count, apart from metadata
+        per output chunk.
+        Global deduplication uses a disk index with an 8 MiB cache. Packed validity still adds its full-raster bitmap.
+        Temporary output survives in derived graphs and pending persisted reads; workers need access to its files.
 
         :param band: Band to sample, counting from one.
         :param n_pairs: Requested number of pairs with two finite values; fewer may be returned if sampling stops early.
@@ -3518,7 +3558,15 @@ class RasterBase(ABC):
         :param index_dtype: Integer NumPy dtype for returned cell indexes (e.g. ``"int64"`` for very large rasters).
         :param distance_dtype: Floating NumPy dtype for returned distances (e.g. ``"float32"`` to reduce memory).
         :param mp_config: Worker and tile settings for multiprocessing reads from an unloaded raster. Cannot be
-            combined with Dask inputs. The returned Xarray Dataset is eager.
+            combined with Dask inputs.
+        :param force_output_to_memory: Return every output column in memory, including disk output.
+        :param output_chunks: Maximum pairs per returned Dask chunk or saved disk batch.
+        :param read_strategy: ``"native"`` (default), ``"reuse_values"`` to save accepted endpoint values,
+            or ``"packed_validity"`` to cache finite-cell bits. Pair draws and seeds follow ``strategy`` unchanged.
+        :param output_storage: ``"memory"`` (default) or ``"disk"`` for temporary pair output with mp_config.
+            Save Dask output through Xarray's to_netcdf() or to_zarr().
+        :param output_directory: Existing parent directory for temporary disk output; defaults to the system's
+            temporary directory. Files are removed when the last graph or pending read releases them.
         :returns: Xarray Dataset with pair and endpoint dimensions, containing cell indexes, values, coordinates,
             and distances.
         """
@@ -3548,6 +3596,11 @@ class RasterBase(ABC):
             index_dtype=index_dtype,
             distance_dtype=distance_dtype,
             mp_config=mp_config,
+            force_output_to_memory=force_output_to_memory,
+            output_chunks=output_chunks,
+            read_strategy=read_strategy,
+            output_storage=output_storage,
+            output_directory=output_directory,
         )
 
     def variogram(
@@ -3557,6 +3610,12 @@ class RasterBase(ABC):
         n_pairs: int = 1_000_000,
         sampling: Literal["loglag", "random_xy"] = "loglag",
         estimator: str | Callable[[NDArrayNum], float] = "dowd",
+        percentile: float = 50,
+        reduction_backend: Literal["geoutils", "flox"] = "geoutils",
+        flox_engine: str | None = None,
+        method: Literal["auto", "map-reduce", "groupwise"] = "auto",
+        tdigest_compression: float = 100,
+        mp_config: MultiprocConfig | None = None,
         bins: Literal["log", "uniform"] | Iterable[float] = "log",
         n_lags: int = 24,
         min_lag: float | None = None,
@@ -3577,6 +3636,15 @@ class RasterBase(ABC):
         :param estimator: Semivariance estimator from SciKit-GStat: ``"dowd"``, ``"matheron"``, ``"cressie"``,
             ``"genton"``, ``"minmax"``, ``"entropy"`` or ``"percentile"``. A function can instead map absolute pair
             differences to one value per distance bin.
+        :param percentile: Percentile from 0 to 100 for estimator="percentile" (default 50), exact or approximate.
+        :param reduction_backend: Native GeoUtils or optional Flox reduction of the sampled pairs.
+        :param flox_engine: Local Flox reduction algorithm: None (automatic), "numpy", "numba", "flox" or "numbagg".
+            This is independent of Dask/MP execution. The "numbagg" engine does not support t-digests.
+        :param method: Calculate complete bins exactly ("groupwise") or combine summaries ("map-reduce").
+            "auto" uses t-digests for Dowd and percentiles, and complete bins for other nonmergeable estimators.
+        :param tdigest_compression: Digest accuracy/memory setting from 20 to 1000 (default 100).
+        :param mp_config: Worker and tile settings for sampling and pair reduction. Cannot be combined with
+            Dask source inputs. File-backed sources stay unloaded.
         :param bins: Distance bins: ``"log"`` for logarithmic spacing, ``"uniform"`` for equal widths, or explicit
             edges (e.g. [1, 10, 100]).
         :param n_lags: Number of distance bins when bins is ``"log"`` or ``"uniform"``.
@@ -3603,6 +3671,12 @@ class RasterBase(ABC):
             sampling=sampling,
             n_runs=n_runs,
             estimator=estimator,
+            percentile=percentile,
+            reduction_backend=reduction_backend,
+            flox_engine=flox_engine,
+            method=method,
+            tdigest_compression=tdigest_compression,
+            mp_config=mp_config,
             bins=bins,
             n_lags=n_lags,
             min_lag=min_lag,

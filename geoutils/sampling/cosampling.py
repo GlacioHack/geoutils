@@ -201,7 +201,7 @@ def _check_cosample_input_types(
     """
     Require inputs to be of the same object or accessor "family" (GeoUtils, or Xarray/Pandas).
 
-    However, DataArrays and GeoDataFrames can mix eager and Dask. Plain arrays have to match their input locations,
+    However, DataArrays and GeoDataFrames can mix in-memory and Dask. Plain arrays have to match their input locations,
     and vector outlines only supply a mask, so both of them are accepted in every case.
     """
 
@@ -291,7 +291,7 @@ def _align_cosample_inputs_for_raster_support(
     temporary_files: ExitStack,
 ) -> tuple[dict[str, Any], dict[str, tuple[RasterBase, int]]]:
     """
-    Align every input with the output support, keeping Dask/MP/eager support.
+    Align every input with the output support, keeping Dask/MP/in-memory support.
 
     Point inputs are gridded, and rasters reprojected to the support grid if necessary.
     NumPy and Dask use the selected arrays, while multiprocessing uses raster objects and band indexes that
@@ -435,14 +435,14 @@ def _intersect_validity(validity_layers: Iterable[Any]) -> Any:
 ###############################
 
 
-def _cosample_raster_eager(
+def _cosample_raster_in_memory(
     arrays: Mapping[str, NDArrayNum],
     common_validity: NDArrayBool,
     subsample: int | float,
     random_state: int | np.random.Generator | None,
     strategy: Literal["sequential", "topk"],
 ) -> NDArrayNum:
-    """Cosample valid locations eagerly (in-memory) into a multi-band array output."""
+    """Cosample valid locations into an in-memory multi-band array."""
 
     # Use all valid cells when no smaller sample was requested
     if subsample == 1:
@@ -473,7 +473,7 @@ def _cosample_raster_dask(
     """
     Cosample valid locations lazily across chunks into a multi-band Dask array output.
 
-    Same logic as eager, but written in Dask.
+    Same logic as the in-memory calculation, but written in Dask.
     """
 
     import_optional("dask")
@@ -519,7 +519,7 @@ def _wrapper_cosample_raster_block_mp(
     """
     Wrapper for Multiprocessing cosample in input blocks, used in _cosample_raster_mp() with map_overlap().
 
-    Same logic as eager above, but for a chunk.
+    Same logic as the in-memory calculation above, but for a chunk.
     """
 
     from geoutils.raster.raster import Raster
@@ -594,7 +594,7 @@ def _cosample_raster_mp(
     """
     Cosample valid values from a temporary "validity" file, then write their values by block.
 
-    Same logic as eager above, but chunked using Multiprocessing as backend.
+    Same logic as the in-memory calculation above, but chunked using Multiprocessing as backend.
 
     _wrapper_cosample_raster_block_mp() applies the same mask in both passes.
     We keep the temporary "validity" file alive until the values have been written, and sort
@@ -663,7 +663,8 @@ def _cosample_on_raster(
 
     - _align_cosample_inputs_for_raster_support() places every input on the grid.
     - _intersect_validity() then combines finite coverage with the optional mask into a common validity mask.
-    - Then an eager/Dask/MP _cosample_raster() function draws one common sample and constructs the multi-band output.
+    - Then an in-memory/Dask/MP _cosample_raster() function draws one common sample and constructs the multi-band
+      output.
 
     :param inputs: Named values with their selected band and original locations, prepared by _cosample().
     :param support: Raster defining the output grid, resolved from ``at`` and ``raster_point_mode``.
@@ -706,7 +707,7 @@ def _cosample_on_raster(
             output.attrs["long_name"] = tuple(inputs)
         return output
 
-    # 2b/ For Dask or eager, intersect the user mask and finite coverage from every aligned value
+    # 2b/ For Dask or in-memory, intersect the user mask and finite coverage from every aligned value
     validity_layers = [_mask_at_support(mask, support, mask_mode=mask_mode, align=align)]
     validity_layers.extend(np.isfinite(array) for array in arrays.values())
     common_validity = _intersect_validity(validity_layers)
@@ -715,7 +716,7 @@ def _cosample_on_raster(
     if is_dask_array(common_validity):
         data = _cosample_raster_dask(arrays, common_validity, subsample, random_state, strategy)
     else:
-        data = _cosample_raster_eager(arrays, common_validity, subsample, random_state, strategy)
+        data = _cosample_raster_in_memory(arrays, common_validity, subsample, random_state, strategy)
 
     # 3/ Construct the raster output from the NumPy or Dask bands
     tags = {"long_name": tuple(arrays)}
@@ -1068,7 +1069,7 @@ def _cosample(
     The output is a multi-band raster or multi-column point cloud containing all data sampled at valid values of the
     same locations.
 
-    This function reuses eager, Dask and multiprocessing execution from other geospatial operations (grid,
+    This function reuses in-memory, Dask and multiprocessing execution from other geospatial operations (grid,
     interp_points). Additional steps include placing values on common support, determine validity (non-NaN/inf),
     then drawing one shared sample.
     Specifically:

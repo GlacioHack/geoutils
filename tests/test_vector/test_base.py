@@ -200,7 +200,7 @@ class TestClassVsAccessorConsistency:
     def test_methods__equality_and_loading(
         self, tmp_path: Path, method: str, kwargs: dict[str, Any], loaded: bool, chunks: int | None
     ) -> None:
-        """Checks that vector methods load as needed and match eager class and accessor outputs."""
+        """Checks that vector methods load as needed and match in-memory class and accessor outputs."""
 
         if not loaded:
             pytest.importorskip("dask_geopandas")

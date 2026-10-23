@@ -120,6 +120,7 @@ OPERATION_GROUP_ORDER = (
     "Point ⟶ Raster",
     "Vector ⟶ Raster",
     "Raster ⟶ Other",
+    "Point ⟶ Other",
 )
 OPERATION_GROUPS: dict[str, str] = {
     "crop": "Raster ⟶ Raster",
@@ -138,6 +139,10 @@ OPERATION_GROUPS: dict[str, str] = {
     "create_mask": "Vector ⟶ Raster",
     "statistics": "Raster ⟶ Other",
     "grouped_stats": "Raster ⟶ Other",
+    "mergeable_grouped_stats": "Raster ⟶ Other",
+    "raster_variogram": "Raster ⟶ Other",
+    "raster_pairsample": "Raster ⟶ Other",
+    "variogram_from_pairs": "Point ⟶ Other",
     "write": "Raster ⟶ Other",
 }
 
@@ -1232,8 +1237,7 @@ def _default_cases(comparison: Comparison, *, execution: ExecutionMode | None = 
             if case.engine not in (None, backend):
                 continue
         if comparison.operation == "grouped_stats":
-            strategy = signature(RasterBase.stats).parameters["strategy"].default
-            if case.strategy not in (None, strategy):
+            if case.strategy not in (None, "auto"):
                 continue
         cases.append(case)
     return tuple(cases)
@@ -1695,7 +1699,7 @@ def _scaling_html(result: Any, *, include_asv_history: bool = True) -> str:
         [
             "<h1>Scaling with raster size</h1>",
             "<p>These plots show how execution time and peak additional RAM grow with raster size, comparing "
-            "eager, Dask and Multiprocessing execution with default options.</p>",
+            "in-memory, Dask and Multiprocessing execution with default options.</p>",
             _run_metadata(result),
             "<p>Raster width and height vary together; chunk size stays fixed. Select an operation to show its plot.</p>",
             '<div class="scaling-layout"><nav class="plot-toc" aria-label="Scaling operations">',

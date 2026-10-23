@@ -434,7 +434,7 @@ def _open_point_parquet(
     result.attrs.update({key: value for key, value in metadata["attrs"].items() if key.startswith("dataframe_")})
     result.attrs["row_group_sizes"] = [count for _, _, count in metadata["row_groups"]]
     if row_labels is not None:
-        # Leave stored labels lazy without asking Xarray to create an eager Pandas index
+        # Leave stored labels lazy without asking Xarray to create a Pandas index
         labels = row_labels if isinstance(row_labels, xr.Variable) else xr.Variable("point", row_labels)
         coordinates = xr.Coordinates({"point": labels}, indexes={})
         result = result.assign_coords(coordinates)
@@ -471,7 +471,7 @@ def _open_parquet_geodataframe(
     """
     Use GeoPandas to decode point geometry while preserving the selected values and lazy metadata.
 
-    Eager reads pass the configured filesystem to read_parquet(), as documented at
+    In-memory reads pass the configured filesystem to read_parquet(), as documented at
     https://geopandas.org/en/stable/docs/reference/api/geopandas.read_parquet.html.
     """
     from geoutils.pointcloud.dataframe import _build_pointcloud_output
@@ -544,7 +544,7 @@ def _open_parquet_geodataframe(
 
 
 def _point_parquet_table(points: xr.DataArray, *, write_bbox: bool = True) -> Any:
-    """Encode one eager point array as a GeoParquet 1.1 table with native coordinate fields."""
+    """Encode one in-memory point array as a GeoParquet 1.1 table with native coordinate fields."""
     pa = import_optional("pyarrow")
 
     # Build native coordinate fields directly from the numeric arrays

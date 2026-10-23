@@ -112,7 +112,7 @@ class TestPredictorsChunked:
     """Test module for chunked (Dask/MP) error magnitude prediction on raster and point."""
 
     def test_predict_magnitude__raster_dask_mp_equal(self, tmp_path: Path) -> None:
-        """Checks that Dask and MP raster tiles predict the eager magnitude map without loading source files."""
+        """Checks that Dask and MP raster tiles predict the in-memory magnitude map without loading source files."""
 
         pytest.importorskip("dask")
 
@@ -160,7 +160,7 @@ class TestPredictorsChunked:
     def test_predict_magnitude__point_dask_mp_equal(
         self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
     ) -> None:
-        """Checks that Dask and MP point partitions predict the eager values in the same row order."""
+        """Checks that Dask and MP point partitions predict the in-memory values in the same row order."""
 
         pytest.importorskip("dask_geopandas")
 
@@ -262,7 +262,7 @@ class TestPredictorsChunked:
         raster = gu.Raster.from_array(np.ones((2, 7)), transform=from_origin(0, 2, 1, 1), crs=32631)
         points = gu.PointCloud.from_xyz(np.arange(7), np.arange(7), np.ones(7), crs=32631)
 
-        # Dask predictor chunks select lazy output even with eager source data
+        # Dask predictor chunks select lazy output even with in-memory source data
         raster_predictor = dask.from_array(np.tile(quality, (2, 1)), chunks=(1, 3))
         point_predictor = dask.from_array(quality, chunks=3)
         raster_result = structure.predict_magnitude({"quality": raster_predictor}, like=raster)
@@ -275,7 +275,7 @@ class TestPredictorsChunked:
         assert hasattr(scalar_result.data, "compute")
         np.testing.assert_array_equal(np.asarray(scalar_result.compute()), np.full((2, 7), 1.5))
 
-        # Computing both maps matches the same predictions on eager inputs
+        # Computing both maps matches the same predictions on in-memory inputs
         eager_raster = structure.predict_magnitude({"quality": np.tile(quality, (2, 1))}, like=raster)
         eager_points = structure.predict_magnitude({"quality": quality}, like=points)
         np.testing.assert_array_equal(np.asarray(raster_result.compute()), eager_raster.to_nanarray())
@@ -401,7 +401,7 @@ class TestPredictorsErrors:
             if chunked:
                 pytest.importorskip("dask_geopandas")
 
-        # Should fail for both eager/Dask
+        # Should fail for both in-memory/Dask
         with pytest.raises(
             ValueError, match="Spatial predictor 'quality' must be scalar or match every output location"
         ):

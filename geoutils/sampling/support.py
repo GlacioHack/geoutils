@@ -99,7 +99,7 @@ def _normalize_mask_array(mask: Any | None, shape: tuple[int, ...]) -> Any:
     if mask is None:
         return None
 
-    # Ensure lazy arrays and proper missing values in eager masked arrays
+    # Ensure lazy arrays and proper missing values in in-memory masked arrays
     values = _as_array(mask)
     if np.ma.isMaskedArray(values):
         values = values.filled(False)

@@ -349,7 +349,7 @@ class TestLasPyIO:
                 scales=(0.001, 0.001, 0.001),
                 offsets=(0.0, 0.0, 0.0),
             )
-            # Validate the resulting file through an independent eager reader
+            # Validate the resulting file through an independent in-memory reader
             self._assert_roundtrip(pc, output)
             assert not ds.pc.is_loaded
 
@@ -417,7 +417,7 @@ class TestLasPyIO:
         as_object_type: Literal["pointcloud", "dataarray", "dataset", "geodataframe"],
         backend: Literal["dask", "multiproc"],
     ) -> None:
-        """Checks that Dask and multiprocessing writes use specified LAZ disk chunks and match eager writing."""
+        """Checks that Dask and multiprocessing writes use specified LAZ disk chunks and match in-memory writing."""
 
         import_optional("lazrs")
 
@@ -428,7 +428,7 @@ class TestLasPyIO:
         reference["intensity"] = np.arange(11, dtype=np.uint16)
         columns = ["classification", "identifier", "intensity"]
 
-        # Open eager and chunked
+        # Open in-memory and chunked
         if as_object_type == "pointcloud":
             eager_writer = chunked_writer = reference
             eager_accessors = chunked_accessors = [reference]

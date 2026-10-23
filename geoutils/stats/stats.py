@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Apply global/grouped statistics and variography to rasters and point clouds."""
+"""Apply global/grouped statistics to rasters and point clouds."""
 
 from __future__ import annotations
 
@@ -29,19 +29,24 @@ import numpy as np
 
 from geoutils._dispatch import _is_pointcloud, _is_raster, is_dask_array
 from geoutils._misc import import_optional
-from geoutils._typing import ArrayLike, NDArrayNum
+from geoutils._typing import ArrayLike
 from geoutils.operators.base import LocalData
 from geoutils.operators.overlap import OverlapBackend
 from geoutils.operators.reducer import Reducer
 from geoutils.raster.array import get_mask_from_array
 from geoutils.stats.grouping import _grouped_stats, _validate_group_declarations
-from geoutils.stats.reduction import _normalize_statistics, _reduce_global_values
+from geoutils.stats.reduction import (
+    _check_input_flox_engine,
+    _check_input_reduction_method,
+    _check_input_tdigest,
+    _normalize_statistics,
+    _reduce_global_values,
+)
 from geoutils.stats.selection import (
     _coordinates_at_support,
     _sample_and_mask_global_values,
     _select_values_and_mask_at_support,
 )
-from geoutils.stats.variography import Variogram, _estimate_variogram
 
 if TYPE_CHECKING:
     from geoutils.interface.resampling import InterpolationMethod
@@ -53,7 +58,7 @@ if TYPE_CHECKING:
     from geoutils.uncertainty import ErrorStructure, PropagationSummary
     from geoutils.vector.base import VectorLike
 
-__all__ = ["stats", "variogram"]
+__all__ = ["stats"]
 
 
 def _global_stats(
@@ -63,11 +68,16 @@ def _global_stats(
     mask: Any | None,
     subsample: int | float,
     random_state: int | np.random.Generator | None,
-    strategy: Literal["auto", "dense", "sparse", "groupwise"],
     subsampling_strategy: Literal["sequential", "topk"],
     mp_config: MultiprocConfig | None,
     support: RasterBase | PointCloudBase | None = None,
     _return_local_data: bool = False,
+    backend: str = "geoutils",
+    flox_engine: str | None = None,
+    tdigest_compression: float = 100,
+    method: str = "auto",
+    reindex: bool | None = None,
+    split_every: int | None = None,
 ) -> Any:
     """
     Calculate global statistic.
@@ -102,8 +112,13 @@ def _global_stats(
     result = _reduce_global_values(
         values_to_reduce,
         statistics,
-        strategy=strategy,
         mp_config=mp_config if subsample == 1 else None,
+        backend=backend,
+        flox_engine=flox_engine,
+        tdigest_compression=tdigest_compression,
+        method=method,
+        reindex=reindex,
+        split_every=split_every,
     )
     if not _return_local_data:
         return result
@@ -115,7 +130,7 @@ def _global_stats(
     for name in names:
         array = values_to_reduce[name][0]
         if is_dask_array(array) or not isinstance(array, np.ndarray):
-            raise ValueError("Statistics uncertainty propagation currently requires eager in-memory values.")
+            raise ValueError("Statistics uncertainty propagation currently requires in-memory values.")
         flat_values = np.asanyarray(np.ma.getdata(array)).reshape(-1)
         valid = ~get_mask_from_array(array).reshape(-1)
         source_ids = np.empty(array.size, dtype=object)
@@ -146,8 +161,12 @@ def stats(
     subsample: int | float = 1,
     subsample_per_group: bool = False,
     random_state: int | np.random.Generator | None = None,
-    strategy: Literal["auto", "dense", "sparse", "groupwise"] = "auto",
+    method: Literal["auto", "map-reduce", "blockwise", "cohorts", "groupwise"] = "auto",
+    reindex: bool | None = None,
+    split_every: int | None = None,
     backend: Literal["geoutils", "flox"] = "geoutils",
+    flox_engine: str | None = None,
+    tdigest_compression: float = 100,
     subsampling_strategy: Literal["sequential", "topk"] = "topk",
     interpolation: InterpolationMethod = "linear",
     align: Literal["raise", "reproject"] = "raise",
@@ -162,6 +181,8 @@ def stats(
     """
     Calculate statistics, either global (whole array) or grouped with other geospatial objects (continuous binning or
     categorical grouping, including zonal grouping).
+
+    Supports Dask or multiprocessing to compute statistics per chunk on large rasters or point clouds.
 
     Omit ``by`` for global statistics. With ``by``, provide ``categories`` for discrete groups, ``bins`` for
     continuous groups along the variable. For a vector, provide the feature column through a tuple directly in ``by``,
@@ -246,39 +267,21 @@ def stats(
 
     Chunk strategies
     ----------------
-    Dask and multiprocessing divide the inputs into chunks and use the same NumPy calculation on each one. ``dense``
-    stores a fixed-size summary containing every declared group per chunk. It is efficient when the number of group
-    combinations is moderate. ``sparse`` stores only groups present in each chunk, reducing memory when many possible
-    groups are absent, at the cost of aligning group labels when chunks are combined. Both aggregate counts, sums,
-    minima, maxima, means, standard deviations and RMSE across chunks without keeping the original values.
 
-    Median, NMAD, other quantiles, and user functions cannot be aggregated across chunks from the ``dense`` or
-    ``sparse`` summaries because they need all values from a group at once. Requesting these combinations raises an
-    error. ``groupwise`` instead finds the chunks containing each group and collects all its values before calculation,
-    so its memory use depends on the largest group. ``auto`` selects ``groupwise`` for these statistics; otherwise, it
-    selects ``dense`` for up to 4096 group combinations and ``sparse`` above that. With ordinary in-memory inputs, all
-    group values are already available and these statistics are calculated directly.
+    With both Flox and GeoUtils backend, "map-reduce" is the default, which maps groups in each chunk, reduces them,
+    then merges results. This leads to exact results for mergeable statistics (e.g. mean, STD) but approximate for
+    non-mergeable ones (e.g. median, NMAD).
+
+    GeoUtils backend also supports "groupwise", which collects all values within a group. It still reads chunk by
+    chunk the large input data, never loading it in memory, but its memory usage will be proportional to the largest
+    group. This method allows to derive exact statistics for any reducer.
 
     Subsampling strategies
     ----------------------
-    Subsampling is global by default. Set ``subsample_per_group=True`` to apply the fraction or maximum separately
-    to each combination of grouping variables. Fractions round down within each group; a maximum larger than a
-    group keeps every eligible location in that group. ``subsample=1`` always keeps all eligible locations.
-
-    ``topk`` assigns a reproducible SplitMix64 key to each flat input position and keeps the smallest keys, giving
-    the same sample for NumPy, Dask and multiprocessing regardless of chunk layout. ``sequential`` draws without
-    replacement from the available positions; its result can depend on chunk layout.
-
-    Per-group sampling delegates to _stratified_subsample_indices(). Fractions use full group counts before rounding
-    quotas; fixed topk caps select directly within chunks. Dask and multiprocessing share the selection calculation;
-    Dask combines topk candidates in a task tree, while multiprocessing combines bounded batches in the caller.
-    Group counts and the final sample must fit in memory.
-
-    Sampling uses group membership and the user mask, then selects the same locations for every value array.
-    Missing observations are still handled separately for each value. Dask computes the selected arrays together;
-    the reduced sample is then calculated eagerly for both Dask and multiprocessing inputs. Without subsampling,
-    _reduce_values() uses their shared block calculations, with scheduling differences documented in
-    _aggregate_chunked().
+    Subsampling is global by default. Set ``subsample_per_group=True`` to apply it within each grouping variables, for
+    instance to limit large groups to maximum 1,000,000 points. Combined with ``method="groupwise"``, this allows to
+    derive exact statistics on all small groups, and approximate ones (due to subsampling) on large groups, capping
+    maximum memory naturally.
 
     References
     ----------
@@ -318,12 +321,19 @@ def stats(
     :param subsample_per_group: Whether to apply subsample within each combined group (True, stratified sampling) or
         once across all groups (False). Without ``by``, both use one global sample.
     :param random_state: Seed to reproduce subsampling (e.g. 42), or an existing random generator.
-    :param strategy: Combine chunk statistics for all groups ("dense"), only groups present in each chunk
-        ("sparse"), or gather each complete group ("groupwise"). "auto" chooses from the statistics and group count;
-        exact quantiles and custom functions require "auto" or "groupwise" for chunked data.
-    :param backend: Use the GeoUtils reducer ("geoutils") or optional Flox reducer ("flox") for grouped statistics.
-        Flox cannot return group masks, sample within groups, use multiprocessing, or calculate custom functions and
-        NMAD. Its Dask path also excludes exact medians and percentiles.
+    :param method: Parallel calculation: "auto", "map-reduce", GeoUtils-only "groupwise", or Flox-only
+        "blockwise" and "cohorts". Auto uses mergeable summaries where available, including t-digests for quantiles.
+    :param reindex: Include every declared group in chunk summaries (True), only groups present (False), or let
+        the backend choose (None). Groupwise does not use summaries. Flox cohorts and t-digests require False or None.
+    :param split_every: Maximum block summaries per merge (at least 2). None uses Dask configuration or the backend
+        default (8 for GeoUtils).
+    :param backend: Use the GeoUtils reducer ("geoutils") or optional Flox reducer ("flox") for global or
+        grouped statistics. Both support in-memory and Dask inputs; multiprocessing requires GeoUtils. Exact quantiles
+        use complete groups; map-reduce uses t-digests for quantiles. Group masks and custom functions require
+        GeoUtils.
+    :param flox_engine: Local Flox reduction algorithm: None (automatic), "numpy", "numba", "flox" or "numbagg".
+        This is independent of Dask/MP execution. The "numbagg" engine does not support t-digests.
+    :param tdigest_compression: Digest accuracy/memory setting from 20 to 1000 (default 100).
     :param subsampling_strategy: "topk" keeps the same sampled locations across chunk layouts for a fixed seed;
         "sequential" draws random locations using traversal order and can depend on the chunks.
     :param interpolation: Raster values at point locations use interp_points() with SciPy methods "nearest",
@@ -347,10 +357,17 @@ def stats(
     """
 
     # 1/ Validate user inputs
-    if strategy not in {"auto", "dense", "sparse", "groupwise"}:
-        raise ValueError("Argument ``strategy`` must be 'auto', 'dense', 'sparse' or 'groupwise'.")
     if backend not in {"geoutils", "flox"}:
         raise ValueError("Argument ``backend`` must be 'geoutils' or 'flox'.")
+    _check_input_reduction_method(backend, method, reindex, split_every)
+    if fractional and (method not in {"auto", "map-reduce"} or reindex is not None or split_every is not None):
+        raise ValueError(
+            "Fractional statistics require method='auto' or 'map-reduce', reindex=None and split_every=None."
+        )
+    if backend == "flox" and mp_config is not None:
+        raise ValueError("The Flox backend does not support multiprocessing.")
+    _check_input_flox_engine(backend, flox_engine)
+    _check_input_tdigest(tdigest_compression)
     if subsampling_strategy not in {"sequential", "topk"}:
         raise ValueError("Argument ``subsampling_strategy`` must be 'sequential' or 'topk'.")
     if not isinstance(subsample, (int, float)) or subsample <= 0:
@@ -364,8 +381,8 @@ def stats(
             raise ValueError("Fractional statistics require one vector grouper through argument by.")
         if subsample != 1 or subsample_per_group:
             raise ValueError("Fractional statistics do not support subsampling.")
-        if backend != "geoutils" or mp_config is not None or return_masks:
-            raise ValueError("Fractional statistics require backend='geoutils', mp_config=None and return_masks=False.")
+        if return_masks:
+            raise ValueError("Fractional statistics require return_masks=False.")
     if error_structure is not None:
         if not isinstance(statistics, Reducer):
             raise TypeError("Statistics uncertainty propagation requires one Reducer as statistics.")
@@ -378,19 +395,27 @@ def stats(
             "Argument ``by`` is required for ``bins``, ``categories``, ``observed``=False or ``return_masks``=True."
         )
     if backend == "flox":
-        if by is None:
-            raise ValueError("The Flox backend requires grouped statistics through argument ``by``.")
-        if subsample_per_group or return_masks or mp_config is not None or strategy != "auto":
-            raise ValueError(
-                "The Flox backend requires ``subsample_per_group``=False, ``return_masks``=False, "
-                "``mp_config``=None and ``strategy``='auto'."
-            )
+        if return_masks:
+            raise ValueError("The Flox backend requires ``return_masks``=False.")
         import_optional("flox")
 
         # Warn before spatial selection reads values from raster or point cloud containers
-        spatial_inputs = [source, at, mask, *by.values(), *(values.values() if isinstance(values, Mapping) else [])]
+        spatial_inputs = [
+            source,
+            at,
+            mask,
+            *(by.values() if by is not None else []),
+            *(values.values() if isinstance(values, Mapping) else []),
+        ]
         spatial_inputs = [value[0] if isinstance(value, tuple) and value else value for value in spatial_inputs]
-        if any(_is_raster(value) or _is_pointcloud(value) for value in spatial_inputs):
+        if (
+            not fractional
+            and mp_config is None
+            and any(
+                (_is_raster(value) and not value._is_xr) or (_is_pointcloud(value) and not value._is_dask)
+                for value in spatial_inputs
+            )
+        ):
             warnings.warn(
                 "The Flox backend loads Raster and PointCloud inputs before calculating grouped statistics.",
                 category=UserWarning,
@@ -437,14 +462,19 @@ def stats(
                 mask=support_mask,
                 subsample=subsample,
                 random_state=random_state,
-                strategy=strategy,
                 subsampling_strategy=subsampling_strategy,
                 mp_config=mp_config,
                 support=support,
                 _return_local_data=error_structure is not None,
+                backend=backend,
+                flox_engine=flox_engine,
+                tdigest_compression=tdigest_compression,
+                method=method,
+                reindex=reindex,
+                split_every=split_every,
             )
         else:
-            # For eager data, build the group IDs and reduce each selected value directly
+            # For in-memory data, build the group IDs and reduce each selected value directly
             assert definitions is not None
             if fractional:
                 if support is None or not _is_raster(support):
@@ -461,6 +491,9 @@ def stats(
                     definitions=definitions,
                     observed=observed,
                     overlap_backend=overlap_backend,
+                    backend=backend,
+                    flox_engine=flox_engine,
+                    mp_config=mp_config,
                     return_local_data=error_structure is not None,
                 )
             else:
@@ -474,8 +507,12 @@ def stats(
                     subsample=subsample,
                     subsample_per_group=subsample_per_group,
                     random_state=random_state,
-                    strategy=strategy,
                     backend=backend,
+                    flox_engine=flox_engine,
+                    tdigest_compression=tdigest_compression,
+                    method=method,
+                    reindex=reindex,
+                    split_every=split_every,
                     subsampling_strategy=subsampling_strategy,
                     interpolation=interpolation,
                     align=align,
@@ -507,92 +544,3 @@ def stats(
         **options,
     )
     return nominal_result, summary
-
-
-def variogram(
-    source: RasterBase | PointCloudBase,
-    *,
-    band: int | None = None,
-    n_pairs: int = 1_000_000,
-    sampling: Literal["loglag", "random_xy"] = "loglag",
-    estimator: str | Callable[[NDArrayNum], float] = "dowd",
-    bins: Literal["log", "uniform"] | Iterable[float] = "log",
-    n_lags: int = 24,
-    min_lag: float | None = None,
-    max_lag: float | None = None,
-    n_runs: int = 1,
-    model: str | Callable[..., Any] | list[str | Callable[..., Any]] | None = None,
-    fit_kwargs: dict[str, Any] | None = None,
-    random_state: int | np.random.Generator | None = None,
-    mask: RasterLike | VectorLike | ArrayLike | None = None,
-    **pair_sampling_kwargs: Any,
-) -> Variogram:
-    """
-    Estimate a variogram from spatial pairs efficiently sampled from a raster or point cloud.
-
-    The output Variogram object can be easily re-fit with ``fit()``, plotted with ``plot()`` or exported
-    to various formats (e.g., GSTools, GPyTorch) with for example ``to_gstools()``. It can also be passed to
-    resampling and gridding function supporting kriging in GeoUtils.
-
-    The empirical variogram's ``sampling`` uses pairwise logarithmic distance "loglag" by default to efficiently
-    capture both short distances and large distances on large datasets, which typically outperforms random
-    endpoints selection ("random_xy").
-    Both options support out-of-memory execution through Dask for raster inputs.
-
-    SciKit-GStat supplies the semivariance estimators and theoretical model formulas. GeoUtils fits the chosen
-    model to the measured distance bins with SciPy curve_fit().
-
-    :param source: Raster or point cloud whose spatial variability is estimated.
-    :param band: Raster band to sample, counting from 1. Omit for a point cloud.
-    :param n_pairs: Number of finite pairs targeted in each run (e.g. 100_000).
-    :param sampling: How to select pairs: ``"loglag"`` balances short and long distances, while ``"random_xy"``
-        selects endpoints independently.
-    :param estimator: Semivariance estimator from SciKit-GStat: ``"dowd"``, ``"matheron"``, ``"cressie"``,
-        ``"genton"``, ``"minmax"``, ``"entropy"`` or ``"percentile"``. A function can instead map absolute pair
-        differences to one value per distance bin.
-    :param bins: Distance bins: ``"log"`` for logarithmic spacing, ``"uniform"`` for equal widths, or explicit
-        edges (e.g. [1, 10, 100]).
-    :param n_lags: Number of distance bins when bins is ``"log"`` or ``"uniform"``.
-    :param min_lag: Minimum sampled distance in CRS units; defaults to the smaller pixel spacing or half the estimated
-        point spacing.
-    :param max_lag: Maximum sampled distance in CRS units; defaults to the diagonal of the source locations.
-    :param n_runs: Independent samples to average; repeat sampling to estimate each distance bin's standard error.
-    :param model: SciKit-GStat model to fit: ``"spherical"``, ``"exponential"``, ``"gaussian"``, ``"cubic"``,
-        ``"stable"`` or ``"matern"``, or the corresponding model function. Sum a list of models ordered from short
-        to long range (e.g. ["spherical", "exponential"]). ``None`` keeps only the empirical variogram.
-    :param fit_kwargs: Options for Variogram.fit(): ``use_nugget``, ``bounds``, ``p0`` or ``maxfev``
-        (e.g. {"use_nugget": True}); optimization uses SciPy curve_fit().
-    :param random_state: Seed or NumPy generator for reproducible sampling across runs (e.g. 42).
-    :param mask: Locations to keep: True values in a boolean mask, an aligned mask raster for raster inputs,
-        or locations inside vector geometries.
-    :param pair_sampling_kwargs: Extra pairsample() options for the source (e.g. ``strategy`` or ``max_rounds``).
-    :returns: Variogram with distance bins, pair counts and semivariance, plus sampling errors and a fitted model
-        when requested.
-    """
-
-    # Keep raster band selection out of point pair sampling kwargs
-    pair_kwargs: dict[str, Any] = {} if band is None else {"band": band}
-    pair_kwargs.update(
-        {
-            "n_pairs": n_pairs,
-            "sampling": sampling,
-            "min_distance": min_lag,
-            "max_distance": max_lag,
-            "mask": mask,
-        }
-    )
-    pair_kwargs.update(pair_sampling_kwargs)
-
-    return _estimate_variogram(
-        source,
-        n_runs=n_runs,
-        estimator=estimator,
-        bins=bins,
-        n_lags=n_lags,
-        min_lag=min_lag,
-        max_lag=max_lag,
-        models=model,
-        fit_kwargs=fit_kwargs,
-        random_state=random_state,
-        pair_kwargs=pair_kwargs,
-    )

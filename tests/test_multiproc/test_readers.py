@@ -16,6 +16,7 @@ from rasterio.transform import from_origin
 import geoutils as gu
 from geoutils.multiproc import ClusterGenerator, MultiprocConfig
 from geoutils.multiproc.readers import (
+    _read_selected_values,
     _read_values,
     _reader_from_source,
     _ValueReader,
@@ -38,7 +39,10 @@ class TestValueReaderChunked:
     def test_value_reader__raster_windows(
         self, source_bands: list[int] | None, band: int, downsample: int, workers: bool, tmp_path: Path
     ) -> None:
-        """Checks that Multiproc readers load only the requested raster band and window, and compares with eager."""
+        """
+        Checks that Multiproc readers load only the requested raster band and window,
+        and compares with in-memory results.
+        """
 
         # Write a raster file to disk with three distinct bands, one nodata pixel, and values preserved by downsampling
         base = np.arange(80, dtype=np.int16).reshape(8, 10)
@@ -62,7 +66,7 @@ class TestValueReaderChunked:
         with ClusterGenerator("multi" if workers else "basic", nb_workers=2) as cluster:
             result = cluster.compute(cluster.submit(_read_values, block))
 
-        # Compare the selected values and nodata mask with an independent small eager read
+        # Compare the selected values and nodata mask with an independent small in-memory read
         expected = reference.data[band - 1][tile]
         assert np.array_equal(np.ma.getdata(result), np.ma.getdata(expected))
         assert np.array_equal(np.ma.getmaskarray(result), np.ma.getmaskarray(expected))
@@ -161,6 +165,97 @@ class TestValueReaderChunked:
         assert np.array_equal(result, expected)
         assert reader.dtype == result.dtype
         assert reader.read_points(slice(2, 5)).shape[0] == 3
+        assert not source.is_loaded
+
+    @pytest.mark.parametrize("source_kind", ["raster", "pointcloud"])
+    @pytest.mark.parametrize("workers", [False, True])
+    def test_read_selected_values__order_masks_and_edge_chunks(
+        self, source_kind: str, workers: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Checks that selected raster cells and point rows preserve order, masks, and repeated edge positions."""
+
+        # Write arrays whose last source chunks are shorter than the requested chunk size
+        source: Any
+        selector: int | str
+        chunks: int | tuple[int, int]
+        expected_windows: list[tuple[slice, ...]]
+        if source_kind == "raster":
+            values = np.arange(99, dtype=float).reshape(9, 11)
+            keep = np.ones(values.shape, dtype=bool)
+            keep[3, 4] = False
+            filename = tmp_path / "values.tif"
+            gu.Raster.from_array(values, from_origin(0, 9, 1, 1), 32633, nodata=-99999).to_file(filename)
+            source = gu.Raster(filename)
+            selector, chunks = 1, (4, 3)
+            indexes = np.array([98, 0, 43, 98, 37, 44])
+            expected_windows = [
+                (slice(0, 4), slice(0, 3)),
+                (slice(0, 4), slice(3, 6)),
+                (slice(0, 4), slice(9, 11)),
+                (slice(4, 8), slice(0, 3)),
+                (slice(8, 9), slice(9, 11)),
+            ]
+        else:
+            values = np.arange(17, dtype=float)
+            keep = np.ones(values.shape, dtype=bool)
+            keep[5] = False
+            filename = tmp_path / "points.gpkg"
+            points = gu.PointCloud.from_xyz(values, np.zeros(values.size), values, crs=32633, data_name="height")
+            points.to_file(filename)
+            source = gu.PointCloud(filename, data_name="height")
+            selector, chunks = "height", 4
+            indexes = np.array([16, 0, 6, 16, 5, 1])
+            expected_windows = [(slice(0, 4),), (slice(4, 8),), (slice(16, 17),)]
+
+        # Record source windows while submitting the original reader callbacks to either backend
+        reader = replace(_ValueReader(source, selector), mask=keep)
+        windows: list[tuple[slice, ...]] = []
+        with ClusterGenerator("multi" if workers else "basic", nb_workers=2) as cluster:
+            config = MultiprocConfig(chunks=chunks, cluster=cluster)
+            original_submit = cluster.submit
+
+            def submit(function: Any, *arguments: Any, **kwargs: Any) -> Any:
+                """Record each selected source window before submitting its original callback."""
+
+                windows.append(arguments[0].slices)
+                return original_submit(function, *arguments, **kwargs)
+
+            monkeypatch.setattr(cluster, "submit", submit)
+            assert not source.is_loaded
+            result = _read_selected_values(reader, indexes, config)
+
+        # Compare the original position order with direct eager indexing, including masks and duplicate edge values
+        expected = np.ma.array(values, mask=~keep).ravel()[indexes]
+        np.testing.assert_array_equal(np.ma.getdata(result), np.ma.getdata(expected))
+        np.testing.assert_array_equal(np.ma.getmaskarray(result), np.ma.getmaskarray(expected))
+        assert result.dtype == expected.dtype
+        assert windows == expected_windows
+        assert not source.is_loaded
+
+    def test_read_selected_values__empty(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Checks that an empty selection returns the input dtype without submitting reader jobs."""
+
+        # Write a small source file and prepare an empty integer selection
+        values = np.arange(12, dtype=np.float32).reshape(3, 4)
+        filename = tmp_path / "values.tif"
+        gu.Raster.from_array(values, from_origin(0, 3, 1, 1), 32633, nodata=-99999).to_file(filename)
+        source = gu.Raster(filename)
+        reader = _ValueReader(source)
+        indexes = np.empty(0, dtype=np.int64)
+        config = MultiprocConfig(chunks=(2, 3))
+
+        # An empty selection must not start a value read through the cluster
+        def submit(*args: Any, **kwargs: Any) -> Any:
+            """Fail if an empty selection submits source work."""
+
+            raise AssertionError("An empty selection must not submit reader jobs")
+
+        monkeypatch.setattr(config.cluster, "submit", submit)
+        result = _read_selected_values(reader, indexes, config)
+
+        # Check the same empty values as direct eager indexing and leave the file object unloaded
+        np.testing.assert_array_equal(result, values.ravel()[indexes])
+        assert result.dtype == values.dtype
         assert not source.is_loaded
 
     def test_value_reader__empty_raster_window(self, tmp_path: Path) -> None:

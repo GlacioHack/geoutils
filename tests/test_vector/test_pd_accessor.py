@@ -21,12 +21,12 @@ import geoutils.vector.pd_accessor as pd_accessor
 
 
 class TestVectorAccessor:
-    """Check that the Pandas ``vct`` accessor mirrors Vector for eager and lazy dataframes."""
+    """Check that the Pandas ``vct`` accessor mirrors Vector for in-memory and lazy dataframes."""
 
     aster_outlines_path = gu.examples.get_path_test("exploradores_rgi_outlines")
 
     def test_open_vector(self) -> None:
-        """Open a vector file as the same eager GeoDataFrame used by Vector."""
+        """Open a vector file as the same in-memory GeoDataFrame used by Vector."""
 
         ds = gu.open_vector(self.aster_outlines_path, load=True)
 
@@ -36,7 +36,7 @@ class TestVectorAccessor:
     def test_bbox__dask_geopandas(self) -> None:
         """Checks that a lazy vector reads its bounding box without replacing its Dask collection."""
 
-        # Open the same features through lazy and eager GeoPandas representations
+        # Open the same features through lazy and in-memory GeoPandas representations
         pytest.importorskip("dask_geopandas")
         lazy = gu.open_vector(self.aster_outlines_path, chunks=1)
         eager = gu.open_vector(self.aster_outlines_path, load=True)
@@ -163,7 +163,7 @@ class TestVectorAccessor:
         assert not getattr(source, accessor).is_loaded and not getattr(result, accessor).is_loaded
 
     def test_to_file(self) -> None:
-        """Write an eager accessor-backed dataframe through the Vector-compatible API."""
+        """Write an in-memory accessor-backed dataframe through the Vector-compatible API."""
 
         ds = gu.open_vector(self.aster_outlines_path, load=True)
 
@@ -254,7 +254,7 @@ class TestVectorAccessor:
         points.to_file(temp_file)
         dask_points = gu.open_pointcloud(temp_file, data_name="id", chunks=2, as_object_type="geodataframe")
 
-        # Compare lazy point-cloud output with the eager mask
+        # Compare lazy point-cloud output with the in-memory mask
         expected = vector.vct.create_mask(points=points)
         output = vector.vct.create_mask(points=dask_points)
 

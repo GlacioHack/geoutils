@@ -82,7 +82,7 @@ class TestRasterConstructorsChunked:
     @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
     @pytest.mark.parametrize("bands", [1, 2])
     def test_from_array__loading_laziness(self, as_object_type: Literal["dataarray", "dataset"], bands: int) -> None:
-        """Checks that lazy construction runs no tasks and exactly matches eager construction."""
+        """Checks that lazy construction runs no tasks and exactly matches in-memory construction."""
         pytest.importorskip("dask")
         import dask.array as da
         from dask.callbacks import Callback

@@ -16,10 +16,10 @@ It relies on [Airspeed Velocity (ASV)](https://asv.readthedocs.io/) to record re
 
 ## Comparison across execution modes, engines and external CLI tools
 
-GeoUtils compares **eager, Dask and Multiprocessing** execution using the same deterministic inputs. Reprojection,
+GeoUtils compares **in-memory, Dask and Multiprocessing** execution using the same deterministic inputs. Reprojection,
 clipping, polygonization, rasterization and gridding additionally use equivalent **GDAL CLI commands** with matching
 output grids, data types and storage options where possible. Every result identifies its operation, numerical method,
-calculation engine, chunk strategy and execution mode separately. Engine comparisons use eager execution, while
+calculation engine, chunk strategy and execution mode separately. Engine comparisons use in-memory execution, while
 execution-mode and chunk-strategy comparisons fix the other dimensions. Fixed-size Numba checks additionally exercise
 each compiled gridding kernel in Dask and Multiprocessing workers. The Rasterio/GDAL calculation engine used inside
 GeoUtils remains distinct from the external GDAL CLI reference. Raster subsampling and raster-to-point conversion use

@@ -111,16 +111,16 @@ def _cast_multiproc_output(source: PointCloudBase, output: PointCloud) -> PointC
 # 2/ REPROJECT
 ##############
 
-# Eager execution
+# In-memory execution
 
 
-def _reproject_pointcloud_eager(
+def _reproject_pointcloud_in_memory(
     source: PointCloudBase,
     ref: RasterLike | VectorLike | None,
     crs: CRS | str | int | None,
     inplace: bool,
 ) -> PointCloud | gpd.GeoDataFrame | None:
-    """Reproject an eager point cloud and optionally update its dataframe in place."""
+    """Reproject an in-memory point cloud and optionally update its dataframe in place."""
 
     projected = _reproject(source, ref=ref, crs=crs)
     if inplace:
@@ -239,7 +239,7 @@ def _reproject_pointcloud_multiproc(
     Reproject independent row partitions and return the matching object or dataframe interface.
 
     Internal logic for Multiproc here is the most complex:
-    _reproject_pointcloud_partition() reads source slices or receives eager rows, applies GeoPandas to_crs(), and
+    _reproject_pointcloud_partition() reads source slices or receives in-memory rows, applies GeoPandas to_crs(), and
     saves exact projected dataframes to temporary files.
     _reproject_las_header() chooses common scales and offsets, then _write_pointcloud_partitions() appends or
      encodes every format in source order.
@@ -341,13 +341,13 @@ def _reproject_pointcloud(
     inplace: bool,
     mp_config: MultiprocConfig | None,
 ) -> Any:
-    """Dispatch point cloud reprojection to eager, Dask or multiprocessing execution."""
+    """Dispatch point cloud reprojection to in-memory, Dask or multiprocessing execution."""
 
     if mp_config is not None:
         return _reproject_pointcloud_multiproc(source, ref, crs, inplace, mp_config)
     if source._is_dask:
         return _reproject_pointcloud_dask(source, ref, crs, inplace)
-    return _reproject_pointcloud_eager(source, ref, crs, inplace)
+    return _reproject_pointcloud_in_memory(source, ref, crs, inplace)
 
 
 #########
@@ -355,13 +355,13 @@ def _reproject_pointcloud(
 #########
 
 
-def _clip_pointcloud_eager(
+def _clip_pointcloud_in_memory(
     source: PointCloudBase,
     mask: Any,
     keep_geom_type: bool,
     sort: bool,
 ) -> PointCloud | gpd.GeoDataFrame:
-    """Clip an eager point cloud and return the matching object or dataframe interface."""
+    """Clip an in-memory point cloud and return the matching object or dataframe interface."""
 
     clipped = _clip(source, mask=mask, keep_geom_type=keep_geom_type, sort=sort)
     return source._override_gdf_output(clipped)
@@ -544,10 +544,10 @@ def _clip_pointcloud(
     sort: bool,
     mp_config: MultiprocConfig | None,
 ) -> Any:
-    """Dispatch point cloud clipping to eager, Dask or multiprocessing execution."""
+    """Dispatch point cloud clipping to in-memory, Dask or multiprocessing execution."""
 
     if mp_config is not None:
         return _clip_pointcloud_multiproc(source, mask, keep_geom_type, sort, mp_config)
     if source._is_dask:
         return _clip_pointcloud_dask(source, mask, keep_geom_type, sort)
-    return _clip_pointcloud_eager(source, mask, keep_geom_type, sort)
+    return _clip_pointcloud_in_memory(source, mask, keep_geom_type, sort)

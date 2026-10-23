@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Testing helpers for eager and Dask-backed raster arrays."""
+"""Testing helpers for in-memory and Dask-backed raster arrays."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def _array_equal_or_close(
     rtol: float,
     atol: float,
 ) -> bool:
-    """Reduce eager or Dask array equality without collecting a lazy array."""
+    """Reduce in-memory or Dask array equality without collecting a lazy array."""
 
     if np.shape(left) != np.shape(right):
         return False

@@ -742,7 +742,7 @@ def _propagate_spatial_method(
     if collect_inputs:
         if getattr(source, "_chunks", None) is not None or getattr(source, "_is_dask", False):
             raise ValueError(
-                "Spatial samples and quantiles require eager inputs; marginal propagation supports chunks."
+                "Spatial samples and quantiles require in-memory inputs; marginal propagation supports chunks."
             )
         records: list[Any] = []
         record_type = _InputInterpolator if isinstance(operator, Interpolator) else _InputReducer
@@ -788,7 +788,7 @@ def _propagate_spatial_method(
         kwargs[parameter] = moment_type(operator, "n_valid", options)
         n_valid = operation(**kwargs)
 
-    # 6/ Small eager outputs can expose labelled intervals without forcing any lazy result to compute
+    # 6/ Small in-memory outputs can expose labelled intervals without forcing any lazy result to compute
     selection = pd.DataFrame(columns=["flat_index", "estimate"])
     raw_estimate = getattr(estimate, "data", estimate)
     if not hasattr(raw_estimate, "compute"):
@@ -831,6 +831,7 @@ def simulate(
     quantiles: Sequence[float] = (),
     max_sample_bytes: int = 268_435_456,
     on_error: Literal["raise", "warn"] = "raise",
+    fatal_exceptions: tuple[type[Exception], ...] = (),
     metadata: Mapping[str, object] | None = None,
 ) -> PropagationSummary:
     """
@@ -851,6 +852,7 @@ def simulate(
     :param quantiles: Probabilities of exact empirical quantiles to save.
     :param max_sample_bytes: Maximum temporary memory used for selected realizations.
     :param on_error: Raise a calculation error or warn and count its draw as failed.
+    :param fatal_exceptions: Error types that stop simulation even when on_error="warn".
     :param metadata: Description of the calculation and its assumptions.
     :returns: Nominal and propagated results with requested selected information.
     """
@@ -907,7 +909,7 @@ def simulate(
             if not np.any(np.isfinite(values)):
                 raise ValueError("The calculation returned no finite values.")
         except Exception as exception:
-            if on_error == "raise":
+            if on_error == "raise" or isinstance(exception, fatal_exceptions):
                 raise
             failures[number] = str(exception)
             warnings.warn(f"Simulation {number} of {n_samples} failed and was skipped: {exception}", stacklevel=2)
@@ -1032,7 +1034,7 @@ def propagate(
     For a spatial operation, pass a bound method and its arguments as operation_kwargs, for example
     propagate(raster.reproject, error_structure=errors, operation_kwargs={"ref": reference, "resampling": Mean()}).
     The estimate, mean and std then have the operation's raster or point layout. Marginal uncertainty can remain
-    lazy with Dask; selected samples currently require eager inputs. Calling the spatial method directly
+    lazy with Dask; selected samples currently require in-memory inputs. Calling the spatial method directly
     with error_structure uses errors only for fitting and returns its ordinary result.
 
     :param operator: Interpolator, Reducer, or supported bound spatial method.

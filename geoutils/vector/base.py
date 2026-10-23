@@ -295,7 +295,7 @@ class VectorBase(ABC):
             dask = import_optional("dask")
             total_bounds, feature_count = dask.compute(total_bounds, feature_count.to_delayed())
 
-        # Format the same summary for eager and lazy vectors
+        # Format the same summary for in-memory and lazy vectors
         as_str = [
             f"Filename:           {self.name} \n",
             f"Coordinate system:  {[CRS(self.crs).name if self.crs is not None else None]}\n",

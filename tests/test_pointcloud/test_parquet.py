@@ -253,7 +253,7 @@ class TestPointParquetChunked:
 
     @pytest.mark.parametrize("write_statistics", [True, False])
     def test_open_pointcloud__nullable_large_integers(self, tmp_path: Path, write_statistics: bool) -> None:
-        """Checks that chunked nullable IDs stay lazy and preserve exact integers as in an eager read."""
+        """Checks that chunked nullable IDs stay lazy and preserve exact integers as in an in-memory read."""
         pytest.importorskip("dask")
 
         # Put large IDs and a missing value in one row group, then split it into chunks of 2/1 points
@@ -269,14 +269,14 @@ class TestPointParquetChunked:
         assert source.chunks and not source.pc.is_loaded
         result = source.compute()
 
-        # Check exact integers independently, then compare every eager value and metadata field
+        # Check exact integers independently, then compare every in-memory value and metadata field
         assert result.identifier.values.tolist() == expected_ids
         xr.testing.assert_identical(result, eager)
         assert source.chunks and not source.pc.is_loaded
 
     @pytest.mark.parametrize("dtype", ["Int16", "Int64"])
     def test_open_pointcloud__integer_measurements_without_statistics(self, tmp_path: Path, dtype: str) -> None:
-        """Checks that lazy nullable measurements support statistics, gridding and exact eager sampling."""
+        """Checks that lazy nullable measurements support statistics, gridding and exact in-memory sampling."""
         pytest.importorskip("dask")
         from dask.callbacks import Callback
 
@@ -297,7 +297,7 @@ class TestPointParquetChunked:
         sampled = source.pc.subsample(2, random_state=0)
         assert sampled.chunks and not sampled.pc.is_loaded
 
-        # Compare every computed result exactly with the same eager calls and check original laziness
+        # Compare every computed result exactly with the same in-memory calls and check original laziness
         xr.testing.assert_identical(sampled.compute(), eager.pc.subsample(2, random_state=0))
         expected = eager.pc.grid(ref=reference, resampling="nearest", radius=0.25)
         assert gridded.rst.crs == expected.rst.crs
@@ -354,7 +354,7 @@ class TestPointParquetChunked:
         filename = tmp_path / "points.parquet"
         points.pc.to_parquet(str(filename), chunks=2)
 
-        # Open eager and lazy
+        # Open in-memory and lazy
         eager = gu.open_pointcloud(filename, data_name="id", as_object_type=as_object_type, load=True)
         reopened = gu.open_pointcloud(filename, data_name="id", chunks=2, as_object_type=as_object_type)
 
@@ -432,7 +432,7 @@ class TestPointParquetChunked:
         use_z: bool,
         columns: Literal["main", "all"],
     ) -> None:
-        """Checks that GeoParquet reads are lazy and match eager exactly."""
+        """Checks that GeoParquet reads are lazy and match in-memory results exactly."""
         pytest.importorskip("pyarrow")
         pytest.importorskip("dask")
         if as_object_type == "geodataframe":

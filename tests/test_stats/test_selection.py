@@ -61,7 +61,7 @@ def stats_file(request: pytest.FixtureRequest, tmp_path: Path) -> tuple[Any, Any
         )
         dataframe.to_file(filename, index=False)
 
-    # Open one unloaded source for Multiproc and one eager source for the expected result
+    # Open one unloaded source for Multiproc and one in-memory source for the expected result
     source = gu.PointCloud(filename, data_name="first")
     reference = gu.PointCloud(filename, data_name="first")
     reference.load(columns="all")
@@ -268,12 +268,12 @@ class TestSelectionChunked:
     """
     Checks stats() input selection with Dask and Multiproc inputs.
 
-    Dask and Multiproc results are compared with eager calculations. Raster and point cloud files stay unloaded while
-    their values, masks and common support are read in chunks.
+    Dask and Multiproc results are compared with in-memory calculations. Raster and point cloud files stay unloaded
+    while their values, masks and common support are read in chunks.
     """
 
     def test_stats__masked_dask_summary_is_computed(self) -> None:
-        """Checks that a masked Dask raster gives computed values and the same counts as eager data."""
+        """Checks that a masked Dask raster gives computed values and the same counts as in-memory data."""
 
         # Use mismatched data and mask chunks so masking also checks automatic chunk alignment
         import dask.array as da
@@ -291,7 +291,7 @@ class TestSelectionChunked:
         result = lazy_raster.stats(statistics, mask=lazy_keep)
         assert not isinstance(result["mean"], da.Array)
 
-        # Compare the result with the same masked eager raster
+        # Compare the result with the same masked in-memory raster
         expected = raster.stats(statistics, mask=keep)
         assert result == pytest.approx(expected)
         assert isinstance(lazy_raster.data, da.Array) and isinstance(lazy_keep.data, da.Array)
@@ -300,7 +300,7 @@ class TestSelectionChunked:
     def test_stats__dask_point_vector_mask(
         self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
     ) -> None:
-        """Checks that eager and Dask points agree on points lying along a polygon boundary."""
+        """Checks that in-memory and Dask points agree on points lying along a polygon boundary."""
 
         # Write a point file to disk with two points inside the polygon, one on its edge, and one outside it
         import geopandas as gpd
@@ -317,7 +317,7 @@ class TestSelectionChunked:
         ).pc
         assert not lazy_points.is_loaded
 
-        # Calculate the same masked summary from Dask partitions and eager points
+        # Calculate the same masked summary from Dask partitions and in-memory points
         statistics = ["mean", "validinliercount"]
         expected = points.stats(statistics, mask=mask)
         result = lazy_points.stats(statistics, mask=mask)
@@ -327,10 +327,10 @@ class TestSelectionChunked:
         assert result == pytest.approx({"mean": 15, "validinliercount": 2})
         assert not lazy_points.is_loaded
 
-    def test_stats__mixed_eager_and_dask_values(self) -> None:
-        """Checks that one stats() call returns computed summaries for mixed eager and Dask values."""
+    def test_stats__mixed_in_memory_and_dask_values(self) -> None:
+        """Checks that one stats() call returns computed summaries for mixed in-memory and Dask values."""
 
-        # Select the same locations from eager and Dask values with distinct scales
+        # Select the same locations from in-memory and Dask values with distinct scales
         import dask.array as da
 
         eager = np.array([1.0, np.nan, 3.0, 4.0, 5.0, 6.0])
@@ -350,7 +350,7 @@ class TestSelectionChunked:
     @pytest.mark.parametrize("workers", [False, True])
     @pytest.mark.parametrize("grouped", [False, True])
     @pytest.mark.parametrize("exact", [False, True])
-    def test_stats__file_values_match_eager(
+    def test_stats__file_values_match_in_memory(
         self,
         stats_file: tuple[Any, Any, dict[str, Any], Any],
         workers: bool,
@@ -358,7 +358,7 @@ class TestSelectionChunked:
         exact: bool,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Checks that Multiproc statistics match eager while the complete source stays on disk."""
+        """Checks that Multiproc statistics match in-memory results while the complete source stays on disk."""
 
         # Select both value columns so their separate nodata locations produce different counts and statistics
         source, reference, values, group = stats_file
@@ -379,7 +379,7 @@ class TestSelectionChunked:
                 config = MultiprocConfig(chunks=(2, 3), cluster=cluster)
                 result = source.stats(statistics, values=values, mp_config=config, **options)
 
-        # Compare the complete grouped table or every global result with the eager stats() call
+        # Compare the complete grouped table or every global result with the in-memory stats() call
         if grouped:
             pd.testing.assert_frame_equal(result, expected, check_dtype=False)
         else:
@@ -576,7 +576,7 @@ class TestSelectionChunked:
                 config = MultiprocConfig(chunks=(2, 3), cluster=cluster)
                 result = source.stats("mean", at=support, interpolation="nearest", mp_config=config)
 
-        # Compare the Multiproc mean with eager stats() and the exact raster values at the point locations
+        # Compare the Multiproc mean with in-memory stats() and the exact raster values at the point locations
         assert result == pytest.approx(expected)
         assert result == pytest.approx(values[rows, columns].mean())
         assert not source.is_loaded and not support.is_loaded
@@ -627,7 +627,7 @@ class TestSelectionChunked:
             config = MultiprocConfig(chunks=(3, 4), cluster=cluster)
             result = source.stats(["mean", "std"], values=2, at=support, align="reproject", mp_config=config)
 
-        # The completed statistics match eager alignment, and original sources remain available on disk
+        # The completed statistics match in-memory alignment, and original sources remain available on disk
         assert result == pytest.approx(expected)
         assert not source.is_loaded and not support.is_loaded
         assert source_filename.exists() and reference_filename.exists()

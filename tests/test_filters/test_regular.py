@@ -799,7 +799,7 @@ class TestFilterChunked:
             "boundless": False,
         }
 
-        # Run eager and worker calculations, then build the Dask result without loading its source
+        # Run in-memory and worker calculations, then build the Dask result without loading its source
         expected = raster.filter(operator, **options).to_nanarray()
         with MpCluster({"nb_workers": 2}) as cluster:
             config = MultiprocConfig(cluster=cluster, chunks=6, outfile=str(tmp_path / "filtered.tif"))
@@ -830,7 +830,7 @@ class TestFilterChunked:
         size: int,
         lazy_test_files_tiny: list[str],
     ) -> None:
-        """Checks that Dask and worker tiles match eager filters while file-backed Raster objects stay unloaded.
+        """Checks that Dask and worker tiles match in-memory filters while file-backed Raster objects stay unloaded.
 
         Gaussian sums can change slightly across tile boundaries, so this case allows an absolute difference of 1e-6.
         The other filters must produce the same values exactly.
@@ -838,7 +838,7 @@ class TestFilterChunked:
 
         import dask.array as da
 
-        # Shared raster for eager, Dask and MP filters
+        # Shared raster for in-memory, Dask and MP filters
         path_raster = lazy_test_files_tiny[path_index]
 
         # 1/ Open test files
@@ -856,8 +856,8 @@ class TestFilterChunked:
         assert isinstance(ds.data, da.Array)
         assert ds.data.chunks is not None
 
-        # 2/ Run eager filters and build chunked outputs
-        # Compute eager references
+        # 2/ Run in-memory filters and build chunked outputs
+        # Compute in-memory references
         base_rst = raster_base.filter(method=method, size=size)
         assert isinstance(base_rst, Raster)
         base_xr = xr_base.rst.filter(method=method, size=size)
@@ -880,7 +880,7 @@ class TestFilterChunked:
         # Allow rounding differences from Gaussian sums across tiles
         tolerances = {"atol": 1e-6} if method == "gaussian" else {}
 
-        # Compute and compare with eager Raster reference
+        # Compute and compare with in-memory Raster reference
         dask_rst = dask_rst.compute()
         assert base_rst.raster_allclose(dask_rst, warn_failure_reason=True, strict_masked=False, **tolerances)
         assert base_rst.raster_allclose(mp_rst, warn_failure_reason=True, strict_masked=False, **tolerances)

@@ -13,6 +13,7 @@ import pytest
 import geoutils as gu
 from geoutils._misc import import_optional
 from geoutils.stats.variography import VariogramModel
+from geoutils.uncertainty.error_structure import _source_covariance_matrix
 
 
 class TestErrorMagnitude:
@@ -560,6 +561,33 @@ class TestErrorStructure:
             assert [bar.get_height() for bar in panels["count"].patches] == [20, 30]
         finally:
             plt.close(panels["statistic"].figure)
+
+
+class TestSourceCovariance:
+    """Test module for covariance between observations."""
+
+    def test_source_covariance_matrix__rectangular_observation_groups(self) -> None:
+        """Checks that covariance handles repeated observations."""
+
+        pytest.importorskip("skgstat")
+
+        # Create observations at two locations
+        source_ids = np.array([10, 11, 12])
+        coordinates = np.array([[0.0, 0.0], [0.0, 0.0], [3.0, 4.0]])
+        correlation = VariogramModel("spherical", effective_range=10, partial_sill=1)
+        independent = gu.ErrorComponent("measurement", 2.0)
+        spatial = gu.ErrorComponent("spatial", 1.0, correlation)
+        component_data = ((independent, np.full(3, 2.0)), (spatial, np.ones(3)))
+
+        # Calculate covariance for reordered and repeated observations
+        rows = np.array([0, 2])
+        columns = np.array([1, 0, 2, 0])
+        covariance = _source_covariance_matrix(source_ids, coordinates, component_data, rows, columns)
+
+        # Check covariance includes independent errors only for the same observation
+        rho = float(spatial.predict_correlation(5.0))
+        expected = np.array([[1.0, 5.0, rho, 5.0], [rho, rho, 5.0, rho]])
+        np.testing.assert_allclose(covariance, expected)
 
 
 class TestErrorStructureErrors:

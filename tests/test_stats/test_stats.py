@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import warnings
 from cmath import isnan
+from contextlib import nullcontext
+from importlib.util import find_spec
 from typing import Any, Literal
 
 import numpy as np
@@ -11,6 +13,7 @@ import rasterio as rio
 
 import geoutils as gu
 from geoutils import examples
+from geoutils._dispatch import is_dask_array
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
 from geoutils.operators.reducer import Mean, Mode, Quantile, Range, Sum
@@ -158,7 +161,6 @@ class TestStats:
     @pytest.mark.parametrize(
         ("option", "message", "error"),
         [
-            ({"strategy": "invalid"}, "Argument ``strategy``", ValueError),
             ({"backend": "invalid"}, "Argument ``backend``", ValueError),
             ({"subsampling_strategy": "invalid"}, "Argument ``subsampling_strategy``", ValueError),
             ({"subsample": 0}, "Argument ``subsample``", ValueError),
@@ -239,6 +241,7 @@ class TestStats:
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_stats__raster_one_band(self, example: str) -> None:
         """Checks raster stats for various statistic names, masks, callables and empty data."""
+
         raster = gu.Raster(example)
 
         # Default stats
@@ -406,6 +409,7 @@ class TestStats:
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     def test_stats__raster_pointcloud(self, example: str) -> None:
         """Checks statistics for a raster converted to a point cloud."""
+
         raster = gu.Raster(example)
         pointcloud = raster.to_pointcloud()
 
@@ -483,6 +487,7 @@ class TestStats:
 
     def test_stats__raster_values(self) -> None:
         """Checks the output statistics values of a raster."""
+
         filename_rast = gu.examples.get_path("everest_landsat_b4")
         filename_vect = gu.examples.get_path("everest_rgi_outlines")
         rast = gu.Raster(filename_rast)
@@ -703,6 +708,104 @@ class TestStats:
         }
         compare_dict(rast_stats_crop_proj_pc, rast_crop_proj_pc.stats("all"))
 
+    @pytest.mark.skipif(find_spec("crick") is not None, reason="Only runs if crick is missing.")
+    @pytest.mark.parametrize("backend", ["geoutils", "flox"])
+    @pytest.mark.parametrize("grouped", [False, True])
+    @pytest.mark.parametrize("statistics", ["all", ["median", "nmad", "90thpercentile", "iqr", "le90"]])
+    def test_stats__quantiles_crick(
+        self,
+        backend: Literal["geoutils", "flox"],
+        grouped: bool,
+        statistics: str | list[str],
+    ) -> None:
+        """Checks that "auto" calculates exact in-memory quantiles (without crick)."""
+
+        # Create nonlinear values with NaNs so quantile interpolation affects the result
+        if backend == "flox":
+            pytest.importorskip("flox")
+        values = np.arange(1002, dtype=float) ** 2
+        values[::19] = np.nan
+        groups = np.arange(values.size) % 2
+        options: dict[str, Any] = {"by": {"zone": groups}, "categories": {"zone": [0, 1]}} if grouped else {}
+
+        # We ensure having crick unavailable won't affect the run
+        result = gu.stats.stats(values, statistics, backend=backend, **options)
+
+        # We compare every quantile and spread exactly against NumPy on the original values
+        names = ["median", "nmad", "90thpercentile", "iqr", "le90"]
+        for label in range(2) if grouped else [0]:
+            members = values[groups == label] if grouped else values
+            members = members[np.isfinite(members)]
+            lower, q25, median, q75, q90, upper = np.percentile(members, [5, 25, 50, 75, 90, 95])
+            expected = [median, 1.4826 * np.median(np.abs(members - median)), q90, q75 - q25, upper - lower]
+            if grouped:
+                actual = [result.loc[label, ("value", name)] for name in names]
+                assert "approximation" not in result.attrs["grouped_stats"]
+            else:
+                actual = [result[_STATS_ALIAS_ALL[name] if statistics == "all" else name] for name in names]
+            np.testing.assert_array_equal(actual, expected)
+
+    @pytest.mark.parametrize("backend", ["geoutils", "flox"])
+    @pytest.mark.parametrize("masked", [False, True])
+    def test_stats__global_infinity(self, backend: Literal["geoutils", "flox"], masked: bool) -> None:
+        """Checks edge case of infinity in global statistics."""
+
+        # Create finite and infinite values
+        if backend == "flox":
+            pytest.importorskip("flox")
+        values = np.array([1.0, np.inf])
+        source = np.ma.array(values, mask=False) if masked else values
+        statistics = ["mean", "sum", "min", "max", "validcount"]
+        expected = gu.stats.stats(source, statistics)
+
+        # Calculate statistics
+        result = gu.stats.stats(source, statistics, backend=backend)
+
+        # Check estimates and counts
+        assert result == expected
+        assert result["mean"] == np.inf
+        assert result["sum"] == np.inf
+        assert result["min"] == 1
+        assert result["max"] == np.inf
+        assert result["validcount"] == (2 if masked else 1)
+
+    @pytest.mark.parametrize("grouped", [False, True])
+    def test_stats__flox_reduction(self, grouped: bool, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Checks that in-memory Flox statistics run independently of GeoUtils reductions."""
+
+        # Create value arrays with NaNs and large integers
+        pytest.importorskip("flox")
+        from geoutils.stats import reduction
+
+        values = {
+            "height": np.array([1.0, 3.0, 10.0, np.nan, 2.0, 8.0, 9.0]),
+            "code": 2**60 + np.arange(7, dtype=np.int64),
+        }
+        options: dict[str, Any] = (
+            {"by": {"zone": np.arange(7) % 2}, "categories": {"zone": [0, 1, 2]}} if grouped else {}
+        )
+        statistics = ["mean", "std", "median", "nmad", "iqr", "rmse", "min", "max"]
+        expected = gu.stats.stats(values, statistics, method="groupwise", **options)
+
+        # Fail if the native reducer is called through the Flox backend
+        def fail_native(*args: Any, **kwargs: Any) -> None:
+            pytest.fail("Flox must perform its own reductions and merges")
+
+        for name in ("_reduce_block", "_merge_blocks", "_aggregate_complete_groups"):
+            monkeypatch.setattr(reduction, name, fail_native)
+        result = gu.stats.stats(values, statistics, backend="flox", method="blockwise", **options)
+
+        # Check equality
+        if grouped:
+            pd.testing.assert_frame_equal(result, expected)
+            assert result[("code", "min")].min() == 2**60
+        else:
+            for value_name in values:
+                for name in statistics:
+                    np.testing.assert_allclose(result[value_name][name], expected[value_name][name])
+            assert result["code"]["min"] == 2**60
+            assert result["code"]["max"] == 2**60 + 6
+
 
 class TestStatsUncertainty:
     """Test module for global and grouped statistics uncertainty and unsupported options."""
@@ -799,6 +902,253 @@ class TestStatsUncertainty:
 class TestStatsChunked:
     """Checks stats() loading behavior and exact results with chunked inputs."""
 
+    @pytest.mark.parametrize("backend,execution", [("geoutils", "dask"), ("geoutils", "mp"), ("flox", "dask")])
+    @pytest.mark.parametrize("reindex", [None, False, True])
+    @pytest.mark.parametrize("grouped", [False, True])
+    def test_stats__map_reduce_chunk_invariance(
+        self, backend: Literal["geoutils", "flox"], execution: str, reindex: bool | None, grouped: bool
+    ) -> None:
+        """Checks that map-reduce matches in-memory statistics."""
+
+        # Create values with a NaN and groups crossing chunks
+        if backend == "flox":
+            pytest.importorskip("flox")
+        if execution == "dask":
+            da = pytest.importorskip("dask.array")
+
+        values = np.arange(35, dtype=float).reshape(5, 7)
+        values[1, 2] = np.nan
+        groups = np.indices(values.shape).sum(axis=0) % 3
+        options: dict[str, Any] = {"by": {"zone": groups}, "categories": {"zone": [0, 1, 2, 3]}} if grouped else {}
+        statistics = ["mean", "sum", "min", "max"]
+        expected = gu.stats.stats(values, statistics, **options)
+        source: Any = da.from_array(values, chunks=(2, 3)) if execution == "dask" else values.copy()
+
+        # Run map-reduce with the selected options
+        config = MultiprocConfig(chunks=(2, 3)) if execution == "mp" else None
+        assert is_dask_array(source) == (execution == "dask")
+        result = gu.stats.stats(
+            source, statistics, backend=backend, method="map-reduce", reindex=reindex, mp_config=config, **options
+        )
+
+        # Check equality
+        if grouped:
+            exact_columns = result.columns.get_level_values("statistic") != "mean"
+            pd.testing.assert_frame_equal(
+                result.loc[:, exact_columns], expected.loc[:, exact_columns], check_exact=True
+            )
+            np.testing.assert_allclose(result[("value", "mean")], expected[("value", "mean")])
+            assert result.attrs["grouped_stats"]["method"] == "map-reduce"
+            assert result.attrs["grouped_stats"]["reindex"] == reindex
+        else:
+            assert result == expected
+        assert is_dask_array(source) == (execution == "dask")
+        np.testing.assert_array_equal(source.compute() if execution == "dask" else source, values)
+
+    @pytest.mark.parametrize("backend,execution", [("geoutils", "dask"), ("geoutils", "mp"), ("flox", "dask")])
+    @pytest.mark.parametrize("split_every", [None, 2, 3])
+    @pytest.mark.parametrize("with_quantiles", [False, True])
+    def test_stats__split_every(
+        self,
+        backend: Literal["geoutils", "flox"],
+        execution: str,
+        split_every: int | None,
+        with_quantiles: bool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Checks that split_every limits summary merges."""
+
+        # Create constant groups with NaNs across multiple chunks
+        dask = pytest.importorskip("dask")
+        da = pytest.importorskip("dask.array")
+
+        from geoutils.stats import reduction
+
+        if with_quantiles:
+            pytest.importorskip("crick")
+        if backend == "flox":
+            flox = pytest.importorskip("flox")
+        groups = np.arange(141) % 2
+        values = np.where(groups, 7.0, 2.0)
+        values[:3] = np.nan
+        statistics = ["mean", "sum", "min", "max"]
+        if with_quantiles:
+            statistics += ["median", "nmad"]
+        options: dict[str, Any] = {"by": {"zone": groups}, "categories": {"zone": [0, 1, 2]}}
+        expected = gu.stats.stats(values, statistics, **options)
+        sizes = []
+
+        # Record merge sizes or the Flox configuration
+        if backend == "geoutils":
+            original_merge = reduction._merge_blocks
+
+            def record_merge(summaries: Any) -> Any:
+                sizes.append(len(summaries))
+                return original_merge(summaries)
+
+            monkeypatch.setattr(reduction, "_merge_blocks", record_merge)
+        else:
+            original_reduce = flox.groupby_reduce
+
+            def record_configuration(*args: Any, **kwargs: Any) -> Any:
+                sizes.append(dask.config.get("split_every"))
+                return original_reduce(*args, **kwargs)
+
+            monkeypatch.setattr(flox, "groupby_reduce", record_configuration)
+
+        # Run with a different surrounding split_every setting
+        source: Any = da.from_array(values, chunks=5) if execution == "dask" else values.copy()
+        config = MultiprocConfig(chunks=5) if execution == "mp" else None
+        with dask.config.set(split_every=7):
+            result = gu.stats.stats(
+                source,
+                statistics,
+                backend=backend,
+                method="map-reduce",
+                split_every=split_every,
+                mp_config=config,
+                **options,
+            )
+            assert dask.config.get("split_every") == 7
+
+        # Check merge sizes, equality and loading
+        expected_split = split_every
+        if expected_split is None:
+            expected_split = 8 if execution == "mp" else 7
+        assert sizes and max(sizes) == expected_split
+        assert all(1 <= size <= expected_split for size in sizes)
+        pd.testing.assert_frame_equal(result, expected, check_exact=True)
+        assert isinstance(source, da.Array) == (execution == "dask")
+        np.testing.assert_array_equal(source.compute() if execution == "dask" else source, values)
+
+    @pytest.mark.parametrize("method", ["blockwise", "cohorts"])
+    def test_stats__flox_methods_chunk_invariance(self, method: Literal["auto", "map-reduce", "blockwise", "cohorts"]) \
+            -> None:
+        """Checks that Flox methods match in-memory statistics."""
+
+        # Create groups crossing chunks
+        pytest.importorskip("flox")
+        da = pytest.importorskip("dask.array")
+
+        values = np.arange(24, dtype=float)
+        groups = np.repeat(np.arange(3), 8)
+        options: dict[str, Any] = {"by": {"zone": groups}, "categories": {"zone": [0, 1, 2, 3]}, "observed": False}
+        statistics = ["mean", "sum", "min", "max"]
+        expected = gu.stats.stats(values, statistics, **options)
+        source = da.from_array(values, chunks=5)
+
+        # Run the selected Flox method
+        result = gu.stats.stats(source, statistics, backend="flox", method=method, **options)
+
+        # Check equality and loading
+        pd.testing.assert_frame_equal(result, expected, check_exact=True)
+        assert isinstance(result, pd.DataFrame)
+        assert isinstance(source, da.Array)
+        np.testing.assert_array_equal(source.compute(), values)
+
+    def test_stats__flox_group_order(self) -> None:
+        """Checks that Flox counts follow the requested group order."""
+
+        pytest.importorskip("flox")
+        da = pytest.importorskip("dask.array")
+
+        # Create uneven groups in a different order from their labels
+        values = np.arange(7.0)
+        groups = np.array([0, 0, 1, 2, 0, 1, 0])
+        options: dict[str, Any] = {"by": {"zone": groups}, "categories": {"zone": [2, 0, 1, 3]}, "observed": False}
+        statistics = ["mean", "totalcount", "percentagevalidpoints"]
+        source = da.from_array(values, chunks=2)
+
+        # Run default Flox reduction with a shorter final chunk
+        expected = gu.stats.stats(values, statistics, **options)
+        result = gu.stats.stats(source, statistics, backend="flox", **options)
+
+        # Check counts, percentages and the unchanged lazy input
+        pd.testing.assert_frame_equal(result, expected, check_exact=True)
+        np.testing.assert_array_equal(result[("value", "totalcount")], [1, 4, 2, 0])
+        assert isinstance(source, da.Array)
+        np.testing.assert_array_equal(source.compute(), values)
+
+    @pytest.mark.parametrize("method", ["auto", "cohorts"])
+    def test_stats__flox_cohorts_grid(self, method: Literal["auto", "cohorts"]) -> None:
+        """Checks that Flox reduces groups across rows and columns correctly."""
+
+        pytest.importorskip("flox")
+        da = pytest.importorskip("dask.array")
+
+        # Create groups crossing chunks of 1 row and 2 columns
+        values = np.arange(8.0).reshape(2, 4)
+        groups = np.array([[1, 2, 2, 0], [0, 1, 2, 2]])
+        options: dict[str, Any] = {"by": {"zone": groups}, "categories": {"zone": [0, 1, 2]}}
+        statistics = ["mean", "sum", "min", "max", "totalcount"]
+        source = da.from_array(values, chunks=(1, 2))
+
+        # Compare with complete groups in memory
+        expected = gu.stats.stats(values, statistics, **options)
+        result = gu.stats.stats(source, statistics, backend="flox", method=method, **options)
+
+        # Check every group and the unchanged lazy input
+        pd.testing.assert_frame_equal(result, expected, check_exact=True)
+        assert result.loc[0, ("value", "mean")] == 3.5
+        assert isinstance(source, da.Array)
+        np.testing.assert_array_equal(source.compute(), values)
+
+    @pytest.mark.parametrize("shape,grouped", [((24,), False), ((24,), True), ((6, 4), True)])
+    def test_stats__flox_blockwise_exact_quantiles(self, shape: tuple[int, ...], grouped: bool) -> None:
+        """Checks that Flox blockwise quantiles match exact results."""
+
+        # Create complete groups with a NaN
+        pytest.importorskip("flox")
+        da = pytest.importorskip("dask.array")
+
+        values = np.arange(24, dtype=float).reshape(shape)
+        values.flat[3] = np.nan
+        groups = np.repeat(np.arange(3), 8).reshape(shape)
+        options: dict[str, Any] = {"by": {"zone": groups}, "categories": {"zone": [0, 1, 2, 3]}} if grouped else {}
+        statistics = ["median", "nmad", "90thpercentile", "iqr", "le90"]
+        expected = gu.stats.stats(values, statistics, method="groupwise", **options)
+        chunks = 5 if len(shape) == 1 else (2, 4)
+        source = da.from_array(values, chunks=chunks)
+
+        # Calculate blockwise statistics
+        result = gu.stats.stats(source, statistics, backend="flox", method="blockwise", **options)
+
+        # Check exact equality
+        if grouped:
+            pd.testing.assert_frame_equal(result, expected, check_exact=True)
+        else:
+            assert result == expected
+        assert isinstance(source, da.Array)
+        np.testing.assert_array_equal(source.compute(), values)
+
+    def test_stats__groupwise_method(self) -> None:
+        """Checks that groupwise preserves complete groups and value order."""
+
+        # Create alternating groups with uneven chunks
+        da = pytest.importorskip("dask.array")
+
+        values = np.arange(14, dtype=float)
+        groups = np.arange(14) % 2
+        options: dict[str, Any] = {"by": {"zone": groups}, "categories": {"zone": [0, 1]}}
+
+        def first_value(array: Any) -> Any:
+            """Return the first observation to check the order of each complete group."""
+
+            return array[0]
+
+        statistics: list[Any] = ["median", first_value]
+        expected = gu.stats.stats(values, statistics, **options)
+        source = da.from_array(values, chunks=5)
+
+        # Run groupwise statistics
+        result = gu.stats.stats(source, statistics, method="groupwise", **options)
+
+        # Check equality and loading
+        pd.testing.assert_frame_equal(result, expected, check_exact=True)
+        assert result.attrs["grouped_stats"]["method"] == "groupwise"
+        assert isinstance(source, da.Array)
+        np.testing.assert_array_equal(source.compute(), values)
+
     @pytest.mark.parametrize("masked", [False, True])
     def test_stats__multiprocessing_summary(self, masked: bool) -> None:
         """Checks that stats() combines ungrouped array tiles and optional masks in worker processes."""
@@ -824,11 +1174,11 @@ class TestStatsChunked:
         with MpCluster({"nb_workers": 2}) as cluster:
             config = MultiprocConfig(chunks=(2, 3), cluster=cluster)
             array_summary = gu.stats.stats(values, mask=keep, mp_config=config)
-            array_all = gu.stats.stats(values, "all", mask=keep, mp_config=config)
+            array_all = gu.stats.stats(values, "all", mask=keep, mp_config=config, method="groupwise")
             raster_summary = raster.stats(mask=keep, mp_config=config)
             reductions = raster.stats(["mean", "std", "sum", "validcount"], mask=keep, mp_config=config)
 
-        # Match the eager values and preserve integer count results in both public APIs
+        # Match the in-memory values and preserve integer count results in both public APIs
         compare_dict(expected_summary, array_summary)
         compare_dict(expected_all, array_all)
         compare_dict(expected_summary, raster_summary)
@@ -837,7 +1187,7 @@ class TestStatsChunked:
         assert isinstance(array_summary["Total count"], int)
 
     def test_stats__custom_summary_preserves_shape(self) -> None:
-        """Checks that Multiproc custom summaries match eager results and see the complete array shape."""
+        """Checks that Multiproc custom summaries match in-memory results and see the complete array shape."""
 
         # Use a rectangular array whose full shape differs from every worker tile and from a flattened array
         values = np.arange(12, dtype=float).reshape(3, 4)
@@ -849,8 +1199,246 @@ class TestStatsChunked:
         shape = gu.stats.stats(values, np.shape, mp_config=config)
         combined = gu.stats.stats(values, [np.shape, "mean"], mp_config=config)
 
-        # Preserve the complete shape and exactly match both eager output forms
+        # Preserve the complete shape and exactly match both in-memory output forms
         assert shape == expected_shape
         assert combined == expected_combined
         assert shape == combined["shape"] == values.shape
         assert combined["mean"] == pytest.approx(values.mean())
+
+    @pytest.mark.parametrize("engine", ["numpy", "numba", "flox", "numbagg"])
+    def test_stats__flox_engines(self, engine: str) -> None:
+        """Checks that Flox engines match NumPy statistics."""
+
+        if engine == "numba":
+            pytest.importorskip("numba")
+
+        # Create values and NumPy reference statistics
+        pytest.importorskip("flox")
+        if engine == "numbagg":
+            pytest.importorskip("numbagg")
+        da = pytest.importorskip("dask.array")
+
+        values = np.arange(41, dtype=float)
+        source = da.from_array(values, chunks=7)
+        expected = {
+            "mean": np.mean(values),
+            "std": np.std(values),
+            "sum": np.sum(values),
+            "min": np.min(values),
+            "max": np.max(values),
+            "rmse": np.sqrt(np.mean(values**2)),
+        }
+
+        # Calculate statistics with the selected Flox engine
+        result = gu.stats.stats(
+            source,
+            list(expected),
+            backend="flox",
+            flox_engine=engine,
+        )
+
+        # Allow rounding from summing chunks
+        assert isinstance(source, da.Array)
+        for name, reference in expected.items():
+            np.testing.assert_allclose(result[name], reference)
+        np.testing.assert_array_equal(source.compute(), values)
+
+    @pytest.mark.parametrize(
+        "backend,execution,method",
+        [("geoutils", execution, method) for execution in ("dask", "mp") for method in ("groupwise", "map-reduce")]
+        + [("flox", "dask", "map-reduce")],
+    )
+    @pytest.mark.parametrize("grouped", [False, True])
+    def test_stats__parallel_distribution(
+        self,
+        backend: str,
+        execution: str,
+        grouped: bool,
+        method: Literal["auto", "groupwise", "map-reduce"],
+    ) -> None:
+        """Checks that chunked distribution statistics match in-memory results."""
+
+        # Create symmetric values whose chunk medians differ
+        if method != "groupwise":
+            pytest.importorskip("crick")
+        if backend == "flox":
+            pytest.importorskip("flox")
+        if execution == "dask":
+            dask = pytest.importorskip("dask")
+            da = pytest.importorskip("dask.array")
+            from dask.callbacks import Callback
+
+        values = np.tile(np.arange(-20, 21, dtype=float), 17)
+        groups = np.tile(np.arange(41) % 3, 17)
+        statistics = ["mean", "std", "sum", "median", "nmad", "90thpercentile", "iqr", "le90"]
+        options: dict[str, Any] = {"backend": backend, "method": method}
+        if method != "groupwise":
+            options["tdigest_compression"] = 200
+        if grouped:
+            options.update(by={"zone": groups}, categories={"zone": [0, 1, 2, 3]}, observed=False)
+        expected = gu.stats.stats(values, statistics, **options)
+        source: Any = da.from_array(values, chunks=37) if execution == "dask" else values.copy()
+
+        def check_task(key: Any, result: Any, *args: Any) -> None:
+            """Check that no task collects the complete observation vector."""
+
+            if method != "groupwise" and isinstance(result, np.ndarray):
+                assert result.shape != values.shape
+
+        # Calculate chunked statistics
+        scheduler = dask.config.set(scheduler="synchronous") if execution == "dask" else nullcontext()
+        callback = Callback(posttask=check_task) if execution == "dask" else nullcontext()
+        with scheduler, callback:
+            config = MultiprocConfig(chunks=37) if execution == "mp" else None
+            result = gu.stats.stats(source, statistics, **options, mp_config=config)
+
+        # Allow rounding and small t-digest errors
+        if grouped:
+            pd.testing.assert_frame_equal(result, expected)
+        else:
+            for name in statistics:
+                if method != "groupwise" and name in {"median", "nmad", "90thpercentile", "iqr", "le90"}:
+                    np.testing.assert_allclose(result[name], expected[name], atol=0.1)
+                else:
+                    assert result[name] == pytest.approx(expected[name])
+            assert abs(result["median"] - np.median(values)) < 0.1
+            assert abs(result["nmad"] - 1.4826 * np.median(np.abs(values - np.median(values)))) < 0.1
+        assert is_dask_array(source) == (execution == "dask")
+        if is_dask_array(source):
+            np.testing.assert_array_equal(source.compute(), values)
+        else:
+            np.testing.assert_array_equal(source, values)
+
+    @pytest.mark.parametrize("backend,execution", [("geoutils", "dask"), ("geoutils", "mp"), ("flox", "dask")])
+    def test_stats__masked_nan(self, backend: Literal["geoutils", "flox"], execution: str) -> None:
+        """Checks that an exposed NaN is missing in counts and estimates."""
+
+        pytest.importorskip("crick")
+        if backend == "flox":
+            pytest.importorskip("flox")
+        da = pytest.importorskip("dask.array")
+
+        # Create an exposed NaN and a separate masked value
+        values = np.ma.array([1.0, np.nan, 3.0, 99.0], mask=[False, False, False, True])
+        source = da.from_array(values, chunks=3) if execution == "dask" else values.copy()
+        config = MultiprocConfig(chunks=3) if execution == "mp" else None
+        statistics = ["mean", "median", "sum", "validcount"]
+
+        # Reduce uneven chunks and compare with the same backend in memory
+        expected = gu.stats.stats(values, statistics, backend=backend)
+        result = gu.stats.stats(source, statistics, backend=backend, mp_config=config)
+
+        # Check estimates, counts and the original mask
+        assert result == expected == {"mean": 2.0, "median": 2.0, "sum": 4.0, "validcount": 2}
+        assert isinstance(source, da.Array) == (execution == "dask")
+        computed = source.compute() if execution == "dask" else source
+        np.testing.assert_array_equal(computed, values)
+        np.testing.assert_array_equal(np.ma.getmaskarray(values), [False, False, False, True])
+
+    @pytest.mark.parametrize("backend,execution", [("geoutils", "dask"), ("geoutils", "mp"), ("flox", "dask")])
+    def test_stats__global_infinity_chunk(self, backend: Literal["geoutils", "flox"], execution: str) -> None:
+        """Checks edge case of global statistics works in chunks."""
+
+        # Create values with infinity and NaN
+        if backend == "flox":
+            pytest.importorskip("flox")
+        if execution == "dask":
+            da = pytest.importorskip("dask.array")
+
+        values = np.array([1.0, np.inf, np.nan, 3.0, 5.0])
+        statistics = ["mean", "sum", "min", "max", "validcount"]
+        expected = gu.stats.stats(values, statistics)
+        source = da.from_array(values, chunks=2) if execution == "dask" else values.copy()
+        config = MultiprocConfig(chunks=2) if execution == "mp" else None
+
+        # Calculate chunked statistics
+        result = gu.stats.stats(source, statistics, backend=backend, mp_config=config)
+
+        # Check equality and loading
+        assert result == expected
+        assert is_dask_array(source) == (execution == "dask")
+
+    @pytest.mark.parametrize("grouped", [False, True])
+    def test_stats__flox_reduction_chunk(self, grouped: bool, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Checks that chunked Flox statistics run independently of GeoUtils reductions."""
+
+        # Split constant groups across multiple chunks
+        pytest.importorskip("flox")
+        pytest.importorskip("crick")
+        da = pytest.importorskip("dask.array")
+
+        from geoutils.stats import reduction
+
+        groups = np.arange(41) % 2
+        values = np.where(groups, 7.0, 2.0) if grouped else np.full(41, 2.0)
+        values[3] = np.nan
+        eager = {"height": values, "code": 2**60 + groups if grouped else np.full(41, 2**60, dtype=np.int64)}
+        source = {name: da.from_array(array, chunks=7) for name, array in eager.items()}
+        options: dict[str, Any] = {"by": {"zone": groups}, "categories": {"zone": [0, 1, 2]}} if grouped else {}
+        statistics = ["mean", "std", "median", "nmad", "iqr", "rmse", "min", "max"]
+        expected = gu.stats.stats(eager, statistics, **options)
+
+        # Fail if the native reducer is called through the Flox backend
+        def fail_native(*args: Any, **kwargs: Any) -> None:
+            pytest.fail("Flox must perform its own reductions and merges")
+
+        for name in ("_reduce_block", "_merge_blocks", "_aggregate_complete_groups"):
+            monkeypatch.setattr(reduction, name, fail_native)
+        result = gu.stats.stats(source, statistics, backend="flox", method="map-reduce", **options)
+
+        # Check equality and loading
+        assert all(isinstance(array, da.Array) for array in source.values())
+        if grouped:
+            pd.testing.assert_frame_equal(result, expected)
+        else:
+            for value_name in eager:
+                for name in statistics:
+                    np.testing.assert_allclose(result[value_name][name], expected[value_name][name])
+        for name in eager:
+            np.testing.assert_array_equal(source[name].compute(), eager[name])
+
+
+class TestStatsBackendErrors:
+    """Test module for errors/warnings in stats()."""
+
+    @pytest.mark.parametrize(
+        "options,message,error",
+        [
+            ({"method": "unknown"}, "Argument ``method``", ValueError),
+            ({"reindex": 1}, "Argument ``reindex``", TypeError),
+            ({"split_every": True}, "Argument ``split_every``", TypeError),
+            ({"split_every": 2.5}, "Argument ``split_every``", TypeError),
+            ({"split_every": 1}, "Argument ``split_every``", ValueError),
+            ({"split_every": 0}, "Argument ``split_every``", ValueError),
+            ({"method": "groupwise", "split_every": 2}, "applies to group summaries", ValueError),
+            ({"method": "blockwise"}, "requires backend='flox'", ValueError),
+            ({"method": "cohorts"}, "requires backend='flox'", ValueError),
+            ({"backend": "flox", "method": "groupwise"}, "requires backend='geoutils'", ValueError),
+            ({"method": "groupwise", "reindex": False}, "applies to group summaries", ValueError),
+            ({"backend": "flox", "method": "cohorts", "reindex": True}, "requires reindex=False", ValueError),
+        ],
+    )
+    def test_stats__error_method_options(self, options: dict[str, Any], message: str, error: type[Exception]) -> None:
+        """Checks an error is raised for invalid method options."""
+
+        # Require Flox only for options that select its backend
+        if options.get("backend") == "flox":
+            pytest.importorskip("flox")
+
+        # Check the error
+        with pytest.raises(error, match=message):
+            gu.stats.stats(np.arange(6.0), "mean", **options)
+
+    @pytest.mark.parametrize("grouped", [False, True])
+    def test_stats__error_flox_multiproc(self, grouped: bool) -> None:
+        """Checks an error is raised for Flox multiprocessing."""
+
+        pytest.importorskip("flox")
+
+        # Create values and optional groups
+        values = np.arange(7, dtype=float)
+        options: dict[str, Any] = {"by": {"zone": np.arange(7) % 2}, "categories": {"zone": [0, 1]}} if grouped else {}
+
+        # Check the error before starting workers
+        with pytest.raises(ValueError, match="Flox backend does not support multiprocessing"):
+            gu.stats.stats(values, "mean", backend="flox", mp_config=MultiprocConfig(chunks=3), **options)

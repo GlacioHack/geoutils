@@ -24,7 +24,7 @@ class TestStratifiedSubsample:
     test_grouping.py, here we test the subfunctions instead. Warning behavior and invalid sample sizes are covered in
     TestStratifiedSubsampleErrors.
 
-    For eager arrays, we check that:
+    For in-memory arrays, we check that:
     - Each group receives the requested number or fraction of samples, while negative group IDs are properly excluded.
     - A fixed seed selects the same samples when group IDs or the array shape change.
     """
@@ -92,14 +92,14 @@ class TestStratifiedSubsample:
 
 @pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
 class TestStratifiedSubsampleChunked:
-    """Checks stratified subsampling against eager results for Dask arrays and Multiproc chunks."""
+    """Checks stratified subsampling against in-memory results for Dask arrays and Multiproc chunks."""
 
     @pytest.mark.parametrize(
         "shape,chunks", [((120,), (7,)), ((10, 12), (3, 5)), ((10, 12), (4, 4)), ((10, 12), (12, 12))]
     )
     @pytest.mark.parametrize("subsample", [1, 3, 0.15, 0.5])
     @pytest.mark.parametrize("strategy", ["topk", "sequential"])
-    def test_stratified_subsample_indices__eager_dask_and_multiproc(
+    def test_stratified_subsample_indices__in_memory_dask_and_multiproc(
         self,
         shape: tuple[int, ...],
         chunks: tuple[int, ...],
@@ -120,14 +120,14 @@ class TestStratifiedSubsampleChunked:
         lazy = da.from_array(groups, chunks=chunks)
         config = MultiprocConfig(chunks=chunks[0] if len(chunks) == 1 else (chunks[0], chunks[1]))
 
-        # Sample the same group IDs through the eager, Dask and Multiproc backends
+        # Sample the same group IDs through the in-memory, Dask and Multiproc backends
         eager = _stratified_subsample_indices(groups, subsample, random_state=42, strategy=strategy)
         dask_result = _stratified_subsample_indices(lazy, subsample, random_state=42, strategy=strategy)
         tile_result = _stratified_subsample_indices(
             groups, subsample, random_state=42, strategy=strategy, mp_config=config
         )
 
-        # Inputs remain chunked, while this index-selection helper returns eager NumPy positions
+        # Inputs remain chunked, while this index-selection helper returns in-memory NumPy positions
         assert isinstance(lazy, da.Array)
         assert isinstance(dask_result, np.ndarray) and isinstance(tile_result, np.ndarray)
 
@@ -175,7 +175,7 @@ class TestStratifiedSubsampleChunked:
 
     @pytest.mark.parametrize("strategy", ["topk", "sequential"])
     def test_stratified_subsample_indices__empty_groups(self, strategy: Literal["topk", "sequential"]) -> None:
-        """Checks that ID -1 and sample sizes rounded to zero return no positions for eager and Dask inputs."""
+        """Checks that ID -1 and sample sizes rounded to zero return no positions for in-memory and Dask inputs."""
 
         # Create one input with no valid group ID and another with one valid location in its final Dask block
         import dask.array as da

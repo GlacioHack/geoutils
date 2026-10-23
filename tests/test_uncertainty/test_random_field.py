@@ -386,7 +386,7 @@ class TestRandomFieldChunked:
         tmp_path: Path,
         backend: Literal["gstools", "gpytorch"],
     ) -> None:
-        """Checks that both backends match eager fields across Dask and MP point rows."""
+        """Checks that both backends match in-memory fields across Dask and MP point rows."""
 
         pytest.importorskip(backend)
         dask_geopandas = pytest.importorskip("dask_geopandas")
@@ -671,7 +671,7 @@ class TestRandomFieldErrors:
         points = gu.PointCloud.from_xyz([0, 1], [0, 1], [10, 20], crs=32631)
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
 
-        # Error on a wrong point input, from PointCloud or eager DataFrame
+        # Error on a wrong point input, from PointCloud or in-memory DataFrame
         with pytest.raises(ValueError, match="Dask point chunks require a Dask GeoDataFrame input"):
             points.random_field(structure, chunksizes=1)
         with pytest.raises(ValueError, match="Dask point chunks require a Dask GeoDataFrame input"):

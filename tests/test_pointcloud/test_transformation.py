@@ -131,7 +131,7 @@ class TestTransformationChunked:
 
     @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_clip__dask_las_loading_laziness(self, as_object_type: Literal["dataarray", "geodataframe"]) -> None:
-        """Checks that clip() keeps a LAS-backed Dask GeoDataFrame lazy and matches eager point selection."""
+        """Checks that clip() keeps a LAS-backed Dask GeoDataFrame lazy and matches in-memory point selection."""
 
         pytest.importorskip("laspy")
         dgpd = pytest.importorskip("dask_geopandas")
@@ -221,14 +221,14 @@ class TestTransformationChunked:
         self, as_object_type: Literal["dataarray", "geodataframe"], chunks: int, loaded: bool, tmp_path: Path
     ) -> None:
         """
-        Checks that eager, Dask and multiprocessing reprojection return the same rows and metadata.
+        Checks that in-memory, Dask and multiprocessing reprojection return the same rows and metadata.
 
         File-backed inputs keep their original loaded/unloaded state, and the new file output stays unloaded.
         """
 
         dgpd = pytest.importorskip("dask_geopandas")
 
-        # 1/ Prepare eager, accessor, Dask and multiprocessing inputs from the same 11 points
+        # 1/ Prepare in-memory, accessor, Dask and multiprocessing inputs from the same 11 points
         # Chunks of 4 or 6 both leave a shorter final chunk, which helps catch dropped/duplicated rows at the joins
         filename = tmp_path / "points.gpkg"
         self.points.to_file(filename, index=False)
@@ -475,13 +475,15 @@ class TestTransformationChunked:
 
 
 class TestReprojectErrors:
-    """Test module for validation errors raised by eager, Dask, and multiprocessing reprojection."""
+    """Test module for validation errors raised by in-memory, Dask, and multiprocessing reprojection."""
 
     points = TestTransformationChunked.points
     heights = TestTransformationChunked.heights
 
     def test_reproject__error_inplace_with_chunked_execution(self, tmp_path: Path) -> None:
-        """Checks that multiprocessing rejects inplace before writing, while eager reprojection updates the object."""
+        """
+        Checks that multiprocessing rejects inplace before writing, while in-memory reprojection updates the object.
+        """
 
         # Start with an unloaded file source and a new output path, then request inplace + multiprocessing
         filename = tmp_path / "source.gpkg"
@@ -494,7 +496,7 @@ class TestReprojectErrors:
         assert not source.is_loaded and not outfile.exists()
         assert source.crs == self.points.crs
 
-        # The eager version accepts inplace, returns None and changes the source coordinates
+        # The in-memory version accepts inplace, returns None and changes the source coordinates
         eager = gu.PointCloud(self.points.copy(), data_name="intensity")
         expected = self.points.to_crs(32632)
         assert eager.reproject(crs=32632, inplace=True) is None

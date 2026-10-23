@@ -17,9 +17,10 @@ from shapely.geometry import Polygon, box
 
 import geoutils as gu
 from geoutils._dispatch import is_dask_array
+from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
 from geoutils.operators import LocalData, Reducer
-from geoutils.operators.reducer import Mean
+from geoutils.operators.reducer import Count, Mean
 
 
 @pytest.fixture
@@ -62,7 +63,7 @@ class NoFractionalSupportReducer(Reducer):
 
 class TestGroupedStats:
     """
-    Test module for grouped statistics, i.e. stats(by=), with eager inputs.
+    Test module for grouped statistics, i.e. stats(by=), with in-memory inputs.
 
     Dask and Multiproc inputs are covered in TestGroupedStatsChunked further below.
 
@@ -210,7 +211,7 @@ class TestGroupedStats:
 
     @pytest.mark.parametrize("source_type", ["raster", "xarray", "pointcloud", "dataframe"])
     def test_stats__mask_types(self, source_type: str) -> None:
-        """Checks that every eager spatial input returns a boolean mask on its common support."""
+        """Checks that every in-memory spatial input returns a boolean mask on its common support."""
 
         # Create the same six values and two groups as either raster pixels or points
         values = np.arange(1, 7, dtype=float)
@@ -290,7 +291,8 @@ class TestGroupedStats:
             statistics="mean",
             subsample=10,
             random_state=42,
-            strategy="sparse",
+            method="map-reduce",
+            reindex=False,
             subsampling_strategy=subsampling_strategy,
             return_masks=True,
         )
@@ -732,7 +734,7 @@ class TestGroupedStats:
 
         # Check the declared row order, empty category and every reduced value
         pd.testing.assert_frame_equal(result, expected)
-        assert result.attrs["grouped_stats"]["strategy"] == "flox"
+        assert result.attrs["grouped_stats"]["backend"] == "flox"
 
     def test_stats__flox_bins_mask_and_subsample(self) -> None:
         """Checks that Flox matches GeoUtils bin boundaries, masking and global subsampling."""
@@ -789,7 +791,7 @@ class TestGroupedStats:
         mask = np.array([True, True, False, True, True, True, True, True])
         statistics = ["median", "90thpercentile", "iqr", "le90"]
 
-        # Compte stats with with Flox
+        # Compute stats with Flox
         result = gu.stats.stats(
             values,
             statistics=statistics,
@@ -797,6 +799,7 @@ class TestGroupedStats:
             categories={"group": ["A", "B"]},
             mask=mask,
             backend="flox",
+            method="blockwise",
         )
         # We check exact equivalence with NumPy
         selected = [values[mask & np.isfinite(values) & (groups == group)] for group in ("A", "B")]
@@ -812,6 +815,171 @@ class TestGroupedStats:
             result[("value", "le90")], [np.percentile(group, 95) - np.percentile(group, 5) for group in selected]
         )
 
+    def test_stats__shared_quantile_states(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Checks that grouped quantiles share t-digests."""
+
+        # Create constant groups with a NaN and an empty category
+        pytest.importorskip("crick")
+        pytest.importorskip("flox")
+        from geoutils.stats import reduction
+
+        values = np.array([2.0, 7.0, 2.0, np.nan, 2.0])
+        groups = np.array([0, 1, 0, 1, 0])
+        calls = []
+        original = reduction._flox_groupby_reduce
+
+        # Record each tdigest construction
+        def record_states(*args: Any, **kwargs: Any) -> Any:
+
+            if not isinstance(kwargs["function"], str):
+                calls.append(kwargs["function"].finalize)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(reduction, "_flox_groupby_reduce", record_states)
+
+        # Calculate several grouped quantiles
+        result = gu.stats.stats(
+            values,
+            ["median", "90thpercentile", "iqr", "le90", "mean"],
+            by={"g": groups},
+            categories={"g": [1, 0, 8]},
+            observed=False,
+            backend="flox",
+            method="map-reduce",
+        )
+
+        # Check one digest calculation was done
+        assert calls == [None]
+
+        # Check expected output (order, NaN, etc)
+        assert result.index.tolist() == [1, 0, 8]
+        assert result[("value", "count")].tolist() == [1, 3, 0]
+        np.testing.assert_array_equal(result[("value", "median")], [7, 2, np.nan])
+        np.testing.assert_array_equal(result[("value", "iqr")], [0, 0, np.nan])
+        assert result.attrs["grouped_stats"]["approximation"]["method"] == "tdigest"
+
+    @pytest.mark.parametrize(
+        "backend,method,engine",
+        [("geoutils", "groupwise", None), ("geoutils", "map-reduce", None)]
+        + [("flox", method, engine) for method in ("blockwise", "map-reduce") for engine in ("numpy", "numba", "flox")],
+    )
+    def test_stats__quantiles_empty(
+        self,
+        backend: Literal["geoutils", "flox"],
+        method: Literal["groupwise", "map-reduce", "blockwise"],
+        engine: str | None,
+    ) -> None:
+        """Checks that quantiles-type estimators (e.g., median, NMAD) handle empty groups properly."""
+
+        if engine == "numba":
+            pytest.importorskip("numba")
+
+        # Create constant groups with NaNs and an empty category
+        if method not in {"groupwise", "blockwise"}:
+            pytest.importorskip("crick")
+        if backend == "flox":
+            pytest.importorskip("flox")
+        values = np.array([2.0, 2.0, np.nan, 7.0, 7.0, 7.0])
+        groups = np.array([0, 0, 0, 1, 1, 1])
+
+        # Calculate grouped statistics
+        result = gu.stats.stats(
+            values,
+            ["mean", "median", "nmad", "90thpercentile", "iqr", "le90"],
+            by={"zone": groups},
+            categories={"zone": [0, 1, 2]},
+            observed=False,
+            backend=backend,
+            method=method,
+            flox_engine=engine,
+        )
+
+        # Check quantiles and empty groups
+        np.testing.assert_array_equal(result[("value", "count")], [2, 3, 0])
+        for name in ("mean", "median", "90thpercentile"):
+            np.testing.assert_array_equal(result[("value", name)], [2, 7, np.nan])
+        for name in ("nmad", "iqr", "le90"):
+            np.testing.assert_array_equal(result[("value", name)], [0, 0, np.nan])
+        if method not in {"groupwise", "blockwise"}:
+            assert result.attrs["grouped_stats"]["approximation"] == {"method": "tdigest", "compression": 100}
+
+    @pytest.mark.parametrize(
+        "values,statistics",
+        [
+            pytest.param(np.array([2**60 + 1, 2**60 + 2], dtype=np.int64), ["min", "max"], id="integer_extrema"),
+            pytest.param(np.array([1e20, 2e20], dtype=np.float32), ["sumofsquares", "rmse"], id="large_squares"),
+            pytest.param(np.array([1e-30, 2e-30], dtype=np.float32), ["sumofsquares", "rmse"], id="small_squares"),
+        ],
+    )
+    def test_stats__flox_precision(self, values: NDArrayNum, statistics: list[str]) -> None:
+        """Checks that Flox preserves numerical precision."""
+
+        # Create one occupied group and one empty category
+        pytest.importorskip("flox")
+        options: dict[str, Any] = {
+            "by": {"zone": np.zeros(len(values), dtype=int)},
+            "categories": {"zone": [0, 1]},
+            "observed": False,
+        }
+        expected = gu.stats.stats(values, statistics, **options)
+
+        # Calculate Flox statistics
+        result = gu.stats.stats(values, statistics, backend="flox", **options)
+
+        # Check equality
+        pd.testing.assert_frame_equal(result, expected, check_exact=True)
+
+    @pytest.mark.parametrize("per_group", [False, True])
+    @pytest.mark.parametrize("sampling", ["sequential", "topk"])
+    def test_stats__identical_samples(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        per_group: bool,
+        sampling: Literal["sequential", "topk"],
+    ) -> None:
+        """Checks that Flox and GeoUtils use identical samples."""
+
+        # Create two value arrays, groups and a mask
+        pytest.importorskip("flox")
+        from pandas.testing import assert_frame_equal
+
+        from geoutils.stats import grouping
+
+        values = {"a": np.arange(50, dtype=float), "b": np.arange(50, dtype=float) ** 2}
+        values["a"][4] = np.nan
+        groups = np.arange(50) % 3
+        options: dict[str, Any] = {
+            "by": {"g": groups},
+            "categories": {"g": [2, 0, 1, 6]},
+            "mask": np.arange(50) % 7 != 0,
+            "subsample": 6,
+            "subsample_per_group": per_group,
+            "subsampling_strategy": sampling,
+            "random_state": 42,
+            "observed": False,
+        }
+        selections = []
+        original = grouping._sample_grouped_arrays
+
+        # Record values produced by the sampler
+        def record_sample(*args: Any, **kwargs: Any) -> Any:
+
+            selected_values, selected_codes = original(*args, **kwargs)
+            selections.append((selected_values, selected_codes))
+            return selected_values, selected_codes
+
+        monkeypatch.setattr(grouping, "_sample_grouped_arrays", record_sample)
+        native = gu.stats.stats(values, ["mean", "median", "sum"], **options)
+        result = gu.stats.stats(values, ["mean", "median", "sum"], **options, backend="flox")
+
+        # Check both backends use the same sample, and only once
+        assert len(selections) == 2
+        for name in values:
+            np.testing.assert_equal(selections[0][0][name], selections[1][0][name])
+        np.testing.assert_array_equal(selections[0][1], selections[1][1])
+        assert_frame_equal(result, native)
+        assert result.attrs["grouped_stats"]["subsample_per_group"] == per_group
+
 
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestGroupedStatsChunked:
@@ -821,15 +989,15 @@ class TestGroupedStatsChunked:
     Reduction strategies are instead covered in test_reduction.py.
 
     The tests compare group definitions, common support, sampling, vector zones, returned masks, and the optional Flox
-    backend with eager results.
+    backend with in-memory results.
     """
 
-    @pytest.mark.parametrize("strategy", ["dense", "sparse", "groupwise"])
-    def test_stats__empty_selection(self, strategy: Literal["dense", "sparse", "groupwise"]) -> None:
+    @pytest.mark.parametrize("method,reindex", [("map-reduce", True), ("map-reduce", False), ("groupwise", None)])
+    def test_stats__empty_selection(self, method: Literal["map-reduce", "groupwise"], reindex: bool | None) -> None:
         """Checks that fully masked chunks return an empty table and mask mapping."""
 
         # Mask every location while requesting both boolean groups in the result
-        import dask.array as da
+        da = pytest.importorskip("dask.array")
 
         values = da.ones((5, 6), chunks=2)
         table, masks = gu.stats.stats(
@@ -837,7 +1005,8 @@ class TestGroupedStatsChunked:
             by={"zone": np.ones((5, 6), dtype=bool)},
             mask=np.zeros((5, 6), dtype=bool),
             statistics="mean",
-            strategy=strategy,
+            method=method,
+            reindex=reindex,
             return_masks=True,
         )
         eager_table, _ = gu.stats.stats(
@@ -845,7 +1014,8 @@ class TestGroupedStatsChunked:
             by={"zone": np.ones((5, 6), dtype=bool)},
             mask=np.zeros((5, 6), dtype=bool),
             statistics="mean",
-            strategy=strategy,
+            method=method,
+            reindex=reindex,
             return_masks=True,
         )
 
@@ -859,7 +1029,7 @@ class TestGroupedStatsChunked:
     def test_stats__empty_arrays(self, backend: str) -> None:
         """Checks that empty inputs include requested groups with zero counts."""
 
-        # Calculate statistics for one requested group from empty Eager, Dask, or Multiproc inputs
+        # Calculate statistics for one requested group from empty in-memory, Dask, or Multiproc inputs
         values = np.empty(0)
         expected = gu.stats.stats(
             values,
@@ -870,7 +1040,7 @@ class TestGroupedStatsChunked:
         )
         config = MultiprocConfig(chunks=4) if backend == "multiproc" else None
         if backend == "dask":
-            import dask.array as da
+            da = pytest.importorskip("dask.array")
 
             values = da.from_array(values, chunks=4)
         result = gu.stats.stats(
@@ -889,11 +1059,11 @@ class TestGroupedStatsChunked:
         assert result.loc[0, ("value", "validcount")] == 0
         assert np.isnan(result.loc[0, ("value", "mean")])
 
-    def test_stats__dask_lazy_masks_match_eager(self) -> None:
-        """Checks that the Dask backend matches eager calculation and creates group masks only when requested."""
+    def test_stats__dask_lazy_masks_match_in_memory(self) -> None:
+        """Checks that the Dask backend matches in-memory calculation and creates group masks only when requested."""
 
-        # Calculate an eager reference from three numeric intervals
-        import dask.array as da
+        # Calculate an in-memory reference from 3 intervals
+        da = pytest.importorskip("dask.array")
 
         values = np.arange(12, dtype=float).reshape(3, 4)
         grouper = np.arange(12, dtype=float).reshape(3, 4)
@@ -929,8 +1099,8 @@ class TestGroupedStatsChunked:
         )
         config = MultiprocConfig(chunks=3) if backend == "multiproc" else None
         if backend == "dask":
-            import dask.array as da
-            import dask.dataframe as dd
+            da = pytest.importorskip("dask.array")
+            dd = pytest.importorskip("dask.dataframe")
 
             groups = dd.from_pandas(groups, npartitions=2) if kind == "categorical" else da.from_array(groups, chunks=3)
 
@@ -959,7 +1129,7 @@ class TestGroupedStatsChunked:
         )
         config = MultiprocConfig(chunks=2) if backend == "multiproc" else None
         if backend == "dask":
-            import dask.dataframe as dd
+            dd = pytest.importorskip("dask.dataframe")
 
             groups = dd.from_pandas(groups, npartitions=2)
 
@@ -994,7 +1164,7 @@ class TestGroupedStatsChunked:
         )
         config = MultiprocConfig(chunks=2) if backend == "multiproc" else None
         if backend == "dask":
-            import dask.array as da
+            da = pytest.importorskip("dask.array")
 
             groups = da.from_array(groups, chunks=2)
 
@@ -1033,7 +1203,7 @@ class TestGroupedStatsChunked:
         )
         config = MultiprocConfig(chunks=2) if backend == "multiproc" else None
         if backend == "dask":
-            import dask.array as da
+            da = pytest.importorskip("dask.array")
 
             groups = da.from_array(groups, chunks=2)
 
@@ -1114,7 +1284,7 @@ class TestGroupedStatsChunked:
         """Checks that known Dask categories return their specified order and absent groups like Pandas categories."""
 
         # Declare an unused category so discovering only observed labels would lose part of the requested groups
-        import dask.dataframe as dd
+        dd = pytest.importorskip("dask.dataframe")
 
         values = np.array([1.0, 3.0, 5.0, 7.0])
         categories = ["low", "high", "unused"]
@@ -1135,7 +1305,7 @@ class TestGroupedStatsChunked:
     def test_stats__external_values_on_common_support(
         self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
     ) -> None:
-        """Checks that Dask point inputs use the same common support and return the same result as eager points."""
+        """Checks that Dask point inputs use the same common support and return the same result as in-memory points."""
 
         # Place points at known raster pixels and give two polygons different numeric values
         raster = gu.Raster.from_array(np.arange(16, dtype=float).reshape(4, 4), Affine(1, 0, 0, 0, -1, 4), 32631)
@@ -1186,7 +1356,7 @@ class TestGroupedStatsChunked:
         assert table[("points", "count")].tolist() == [1, 2]
         mask = masks["west"]
         mask_values = mask.pc.data
-        import dask.dataframe as dd
+        dd = pytest.importorskip("dask.dataframe")
 
         if as_object_type == "dataarray":
             assert is_dask_array(mask_values)
@@ -1342,7 +1512,7 @@ class TestGroupedStatsChunked:
         # Cross group boundaries with uneven chunks, including differently chunked Dask grouping variables
         config = None
         if backend == "dask":
-            import dask.array as da
+            da = pytest.importorskip("dask.array")
 
             values = {name: da.from_array(array, chunks=(2, 3)) for name, array in values.items()}
             by = {name: da.from_array(array, chunks=(3, 2)) for name, array in by.items()}
@@ -1402,7 +1572,7 @@ class TestGroupedStatsChunked:
         expected_table, expected_masks = source.stats("sum", by={"zone": (zones, "label")}, return_masks=True)
         config = MultiprocConfig(chunks=(1, 2)) if backend == "multiproc" else None
         if backend == "dask":
-            import dask.array as da
+            da = pytest.importorskip("dask.array")
 
             source = source.to_xarray().chunk({"y": 1, "x": 2}).rst
 
@@ -1423,7 +1593,7 @@ class TestGroupedStatsChunked:
 
     @pytest.mark.parametrize("grouping", ["categories", "bins"])
     def test_stats__vector_groups_file_points_not_loaded(self, grouping: str, tmp_path: Path) -> None:
-        """Checks that vector categories and bins match eager while a point file remains unloaded."""
+        """Checks that vector categories and bins match in-memory results while a point file remains unloaded."""
 
         # Write a point file to disk with four values and the final point outside both vector features
         dataframe = gpd.GeoDataFrame(
@@ -1451,7 +1621,7 @@ class TestGroupedStatsChunked:
         assert table[("height", "sum")].tolist() == [3, 3]
 
     def test_stats__vector_coverage_includes_point_boundaries(self, tmp_path: Path) -> None:
-        """Checks that vector coverage groups include boundary points for eager and unloaded point values."""
+        """Checks that vector coverage groups include boundary points for in-memory and unloaded point values."""
 
         # Write a point file to disk with one point on the feature edge, one inside, and one outside
         dataframe = gpd.GeoDataFrame(
@@ -1502,7 +1672,7 @@ class TestGroupedStatsChunked:
             if source_type in {"xarray", "dask"}:
                 xarray_source = source.to_xarray()
                 if source_type == "dask":
-                    import dask.array as da
+                    da = pytest.importorskip("dask.array")
 
                     xarray_source = xarray_source.chunk({"band": 1, "y": 3, "x": 2})
                 source = xarray_source.rst
@@ -1612,12 +1782,15 @@ class TestGroupedStatsChunked:
         assert output.height.dtype == bool
         assert table[("height", "count")].sum() == size
 
-    def test_stats__flox_matches_eager(self) -> None:
-        """Checks that Flox computes a Pandas table equal to eager GeoUtils output while inputs remain Dask arrays."""
+    @pytest.mark.parametrize("subsample", [1, 5])
+    def test_stats__flox_matches_in_memory(self, subsample: int) -> None:
+        """
+        Checks that Flox computes a Pandas table equal to in-memory GeoUtils output while inputs remain Dask arrays.
+        """
 
-        # Create two interleaved groupers and give the selected values a different Dask chunk layout
+        # Create two interleaved groupers with different Dask chunk layout
         pytest.importorskip("flox")
-        import dask.array as da
+        da = pytest.importorskip("dask.array")
 
         values = np.arange(48, dtype=float).reshape(6, 8)
         values[0, 0] = np.nan
@@ -1631,6 +1804,9 @@ class TestGroupedStatsChunked:
             "categories": {"row": [1, 0, 2], "column": [2, 0, 1, 3]},
             "mask": keep,
             "observed": False,
+            "subsample": subsample,
+            "subsample_per_group": True,
+            "random_state": 42,
         }
         expected = gu.stats.stats(values, backend="geoutils", **options)
         lazy_values = da.from_array(values, chunks=(2, 4))
@@ -1648,13 +1824,237 @@ class TestGroupedStatsChunked:
             mask=da.from_array(keep, chunks=(3, 2)),
             observed=False,
             backend="flox",
+            subsample=subsample,
+            subsample_per_group=True,
+            random_state=42,
         )
 
-        # Check input laziness, computed output type and every result against the eager calculation
+        # Check input laziness, computed output type and every result against the in-memory calculation
         assert isinstance(lazy_values, da.Array)
         assert all(isinstance(grouper, da.Array) for grouper in lazy_groups.values())
         assert isinstance(result, pd.DataFrame)
         pd.testing.assert_frame_equal(result, expected)
+
+    @pytest.mark.parametrize("backend,execution", [("geoutils", "dask"), ("geoutils", "mp"), ("flox", "dask")])
+    def test_stats__fractional_chunk(
+        self, backend: Literal["geoutils", "flox"], execution: str
+    ) -> None:
+        """Checks that fractional means combine chunk weights correctly."""
+
+        # Create a polygon, which gives a cell a fractional weight of 0.01
+        if backend == "flox":
+            pytest.importorskip("flox")
+        from pandas.testing import assert_frame_equal
+
+        values = np.array([[2, np.nan, 8, 200]], dtype=np.float32)
+        transform = Affine(1, 0, 0, 0, -1, 1)
+        raster = gu.Raster.from_array(values, transform, 32633, nodata=-999)
+        zones = gu.Vector(gpd.GeoDataFrame(geometry=[box(0, 0, 3.01, 1)], crs=32633))
+        options: dict[str, Any] = {
+            "by": {"zone": zones},
+            "fractional": True,
+            "overlap_backend": "shapely",
+            "observed": False,
+        }
+        statistics = ["mean", "sum", "validcount", "totalcount"]
+        eager = raster.stats(statistics, **options)
+
+        # Run fractional statistics in chunks of 3 cells
+        if execution == "dask":
+            da = pytest.importorskip("dask.array")
+
+            source = gu.DataArrayRasterAccessor.from_array(da.from_array(values, chunks=(1, 3)), transform, 32633).rst
+            result = source.stats(statistics, **options, backend=backend)
+            assert not source.is_loaded
+            assert isinstance(source.data, da.Array)
+        else:
+            result = raster.stats(statistics, **options, backend=backend, mp_config=MultiprocConfig(chunks=(1, 3)))
+
+        # Compare with in-memory fractional statistics
+        assert isinstance(result, pd.DataFrame)
+        assert_frame_equal(result, eager)
+        inside = result.loc[True, "band_1"]
+
+        # Check counts with nodata
+        assert inside["totalcount"] == pytest.approx(3.01)
+        assert inside["validcount"] == pytest.approx(2.01)
+
+        # Fractional sum should be: 2 + 8 + 200 * 0.01 = 12
+        assert inside["sum"] == pytest.approx(12)
+        assert inside["mean"] == pytest.approx(12 / 2.01)
+
+    @pytest.mark.parametrize("backend,execution", [("geoutils", "dask"), ("geoutils", "mp"), ("flox", "dask")])
+    @pytest.mark.parametrize("inside_outside", [False, True])
+    def test_stats__fractional_chunk_invariance(
+        self, backend: Literal["geoutils", "flox"], execution: str, inside_outside: bool
+    ) -> None:
+        """Checks that chunked fractional statistics match in-memory results."""
+
+        # Create overlapping polygons (2 polygons with same label, 1 outside raster)
+        if backend == "flox":
+            pytest.importorskip("flox")
+        from pandas.testing import assert_frame_equal
+
+        values = np.arange(35, dtype=np.float32).reshape(5, 7)
+        values[1, 1] = np.nan
+        mask = np.ones(values.shape, dtype=bool)
+        mask[3, 4] = False
+        transform = Affine(1, 0, 0, 0, -1, 5)
+        raster = gu.Raster.from_array(values, transform, 32633, nodata=-999)
+        zones = gu.Vector(
+            gpd.GeoDataFrame(
+                {"label": ["a", "a", "b", "empty"]},
+                geometry=[box(0.5, 0.5, 3.5, 4.5), box(2, 0.7, 5.4, 3.2), box(2.5, 0.5, 6.5, 4.5), box(20, 20, 21, 21)],
+                crs=32633,
+            )
+        )
+        statistics = ["sum", "mean", "validcount", "totalcount", "percentagevalidpoints"]
+        options: dict[str, Any] = {
+            "by": {"zone": zones if inside_outside else (zones, "label")},
+            "fractional": True,
+            "mask": mask,
+            "observed": False,
+            "overlap_backend": "shapely",
+        }
+        expected = raster.stats(statistics, **options)
+
+        # Calculate fractional statistics with uneven chunks
+        if execution == "dask":
+            da = pytest.importorskip("dask.array")
+
+            source = gu.DataArrayRasterAccessor.from_array(
+                da.from_array(values, chunks=(2, 3)), transform, 32633, nodata=-999
+            ).rst
+            result = source.stats(statistics, **options, backend=backend)
+            assert not source.is_loaded
+            assert isinstance(source.data, da.Array)
+        else:
+            result = raster.stats(statistics, **options, backend=backend, mp_config=MultiprocConfig(chunks=(2, 3)))
+
+        # Check equality
+        assert_frame_equal(result, expected)
+        assert isinstance(result, pd.DataFrame)
+        if not inside_outside:
+            assert result.loc["empty", ("band_1", "count")] == 0
+
+    @pytest.mark.parametrize("backend", ["geoutils", "flox"])
+    def test_stats__fractional_sparse_intersections(
+        self, monkeypatch: pytest.MonkeyPatch, backend: Literal["geoutils", "flox"]
+    ) -> None:
+        """Checks that fractional statistics only read nearby chunks and features."""
+
+        # Create one nearby polygon, and set 100 outside the raster
+        dask = pytest.importorskip("dask")
+        da = pytest.importorskip("dask.array")
+
+        import geoutils.stats.fractional as fractional
+
+        if backend == "flox":
+            pytest.importorskip("flox")
+        values = np.arange(48, dtype=float).reshape(6, 8)
+        geometries = [box(0.2, 4.2, 0.8, 4.8), *[box(100 + i, 100, 100.5 + i, 100.5) for i in range(100)]]
+        zones = gu.Vector(gpd.GeoDataFrame({"label": np.arange(len(geometries))}, geometry=geometries, crs=32633))
+        reads = []
+        intersections = []
+
+        # Record source chunk reads
+        def read_block(block: NDArrayNum, block_id: Any = None) -> NDArrayNum:
+            if block.size:
+                reads.append(block_id)
+            return block
+
+        original = fractional._grid_intersection_fractions
+
+        # Record intersections
+        def intersect(selected: Any, *args: Any, **kwargs: Any) -> Any:
+            intersections.append(len(selected))
+            return original(selected, *args, **kwargs)
+
+        monkeypatch.setattr(fractional, "_grid_intersection_fractions", intersect)
+        lazy_values = da.from_array(values, chunks=(2, 3)).map_blocks(read_block, dtype=float)
+        source = gu.DataArrayRasterAccessor.from_array(lazy_values, Affine(1, 0, 0, 0, -1, 6), 32633).rst
+        with dask.config.set(scheduler="synchronous"):
+            result = source.stats("mean", by={"g": (zones, "label")}, fractional=True, backend=backend)
+
+        # Check only the nearby chunk and polygon are read/intersected
+        assert not source.is_loaded
+        assert isinstance(source.data, da.Array)
+        assert len(reads) == 1
+        assert intersections == [1]
+        assert result.index.tolist() == [0]
+        assert result.loc[0, ("band_1", "mean")] == values[1, 0]
+
+    @pytest.mark.parametrize("chunks", [157, 613])
+    def test_stats__tdigest_accuracy(self, chunks: int) -> None:
+        """Checks that t-digest estimates stay accurate."""
+
+        # Create normally distributed values and an exact reference
+        pytest.importorskip("crick")
+        pytest.importorskip("flox")
+        da = pytest.importorskip("dask.array")
+
+        rng = np.random.default_rng(42)
+        values = rng.normal(size=10_003)
+        groups = np.arange(len(values)) % 4
+        exact = gu.stats.stats(
+            values, ["median", "90thpercentile"], by={"g": groups}, categories={"g": [0, 1, 2, 3]}, method="groupwise"
+        )
+        source = da.from_array(values, chunks=chunks)
+        result = gu.stats.stats(
+            source,
+            ["median", "90thpercentile"],
+            by={"g": groups},
+            categories={"g": [0, 1, 2, 3]},
+            backend="flox",
+            method="map-reduce",
+            tdigest_compression=200,
+        )
+
+        # Allow absolute error of 0.02 for near-zero medians
+        assert isinstance(source, da.Array)
+        assert isinstance(result, pd.DataFrame)
+        np.testing.assert_array_equal(result[("value", "count")], exact[("value", "count")])
+        for name in ("median", "90thpercentile"):
+            np.testing.assert_allclose(result[("value", name)], exact[("value", name)], atol=0.02, rtol=0)
+
+    @pytest.mark.parametrize("engine", ["numpy", "numba", "flox"])
+    def test_stats__flox_engines(self, engine: str) -> None:
+        """Checks that Flox engines give roughly equivalent chunked results."""
+
+        if engine == "numba":
+            pytest.importorskip("numba")
+
+        # Create constant groups for exact quantiles
+        pytest.importorskip("crick")
+        pytest.importorskip("flox")
+        da = pytest.importorskip("dask.array")
+
+        groups = np.arange(41) % 2
+        values = np.where(groups, 7.0, 2.0)
+        source = da.from_array(values, chunks=7)
+        expected = gu.stats.stats(
+            values,
+            ["mean", "median", "nmad", "iqr", "le90"],
+            by={"zone": groups},
+            categories={"zone": [0, 1]},
+            method="groupwise",
+        )
+
+        # Calculate statistics with the selected Flox engine
+        result = gu.stats.stats(
+            source,
+            ["mean", "median", "nmad", "iqr", "le90"],
+            by={"zone": groups},
+            categories={"zone": [0, 1]},
+            backend="flox",
+            flox_engine=engine,
+            method="map-reduce",
+        )
+
+        # Check equality and loading
+        assert isinstance(source, da.Array)
+        pd.testing.assert_frame_equal(result, expected, check_exact=True)
+        np.testing.assert_array_equal(source.compute(), values)
 
 
 class TestGroupedStatsErrors:
@@ -1735,6 +2135,33 @@ class TestGroupedStatsErrors:
             source.stats("mean", by=by, bins=bins, categories=categories)
         assert not source.is_loaded
 
+    @pytest.mark.parametrize("reducer_type", [Count, Mean])
+    @pytest.mark.parametrize("fractional", [False, True])
+    def test_stats__error_flox_support(
+        self,
+        reducer_type: type[Reducer],
+        fractional: bool,
+    ) -> None:
+        """Checks an error is raised for unsupported Flox reducer options."""
+
+        # Create a reducer with modified weight support
+        pytest.importorskip("flox")
+        reducer = reducer_type()
+        reducer.accepts_support_weights = False
+        values = np.arange(4.0)
+        options: dict[str, Any]
+        if fractional:
+            source = gu.Raster.from_array(values.reshape(2, 2), Affine(1, 0, 0, 0, -1, 2), 32633)
+            zones = gu.Vector(gpd.GeoDataFrame(geometry=[box(0.25, 0.25, 1.75, 1.75)], crs=32633))
+            options = {"by": {"zone": zones}}
+        else:
+            source = values
+            options = {"by": {"zone": np.zeros(4, dtype=int)}, "categories": {"zone": [0]}}
+
+        # Check error for ordinary/fractional statistics
+        with pytest.raises(ValueError, match="Reducer|reducers"):
+            gu.stats.stats(source, reducer, backend="flox", fractional=fractional, **options)
+
     def test_stats__error_flox_options(self) -> None:
         """Checks that Flox rejects options and statistics that its grouped path cannot reproduce."""
 
@@ -1744,20 +2171,11 @@ class TestGroupedStatsErrors:
         by = {"zone": np.arange(6) % 2}
         categories = {"zone": [0, 1]}
 
-        # Raise errors for global statistics, group masks, sampling within groups,
-        # multiprocessing and GeoUtils strategies
-        with pytest.raises(ValueError, match="requires grouped statistics"):
-            gu.stats.stats(values, "mean", backend="flox")
-        for options in (
-            {"return_masks": True},
-            {"subsample_per_group": True},
-            {"mp_config": MultiprocConfig(chunks=2)},
-            {"strategy": "dense"},
-        ):
-            with pytest.raises(ValueError, match="Flox backend requires"):
-                gu.stats.stats(values, "mean", backend="flox", by=by, categories=categories, **options)  # type: ignore[arg-type]
+        # Raise errors for group masks
+        with pytest.raises(ValueError, match="Flox backend requires"):
+            gu.stats.stats(values, "mean", backend="flox", by=by, categories=categories, return_masks=True)
         with pytest.raises(ValueError, match="does not support"):
-            gu.stats.stats(values, "nmad", backend="flox", by=by, categories=categories)
+            gu.stats.stats(values, lambda array: np.nanmean(array), backend="flox", by=by, categories=categories)
 
     def test_raster_stats__flox_loading_warning(self) -> None:
         """Checks that a Raster input warns that the Flox backend loads its values."""

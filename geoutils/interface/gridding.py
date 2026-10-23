@@ -16,7 +16,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Grid point clouds through eager, Dask or multiprocessing execution (uses interpolator/reducers in operators)."""
+"""Grid point clouds through in-memory, Dask or multiprocessing execution (uses interpolator/reducers in operators)."""
 
 from __future__ import annotations
 
@@ -143,10 +143,10 @@ def _grid_resolution(
 
 
 ################################
-# 2/ EAGER CALCULATION ENGINES
+# 2/ CALCULATION ENGINES
 ################################
 
-# Common eager dispatcher for interpolation and circular-neighborhood methods
+# Common dispatcher for interpolation and circular-neighborhood methods
 ############################################################################
 
 
@@ -581,7 +581,7 @@ def _multiproc_grid_pointcloud(
 # 5/ BACKEND DISPATCH
 ######################
 
-# Resolve the output grid once, then select eager, Dask or multiprocessing execution
+# Resolve the output grid once, then select in-memory, Dask or multiprocessing execution
 ####################################################################################
 
 
@@ -609,9 +609,9 @@ def _grid_pointcloud_to_raster(
     gridding_func: GridPointCloudCallable = _grid_pointcloud,
 ) -> Any:
     """
-    Grid a point cloud to a raster with eager, Dask, or Multiprocessing backends.
+    Grid a point cloud to a raster with in-memory, Dask, or Multiprocessing backends.
 
-    A Dask reference selects lazy output even when the point source is eager. Its spatial chunks are reused unless
+    A Dask reference selects lazy output even when the point source is in memory. Its spatial chunks are reused unless
     chunksizes is supplied, following the same reference-grid behavior as rasterization. An explicit data_name
     selects values without copying the source or changing its active column.
     """
@@ -623,7 +623,7 @@ def _grid_pointcloud_to_raster(
         raise ValueError("Argument ``data_name`` must name an existing point column.")
     data_name = get_geo_attr(source_pointcloud, "data_name") if data_name is None else data_name
 
-    # Follow a lazy output reference without converting an eager point cloud to a Dask dataframe
+    # Follow a lazy output reference without converting an in-memory point cloud to a Dask dataframe
     ref_chunks = get_geo_attr(ref, "_chunks") if ref is not None and has_geo_attr(ref, "_chunks") else None
     if ref_chunks is not None:
         ref_chunks = ref_chunks[-2:]
@@ -633,11 +633,11 @@ def _grid_pointcloud_to_raster(
     if dask and mp_config is not None:
         raise ValueError(
             "Cannot use Multiprocessing and Dask simultaneously. To use Dask, remove mp_config. "
-            "To use Multiprocessing, use an eager PointCloud and an unchunked raster reference."
+            "To use Multiprocessing, use an in-memory PointCloud and an unchunked raster reference."
         )
 
     if is_dask_dataframe(_source_dataframe(source_pointcloud)) and mp_config is not None:
-        raise ValueError("Multiprocessing gridding is only supported for eager or file-backed PointCloud objects.")
+        raise ValueError("Multiprocessing gridding is only supported for in-memory or file-backed PointCloud objects.")
 
     # Resolve all supported grid definitions to one output shape and transform
     out_shape, out_transform, out_crs = _check_match_grid(
@@ -654,7 +654,7 @@ def _grid_pointcloud_to_raster(
     if n_threads < 0:
         raise ValueError("Argument 'n_threads' must be non-negative.")
     if gridding_func is _grid_pointcloud:
-        # Convert the method name once before eager or chunked execution decides which source points to read
+        # Convert the method name once before in-memory or chunked execution decides which source points to read
         resampling = _resolve_gridding_operator(resampling, distance_power=distance_power)
         if isinstance(resampling, Reducer):
             _resolve_point_neighbours_for_reducer(resampling)
@@ -668,7 +668,7 @@ def _grid_pointcloud_to_raster(
             raise ValueError("Nearest-source nodata handling requires an Interpolator.")
         _gridding_nodata_spread(resampling, nodata_handling=nodata_handling)
 
-    # Eager calls can use SciPy threads while each parallel output task stays single-threaded
+    # In-memory calls can use SciPy threads while each parallel output task stays single-threaded
     is_parallel_backend = dask or mp_config is not None
     resolved_threads = n_threads if n_threads > 0 else (1 if is_parallel_backend else max(1, (os.cpu_count() or 2) - 1))
     kwargs: dict[str, Any] = {
@@ -688,7 +688,7 @@ def _grid_pointcloud_to_raster(
     from geoutils.raster import Raster
     from geoutils.raster.xr_accessor import DataArrayRasterAccessor
 
-    # The eager path grids the complete source into an in-memory Raster
+    # The in-memory path grids the complete source into a Raster
     if not dask and mp_config is None:
         array = _grid_pointcloud_block_from_source(
             source_pointcloud=source_pointcloud,

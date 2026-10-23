@@ -19,14 +19,14 @@
 
 # Summary: the module is separated in common helpers, readers and writers.
 
-# ``PointCloud.load()`` uses the eager or multiprocessing readers in this
+# ``PointCloud.load()`` uses the in-memory or multiprocessing readers in this
 # module and returns one in-memory GeoDataFrame.
 # ``open_pointcloud(..., chunks=...)`` assembles a lazy Dask-GeoPandas GeoDataFrame in
 # ``pointcloud.loading``; each Dask partition calls the point-index slice
 # reader defined here.
 
 # Writing follows the reverse pattern. Common conversion helpers turn each
-# dataframe partition into LasPy records, backend-specific writers supply eager,
+# dataframe partition into LasPy records, backend-specific writers supply in-memory,
 # Dask, or multiprocessing partitions, and ``_write_laspy()`` dispatches between
 # those paths.
 
@@ -68,7 +68,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class LasMetadata:
-    """Header metadata used to plan eager, multiprocessing and Dask reads."""
+    """Header metadata used to plan in-memory, multiprocessing and Dask reads."""
 
     crs: CRS | None
     point_count: int
@@ -182,7 +182,7 @@ def _empty_las_geodataframe(columns: list[str], crs: CRS | None) -> gpd.GeoDataF
 
 
 def _concat_las_geodataframes(parts: list[gpd.GeoDataFrame], columns: list[str], crs: CRS | None) -> gpd.GeoDataFrame:
-    """Combine eager LAS chunks while preserving their common schema and CRS."""
+    """Combine in-memory LAS chunks while preserving their common schema and CRS."""
 
     if len(parts) == 0:
         return _empty_las_geodataframe(columns=columns, crs=crs)
@@ -191,7 +191,7 @@ def _concat_las_geodataframes(parts: list[gpd.GeoDataFrame], columns: list[str],
 
 
 def _laspy_points_to_geodataframe(points: Any, crs: CRS | None, columns: list[str]) -> gpd.GeoDataFrame:
-    """Convert one LasPy record batch for any eager or partitioned reader."""
+    """Convert one LasPy record batch for any in-memory or partitioned reader."""
 
     # Keep Z as a data column while X/Y become two-dimensional point geometry
     columns_no_z = [column for column in columns if column != "Z"]
@@ -230,7 +230,7 @@ def _point_bounds_mask(
 # 2/ LAS READING
 ##################
 
-# Header, eager and point-index readers
+# Header, in-memory and point-index readers
 ########################################
 
 
@@ -306,7 +306,7 @@ def _load_laspy_data(
     columns: Literal["all", "main"] | Iterable[str],
     data_name: str | None = "Z",
 ) -> gpd.GeoDataFrame:
-    """Read all requested points into the eager GeoDataFrame used by ``PointCloud.load()``."""
+    """Read all requested points into the in-memory GeoDataFrame used by ``PointCloud.load()``."""
 
     # Validate requested dimensions before reading the complete file
     metadata = _load_laspy_metadata(filename)
@@ -461,7 +461,7 @@ def _open_las_array(
     load: bool = True,
 ) -> xr.DataArray:
     """
-    Read LAS coordinates and attributes as eager arrays or delayed record slices.
+    Read LAS coordinates and attributes as in-memory arrays or delayed record slices.
 
     _load_laspy_metadata() supplies row counts and dimensions. _read_las_arrays() reads each requested slice,
     and from_xyz() assembles its values and coordinates without constructing geometries.
@@ -617,7 +617,7 @@ def _open_las_geodataframe(
             preserve_locations=True,
         )
     if chunks is None:
-        # The eager path loads all requested LAS dimensions into one GeoDataFrame
+        # The in-memory path loads all requested LAS dimensions into one GeoDataFrame
         pc = PointCloud(filename, data_name=data_name, downsample=1)
         pc.load(columns=columns, mp_config=None)
         pc._dataset.attrs["data_name"] = pc.data_name
@@ -692,7 +692,7 @@ def _load_laspy_data_partitions(
     partition_size: int,
     mp_config: MultiprocConfig,
 ) -> gpd.GeoDataFrame:
-    """Read point-index slices in workers and combine them into one eager GeoDataFrame."""
+    """Read point-index slices in workers and combine them into one in-memory GeoDataFrame."""
 
     if partition_size <= 0:
         raise ValueError("Argument 'partition_size' must be a strictly positive integer.")
@@ -730,7 +730,7 @@ def _iter_laspy_data_chunks(
     bounds: BoundingBox | Sequence[float] | None = None,
 ) -> Iterator[gpd.GeoDataFrame]:
     """
-    Stream LAS/LAZ points as independent, eager GeoDataFrame chunks.
+    Stream LAS/LAZ points as independent, in-memory GeoDataFrame chunks.
 
     Regular LAS/LAZ files do not contain a spatial index, so bounded selection
     streams through the file and filters points by coordinates. For COPC files,
@@ -797,7 +797,7 @@ def _load_laspy_data_bounds(
     prefer_copc: bool = True,
 ) -> gpd.GeoDataFrame:
     """
-    Return one eager GeoDataFrame containing points within X/Y bounds.
+    Return one in-memory GeoDataFrame containing points within X/Y bounds.
 
     COPC files are queried through LasPy's COPC spatial index when possible.
     Normal LAS/LAZ files are streamed by point chunks and filtered by
@@ -902,7 +902,7 @@ def _iter_laspy_spatial_chunks(
 
 
 def _as_geodataframe(pc: gpd.GeoDataFrame | pd.DataFrame, crs: CRS | None = None) -> gpd.GeoDataFrame:
-    """Normalize an eager writer partition to a GeoDataFrame with a CRS."""
+    """Normalize an in-memory writer partition to a GeoDataFrame with a CRS."""
 
     if isinstance(pc, gpd.GeoDataFrame):
         out = pc
@@ -922,7 +922,7 @@ def _as_geodataframe(pc: gpd.GeoDataFrame | pd.DataFrame, crs: CRS | None = None
 def _iter_dataframe_partitions(
     pc: gpd.GeoDataFrame | pd.DataFrame, partition_size: int | None
 ) -> Iterator[gpd.GeoDataFrame]:
-    """Split an eager dataframe into row partitions for the common writer."""
+    """Split an in-memory dataframe into row partitions for the common writer."""
 
     if partition_size is None:
         yield _as_geodataframe(pc)
@@ -1049,7 +1049,7 @@ def _build_laspy_header_from_partitions(
 
 
 def _dataframe_to_lasdata(pc: gpd.GeoDataFrame | pd.DataFrame, data_name: str | None, header: Any) -> Any:
-    """Convert one eager dataframe partition to records for the shared LAS stream."""
+    """Convert one in-memory dataframe partition to records for the shared LAS stream."""
 
     laspy = import_optional("laspy")
 
@@ -1146,7 +1146,7 @@ def _write_laspy_partitions(
     check_attributes: bool = False,
     laz_chunk_size: int | None = None,
 ) -> None:
-    """Append eager dataframe partitions from any backend to one LAS/LAZ stream."""
+    """Append in-memory dataframe partitions from any backend to one LAS/LAZ stream."""
 
     laspy = import_optional("laspy")
 
@@ -1256,7 +1256,7 @@ def _write_array_las(
         os.replace(output, destination)
 
 
-# Eager and Dask partition writers
+# In-memory and Dask partition writers
 ##################################
 
 
@@ -1268,7 +1268,7 @@ def _write_laspy_dataframe(
     chunks: int | None = None,
     laz_chunk_size: int | None = None,
 ) -> None:
-    """Feed an eager dataframe, optionally split into row partitions, to the common writer."""
+    """Feed an in-memory dataframe, optionally split into row partitions, to the common writer."""
 
     _write_laspy_partitions(
         filename=filename,
@@ -1512,9 +1512,9 @@ def _write_laspy(
     **kwargs: Any,
 ) -> None:
     """
-    Dispatch LAS/LAZ writing to the eager, Dask or multiprocessing partition path.
+    Dispatch LAS/LAZ writing to the in-memory, Dask or multiprocessing partition path.
 
-    Eager dataframes are optionally split into sequential row partitions. Dask
+    In-memory dataframes are optionally split into sequential row partitions. Dask
     dataframes are computed one existing partition at a time. Multiprocessing
     writes independent temporary files in workers and stitches them afterward.
     """

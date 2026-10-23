@@ -65,7 +65,7 @@ def pointcloud_file(tmp_path: Any) -> Any:
 
 class TestArraySubsample:
     """
-    Test module for eager subsampling with one-, two-, and three-dimensional masked arrays.
+    Test module for in-memory subsampling with one-, two-, and three-dimensional masked arrays.
 
     Tests specific to point/raster inputs are available in other modules below, as well as for the testing across
     Dask and Multiprocessing backends!
@@ -167,7 +167,7 @@ class TestArraySubsample:
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestArraySubsampleChunked:
     """
-    Test module for subsample() across eager, Dask and multiprocessing inputs.
+    Test module for subsample() across in-memory, Dask and multiprocessing inputs.
 
     We check that backends return the requested sample size and exactly the same values (for "topk" strategy).
     We also check behaviour with selected bands, mask input and chunk size.
@@ -393,7 +393,9 @@ class TestArraySubsampleChunked:
         lazy_test_files_tiny: list[str],
         tmp_path: Path,
     ) -> None:
-        """Checks that masks and finite data jointly define fractional samples across eager, Dask and worker tiles."""
+        """
+        Checks that masks and finite data jointly define fractional samples across in-memory, Dask and worker tiles.
+        """
 
         import dask.array as da
 
@@ -511,7 +513,7 @@ class TestArraySubsampleChunked:
         assert not lazy._in_memory and not unloaded.is_loaded
         lazy_result = tuple(index.compute() for index in lazy_result)
 
-        # 4/ Check the exact eager order and confirm that nodata cells are treated similarly
+        # 4/ Check the exact in-memory order and confirm that nodata cells are treated similarly
         np.testing.assert_array_equal(lazy_result, expected)
         np.testing.assert_array_equal(worker_result, expected)
         assert len(expected[0]) == (allowed.sum() if subsample == 1 else subsample)
@@ -991,7 +993,7 @@ class TestPointSubsampleChunked:
         assert source.is_loaded == loaded
 
     def test_subsample__point_accessor_multiprocessing_output(self, tmp_path: Path) -> None:
-        """Checks that multiprocessing point subsampling returns a GeoDataFrame for an eager accessor input."""
+        """Checks that multiprocessing point subsampling returns a GeoDataFrame for an in-memory accessor input."""
 
         # Add a second attribute so the accessor result must keep complete source rows
         values = np.arange(40, dtype=np.float64)
@@ -1046,7 +1048,7 @@ class TestPointSubsampleChunked:
             mp_config=MultiprocConfig(chunks=6, outfile=str(output_file)),
         )
 
-        # Keep the result unloaded, then compare its elevations and auxiliary values with the eager sample
+        # Keep the result unloaded, then compare its elevations and auxiliary values with the in-memory sample
         assert output_file.exists() and not result.is_loaded
         assert result.data_name == "Z"
         result.load(columns=["Z", "quality"])
@@ -1253,7 +1255,7 @@ class TestPointSubsampleChunked:
 
 class TestRasterSubsample:
     """
-    Test module for eager raster subsampling into point clouds and value arrays.
+    Test module for in-memory raster subsampling into point clouds and value arrays.
 
     TestRasterSubsampleChunked further below covers Dask and multiprocessing outputs,
     their loading behavior, and backend validation.
@@ -1320,7 +1322,7 @@ class TestRasterSubsample:
         np.testing.assert_array_equal(points.gdf.geometry.y, [1.5, 1.5, 0.5, 0.5])
 
     def test_subsample__accessor_returns_dataarray(self) -> None:
-        """Checks that an eager raster accessor returns a DataArray by default."""
+        """Checks that an in-memory raster accessor returns a DataArray by default."""
 
         # Create an accessor with two bands to check both its output type and default band selection
         values = np.arange(16).reshape((2, 2, 4))
@@ -1417,10 +1419,10 @@ class TestRasterSubsample:
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestRasterSubsampleChunked:
     """
-    Test module for subsample() of rasters across eager, Dask, and multiprocessing backends.
+    Test module for subsample() of rasters across in-memory, Dask, and multiprocessing backends.
 
     Dask outputs must stay lazy until explicitly computed. Multiprocessing inputs and point outputs must stay unloaded,
-    and both chunked backends must return the same values as an eager conversion.
+    and both chunked backends must return the same values as an in-memory conversion.
     """
 
     @pytest.mark.parametrize("backend", ["dask", "multiprocessing"])
@@ -1479,7 +1481,7 @@ class TestRasterSubsampleChunked:
             computed_values = result.gdf["b1"].to_numpy()
             assert not source.is_loaded
 
-        # Compare with the eager result
+        # Compare with the in-memory result
         np.testing.assert_array_equal(np.sort(computed_values), np.sort(expected_values))
 
     @pytest.mark.parametrize("backend", ["dask", "multiprocessing"])
@@ -1489,7 +1491,7 @@ class TestRasterSubsampleChunked:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        """Checks that forcing memory output bypasses cutoff search and returns eager raster point rows."""
+        """Checks that forcing memory output bypasses cutoff search and returns in-memory raster point rows."""
 
         from geoutils.sampling import subsampling as subsampling_module
 
@@ -1530,7 +1532,7 @@ class TestRasterSubsampleChunked:
             assert result.is_loaded and not source.is_loaded
             assert not output_file.exists()
 
-        # Compare with the eager result
+        # Compare with the in-memory result
         gpd.testing.assert_geodataframe_equal(
             actual.reset_index(drop=True), expected.reset_index(drop=True), check_dtype=False
         )
@@ -1808,7 +1810,7 @@ class TestRasterSubsampleChunked:
             mp_config=MultiprocConfig(chunks=(3, 4), outfile=str(output_file)),
         )
 
-        # Compare tile-ordered file rows with the eager sample after sorting both by X/Y coordinates
+        # Compare tile-ordered file rows with the in-memory sample after sorting both by X/Y coordinates
         assert output_file.exists() and not source.is_loaded and not result.is_loaded
         assert result.data_name == "Z"
         result.load(columns=["Z", "quality"])

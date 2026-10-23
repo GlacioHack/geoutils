@@ -218,7 +218,7 @@ class TestPointCloudFilterChunked:
         self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
     ) -> None:
         """
-        Checks that filtering with max_points=2 stays lazy with Dask/MP and matches eager results.
+        Checks that filtering with max_points=2 stays lazy with Dask/MP and matches in-memory results.
         """
 
         dgpd = pytest.importorskip("dask_geopandas")
@@ -259,7 +259,7 @@ class TestPointCloudFilterChunked:
         assert dask_filtered.pc.data_name == "height"
         assert dask_filtered.pc.point_count == len(self.points)
 
-        # Check unloaded inputs/outputs and metadata, then compare rows with eager filtering
+        # Check unloaded inputs/outputs and metadata, then compare rows with in-memory filtering
         assert not source.is_loaded and not mp_filtered.is_loaded
         assert mp_filtered.point_count == len(self.points)
         assert mp_filtered.data_name == "height"
@@ -279,7 +279,7 @@ class TestPointCloudFilterChunked:
     def test_filter__dask_z_geometry(
         self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
     ) -> None:
-        """Checks that Dask filtering updates geometry Z across partitions and matches eager values."""
+        """Checks that Dask filtering updates geometry Z across partitions and matches in-memory values."""
 
         dgpd = pytest.importorskip("dask_geopandas")
 
@@ -295,7 +295,7 @@ class TestPointCloudFilterChunked:
         frame.to_file(source_filename, index=False)
         lazy = gu.open_pointcloud(str(source_filename), data_name=None, chunks=2, as_object_type=as_object_type)
 
-        # We filter the same for eager/lazy
+        # We filter the same for in-memory/lazy
         expected = gu.PointCloud(frame, data_name=None).filter(method="mean", radius=1.1)
         filtered = lazy.pc.filter(method="mean", radius=1.1)
 

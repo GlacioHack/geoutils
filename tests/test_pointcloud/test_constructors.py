@@ -80,7 +80,7 @@ class TestPointCloudConstructorsChunked:
     def test_from_xyz__loading_laziness(
         self, as_object_type: Literal["dataarray", "dataset", "geodataframe"], lazy_field: str, use_z: bool
     ) -> None:
-        """Checks lazy construction runs no tasks and exactly matches eager construction."""
+        """Checks lazy construction runs no tasks and exactly matches in-memory construction."""
         pytest.importorskip("dask")
         import dask.array as da
         from dask.callbacks import Callback

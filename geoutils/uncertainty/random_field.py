@@ -339,11 +339,11 @@ def _draw_error_chunk(
 
 
 ############################################
-# 2/ EAGER RANDOM FIELD
+# 2/ IN-MEMORY RANDOM FIELD
 ############################################
 
 
-def _eager_random_fields(
+def _random_fields_in_memory(
     error_structure: ErrorStructure,
     coordinates: ArrayLike | None,
     predictors: Mapping[str, Any] | None,
@@ -664,7 +664,7 @@ def _array_point_fields_dask(
 
     from geoutils.uncertainty.predictors import _point_array_predictors
 
-    # Global row numbers make independent noise identical to an eager draw
+    # Global row numbers make independent noise identical to an in-memory draw
     source = like._dataset.chunk({like._dataset.dims[0]: chunksize}) if chunksize is not None else like._dataset
     chunks = source.chunks[0] if source.chunks is not None else (like.point_count,)
     indexes = xr.DataArray(da.arange(like.point_count, chunks=chunks), dims=source.dims)
@@ -1033,7 +1033,7 @@ def random_field(
         GeoDataFrames cannot use multiprocessing because its output has a different type.
     :param backend: Library used to draw correlated errors; GPyTorch is the default.
     :param gpytorch_inducing_points: Target grid size for approximate GPyTorch fields. The default, "auto", uses
-        256 points for spatial inputs and an exact draw for plain coordinates. Pass None for an exact eager draw.
+        256 points for spatial inputs and an exact draw for plain coordinates. Pass None for an exact in-memory draw.
     :returns: With like, a result of the same spatial object type, or a list when n_fields > 1. Dask results remain
         lazy. Multiprocessing Raster and PointCloud results are file-backed. Without like, an array of shape
         (n_observations,) or (n_fields, n_observations).
@@ -1109,7 +1109,7 @@ def random_field(
             )
         coordinates = coordinate_array
 
-    # 2/ Dispatch to Dask/multiprocessing/eager backends, differentiating point/raster output
+    # 2/ Dispatch to Dask/multiprocessing/in-memory backends, differentiating point/raster output
 
     # Raster
     if isinstance(like, RasterBase):
@@ -1166,8 +1166,8 @@ def random_field(
                 gpytorch_inducing_points=gpytorch_inducing_points,
             )
 
-    # Eager for both point/raster
-    return _eager_random_fields(
+    # In-memory for both point/raster
+    return _random_fields_in_memory(
         error_structure,
         coordinates,
         predictors,

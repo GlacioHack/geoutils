@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
@@ -29,14 +30,25 @@ import pandas as pd
 import xarray as xr
 from scipy.optimize import curve_fit
 
+from geoutils._dispatch import _get_raster_interface, is_dask_array
 from geoutils._misc import import_optional
-from geoutils._typing import NDArrayNum
+from geoutils._typing import ArrayLike, NDArrayNum
+from geoutils.stats.reduction import (
+    _check_input_flox_engine,
+    _check_input_reduction_method,
+    _check_input_tdigest,
+    _digest_quantile,
+    _groupby_reduce_flox,
+    _groupby_reduce_geoutils,
+)
 
 if TYPE_CHECKING:
+    from geoutils.multiproc import MultiprocConfig
     from geoutils.pointcloud.base import PointCloudBase
-    from geoutils.raster.base import RasterBase
+    from geoutils.raster.base import RasterBase, RasterLike
+    from geoutils.vector.base import VectorLike
 
-__all__ = ["Variogram"]
+__all__ = ["Variogram", "variogram"]
 
 
 #############################
@@ -577,7 +589,13 @@ class Variogram:
         pairs: xr.Dataset,
         *,
         estimator: str | Callable[[NDArrayNum], float] = "dowd",
+        percentile: float = 50,
         bins: Literal["log", "uniform"] | Iterable[float] = "log",
+        reduction_backend: Literal["geoutils", "flox"] = "geoutils",
+        flox_engine: str | None = None,
+        method: Literal["auto", "map-reduce", "groupwise"] = "auto",
+        tdigest_compression: float = 100,
+        mp_config: MultiprocConfig | None = None,
         n_lags: int = 24,
         min_lag: float | None = None,
         max_lag: float | None = None,
@@ -589,7 +607,20 @@ class Variogram:
         soon as the per-distance statistics have been computed.
 
         :param pairs: Dataset returned by Raster.pairsample() or PointCloud.pairsample().
-        :param estimator: SciKit-GStat estimator name or a function accepting absolute pair differences.
+        :param estimator: SciKit-GStat estimator name ("matheron", "cressie", "dowd", "genton", "minmax",
+            "entropy" or "percentile") or a function accepting absolute pair differences. Exact chunk reductions
+            support "matheron", "cressie" and "minmax". With either backend, map-reduce uses t-digests for "dowd"
+            and "percentile" estimates. Use method="groupwise" for exact complete-bin calculations.
+            Other native estimators gather pair arrays before calculating each bin.
+        :param percentile: Percentile from 0 to 100 for estimator="percentile" (default 50), exact or approximate.
+        :param reduction_backend: Native GeoUtils or optional Flox reduction; the default remains GeoUtils.
+        :param flox_engine: Local Flox reduction algorithm: None (automatic), "numpy", "numba", "flox" or "numbagg".
+            This is independent of Dask/MP execution. The "numbagg" engine does not support t-digests.
+        :param method: Calculate complete bins exactly ("groupwise") or combine summaries ("map-reduce").
+            "auto" uses t-digests for Dowd and percentiles, and complete bins for other nonmergeable estimators.
+        :param tdigest_compression: Digest accuracy/memory setting from 20 to 1000 (default 100).
+        :param mp_config: Worker and pair batch settings for reduction. Dask-backed pair slices are read inside
+            workers without gathering complete columns; the input dataset remains lazy.
         :param bins: ``"log"``, ``"uniform"`` or explicit distance boundaries.
         :param n_lags: Number of distance bins used for named binning.
         :param min_lag: Lower distance boundary. Defaults to the smallest positive pair distance.
@@ -597,7 +628,7 @@ class Variogram:
         :returns: Per-distance variogram values with no retained pair data.
         """
 
-        # Check the expected Xarray pair layout before reading endpoint values
+        # 1/ Check pair layout and reduction options
         required = {"distance", "value"}
         if not isinstance(pairs, xr.Dataset) or not required.issubset(pairs.data_vars):
             raise TypeError("Argument ``pairs`` must be an Xarray Dataset containing 'distance' and 'value'.")
@@ -608,49 +639,86 @@ class Variogram:
         if pairs["distance"].dims != ("pair",):
             raise ValueError("Variable 'distance' in argument ``pairs`` must have dimensions ('pair',).")
 
-        # Calculate the absolute value difference in each pair and remove missing pairs
-        distances = np.asarray(pairs["distance"], dtype=float)
-        endpoint_values = np.asarray(pairs["value"], dtype=float)
+        # Check backend/reducer options
+        mergeable = _check_input_variogram_reduction(
+            estimator,
+            reduction_backend,
+            flox_engine,
+            method,
+            tdigest_compression,
+            percentile,
+            mp_config,
+        )
+
+        if pairs.sizes["pair"] == 0:
+            raise ValueError("Argument ``pairs`` contains no finite observations with positive distance.")
+
+        # 2/ Prepare pair differences and distance bins
+        distances = pairs["distance"].data.astype(np.float64)
+        endpoint_values = pairs["value"].data.astype(np.float64)
         differences = np.abs(endpoint_values[:, 0] - endpoint_values[:, 1])
         valid = np.isfinite(distances) & np.isfinite(differences) & (distances > 0)
+        edges, binning = _variogram_bin_edges(pairs, distances, valid, bins, n_lags, min_lag, max_lag)
+
+        # 3/ Reduce mergeable estimators across pair batches
+        if mergeable:
+            assert isinstance(estimator, str)
+            experimental, counts, lag_centers = _reduce_variogram_pairs(
+                distances,
+                differences,
+                valid,
+                edges,
+                estimator,
+                reduction_backend,
+                flox_engine,
+                tdigest_compression,
+                percentile,
+                mp_config,
+            )
+            return cls(
+                lags=lag_centers,
+                semivariance=experimental,
+                counts=counts,
+                semivariance_error=np.full(len(experimental), np.nan),
+                bin_lower_edges=edges[:-1],
+                bin_edges=edges[1:],
+                estimator=estimator,
+                distance="euclidean",
+                binning=binning,
+                attrs={
+                    **pairs.attrs,
+                    "pair_count": int(np.sum(counts)),
+                    "reduction_backend": reduction_backend,
+                    "flox_engine": flox_engine,
+                    "method": "map-reduce",
+                    **({"percentile": percentile} if estimator == "percentile" else {}),
+                    **(
+                        {"approximation": {"method": "tdigest", "compression": tdigest_compression}}
+                        if estimator in {"dowd", "percentile"}
+                        else {}
+                    ),
+                },
+            )
+
+        # 4/ Calculate other estimators from complete bins
+        if is_dask_array(distances) or is_dask_array(differences):
+            distances, differences, valid = import_optional("dask").compute(distances, differences, valid)
         distances, differences = distances[valid], differences[valid]
         if distances.size == 0:
             raise ValueError("Argument ``pairs`` contains no finite observations with positive distance.")
 
-        # Build log-spaced or equal-width bins, or check the caller's exact bin edges
-        binning: str
-        if isinstance(bins, str):
-            # Use the requested sampling limits when available so repeated runs share the same bins
-            minimum = float(pairs.attrs.get("min_distance", np.min(distances))) if min_lag is None else float(min_lag)
-            maximum = float(pairs.attrs.get("max_distance", np.max(distances))) if max_lag is None else float(max_lag)
-            if not 0 < minimum < maximum:
-                raise ValueError("Require 0 < ``min_lag`` < ``max_lag``.")
-            if n_lags < 1 or bins not in {"log", "uniform"}:
-                raise ValueError("Argument ``bins`` must be 'log' or 'uniform', with ``n_lags`` at least one.")
-            edges = (
-                np.geomspace(minimum, maximum, n_lags + 1)
-                if bins == "log"
-                else np.linspace(minimum, maximum, n_lags + 1)
-            )
-            binning = bins
-        else:
-            edges = np.asarray(tuple(bins), dtype=float)
-            if edges.ndim != 1 or len(edges) < 2 or not np.all(np.diff(edges) > 0):
-                raise ValueError("Argument ``bins`` must contain at least two increasing lag boundaries.")
-            binning = "explicit"
-
-        # Choose the named semivariance formula or use the caller's function
+        # Choose semivariance, or use custom function
         if callable(estimator):
             estimator_function = estimator
             estimator_name = getattr(estimator, "__name__", "callable")
         else:
             skgstat = import_optional("skgstat", package_name="scikit-gstat")
-            if not hasattr(skgstat.estimators, estimator):
-                raise ValueError(f"Unknown SciKit-GStat ``estimator`` {estimator!r}.")
             estimator_function = getattr(skgstat.estimators, estimator)
+            if estimator == "percentile":
+                estimator_function = partial(estimator_function, p=percentile)
             estimator_name = estimator
 
-        # Assign each pair to one distance bin, including both outer edges
+        # We assign each pair to one distance bin, including both outer edges
         membership = np.digitize(distances, edges, right=True) - 1
         membership[distances == edges[0]] = 0
         experimental = np.full(len(edges) - 1, np.nan, dtype=float)
@@ -669,7 +737,7 @@ class Variogram:
                 experimental[index] = float(estimator_function(sorted_differences[start:stop]))
                 lag_centers[index] = float(np.mean(sorted_distances[start:stop]))
 
-        # Return only per-bin arrays and plain source details that can be saved
+        # 5/ Construct the variogram result
         return cls(
             lags=lag_centers,
             semivariance=experimental,
@@ -680,7 +748,12 @@ class Variogram:
             estimator=estimator_name,
             distance="euclidean",
             binning=binning,
-            attrs={**pairs.attrs, "pair_count": int(np.sum(counts))},
+            attrs={
+                **pairs.attrs,
+                "pair_count": int(np.sum(counts)),
+                "method": "groupwise",
+                **({"percentile": percentile} if estimator == "percentile" else {}),
+            },
         )
 
     def fit(
@@ -1296,46 +1369,385 @@ class Variogram:
 ############################
 
 
-def _estimate_variogram(
-    source: RasterBase | PointCloudBase,
-    *,
-    n_runs: int,
+# We list accepted SciKit-GStat names and their implemented chunk reductions (None requires complete pair arrays)
+_VARIOGRAM_ESTIMATORS = {
+    "matheron": "exact",
+    "cressie": "exact",
+    "dowd": "tdigest",
+    "genton": None,
+    "minmax": "exact",
+    "entropy": None,
+    "percentile": "tdigest",
+}
+
+
+def _check_input_variogram_reduction(
     estimator: str | Callable[[NDArrayNum], float],
+    backend: str,
+    engine: str | None,
+    method: str,
+    compression: float,
+    percentile: float = 50,
+    mp_config: MultiprocConfig | None = None,
+) -> bool:
+    """Check various user inputs for variogram reduction (backend, engine), also accounting for supported estimators."""
+
+    # Backend checks
+    if backend not in {"geoutils", "flox"}:
+        raise ValueError("Argument reduction_backend must be 'geoutils' or 'flox'.")
+    if backend == "flox" and mp_config is not None:
+        raise ValueError("The Flox backend does not support multiprocessing.")
+    _check_input_flox_engine(backend, engine)
+    if method not in {"auto", "map-reduce", "groupwise"}:
+        raise ValueError("Argument method must be 'auto', 'map-reduce' or 'groupwise' for variograms.")
+    _check_input_reduction_method(backend, method, None)
+
+    # Estimator name checks
+    if isinstance(estimator, str):
+        if estimator not in _VARIOGRAM_ESTIMATORS:
+            choices = ", ".join(repr(name) for name in _VARIOGRAM_ESTIMATORS)
+            raise ValueError(
+                f"Unknown SciKit-GStat estimator {estimator!r}. Choose from {choices}, or pass a callable."
+            )
+        reduction = _VARIOGRAM_ESTIMATORS[estimator]
+    elif callable(estimator):
+        reduction = None
+    else:
+        raise TypeError("Argument estimator must be a SciKit-GStat estimator name or a callable.")
+
+    # Validate percentile settings before selecting complete bins or mergeable summaries
+    if not np.isfinite(percentile) or not 0 <= percentile <= 100:
+        raise ValueError("Argument percentile must be finite and between 0 and 100.")
+    if estimator != "percentile" and percentile != 50:
+        raise ValueError("Argument percentile requires estimator='percentile'.")
+    mergeable = reduction is not None and method != "groupwise"
+    if backend == "flox" and not mergeable:
+        name = repr(estimator) if isinstance(estimator, str) else "a custom callable"
+        raise ValueError(
+            "The Flox variogram backend supports exact 'matheron'/'cressie'/'minmax', "
+            "or t-digest 'dowd'/'percentile'. "
+            f"Estimator {name} has no registered chunk reduction. "
+            "Use reduction_backend='geoutils', method='groupwise' to calculate it from complete pair arrays."
+        )
+    if method == "map-reduce" and not mergeable:
+        raise ValueError("This estimator requires method='groupwise' or 'auto'.")
+
+    # Import optional packages after checks
+    _check_input_tdigest(compression)
+    if mergeable and reduction == "tdigest":
+        import_optional("crick", extra_name="num")
+    if backend == "flox":
+        import_optional("flox", extra_name="num")
+    return mergeable
+
+
+def _variogram_bin_edges(
+    pairs: xr.Dataset,
+    distances: Any,
+    valid: Any,
     bins: Literal["log", "uniform"] | Iterable[float],
     n_lags: int,
     min_lag: float | None,
     max_lag: float | None,
-    models: str | Callable[..., Any] | Sequence[str | Callable[..., Any]] | None,
-    fit_kwargs: Mapping[str, Any] | None,
-    random_state: int | np.random.Generator | None,
-    pair_kwargs: Mapping[str, Any],
+) -> tuple[NDArrayNum, str]:
+    """Build variogram bins edges, supporting Dask."""
+
+    # If edges are explicit, we don't need to scan the pairs Xarray dataset
+    if not isinstance(bins, str):
+        edges = np.asarray(tuple(bins), dtype=np.float64)
+        if edges.ndim != 1 or len(edges) < 2 or not np.all(np.diff(edges) > 0):
+            raise ValueError("Argument ``bins`` must contain at least two increasing lag boundaries.")
+        return edges, "explicit"
+    if n_lags < 1 or bins not in {"log", "uniform"}:
+        raise ValueError("Argument ``bins`` must be 'log' or 'uniform', with ``n_lags`` at least one.")
+
+    # Otherwise we determine min/max, using attribute inputs if they exist
+    minimum = pairs.attrs.get("min_distance") if min_lag is None else min_lag
+    maximum = pairs.attrs.get("max_distance") if max_lag is None else max_lag
+    if minimum is None or maximum is None:
+        if is_dask_array(valid):
+            import_optional("dask")
+            import dask.array as module
+        else:
+            module = np
+        pending = {}
+        if minimum is None:
+            pending["minimum"] = module.min(module.where(valid, distances, np.inf))
+        if maximum is None:
+            pending["maximum"] = module.max(module.where(valid, distances, -np.inf))
+        if module is not np:
+            pending = dict(zip(pending, import_optional("dask").compute(*pending.values())))
+        minimum = pending.get("minimum", minimum)
+        maximum = pending.get("maximum", maximum)
+        if minimum == np.inf or maximum == -np.inf:
+            raise ValueError("Argument ``pairs`` contains no finite observations with positive distance.")
+    minimum, maximum = float(minimum), float(maximum)
+    if not 0 < minimum < maximum:
+        raise ValueError("Require 0 < ``min_lag`` < ``max_lag``.")
+    edges = np.geomspace(minimum, maximum, n_lags + 1) if bins == "log" else np.linspace(minimum, maximum, n_lags + 1)
+    return edges, bins
+
+
+def _reduce_variogram_pairs(
+    distances: Any,
+    differences: Any,
+    valid: Any,
+    edges: NDArrayNum,
+    estimator: str,
+    backend: str,
+    engine: str | None,
+    compression: float,
+    percentile: float,
+    mp_config: MultiprocConfig | None = None,
+) -> tuple[NDArrayNum, NDArrayNum, NDArrayNum]:
+    """
+    Compute variogram estimators on pairs with chunked support (Dask/multiprocessing).
+
+    This function uses the same logic as stats(), differentiating mergeable variogram estimators like Matheron (can
+    be computed as a sum of chunks of pairs within a bin), to approximate ones like Dowd (using approximate t-digest),
+    and non-mergeable ones (Genton).
+
+    We use reductions functions _groupby_reduce_geoutils() and _groupby_reduce_flox(), used in stats() to return
+    counts, sums, extrema and t-digests.
+
+    Estimators and support:
+
+    - "matheron", "cressie" and "minmax" use exact chunk reductions.
+    - "dowd" and "percentile" use t-digest approximations.
+    - "genton", "entropy" and custom callables require complete lag bins and are handled separately.
+    """
+
+    # 1/ Align pair columns and assign distance bins
+
+    use_dask = any(is_dask_array(array) for array in (distances, differences, valid))
+    if use_dask:
+        import dask.array as module
+
+        distances = module.asarray(distances).rechunk(valid.chunks)
+        differences = module.asarray(differences).rechunk(valid.chunks)
+    else:
+        module = np
+
+    # Assign valid out-of-bin pairs to one extra group, and exclude invalid pairs
+    n_bins = len(edges) - 1
+    membership = module.digitize(distances, edges, right=True) - 1
+    membership = module.where(distances == edges[0], 0, membership)
+    in_bin = (membership >= 0) & (membership < n_bins)
+    groups = module.where(valid, module.where(in_bin, membership, n_bins), -1).astype(np.int64)
+
+    # 2/ Select summaries for the variogram estimator
+
+    # We define summaries needed by each empirical variogram estimator
+    use_tdigest = estimator in {"dowd", "percentile"}
+    if use_tdigest:
+        # Dowd needs the median absolute difference, and percentile needs the requested quantile
+        # We can merge t-digests across chunks
+        estimator_reductions = {"digest"}
+    elif estimator == "matheron":
+        # Matheron uses squared absolute differences, with sums that add exactly across chunks
+        estimator_reductions = {"sumofsquares"}
+    elif estimator == "minmax":
+        # MinMax uses the range divided by the mean absolute difference
+        estimator_reductions = {"sum", "min", "max"}
+    elif estimator == "cressie":
+        # Cressie averages square roots of absolute differences to reduce the influence of outliers
+        # We sum the transformed differences now and will apply the fourth power after merging chunks
+        differences = module.sqrt(differences)
+        estimator_reductions = {"sum"}
+    else:
+        raise ValueError(f"Estimator {estimator!r} has no chunk reduction.")
+
+    # 3/ Reduce each chunk and merge its summaries
+    outside = ~in_bin
+    values = [module.ma.masked_array(array, mask=outside) for array in (distances, differences)]
+    reduce = _groupby_reduce_geoutils if backend == "geoutils" else _groupby_reduce_flox
+    _, sizes, state = reduce(
+        values,
+        groups,
+        n_bins + 1,
+        [{"sum"}, estimator_reductions],
+        engine,
+        compression,
+        method="map-reduce",
+        reindex=True if backend == "geoutils" else None,
+        mp_config=mp_config,
+    )
+
+    # 4/ Calculate pair counts and mean distances in each bin
+
+    if not sizes.sum():
+        raise ValueError("Argument ``pairs`` contains no finite observations with positive distance.")
+
+    # We count pairs using distances (so numerical overflow errors in sums do not affect the result)
+    counts = state["count"][0, :n_bins]
+    occupied = counts > 0
+    # Empty bins have zero counts and NaN lag centers
+    lags = np.divide(state["sum"][0, :n_bins], counts, out=np.full(n_bins, np.nan), where=occupied)
+
+    # 5/ Finally, we calculate variogram estimates from the merged summaries
+
+    if use_tdigest:
+        probability = percentile / 100 if estimator == "percentile" else 0.5
+        quantiles = _digest_quantile(state["digest"][1, :n_bins], q=probability)
+        if estimator == "percentile":
+            # Match SciKit-GStat absolute-difference quantile
+            semivariance = quantiles
+        elif estimator == "dowd":
+            # Dowd: square median, multiply by 2.198 and 0.5
+            semivariance = 0.5 * 2.198 * np.square(quantiles)
+    else:
+        # We normalize the merged sums by all pairs in the bin
+        name = "sumofsquares" if estimator == "matheron" else "sum"
+        means = np.divide(state[name][1, :n_bins], counts, out=np.full(n_bins, np.nan), where=occupied)
+        if estimator == "matheron":
+            # Matheron: simply times 0.5 to get semivar
+            semivariance = means / 2
+        elif estimator == "minmax":
+            # We merge across the whole bin, then divide their range by the mean absolute difference
+            # (zero makes the ratio undefined, so leave those bins as NaN)
+            difference_range = state["max"][1, :n_bins] - state["min"][1, :n_bins]
+            semivariance = np.divide(
+                difference_range, means, out=np.full(n_bins, np.nan), where=occupied & (means != 0)
+            )
+        elif estimator == "cressie":
+            # We apply the Cressie correction using the total bin count
+            correction = np.full(n_bins, np.nan)
+            sample_counts = counts[occupied].astype(np.float64)
+            correction[occupied] = 0.457 + 0.494 / sample_counts + 0.045 / sample_counts**2
+            # And apply 4th power and /2 correction
+            semivariance = means**4 / (2 * correction)
+
+    return semivariance, counts, lags
+
+
+def variogram(
+    source: RasterBase | PointCloudBase,
+    *,
+    band: int | None = None,
+    n_pairs: int = 1_000_000,
+    sampling: Literal["loglag", "random_xy"] = "loglag",
+    estimator: str | Callable[[NDArrayNum], float] = "dowd",
+    percentile: float = 50,
+    reduction_backend: Literal["geoutils", "flox"] = "geoutils",
+    flox_engine: str | None = None,
+    method: Literal["auto", "map-reduce", "groupwise"] = "auto",
+    tdigest_compression: float = 100,
+    mp_config: MultiprocConfig | None = None,
+    bins: Literal["log", "uniform"] | Iterable[float] = "log",
+    n_lags: int = 24,
+    min_lag: float | None = None,
+    max_lag: float | None = None,
+    n_runs: int = 1,
+    model: str | Callable[..., Any] | list[str | Callable[..., Any]] | None = None,
+    fit_kwargs: dict[str, Any] | None = None,
+    random_state: int | np.random.Generator | None = None,
+    mask: RasterLike | VectorLike | ArrayLike | None = None,
+    **pair_sampling_kwargs: Any,
 ) -> Variogram:
     """
-    Sample one or more pair sets and combine their per-distance variogram values.
+    Estimate a variogram from spatial pairs efficiently sampled from a raster or point cloud.
 
-    Each run calls the source pairsample() method, then Variogram.from_pairs() groups value differences by distance.
-    Repeated runs share the first run's bins and are combined before Variogram.fit() fits any requested model.
+    This function supports chunked execution with Dask or multiprocessing, for large datasets.
 
-    Source, estimation, binning, repetition, fitting, and random-state options are documented by
-    geoutils.stats.variogram().
+    The output Variogram object can be re-fit with ``fit()``, plotted with ``plot()`` or exported
+    to various formats (e.g., GSTools, GPyTorch) with for example ``to_gstools()``. It can also be passed to
+    resampling and gridding function supporting kriging in GeoUtils.
 
-    :param models: Public model argument forwarded to Variogram.fit(): one model or a sequence of models to sum,
-        or None to keep only the measured variogram.
-    :param pair_kwargs: Complete options for source.pairsample(), including sample size, mask, distance limits,
-        and any source-specific controls. This function supplies a separate random_state for each run.
-    :returns: Variogram with mean measurements and total pair counts across runs, sampling errors when repeated,
-        and any requested fitted model.
+    The empirical variogram's ``sampling`` uses pairwise logarithmic distance "loglag" by default to efficiently
+    capture both short distances and large distances on large datasets, which typically outperforms random
+    endpoints selection ("random_xy").
+    Both options support out-of-memory execution through Dask for raster inputs.
+
+    SciKit-GStat supplies the semivariance estimators and theoretical model formulas. GeoUtils fits the chosen
+    model to the measured distance bins with SciPy curve_fit().
+
+    Raster variograms reuse accepted endpoint values by default to avoid reading them again during reduction.
+    Pass ``read_strategy="native"`` or ``"packed_validity"`` to choose another policy. For multiprocessing raster
+    inputs, ``output_chunks`` also sets the number of pairs in each reduction batch (default 100,000).
+
+    :param source: Raster or point cloud whose spatial variability is estimated.
+    :param band: Raster band to sample, counting from 1. Omit for a point cloud.
+    :param n_pairs: Number of finite pairs targeted in each run (e.g. 100_000).
+    :param sampling: How to select pairs: ``"loglag"`` balances short and long distances, while ``"random_xy"``
+        selects endpoints independently.
+    :param estimator: Semivariance estimator from SciKit-GStat: ``"dowd"``, ``"matheron"``, ``"cressie"``,
+        ``"genton"``, ``"minmax"``, ``"entropy"`` or ``"percentile"``. A function can instead map absolute pair
+        differences to one value per distance bin.
+    :param percentile: Percentile from 0 to 100 for estimator="percentile" (default 50), exact or approximate.
+    :param reduction_backend: GeoUtils or optional Flox grouped reduction of pair differences.
+    :param flox_engine: Local Flox reduction algorithm: None (automatic), "numpy", "numba", "flox" or "numbagg".
+        This is independent of Dask/MP execution. The "numbagg" engine does not support t-digests.
+    :param method: Calculate complete bins exactly ("groupwise") or combine summaries ("map-reduce").
+        "auto" uses t-digests for Dowd and percentiles, and complete bins for other nonmergeable estimators.
+    :param tdigest_compression: Digest accuracy/memory setting from 20 to 1000 (default 100).
+    :param mp_config: Worker and tile settings for sampling and pair reduction. Cannot be combined with
+        Dask source inputs. File-backed sources stay unloaded.
+    :param bins: Distance bins: ``"log"`` for logarithmic spacing, ``"uniform"`` for equal widths, or explicit
+        edges (e.g. [1, 10, 100]).
+    :param n_lags: Number of distance bins when bins is ``"log"`` or ``"uniform"``.
+    :param min_lag: Minimum sampled distance in CRS units; defaults to the smaller pixel spacing or half the estimated
+        point spacing.
+    :param max_lag: Maximum sampled distance in CRS units; defaults to the diagonal of the source locations.
+    :param n_runs: Independent samples to average; repeat sampling to estimate each distance bin's standard error.
+    :param model: SciKit-GStat model to fit: ``"spherical"``, ``"exponential"``, ``"gaussian"``, ``"cubic"``,
+        ``"stable"`` or ``"matern"``, or the corresponding model function. Sum a list of models ordered from short
+        to long range (e.g. ["spherical", "exponential"]). ``None`` keeps only the empirical variogram.
+    :param fit_kwargs: Options for Variogram.fit(): ``use_nugget``, ``bounds``, ``p0`` or ``maxfev``
+        (e.g. {"use_nugget": True}); optimization uses SciPy curve_fit().
+    :param random_state: Seed or NumPy generator for reproducible sampling across runs (e.g. 42).
+    :param mask: Locations to keep: True values in a boolean mask, an aligned mask raster for raster inputs,
+        or locations inside vector geometries.
+    :param pair_sampling_kwargs: Extra pairsample() options for the source (e.g. ``strategy`` or ``max_rounds``).
+    :returns: Variogram with distance bins, pair counts and semivariance, plus sampling errors and a fitted model
+        when requested.
     """
+
+    # 1/ Check user inputs
+
+    # Check variogram reduction option
+    _check_input_variogram_reduction(
+        estimator,
+        reduction_backend,
+        flox_engine,
+        method,
+        tdigest_compression,
+        percentile,
+        mp_config,
+    )
 
     # Check the repeat count before creating one random seed per run
     if not isinstance(n_runs, (int, np.integer)) or isinstance(n_runs, bool) or n_runs < 1:
         raise ValueError("Argument ``n_runs`` must be a positive integer.")
+
+    # 2/ Prepare pair sampling options, random seeds and distance bins
+
+    # Keep raster band selection out of point pair sampling kwargs
+    pair_kwargs: dict[str, Any] = {} if band is None else {"band": band}
+    pair_kwargs.update(
+        {
+            "n_pairs": n_pairs,
+            "sampling": sampling,
+            "min_distance": min_lag,
+            "max_distance": max_lag,
+            "mask": mask,
+            "mp_config": mp_config,
+        }
+    )
+    pair_kwargs.update(pair_sampling_kwargs)
+
+    # Reuse sampled raster values without allocating a validity bitmap for the whole source
+    is_raster = _get_raster_interface(source) is not None
+    if is_raster:
+        pair_kwargs.setdefault("read_strategy", "reuse_values")
+
     rng = random_state if isinstance(random_state, np.random.Generator) else np.random.default_rng(random_state)
     seeds = rng.integers(0, np.iinfo(np.int32).max, n_runs)
 
     # Materialize explicit boundaries once because a generator cannot be read by every repeated run
     if not isinstance(bins, str):
         bins = tuple(bins)
+
+    # 3/ Sample pairs and calculate a variogram, optionally for multiple runs
 
     def run(seed: np.integer[Any], bin_spec: Literal["log", "uniform"] | Iterable[float]) -> Variogram:
         """
@@ -1347,10 +1759,22 @@ def _estimate_variogram(
 
         # Convert one pair sample to per-distance values and then release the pairs
         pairs = source.pairsample(random_state=int(seed), **pair_kwargs)
+
+        # Reduce raster pairs in their output batches instead of using the spatial tile width as a row count
+        reduction_config = mp_config
+        if is_raster and mp_config is not None:
+            reduction_config = mp_config.copy()
+            reduction_config.chunks = int(pair_kwargs.get("output_chunks", 100_000))
         return Variogram.from_pairs(
             pairs,
             estimator=estimator,
+            percentile=percentile,
+            reduction_backend=reduction_backend,
+            flox_engine=flox_engine,
+            method=method,
+            tdigest_compression=tdigest_compression,
             bins=bin_spec,
+            mp_config=reduction_config,
             n_lags=n_lags,
             min_lag=min_lag,
             max_lag=max_lag,
@@ -1358,47 +1782,50 @@ def _estimate_variogram(
 
     # Build distance bins from the first run so all later runs use the same edges
     first = run(seeds[0], bins)
+
+    # 4/ Combine repeated variogram samplings (if more than one run), to get an idea of variability
     if n_runs == 1:
         result = replace(first, attrs={**first.attrs, "n_runs": 1})
-        return result if models is None else result.fit(models, **dict(fit_kwargs or {}))
+    else:
+        # Draw each remaining sample through the object's own raster or point implementation
+        shared_bins: Literal["log", "uniform"] | Iterable[float] = bins
+        if isinstance(bins, str):
+            assert first.bin_lower_edges is not None and first.bin_edges is not None
+            shared_bins = np.r_[first.bin_lower_edges[0], first.bin_edges]
 
-    # Draw each remaining sample through the object's own raster or point implementation
-    shared_bins: Literal["log", "uniform"] | Iterable[float] = bins
-    if isinstance(bins, str):
-        assert first.bin_lower_edges is not None and first.bin_edges is not None
-        shared_bins = np.r_[first.bin_lower_edges[0], first.bin_edges]
+        runs = [first, *[run(seed, shared_bins) for seed in seeds[1:]]]
 
-    runs = [first, *[run(seed, shared_bins) for seed in seeds[1:]]]
+        # Stack the small per-distance arrays from all runs
+        semivariances = np.vstack([run_result.semivariance for run_result in runs])
+        lag_centers = np.vstack([run_result.lags for run_result in runs])
+        counts = np.sum(np.vstack([run_result.counts for run_result in runs]), axis=0)
+        mean_semivariance = np.full(semivariances.shape[1], np.nan)
+        mean_lags = np.full(semivariances.shape[1], np.nan)
+        errors = np.full(semivariances.shape[1], np.nan)
 
-    # Stack the small per-distance arrays from all runs
-    semivariances = np.vstack([run_result.semivariance for run_result in runs])
-    lag_centers = np.vstack([run_result.lags for run_result in runs])
-    counts = np.sum(np.vstack([run_result.counts for run_result in runs]), axis=0)
-    mean_semivariance = np.full(semivariances.shape[1], np.nan)
-    mean_lags = np.full(semivariances.shape[1], np.nan)
-    errors = np.full(semivariances.shape[1], np.nan)
+        # Average each distance bin and calculate sampling error only when runs are repeated
+        for index in range(semivariances.shape[1]):
+            finite_semivariance = semivariances[np.isfinite(semivariances[:, index]), index]
+            finite_lags = lag_centers[np.isfinite(lag_centers[:, index]), index]
+            if finite_semivariance.size:
+                mean_semivariance[index] = np.mean(finite_semivariance)
+            if finite_semivariance.size > 1:
+                errors[index] = np.std(finite_semivariance, ddof=1) / np.sqrt(finite_semivariance.size)
+            if finite_lags.size:
+                mean_lags[index] = np.mean(finite_lags)
 
-    # Average each distance bin and calculate sampling error only when runs are repeated
-    for index in range(semivariances.shape[1]):
-        finite_semivariance = semivariances[np.isfinite(semivariances[:, index]), index]
-        finite_lags = lag_centers[np.isfinite(lag_centers[:, index]), index]
-        if finite_semivariance.size:
-            mean_semivariance[index] = np.mean(finite_semivariance)
-        if finite_semivariance.size > 1:
-            errors[index] = np.std(finite_semivariance, ddof=1) / np.sqrt(finite_semivariance.size)
-        if finite_lags.size:
-            mean_lags[index] = np.mean(finite_lags)
+        # Reuse the first run's bin details with the combined values and counts
+        result = replace(
+            first,
+            lags=mean_lags,
+            semivariance=mean_semivariance,
+            semivariance_error=errors,
+            counts=counts,
+            attrs={**first.attrs, "n_runs": n_runs, "pair_count": int(np.sum(counts))},
+        )
 
-    # Reuse the first run's bin details with the combined values and counts
-    result = replace(
-        first,
-        lags=mean_lags,
-        semivariance=mean_semivariance,
-        semivariance_error=errors,
-        counts=counts,
-        attrs={**first.attrs, "n_runs": n_runs, "pair_count": int(np.sum(counts))},
-    )
-    return result if models is None else result.fit(models, **dict(fit_kwargs or {}))
+    # 5/ Fit model to the empirical variogram
+    return result if model is None else result.fit(model, **dict(fit_kwargs or {}))
 
 
 ################################

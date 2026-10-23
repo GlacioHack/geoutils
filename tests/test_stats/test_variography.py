@@ -5,17 +5,23 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from contextlib import nullcontext
 from importlib.util import find_spec
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pytest
 import xarray as xr
+from affine import Affine
 from rasterio.transform import from_origin
 
 import geoutils as gu
+from geoutils._dispatch import is_dask_array
 from geoutils._typing import NDArrayNum
+from geoutils.multiproc import MultiprocConfig
+from geoutils.multiproc.cluster import MpCluster
+from geoutils.sampling.pairsampling import _RasterPairSource
 from geoutils.stats.variography import VariogramModel
 
 
@@ -39,7 +45,7 @@ class TestVariogramStorage:
         code = (
             "import sys\n"
             "import geoutils\n"
-            "assert not {'skgstat', 'gstools', 'gpytorch', 'torch'}.intersection(sys.modules)\n"
+            "assert not {'skgstat', 'gstools', 'gpytorch', 'torch', 'flox', 'crick'}.intersection(sys.modules)\n"
         )
         # Check inside that process that none of the optional packages was loaded
         subprocess.run([sys.executable, "-c", code], check=True)
@@ -274,12 +280,57 @@ class TestVariogramPlot:
 
 
 class TestVariogramEstimation:
-    """Checks variogram estimation and fitting through raster and point cloud methods.
+    """Test module for variogram estimation and fitting through raster and point cloud methods."""
 
-    The methods cover repeated samples, model names, functions, and the shared pair API.
-    """
+    @pytest.mark.parametrize("read_strategy", ["native", "packed_validity"])
+    def test_variogram__raster_default_cache(self, read_strategy: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Checks that raster variograms reuse accepted values and honor supplied read strategies."""
 
-    def test_object_variogram_aggregates_runs_and_fits_summed_model(self) -> None:
+        # Create missing rows and small batches so sampling needs several endpoint reads
+        values = np.arange(20 * 23, dtype=np.float32).reshape(20, 23)
+        values[:4] = np.nan
+        raster = gu.Raster.from_array(values, from_origin(0, 20, 1, 1), 32633, nodata=-99999)
+        options: dict[str, Any] = {
+            "n_pairs": 127,
+            "n_lags": 6,
+            "estimator": "matheron",
+            "strategy": "independent",
+            "batch_pairs": 47,
+            "max_lag": 6,
+            "random_state": 42,
+        }
+
+        # Record endpoint reads while calling the public variogram method
+        reads: list[int] = []
+        original = _RasterPairSource.read_pairs
+
+        def read_pairs(
+            source: _RasterPairSource, first: NDArrayNum, second: NDArrayNum, **kwargs: Any
+        ) -> tuple[NDArrayNum, NDArrayNum]:
+            """Record each endpoint selection and forward the original read options."""
+
+            reads.append(len(first))
+            return original(source, first, second, **kwargs)
+
+        monkeypatch.setattr(_RasterPairSource, "read_pairs", read_pairs)
+        result = raster.variogram(**options)
+        default_reads = list(reads)
+        reads.clear()
+        expected = raster.variogram(**options, read_strategy=read_strategy)
+
+        # Check equal estimates and the reads avoided by storing accepted values
+        assert result.attrs["read_strategy"] == "reuse_values"
+        assert expected.attrs.get("read_strategy", "native") == read_strategy
+        np.testing.assert_array_equal(result.counts, expected.counts)
+        np.testing.assert_array_equal(result.lags, expected.lags)
+        np.testing.assert_array_equal(result.semivariance, expected.semivariance)
+        if read_strategy == "native":
+            assert reads[:-1] == default_reads
+            assert reads[-1] == 127
+        else:
+            assert reads == [127]
+
+    def test_variogram__runs_summed_model(self) -> None:
         """Checks that Raster.variogram() combines repeated samples and fits a summed model."""
 
         pytest.importorskip("skgstat")
@@ -306,7 +357,7 @@ class TestVariogramEstimation:
         assert result.attrs["n_runs"] == 3
 
     @pytest.mark.parametrize("n_runs", [1, 3])
-    def test_variogram_repetitions_match_independent_samples(self, n_runs: int) -> None:
+    def test_variogram__runs(self, n_runs: int) -> None:
         """Checks that repeated pair samples combine their values, counts, and sampling errors."""
 
         pytest.importorskip("skgstat")
@@ -352,7 +403,7 @@ class TestVariogramEstimation:
         np.testing.assert_array_equal(result.counts, expected.counts)
         np.testing.assert_allclose(result.semivariance, expected.semivariance, equal_nan=True)
 
-    def test_fit_accepts_short_names_and_skgstat_model_functions(self) -> None:
+    def test_variogram__fit_inputs(self) -> None:
         """Checks that fit() accepts SciKit-GStat functions and the short model names used by xDEM."""
 
         # Create exact Gaussian values with the SciKit-GStat function
@@ -389,9 +440,222 @@ class TestVariogramEstimation:
         assert len(result.lags) == 6
         assert result.model is None
 
+    @pytest.mark.parametrize("source_kind", ["raster", "pointcloud"])
+    def test_variogram__percentile(self, source_kind: str) -> None:
+        """Checks that variogram runs use the percentile properly."""
+
+        # Create raster or point data
+        pytest.importorskip("skgstat")
+        y, x = np.mgrid[:9, :11]
+        values = np.sin(x / 3) + np.cos(y / 5)
+        source: Any
+        if source_kind == "raster":
+            source = gu.Raster.from_array(values, from_origin(0, 9, 1, 1), 32633)
+        else:
+            source = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), values.ravel(), crs=32633)
+        options = {"n_pairs": 100, "n_runs": 2, "bins": [0.5, 2, 4, 8, 16], "random_state": 42}
+
+        # Independent function to check
+        def percentile_90(differences: NDArrayNum) -> float:
+            return float(np.percentile(differences, 90))
+
+        # Run both
+        result = source.variogram(estimator="percentile", percentile=90, method="groupwise", **options)
+        expected = source.variogram(estimator=percentile_90, **options)
+
+        # Check equality and metadata
+        np.testing.assert_array_equal(result.counts, expected.counts)
+        np.testing.assert_array_equal(result.semivariance, expected.semivariance)
+        np.testing.assert_array_equal(result.semivariance_error, expected.semivariance_error)
+        assert result.attrs["percentile"] == 90
+        assert result.attrs["n_runs"] == 2
+
+
+class TestVariogramReduction:
+    """Test module for variogram reduction."""
+
+    @pytest.mark.parametrize("estimator", ["matheron", "cressie", "dowd", "genton", "minmax", "entropy", "percentile"])
+    def test_from_pairs__skgstat_estimators(self, estimator: str) -> None:
+        """Checks that named estimators match SciKit-GStat."""
+
+        # Create two bins with different pair differences
+        skgstat = pytest.importorskip("skgstat")
+        if estimator in {"dowd", "percentile"}:
+            pytest.importorskip("crick")
+        differences = np.array([[1, 2, 4, 7], [2, 5, 9, 14]], dtype=float)
+        distances = np.arange(1, 9, dtype=float)
+        values = np.column_stack((np.zeros(8), differences.ravel()))
+        pairs = xr.Dataset({"distance": ("pair", distances), "value": (("pair", "endpoint"), values)})
+
+        # Calculate variograms and SciKit-GStat references
+        result = gu.Variogram.from_pairs(pairs, estimator=estimator, bins=[1, 4, 8])
+        estimator_function = getattr(skgstat.estimators, estimator)
+        expected = [estimator_function(sample) for sample in differences]
+
+        # Check equality
+        assert result.estimator == estimator
+        np.testing.assert_array_equal(result.counts, [4, 4])
+        np.testing.assert_array_equal(result.lags, [2.5, 6.5])
+        np.testing.assert_allclose(result.semivariance, expected)
+
+    @pytest.mark.parametrize("estimator", ["matheron", "cressie", "minmax"])
+    @pytest.mark.parametrize("backend,engine", [("geoutils", None), ("flox", None), ("flox", "numba")])
+    def test_from_pairs__mergeable_variograms(
+        self, estimator: str, backend: Literal["geoutils", "flox"], engine: str | None
+    ) -> None:
+        """Checks that mergeable variogram estimators work properly."""
+
+        if engine == "numba":
+            pytest.importorskip("numba")
+
+        # We create pairs on near bin edges, outside bins and with NaNs
+        if backend == "flox":
+            pytest.importorskip("flox")
+        distances = np.array([1, 2, 3, 4, 6, 9, 0, np.nan, 7, -1, np.inf], dtype=np.float32)
+        differences = np.array([1, 2, 3, 4, 5, 6, 7, 8, np.nan, 9, 10], dtype=np.float32)
+        pairs = xr.Dataset(
+            {
+                "distance": ("pair", distances),
+                "value": (("pair", "endpoint"), np.column_stack((np.zeros_like(differences), differences))),
+            }
+        )
+
+        # Calculate variogram estimates, and compare to direct NumPy
+        result = gu.Variogram.from_pairs(
+            pairs,
+            estimator=estimator,
+            bins=[1, 2, 4, 6, 8],
+            reduction_backend=backend,
+            flox_engine=engine,
+        )
+        expected = []
+        for sample in (np.array([1.0, 2.0]), np.array([3.0, 4.0]), np.array([5.0])):
+            count = len(sample)
+            if estimator == "matheron":
+                expected.append(np.sum(sample**2) / (2 * count))
+            elif estimator == "minmax":
+                expected.append((sample.max() - sample.min()) / sample.mean())
+            else:
+                correction = 0.457 + 0.494 / count + 0.045 / count**2
+                expected.append(np.mean(np.sqrt(sample)) ** 4 / (2 * correction))
+
+        # Check estimates, counts and empty bins
+        np.testing.assert_array_equal(result.counts, [2, 2, 1, 0])
+        np.testing.assert_allclose(result.lags, [1.5, 3.5, 6, np.nan], rtol=0, atol=0)
+        np.testing.assert_allclose(result.semivariance, [*expected, np.nan])
+        assert result.counts.dtype == np.int64
+        assert result.semivariance.dtype == np.float64
+        assert result.attrs["pair_count"] == 5
+        assert result.backend is None
+
+    @pytest.mark.parametrize("backend,engine", [("geoutils", None), ("flox", None), ("flox", "numba")])
+    def test_from_pairs__minmax_zero_empty(
+        self, backend: Literal["geoutils", "flox"], engine: str | None
+    ) -> None:
+        """Checks edge case of minmax variogram for zero difference and empty bins."""
+
+        if engine == "numba":
+            pytest.importorskip("numba")
+
+        # Create pair differences with zeros and nonfinite values
+        if backend == "flox":
+            pytest.importorskip("flox")
+        differences = np.array([0, 0, 5, 5, 0, 4, 3, np.nan, np.inf])
+        distances = np.arange(1, 10, dtype=float)
+        values = np.column_stack((np.zeros(9), differences))
+        pairs = xr.Dataset({"distance": ("pair", distances), "value": (("pair", "endpoint"), values)})
+
+        # Calculate minmax variogram
+        result = gu.Variogram.from_pairs(
+            pairs, estimator="minmax", bins=[1, 2, 4, 6, 7, 9, 10], reduction_backend=backend, flox_engine=engine
+        )
+
+        # Check zero means give NaN and differences 0/4 give a ratio of 2
+        np.testing.assert_array_equal(result.counts, [2, 2, 2, 1, 0, 0])
+        np.testing.assert_array_equal(result.semivariance, [np.nan, 0, 2, 0, np.nan, np.nan])
+        np.testing.assert_array_equal(result.lags, [1.5, 3.5, 5.5, 7, np.nan, np.nan])
+
+    @pytest.mark.parametrize("backend", ["geoutils", "flox"])
+    def test_from_pairs__count_overflow(self, backend: Literal["geoutils", "flox"]) -> None:
+        """Checks that numerical overflow (happens sometimes during squaring) does not change valid pair counts."""
+
+        if backend == "flox":
+            pytest.importorskip("flox")
+
+        # Create differences for which the squares will overflow float64
+        values = np.array([[0, 1e200], [0, 1e200]])
+        pairs = xr.Dataset({"distance": ("pair", [1.0, 10.0]), "value": (("pair", "endpoint"), values)})
+
+        # Calculate Matheron estimates
+        with np.errstate(over="ignore"):
+            result = gu.Variogram.from_pairs(pairs, estimator="matheron", bins=[0.5, 2.0], reduction_backend=backend)
+
+        # Check we still have the proper pair count, despite overflow (inf semivariance)
+        np.testing.assert_array_equal(result.counts, [1])
+        np.testing.assert_array_equal(result.lags, [1])
+        np.testing.assert_array_equal(result.semivariance, [np.inf])
+
+    @pytest.mark.parametrize("percentile", [0, 25, 50, 90, 100])
+    def test_from_pairs__percentile(self, percentile: float) -> None:
+        """Checks that the percentile estimator matches NumPy."""
+
+        # Create two bins with different pair differences
+        pytest.importorskip("skgstat")
+        differences = np.array([[1, 2, 4, 7], [2, 5, 9, 14]], dtype=float)
+        values = np.column_stack((np.zeros(8), differences.ravel()))
+        pairs = xr.Dataset({"distance": ("pair", np.arange(1, 9)), "value": (("pair", "endpoint"), values)})
+
+        # Calculate exact percentiles and a NumPy reference
+        result = gu.Variogram.from_pairs(
+            pairs, estimator="percentile", percentile=percentile, bins=[1, 4, 8, 10], method="groupwise"
+        )
+        expected = np.r_[np.percentile(differences, percentile, axis=1), np.nan]
+
+        # Check equality, empty bins and serialization
+        np.testing.assert_array_equal(result.semivariance, expected)
+        np.testing.assert_array_equal(result.counts, [4, 4, 0])
+        assert result.attrs["percentile"] == percentile
+        assert gu.Variogram.from_dict(result.to_dict()).attrs["percentile"] == percentile
+
+    @pytest.mark.parametrize(
+        "estimator,percentile", [("dowd", None)] + [("percentile", value) for value in (0, 25, 50, 90, 100)]
+    )
+    def test_from_pairs__approximate_estimators(self, estimator: str, percentile: float | None) -> None:
+        """Checks that t-digest estimators approximate exact results."""
+
+        # Create lognormal values and an exact reference
+        pytest.importorskip("crick")
+        pytest.importorskip("flox")
+        rng = np.random.default_rng(42)
+        distances = rng.uniform(1, 8, 10_000)
+        values = rng.lognormal(size=(len(distances), 2))
+        pairs = xr.Dataset({"distance": ("pair", distances), "value": (("pair", "endpoint"), values)})
+        options: dict[str, Any] = {"estimator": estimator, "bins": [1, 3, 8, 10]}
+        if percentile is not None:
+            options["percentile"] = percentile
+        exact = gu.Variogram.from_pairs(pairs, method="groupwise", **options)
+
+        # Calculate t-digest estimates
+        result = gu.Variogram.from_pairs(
+            pairs, **options, reduction_backend="flox", method="map-reduce", tdigest_compression=200
+        )
+
+        # We allow a less than 2% approximation error
+        np.testing.assert_array_equal(result.counts, exact.counts)
+        np.testing.assert_allclose(result.lags, exact.lags)
+        np.testing.assert_allclose(result.semivariance, exact.semivariance, rtol=0.02)
+        if percentile is not None:
+            assert result.attrs["percentile"] == percentile
+        assert result.attrs["approximation"] == {"method": "tdigest", "compression": 200}
+        assert "approximation" not in exact.attrs
+        assert np.isnan(result.semivariance[-1])
+        restored = gu.Variogram.from_dict(result.to_dict())
+        assert restored.attrs["approximation"] == result.attrs["approximation"]
+
 
 class TestVariogramConversion:
-    """Checks fitted model evaluation and conversion to supported optional packages.
+    """
+    Checks fitted model evaluation and conversion to supported optional packages.
 
     The methods cover covariance composition and equivalent GPyTorch, SciKit-GStat, and GSTools parameters.
     """
@@ -416,6 +680,7 @@ class TestVariogramConversion:
     def test_to_gpytorch__covar(self, model_name: str, smoothness: float | None) -> None:
         """Checks that converting to GPyTorch kernel works properly to estimate covariance."""
 
+        pytest.importorskip("skgstat")
         torch = pytest.importorskip("torch")
         pytest.importorskip("gpytorch")
 
@@ -439,6 +704,7 @@ class TestVariogramConversion:
     def test_to_gpytorch__covar_combined(self, combination: str) -> None:
         """Checks GPyTorch export for sum/multiplied kernels."""
 
+        pytest.importorskip("skgstat")
         torch = pytest.importorskip("torch")
         pytest.importorskip("gpytorch")
 
@@ -603,8 +869,585 @@ class TestVariogramConversion:
         assert converted.model.nugget == pytest.approx(0.1)
 
 
+class TestVariogramReductionChunked:
+    """Test module for chunked variogram reduction."""
+
+    @pytest.mark.parametrize(
+        "backend,execution", [("geoutils", "dask"), ("flox", "dask"), ("geoutils", "mp"), ("geoutils", "lazy_mp")]
+    )
+    @pytest.mark.parametrize("estimator", ["matheron", "cressie", "minmax", "dowd", "percentile"])
+    @pytest.mark.parametrize("bins", [[1, 3, 7, 12, 15], "uniform"])
+    def test_from_pairs__loading_laziness(
+        self,
+        backend: Literal["geoutils", "flox"],
+        execution: str,
+        estimator: str,
+        bins: Any,
+    ) -> None:
+        """Checks that chunked variogram reductions avoid gathering all pairs."""
+
+        # Create lazy pair blocks with a NaN
+        if estimator in {"dowd", "percentile"}:
+            pytest.importorskip("crick")
+        if backend == "flox":
+            pytest.importorskip("flox")
+        distances = np.tile(np.arange(1, 12, dtype=np.float32), 7)
+        values = np.column_stack((distances / 3, np.sin(distances))).astype(np.float32)
+        values[5, 1] = np.nan
+        eager = xr.Dataset({"distance": ("pair", distances), "value": (("pair", "endpoint"), values)})
+        options: dict[str, Any] = {"estimator": estimator, "bins": bins, "n_lags": 3, "reduction_backend": backend}
+        if estimator in {"dowd", "percentile"}:
+            options.update(method="map-reduce", tdigest_compression=200)
+        if estimator == "percentile":
+            options["percentile"] = 90
+        expected = gu.Variogram.from_pairs(eager, **options)
+        source = eager.copy()
+        scheduler: Any = nullcontext()
+        callback: Any = nullcontext()
+
+        # Split lazy endpoints into batches with a shorter final batch to reveal missing or duplicated pairs
+        if execution != "mp":
+            dask = pytest.importorskip("dask")
+            da = pytest.importorskip("dask.array")
+            from dask.callbacks import Callback
+
+            endpoint_blocks = [
+                da.from_delayed(
+                    dask.delayed(np.copy)(values[start : start + 13]),
+                    shape=(len(values[start : start + 13]), 2),
+                    dtype=np.float32,
+                )
+                for start in range(0, len(values), 13)
+            ]
+            source["value"] = (("pair", "endpoint"), da.concatenate(endpoint_blocks))
+            source["distance"] = ("pair", da.from_array(distances, chunks=11))
+            scheduler = dask.config.set(scheduler="synchronous")
+
+        # Prevent gathering all pairs during Dask reductions and lazy reads inside MP batches
+        def check_task(key: Any, value: Any, *args: Any) -> None:
+            """Fail if a task gathers all endpoint values or pair differences."""
+
+            if isinstance(value, np.ndarray):
+                assert value.shape not in {(len(values),), values.shape}
+
+        if execution != "mp":
+            callback = Callback(posttask=check_task)
+        config = MultiprocConfig(chunks=17) if execution != "dask" else None
+        with scheduler, callback:
+            result = gu.Variogram.from_pairs(source, **options, mp_config=config)
+
+        # Check equality and loading, with a bit of rounding from summing chunks
+        assert is_dask_array(source.value.data) == (execution != "mp")
+        assert is_dask_array(source.distance.data) == (execution != "mp")
+        assert isinstance(result.semivariance, np.ndarray)
+        np.testing.assert_array_equal(result.counts, expected.counts)
+        np.testing.assert_allclose(result.lags, expected.lags)
+        np.testing.assert_allclose(result.semivariance, expected.semivariance)
+
+    @pytest.mark.parametrize("arrays", ["values_lazy", "distances_lazy", "different_chunks"])
+    @pytest.mark.parametrize("estimator", ["matheron", "cressie", "minmax"])
+    @pytest.mark.parametrize("backend,engine", [("geoutils", None), ("flox", None), ("flox", "numba")])
+    def test_from_pairs__aligned_pair_columns(
+        self, arrays: str, estimator: str, backend: Literal["geoutils", "flox"], engine: str | None
+    ) -> None:
+        """Checks that differently chunked pair columns give equivalent results."""
+
+        if engine == "numba":
+            pytest.importorskip("numba")
+
+        # Create pairs with NaNs and a zero distance
+        da = pytest.importorskip("dask.array")
+
+        if backend == "flox":
+            pytest.importorskip("flox")
+        distances = np.tile([1, 2, 3, 5, 8, 9], 9).astype(np.float32)
+        values = np.column_stack((np.zeros_like(distances), np.sqrt(distances)))
+        values[:7, 1] = np.nan
+        distances[11] = 0
+        eager = xr.Dataset({"distance": ("pair", distances), "value": (("pair", "endpoint"), values)})
+        pairs = eager.copy()
+        if arrays != "values_lazy":
+            pairs["distance"] = ("pair", da.from_array(distances, chunks=7))
+        if arrays != "distances_lazy":
+            pairs["value"] = (("pair", "endpoint"), da.from_array(values, chunks=(11, 1)))
+        options: dict[str, Any] = {"estimator": estimator, "bins": [1, 3, 8, 10, 12]}
+        expected = gu.Variogram.from_pairs(eager, **options)
+
+        # Calculate and check equality and loading
+        result = gu.Variogram.from_pairs(pairs, **options, reduction_backend=backend, flox_engine=engine)
+        assert isinstance(pairs.distance.data, da.Array) == (arrays != "values_lazy")
+        assert isinstance(pairs.value.data, da.Array) == (arrays != "distances_lazy")
+        assert isinstance(result.semivariance, np.ndarray)
+        np.testing.assert_array_equal(result.counts, expected.counts)
+        np.testing.assert_allclose(result.lags, expected.lags)
+        np.testing.assert_allclose(result.semivariance, expected.semivariance)
+
+    @pytest.mark.parametrize(
+        "estimator,backend",
+        [
+            ("matheron", "geoutils"),
+            ("matheron", "flox"),
+            ("cressie", "geoutils"),
+            ("cressie", "flox"),
+            ("minmax", "geoutils"),
+            ("minmax", "flox"),
+            ("tdigest_dowd", "flox"),
+            ("tdigest_percentile", "flox"),
+        ],
+    )
+    def test_from_pairs__disk_pair_batches(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, estimator: str, backend: str
+    ) -> None:
+        """Checks that variogram reduction reads only the required disk columns."""
+
+        # Write a raster with NaNs for disk pair sampling
+        dask = pytest.importorskip("dask")
+        da = pytest.importorskip("dask.array")
+
+        from geoutils.sampling import pairsampling
+
+        if backend == "flox":
+            pytest.importorskip("flox")
+            if estimator.startswith("tdigest_"):
+                pytest.importorskip("crick")
+        values = np.sin(np.arange(41 * 53, dtype=np.float32)).reshape(41, 53)
+        values[2:7, 4:11] = np.nan
+        transform = from_origin(0, 41, 1, 1)
+        eager = gu.Raster.from_array(values, transform, 32633, nodata=-99999)
+        filename = tmp_path / "source.tif"
+        eager.to_file(filename)
+        source = gu.Raster(filename)
+        sample_options: dict[str, Any] = {
+            "n_pairs": 701,
+            "strategy": "independent",
+            "batch_pairs": 97,
+            "random_state": 42,
+            "max_distance": 35,
+        }
+        reduction_options: dict[str, Any] = {
+            "estimator": estimator.removeprefix("tdigest_"),
+            "reduction_backend": backend,
+            "bins": [1, 3, 8, 15, 35],
+        }
+        if estimator.startswith("tdigest_"):
+            reduction_options.update(method="map-reduce", tdigest_compression=200)
+        if estimator == "tdigest_percentile":
+            reduction_options["percentile"] = 90
+        expected_pairs = eager.pairsample(**sample_options)
+        expected = gu.Variogram.from_pairs(expected_pairs, **reduction_options)
+        pairs = source.pairsample(
+            **sample_options,
+            mp_config=MultiprocConfig(chunks=(7, 11)),
+            output_storage="disk",
+            output_directory=tmp_path,
+            output_chunks=37,
+        )
+        columns = []
+        original_read = pairsampling._PairFileReader.__call__
+
+        # Record which saved columns the reduction actually reads
+        def record_column(reader: Any, filename: str, column: str, dtype: Any) -> Any:
+            columns.append(column)
+            return original_read(reader, filename, column, dtype)
+
+        # Record disk reads
+        assert not source.is_loaded
+        assert all(isinstance(column.data, da.Array) for column in pairs.data_vars.values())
+        monkeypatch.setattr(pairsampling._PairFileReader, "__call__", record_column)
+        with dask.config.set(scheduler="synchronous"):
+            result = gu.Variogram.from_pairs(pairs, **reduction_options)
+        assert set(columns) == {"value", "distance"}
+        assert not source.is_loaded
+        np.testing.assert_array_equal(result.counts, expected.counts)
+        np.testing.assert_allclose(result.lags, expected.lags)
+
+        # Allow rounding and small t-digest errors
+        if estimator.startswith("tdigest_"):
+            np.testing.assert_allclose(result.semivariance, expected.semivariance, rtol=0.02)
+        else:
+            np.testing.assert_allclose(result.semivariance, expected.semivariance)
+
+    @pytest.mark.parametrize(
+        "read_strategy,estimator,backend,storage",
+        [
+            ("native", "matheron", "geoutils", "memory"),
+            ("reuse_values", "cressie", "flox", "memory"),
+            ("packed_validity", "minmax", "geoutils", "memory"),
+            ("native", "cressie", "geoutils", "disk"),
+            ("reuse_values", "minmax", "geoutils", "disk"),
+            ("packed_validity", "matheron", "geoutils", "disk"),
+        ],
+    )
+    def test_variogram__runs(
+        self, tmp_path: Path, storage: str, read_strategy: str, estimator: str, backend: str
+    ) -> None:
+        """Checks that chunked repeated variograms match in-memory results."""
+
+        # Create a chunked raster with NaNs
+        pytest.importorskip("skgstat")
+        import gc
+
+        dask = pytest.importorskip("dask")
+        da = pytest.importorskip("dask.array")
+
+        if backend == "flox":
+            pytest.importorskip("flox")
+        values = np.sin(np.arange(41 * 53, dtype=np.float32)).reshape(41, 53)
+        values[2:7, 4:11] = np.nan
+        transform = from_origin(0, 41, 1, 1)
+        source = gu.DataArrayRasterAccessor.from_array(da.from_array(values, chunks=(7, 11)), transform, 32633).rst
+        eager = gu.Raster.from_array(values, transform, 32633, nodata=-99999)
+        options: dict[str, Any] = {
+            "n_pairs": 301,
+            "n_runs": 3,
+            "strategy": "independent",
+            "batch_pairs": 97,
+            "estimator": estimator,
+            "random_state": 42,
+            "bins": [1, 3, 8, 15, 35],
+            "max_distance": 35,
+            "model": "spherical",
+        }
+        expected = eager.variogram(**options)
+        output_options: dict[str, Any] = {}
+        if storage == "disk":
+            filename = tmp_path / "source.tif"
+            eager.to_file(filename)
+            source = gu.Raster(filename)
+            output_options = {"output_directory": tmp_path, "mp_config": MultiprocConfig(chunks=(7, 11))}
+
+        # Run repeated variograms and fit a model
+        with dask.config.set(scheduler="synchronous"):
+            result = source.variogram(
+                **options,
+                **output_options,
+                read_strategy=read_strategy,
+                output_storage=storage,
+                output_chunks=37,
+                reduction_backend=backend,
+            )
+
+        # Allow rounding from summing chunks and fitting
+        assert not source.is_loaded
+        if storage == "memory":
+            assert isinstance(source.data, da.Array)
+        assert isinstance(result.semivariance, np.ndarray)
+        np.testing.assert_array_equal(result.counts, expected.counts)
+        np.testing.assert_allclose(result.lags, expected.lags)
+        np.testing.assert_allclose(result.semivariance, expected.semivariance)
+        np.testing.assert_allclose(result.semivariance_error, expected.semivariance_error)
+        np.testing.assert_allclose(result.fitted_semivariance, expected.fitted_semivariance, rtol=1e-6)
+        assert result.attrs["n_runs"] == 3
+        assert result.attrs["reduction_backend"] == backend
+        assert result.backend == "scikit-gstat models/scipy fit"
+        gc.collect()
+        assert not list(tmp_path.glob("geoutils-pair-output-*"))
+
+    @pytest.mark.parametrize("percentile", [0, 25, 90, 100])
+    @pytest.mark.parametrize("chunks", [7, 13])
+    def test_from_pairs__percentile_loading_laziness(self, percentile: float, chunks: int) -> None:
+        """Checks that lazy percentile reductions match in-memory results."""
+
+        # Create constant bin differences with an empty bin and an invalid first chunk
+        pytest.importorskip("crick")
+        pytest.importorskip("flox")
+        da = pytest.importorskip("dask.array")
+
+        distances = np.tile([1.0, 3.0, 5.0], 17)
+        differences = distances.copy()
+        differences[:13] = np.nan
+        pairs = xr.Dataset(
+            {
+                "distance": ("pair", distances),
+                "value": (("pair", "endpoint"), np.column_stack((np.zeros(len(distances)), differences))),
+            }
+        )
+        lazy = pairs.chunk({"pair": chunks, "endpoint": 1})
+        options: dict[str, Any] = {
+            "estimator": "percentile",
+            "percentile": percentile,
+            "bins": [1, 2, 4, 6, 8],
+            "reduction_backend": "flox",
+            "method": "map-reduce",
+        }
+        expected = gu.Variogram.from_pairs(pairs, **options)
+
+        # Calculate lazy percentiles
+        result = gu.Variogram.from_pairs(lazy, **options)
+
+        # Check exact equality and loading
+        assert isinstance(lazy.value.data, da.Array)
+        assert isinstance(lazy.distance.data, da.Array)
+        assert isinstance(result.semivariance, np.ndarray)
+        np.testing.assert_array_equal(result.counts, expected.counts)
+        np.testing.assert_array_equal(result.lags, expected.lags)
+        np.testing.assert_array_equal(result.semivariance, expected.semivariance)
+        np.testing.assert_array_equal(result.semivariance, [1, 3, 5, np.nan])
+
+    @pytest.mark.parametrize("backend", ["geoutils", "flox"])
+    def test_from_pairs__distributed_dowd(self, backend: Literal["geoutils", "flox"]) -> None:
+        """Checks that distributed Dowd estimates match in-memory results."""
+
+        # Create constant bin differences with an invalid first chunk
+        pytest.importorskip("crick")
+        pytest.importorskip("flox")
+        da = pytest.importorskip("dask.array")
+        pytest.importorskip("distributed")
+        from distributed import Client, LocalCluster
+
+        distances = np.tile([1.0, 3.0, 5.0], 17)
+        differences = distances.copy()
+        differences[:7] = np.nan
+        pairs = xr.Dataset(
+            {
+                "distance": ("pair", distances),
+                "value": (("pair", "endpoint"), np.column_stack((np.zeros(len(distances)), differences))),
+            }
+        )
+        eager = gu.Variogram.from_pairs(pairs, estimator="dowd", bins=[1, 2, 4, 6, 8])
+        lazy = pairs.chunk({"pair": 7, "endpoint": 1})
+        with LocalCluster(n_workers=2, threads_per_worker=1, processes=True, dashboard_address=None) as cluster:
+            with Client(cluster):
+                result = gu.Variogram.from_pairs(
+                    lazy,
+                    estimator="dowd",
+                    bins=[1, 2, 4, 6, 8],
+                    reduction_backend=backend,
+                    method="map-reduce",
+                )
+
+        # Check equality and loading
+        assert isinstance(lazy.value.data, da.Array)
+        assert isinstance(result.semivariance, np.ndarray)
+        np.testing.assert_array_equal(result.counts, eager.counts)
+        np.testing.assert_array_equal(result.lags, eager.lags)
+        np.testing.assert_array_equal(result.semivariance, eager.semivariance)
+
+    @pytest.mark.parametrize("output_chunks", [None, 17, np.int64(17)])
+    def test_variogram__multiprocess_pair_batches(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, output_chunks: int | np.int64 | None
+    ) -> None:
+        """Checks that raster MP reduction uses pair batches without changing the source's spatial tiles."""
+
+        # Write a raster with missing cells and rectangular source tiles
+        values = np.arange(99, dtype=float).reshape(9, 11)
+        values[1:3, 2:4] = np.nan
+        eager = gu.Raster.from_array(values, from_origin(0, 9, 1, 1), 32633, nodata=-99999)
+        filename = tmp_path / "pairs.tif"
+        eager.to_file(filename)
+        source = gu.Raster(filename)
+        config = MultiprocConfig(chunks=(4, 3))
+
+        # Reproduce the same draws eagerly, including a shorter final batch when chunks contain 17 pairs
+        options: dict[str, Any] = {
+            "n_pairs": 71,
+            "n_lags": 5,
+            "estimator": "matheron",
+            "strategy": "independent",
+            "random_state": 42,
+        }
+        if output_chunks is not None:
+            options["output_chunks"] = output_chunks
+        expected = eager.variogram(**options)
+        batch_sizes: list[int] = []
+        original_submit = config.cluster.submit
+
+        def submit(function: Any, *arguments: Any, **kwargs: Any) -> Any:
+            """Record pair batch sizes while submitting the original worker functions."""
+
+            if function.__name__ == "_reduce_block":
+                batch_sizes.append(arguments[0][0].shape[0])
+            return original_submit(function, *arguments, **kwargs)
+
+        # Run source reads and pair reduction through the same basic cluster
+        monkeypatch.setattr(config.cluster, "submit", submit)
+        assert not source.is_loaded
+        result = source.variogram(**options, mp_config=config)
+
+        # Check the full sample, unchanged source tiles and exact eager result
+        expected_batches = [71] if output_chunks is None else [17, 17, 17, 17, 3]
+        assert batch_sizes == expected_batches
+        assert config.chunks == (4, 3)
+        assert not source.is_loaded
+        assert isinstance(result.semivariance, np.ndarray)
+        np.testing.assert_array_equal(result.counts, expected.counts)
+
+        # Float64 summation order can differ when the same pairs are split into several batches
+        np.testing.assert_allclose(result.lags, expected.lags, rtol=2e-13)
+        np.testing.assert_allclose(result.semivariance, expected.semivariance, rtol=2e-13)
+
+    def test_variogram__multiprocess_sampling_and_reduction(self, tmp_path: Path) -> None:
+        """Checks that multiprocessing variograms leave file inputs unloaded."""
+
+        # Write and reopen a raster with NaNs
+        pytest.importorskip("crick")
+        values = np.arange(99, dtype=float).reshape(9, 11)
+        values[1:3, 2:4] = np.nan
+        eager = gu.Raster.from_array(values, Affine(1, 0, 0, 0, -1, 9), 32631, nodata=np.nan)
+        filename = tmp_path / "pairs.tif"
+        eager.to_file(filename)
+        source = gu.Raster(filename)
+        options: dict[str, Any] = {
+            "n_pairs": 127,
+            "sampling": "random_xy",
+            "random_state": 42,
+            "estimator": "dowd",
+            "bins": [1, 3, 6, 10, 15],
+            "method": "map-reduce",
+            "tdigest_compression": 200,
+        }
+        expected = eager.variogram(**options)
+
+        # Sample and reduce pairs with the same process pool
+        assert not source.is_loaded
+        pytest.importorskip("dask.array")
+        with MpCluster({"nb_workers": 2}) as cluster:
+            result = source.variogram(
+                **options,
+                mp_config=MultiprocConfig(chunks=(4, 3), cluster=cluster),
+                output_storage="disk",
+                output_directory=tmp_path,
+                output_chunks=17,
+            )
+
+        # Check equality and loading
+        assert not source.is_loaded
+        np.testing.assert_array_equal(result.counts, expected.counts)
+        np.testing.assert_allclose(result.lags, expected.lags)
+        np.testing.assert_allclose(result.semivariance, expected.semivariance, rtol=0.02)
+
+    @pytest.mark.parametrize("bins", [[0.5, 2], [2, 3]])
+    def test_from_pairs__multiprocess_single_read(self, bins: list[float]) -> None:
+        """Checks that multiprocessing reads each pair batch once."""
+
+        # Create three lazy pair blocks and record reads
+        dask = pytest.importorskip("dask")
+        da = pytest.importorskip("dask.array")
+
+        reads = []
+
+        def read_values(index: int) -> NDArrayNum:
+            """Record one batch read and return four known absolute differences."""
+
+            reads.append(index)
+            return np.column_stack((np.zeros(4), np.arange(index * 4 + 1, index * 4 + 5, dtype=float)))
+
+        blocks = [da.from_delayed(dask.delayed(read_values)(index), shape=(4, 2), dtype=float) for index in range(3)]
+        source = xr.Dataset(
+            {"distance": ("pair", np.ones(12)), "value": (("pair", "endpoint"), da.concatenate(blocks))}
+        )
+        eager_values = np.column_stack((np.zeros(12), np.arange(1, 13.0)))
+        eager = xr.Dataset({"distance": ("pair", np.ones(12)), "value": (("pair", "endpoint"), eager_values)})
+        options: dict[str, Any] = {"estimator": "matheron", "bins": bins}
+        expected = gu.Variogram.from_pairs(eager, **options)
+
+        # Run worker calls locally to record reads
+        assert isinstance(source.value.data, da.Array)
+        assert not reads
+        with dask.config.set(scheduler="synchronous"):
+            result = gu.Variogram.from_pairs(source, **options, mp_config=MultiprocConfig(chunks=4))
+
+        # Check one read per block and equality
+        assert sorted(reads) == [0, 1, 2]
+        assert isinstance(source.value.data, da.Array)
+        assert isinstance(result.semivariance, np.ndarray)
+        np.testing.assert_array_equal(result.counts, expected.counts)
+        np.testing.assert_array_equal(result.lags, expected.lags)
+        np.testing.assert_array_equal(result.semivariance, expected.semivariance)
+
+
 class TestVariogramErrors:
-    """Test module for validation errors raised by variogram storage, estimation, and conversion."""
+    """Test module for errors/warnings raised by variogram estimation and conversion."""
+
+    @pytest.mark.parametrize(
+        "options,error_type,message",
+        [
+            ({"estimator": "percentile", "percentile": value}, ValueError, "finite and between 0 and 100")
+            for value in (-1, 101, np.nan, np.inf)
+        ]
+        + [
+            ({"estimator": "minmax", "percentile": 90}, ValueError, "requires estimator='percentile'"),
+            ({"method": "unknown"}, ValueError, "Argument method"),
+            ({"reduction_backend": "flox", "method": "unknown"}, ValueError, "Argument method"),
+            ({"reduction_backend": "flox", "tdigest_compression": 5}, ValueError, "tdigest_compression"),
+            ({"reduction_backend": "flox", "tdigest_compression": np.inf}, ValueError, "tdigest_compression"),
+            ({"flox_engine": "numba"}, ValueError, "flox_engine requires"),
+            (
+                {"estimator": "matheron", "reduction_backend": "flox", "mp_config": MultiprocConfig(chunks=3)},
+                ValueError,
+                "Flox backend does not support multiprocessing",
+            ),
+        ]
+        + [
+            ({"estimator": estimator}, TypeError, "estimator must be a SciKit-GStat estimator name or a callable")
+            for estimator in (None, 1, ["matheron"])
+        ]
+        + [
+            (
+                {"estimator": estimator, "reduction_backend": backend},
+                ValueError,
+                f"Unknown SciKit-GStat estimator {estimator!r}",
+            )
+            for backend in ("geoutils", "flox")
+            for estimator in ("unknown", "np", "__dict__")
+        ],
+    )
+    def test_variogram__error_reduction_options(
+        self, options: dict[str, Any], error_type: type[Exception], message: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Checks an error is raised for invalid reduction options, before sampling occurs."""
+
+        # Create raster and pair data, then prevent sampling
+        raster = gu.Raster.from_array(np.ones((3, 3)), from_origin(0, 3, 1, 1), 32633)
+        pairs = xr.Dataset(
+            {"distance": ("pair", [1.0, 2.0]), "value": (("pair", "endpoint"), [[0.0, 1.0], [0.0, 2.0]])}
+        )
+
+        def fail_sampling(*args: Any, **kwargs: Any) -> None:
+            """Fail if invalid reduction options reach pair sampling."""
+
+            pytest.fail("Invalid reduction options must fail before pair sampling")
+
+        monkeypatch.setattr(type(raster), "pairsample", fail_sampling)
+
+        # Check the error for both APIs
+        with pytest.raises(error_type, match=message):
+            gu.Variogram.from_pairs(pairs, **options)
+        with pytest.raises(error_type, match=message):
+            raster.variogram(**options)
+
+    @pytest.mark.parametrize("from_pairs", [False, True])
+    @pytest.mark.parametrize("estimator", ["genton", "entropy", np.mean])
+    def test_methods__error_unsupported_flox(
+        self, estimator: Any, from_pairs: bool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Checks an error is raised for unsupported Flox estimators."""
+
+        # Create raster and pair data
+        pairs = xr.Dataset(
+            {"distance": ("pair", [1.0, 2.0]), "value": (("pair", "endpoint"), [[0.0, 1.0], [0.0, 2.0]])}
+        )
+        raster = gu.Raster.from_array(np.ones((3, 3)), from_origin(0, 3, 1, 1), 32633)
+
+        def fail_sampling(*args: Any, **kwargs: Any) -> None:
+            """Fail if backend validation reaches pair selection."""
+
+            pytest.fail("Unsupported Flox requests must fail before pair sampling")
+
+        monkeypatch.setattr(type(raster), "pairsample", fail_sampling)
+
+        # Check the error for both APIs
+        with pytest.raises(ValueError, match="Flox variogram backend supports") as error:
+            if from_pairs:
+                gu.Variogram.from_pairs(pairs, estimator=estimator, reduction_backend="flox")
+            else:
+                raster.variogram(estimator=estimator, reduction_backend="flox")
+
+        # Check the suggested alternatives
+        name = repr(estimator) if isinstance(estimator, str) else "a custom callable"
+        assert f"Estimator {name} has no registered chunk reduction" in str(error.value)
+        assert "method='groupwise'" in str(error.value)
+        assert "reduction_backend='geoutils'" in str(error.value)
 
     @pytest.mark.skipif(find_spec("skgstat") is not None, reason="Only runs if scikit-gstat is missing.")
     def test_estimate__error_missing_scikit_gstat(self) -> None:
@@ -711,7 +1554,7 @@ class TestVariogramErrors:
 
         # Check error
         with pytest.raises(error_type, match=message):
-            gu.Variogram.from_pairs(pairs)
+            gu.Variogram.from_pairs(pairs, estimator="matheron")
 
     @pytest.mark.parametrize("n_runs", [0, -1, 1.5, True])
     def test_variogram__error_invalid_repetitions(self, n_runs: int | float) -> None:
@@ -722,7 +1565,7 @@ class TestVariogramErrors:
 
         # Reject zero, negative, fractional, and boolean run counts
         with pytest.raises(ValueError, match="Argument ``n_runs`` must be a positive integer"):
-            raster.variogram(n_runs=n_runs)
+            raster.variogram(n_runs=n_runs, estimator="matheron")
 
     def test_gstools_conversion__error_component_specific_dimensions(self) -> None:
         """Checks that GSTools conversion rejects components that use different coordinate columns."""
@@ -790,3 +1633,88 @@ class TestVariogramErrors:
         result = gu.Variogram.from_model("gaussian", effective_range=2, partial_sill=0)
         with pytest.raises(ValueError, match="zero sill"):
             result.correlation(1)
+
+    @pytest.mark.skipif(
+        find_spec("flox") is not None or find_spec("crick") is not None,
+        reason="Only runs if flox and crick are missing.",
+    )
+    def test_from_pairs__error_missing_dependency(self) -> None:
+        """Checks an error is raised for missing optional reduction packages."""
+
+        # Create valid pairs for both optional reductions
+        pairs = xr.Dataset(
+            {"distance": ("pair", [1.0, 2.0]), "value": (("pair", "endpoint"), [[0.0, 1.0], [0.0, 2.0]])}
+        )
+
+        # Check missing packages are named in the errors
+        with pytest.raises(ImportError, match="flox"):
+            gu.Variogram.from_pairs(pairs, estimator="matheron", bins=[1, 3], reduction_backend="flox")
+        with pytest.raises(ImportError, match="crick"):
+            gu.Variogram.from_pairs(pairs, bins=[1, 3], reduction_backend="flox", method="map-reduce")
+
+        # Check native reduction works without either package
+        native = gu.Variogram.from_pairs(pairs, estimator="matheron", bins=[1, 3])
+        np.testing.assert_array_equal(native.counts, [2])
+
+    @pytest.mark.parametrize("backend", ["geoutils", "flox"])
+    @pytest.mark.parametrize("estimator", ["unknown", "np", "__dict__"])
+    def test_from_pairs__error_unknown_estimator(self, backend: Literal["geoutils", "flox"], estimator: str) -> None:
+        """Checks an error is raised for unknown estimators before reading pairs."""
+
+        # Create pair data with uneven chunks
+        da = pytest.importorskip("dask.array")
+        from dask.callbacks import Callback
+
+        eager = xr.Dataset(
+            {"distance": ("pair", np.arange(1, 6, dtype=float)), "value": (("pair", "endpoint"), np.ones((5, 2)))}
+        )
+        lazy = eager.chunk({"pair": 3})
+        options: dict[str, Any] = {"estimator": estimator, "reduction_backend": backend}
+
+        def fail_read(*args: Any) -> None:
+            """Fail if an invalid estimator schedules any pair data before raising its error."""
+
+            pytest.fail("Unknown estimators must fail before reading pair data")
+
+        # Check errors before reading pairs
+        with pytest.raises(ValueError, match="Unknown SciKit-GStat estimator") as eager_error:
+            gu.Variogram.from_pairs(eager, **options)
+        with Callback(start=fail_read), pytest.raises(ValueError) as lazy_error:
+            gu.Variogram.from_pairs(lazy, **options)
+
+        # Check error messages and loading
+        assert str(lazy_error.value) == str(eager_error.value)
+        choices = "Choose from 'matheron', 'cressie', 'dowd', 'genton', 'minmax', 'entropy', 'percentile'"
+        assert choices in str(lazy_error.value)
+        assert isinstance(lazy.distance.data, da.Array)
+        assert isinstance(lazy.value.data, da.Array)
+
+    @pytest.mark.parametrize("backend", ["geoutils", "flox"])
+    @pytest.mark.parametrize("case", ["nonpositive", "nonfinite", "empty"])
+    def test_from_pairs__error_no_chunked_pairs(self, backend: Literal["geoutils", "flox"], case: str) -> None:
+        """Checks an error is raised when no valid lazy pairs remain."""
+
+        # Create lazy pairs with invalid or empty data
+        da = pytest.importorskip("dask.array")
+
+        if backend == "flox":
+            pytest.importorskip("flox")
+        distances = np.array([0, -1, 0, -2, 0], dtype=np.float32)
+        values = np.ones((5, 2), dtype=np.float32)
+        if case == "nonfinite":
+            distances[:] = 1
+            values[:, 1] = np.nan
+        elif case == "empty":
+            distances, values = distances[:0], values[:0]
+        pairs = xr.Dataset(
+            {
+                "distance": ("pair", da.from_array(distances, chunks=3)),
+                "value": (("pair", "endpoint"), da.from_array(values, chunks=(3, 2))),
+            }
+        )
+
+        # Check the error and input laziness
+        with pytest.raises(ValueError, match="no finite observations with positive distance"):
+            gu.Variogram.from_pairs(pairs, estimator="matheron", reduction_backend=backend, bins=[1, 2, 4])
+        assert isinstance(pairs.distance.data, da.Array)
+        assert isinstance(pairs.value.data, da.Array)

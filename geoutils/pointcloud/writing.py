@@ -53,7 +53,7 @@ _GPKG_WRITE_BATCH_ROWS = 524_288
 
 
 def _array_partitions(points: xr.DataArray, chunks: int | None) -> Any:
-    """Yield eager row partitions, computing values and attributes together within each partition."""
+    """Yield in-memory row partitions, computing values and attributes together within each partition."""
 
     # Use the requested row count or the largest existing chunk to bound each write
     if chunks is not None and (isinstance(chunks, bool) or not isinstance(chunks, int) or chunks <= 0):

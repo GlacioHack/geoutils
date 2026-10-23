@@ -475,7 +475,7 @@ class TestDataArrayRasterAccessor:
     def test_open_raster__downsample_loading_laziness(
         self, tmp_path: Path, as_object_type: Literal["dataarray", "dataset"], downsample: int
     ) -> None:
-        """Checks that chunked downsampling stays lazy and exactly matches eager opening."""
+        """Checks that chunked downsampling stays lazy and exactly matches in-memory opening."""
 
         pytest.importorskip("dask.array")
         from dask.callbacks import Callback
@@ -496,7 +496,7 @@ class TestDataArrayRasterAccessor:
         expected_chunks = ((3,) * 16 + (2,), (7,) * 14 + (2,)) if downsample == 1 else ((3, 3, 2), (7, 7, 2))
         assert lazy_values.chunks == expected_chunks
 
-        # Check result leaves source lazy and matches exactly with eager resampling
+        # Check result leaves source lazy and matches exactly with in-memory resampling
         computed = lazy.compute()
         xr.testing.assert_identical(computed, eager)
         computed_values = computed["raster"] if as_object_type == "dataset" else computed
@@ -719,7 +719,7 @@ class TestDataArrayRasterAccessor:
         assert variable.encoding["grid_mapping"] in variable.coords
         if lazy:
             assert opened.height.chunks and not opened.height.rst.is_loaded
-            # DataArray filling is eager; Dataset filling stays lazy
+            # DataArray filling runs immediately; Dataset filling stays lazy
             if method == "fill_nodata" and representation == "dataarray":
                 assert variable.chunks is None and variable.rst.is_loaded
             else:
@@ -994,7 +994,7 @@ class TestDataArrayRasterAccessor:
         assert isinstance(footprint, gpd.GeoDataFrame)
 
     def test_stats__dask_global_quantile_stats(self) -> None:
-        """Checks that global quantile statistics match eager results without loading the Dask raster."""
+        """Checks that global quantile statistics match in-memory results without loading the Dask raster."""
 
         pytest.importorskip("dask")
         import dask.array as da
@@ -1077,12 +1077,12 @@ class TestDataArrayRasterAccessor:
     @pytest.mark.skipif(find_spec("dask") is None, reason="Dask is not installed")
     @pytest.mark.parametrize("compute", [True, False])
     def test_to_file__georeferencing(self, raster_gcp_rpc: gu.Raster, tmp_path: Path, compute: bool) -> None:
-        """Checks that immediate/deferred chunked writes preserve GCP/RPC metadata and exactly match eager files."""
+        """Checks that immediate/deferred chunked writes preserve GCP/RPC metadata and exactly match in-memory files."""
 
         dask = pytest.importorskip("dask")
         from dask.callbacks import Callback
 
-        # Load an eager reference and split the same image into chunks of 7/9, including shorter final chunks
+        # Load an in-memory reference and split the same image into chunks of 7/9, including shorter final chunks
         source = raster_gcp_rpc
         eager = gu.open_raster(source.name).load()
         lazy = gu.open_raster(source.name, chunks={"band": 1, "y": 7, "x": 9})
@@ -1116,7 +1116,7 @@ class TestDataArrayRasterAccessor:
         assert lazy.attrs["label"] == "input"
         assert lazy.rst.rpcs == source.rpcs
 
-        # Reopen unloaded results and compare values, missing pixels and GCPs/RPCs with eager output
+        # Reopen unloaded results and compare values, missing pixels and GCPs/RPCs with in-memory output
         expected = gu.Raster(eager_file)
         result = gu.Raster(lazy_file)
         assert not expected.is_loaded
@@ -1828,13 +1828,13 @@ class TestDatasetRasterAccessor:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Checks that chunk writing match eager files, and stays lazy."""
+        """Checks that chunk writing match in-memory files, and stays lazy."""
 
         dask = pytest.importorskip("dask")
         import dask.array as da
         from dask.callbacks import Callback
 
-        # 1/ Create eager and chunked rasters
+        # 1/ Create in-memory and chunked rasters
         # We create 2 bands with a NaN (to test nodata encoding when writing chunks)
         values = np.arange(70, dtype=np.float32).reshape(2, 5, 7) / 4
         values[0, 0, 0] = np.nan
@@ -1858,7 +1858,7 @@ class TestDatasetRasterAccessor:
         original_chunks = [variable.chunks for variable in variables]
         assert all(not variable.rst.is_loaded for variable in variables)
 
-        # Write eager reference file
+        # Write in-memory reference file
         expected_file = tmp_path / "eager.tif"
         eager.rst.to_file(expected_file)
         output_file = tmp_path / "chunked.tif"
@@ -1962,8 +1962,8 @@ class TestDatasetRasterAccessor:
             if name not in names:
                 assert result[name].data is lazy[name].data
 
-        # 3/ Compare eager outputs and source metadata
-        # Compute and compare with the same eager operation, then check the source data, encoding and laziness
+        # 3/ Compare in-memory outputs and source metadata
+        # Compute and compare with the same in-memory operation, then check the source data, encoding and laziness
         expected = getattr(eager.rst, method)(variables=variables, **options)
         xr.testing.assert_identical(result.compute(), expected)
         for name in names:
@@ -1983,7 +1983,7 @@ class TestDatasetRasterAccessor:
         reason="Rasterio before 1.5 cannot set reprojection tolerance for exact comparison with chunks.",
     )
     def test_accessors__file_backed_workflow(self, raster_name: str, raster_dtype: str | None, tmp_path: Path) -> None:
-        """Checks that real GeoTIFF/LAZ data stays lazy and matches eager results through both accessors."""
+        """Checks that real GeoTIFF/LAZ data stays lazy and matches in-memory results through both accessors."""
 
         pytest.importorskip("dask")
         pytest.importorskip("pyarrow")
@@ -2065,7 +2065,7 @@ class TestRasterOpeningChunked:
     def test_open_raster__disk_chunk_metadata(
         self, tmp_path: Path, as_object_type: Literal["dataarray", "dataset"]
     ) -> None:
-        """Checks that disk tile metadata remains independent of computation chunks and matches eager opening."""
+        """Checks that disk tile metadata remains independent of computation chunks and matches in-memory opening."""
         pytest.importorskip("dask")
         from dask.callbacks import Callback
 
@@ -2084,7 +2084,7 @@ class TestRasterOpeningChunked:
             assert lazy.attrs["block_shape"] == variable.attrs["block_shape"] == (16, 32)
         assert not variable.rst.is_loaded
 
-        # Compare exact computed values and metadata with the same eager call
+        # Compare exact computed values and metadata with the same in-memory call
         xr.testing.assert_identical(lazy.compute(scheduler="synchronous"), eager)
         assert not variable.rst.is_loaded
         lazy.close()
@@ -2092,7 +2092,7 @@ class TestRasterOpeningChunked:
 
     @pytest.mark.parametrize("storage", ["netcdf", "zarr"])
     def test_tags__disk_chunks(self, tmp_path: Path, storage: str) -> None:
-        """Checks that inspecting stored array chunks stays lazy and computed values match eager opening."""
+        """Checks that inspecting stored array chunks stays lazy and computed values match in-memory opening."""
         pytest.importorskip("dask")
         from dask.callbacks import Callback
 
@@ -2121,7 +2121,7 @@ class TestRasterOpeningChunked:
             assert lazy["height"].rst.tags["disk_chunks"] == (16, 32)
         assert not lazy["height"].rst.is_loaded
 
-        # Compare the computed result exactly with eager values and cached disk metadata
+        # Compare the computed result exactly with in-memory values and cached disk metadata
         assert eager["height"].rst.tags["disk_chunks"] == (16, 32)
         xr.testing.assert_identical(lazy.compute(scheduler="synchronous"), eager)
         assert not lazy["height"].rst.is_loaded
@@ -2157,7 +2157,7 @@ class TestDatasetRasterAccessorChunked:
             assert variable.chunks == source[name].chunks
             assert variable.data is source[name].data
 
-        # Compute each view and compare values and metadata with the original eager fixture
+        # Compute each view and compare values and metadata with the original in-memory fixture
         for name, variable in arrays.items():
             xr.testing.assert_identical(variable.compute(), mixed_dataset[name])
             assert variable.chunks and source[name].chunks

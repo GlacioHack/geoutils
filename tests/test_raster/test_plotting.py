@@ -306,14 +306,16 @@ class TestPlot:
 
 @pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
 class TestPlotChunked:
-    """Test module for lazy raster plotting: checks the out-of-memory computation, and equality with eager."""
+    """
+    Test module for lazy raster plotting: checks the out-of-memory computation, and equality with in-memory results.
+    """
 
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
 
     def test_plot__loading_laziness(self) -> None:
         """Checks that plotting computes a downsampled image without loading the source."""
 
-        # Open the same raster with spatial chunks and as an eager Rioxarray backend
+        # Open the same raster with spatial chunks and as an in-memory Rioxarray backend
         lazy = gu.open_raster(self.aster_dem_path, chunks={"x": 100, "y": 100})
         eager = gu.open_raster(self.aster_dem_path)
         assert not lazy._in_memory
@@ -325,7 +327,7 @@ class TestPlotChunked:
         eager.rst.plot(max_pixels=4_000, resampling="nearest", add_cbar=False)
         eager_values = np.asarray(plt.gca().get_images()[0].get_array())
 
-        # The source stays lazy and the computed display agrees exactly with eager reprojection
+        # The source stays lazy and the computed display agrees exactly with in-memory reprojection
         assert not lazy._in_memory
         assert lazy_values.size <= 4_000
         assert lazy_values.shape == eager_values.shape

@@ -392,7 +392,7 @@ class TestTransformation:
     def test_reproject__unloaded_multiband_to_single_band_reference(self) -> None:
         """Checks that a multi-band raster can use a match reference for reprojection."""
 
-        # Open multiband and single band rasters, eager and unloaded
+        # Open multiband and single band rasters, in-memory and unloaded
         source = gu.Raster(self.landsat_rgb_path)
         eager_source = gu.Raster(self.landsat_rgb_path, load_data=True)
         reference = gu.Raster(self.landsat_b4_crop_path)
@@ -404,7 +404,7 @@ class TestTransformation:
         result = source.reproject(reference)
         expected = eager_source.reproject(reference)
 
-        # Check that all three bands use the reference shape and match the eager result
+        # Check that all three bands use the reference shape and match the in-memory result
         assert result.count == source.count == 3
         assert result.shape == reference.shape
         assert result.raster_equal(expected, strict_masked=True)
@@ -1205,7 +1205,7 @@ class TestTransformationChunked:
         source_path = tmp_path / "reproject_source.tif"
         raster.to_file(source_path)
 
-        # Extend every edge and establish the eager reference grid
+        # Extend every edge and establish the in-memory reference grid
         dst_bounds = rio.coords.BoundingBox(left=-1, bottom=-6, right=11, top=6)
         base = raster.reproject(bounds=dst_bounds, res=(1, 1), resampling="nearest")
 
@@ -1218,7 +1218,7 @@ class TestTransformationChunked:
         ds = open_raster(source_path, chunks={"band": 1, "x": 5, "y": 5})
         dask_r = ds.rst.reproject(bounds=dst_bounds, res=(1, 1), resampling="nearest")
 
-        # Both chunked sources stay lazy and match the eager pixel placement
+        # Both chunked sources stay lazy and match the in-memory pixel placement
         assert not raster_mp.is_loaded
         assert not ds._in_memory
         assert isinstance(ds.data, da.Array)
@@ -1231,7 +1231,7 @@ class TestTransformationChunked:
     def test_reproject__vertical_shift_chunk_invariance(
         self, tmp_path: Path, backend: str, apply_vertical: bool, tolerance: float
     ) -> None:
-        """Checks that Dask/MP applies vertical shift or tolerance, matching eager."""
+        """Checks that Dask/MP applies vertical shift or tolerance, matching in-memory."""
 
         # Positive tolerance requires Rasterio's explicit tolerance argument
         if tolerance and Version(rio.__version__) < Version("1.5.0"):
@@ -1249,7 +1249,7 @@ class TestTransformationChunked:
         controls: dict[str, Any] = {"tolerance": tolerance, "apply_vertical": apply_vertical}
         assert not source.is_loaded
 
-        # Run eager + Dask/MP reprojection, check laziness and loading
+        # Run in-memory + Dask/MP reprojection, check laziness and loading
         eager_source = gu.Raster(source_file)
         expected = eager_source.reproject(res=2, resampling="nearest", transformer_options=options, **controls)
         assert eager_source.is_loaded
@@ -1276,7 +1276,7 @@ class TestTransformationChunked:
             result_values = result.to_nanarray()
             result_raster = result
 
-        # Check exact agreement with eager reprojection, and against the height offset we defined above
+        # Check exact agreement with in-memory reprojection, and against the height offset we defined above
         assert result_raster.transform == expected.transform
         assert result_raster.crs == expected.crs
         np.testing.assert_array_equal(result_values, expected.to_nanarray())
@@ -1440,7 +1440,7 @@ class TestTransformationChunked:
         assert base.raster_allclose(mp_r, warn_failure_reason=True, strict_masked=False)
 
     def test_icrop__gcp_rcp_pixel_offsets(self, raster_gcp_rpc: gu.Raster) -> None:
-        """Checks that lazy pixel cropping shifts GCPs/RPCs and matches eager exactly."""
+        """Checks that lazy pixel cropping shifts GCPs/RPCs and matches in-memory results exactly."""
 
         # We open a GCP/RCPs raster (with chunking defined so that crop crosses several chunks)
         import_optional("dask")
@@ -1456,7 +1456,7 @@ class TestTransformationChunked:
         assert result.rst._chunks is not None
         assert not lazy.rst.is_loaded
 
-        # We check the GCP/RPC image offsets, and that we exactly match the eager call
+        # We check the GCP/RPC image offsets, and that we exactly match the in-memory call
         assert [point.asdict() for point in result.rst.gcps[0]] == [point.asdict() for point in expected.gcps[0]]
         assert result.rst.gcps[1] == expected.gcps[1]
         assert result.rst.rpcs == expected.rpcs
@@ -1473,9 +1473,9 @@ class TestTransformationChunked:
     def test_reproject__chunk_invariance(
         self, raster_gcp_rpc: gu.Raster, tmp_path: Path, resampling: str, backend: str
     ) -> None:
-        """Checks that uneven GCP/RPC chunks reproduce eager values exactly, and respect laziness."""
+        """Checks that uneven GCP/RPC chunks reproduce in-memory values exactly, and respect laziness."""
 
-        # We use the GCP/RCP raster, and reproject with eager, also using a transformer option
+        # We use the GCP/RCP raster and reproject in memory, also using a transformer option
         source = raster_gcp_rpc
         options = {"RPC_HEIGHT": 80} if source.rpcs else {}
         expected = gu.Raster(source.name).reproject(crs=3857, resampling=resampling, transformer_options=options)
@@ -1516,7 +1516,7 @@ class TestTransformationChunked:
         reason="Exact GCP/RPC reprojection comparisons require Rasterio 1.5 or newer.",
     )
     def test_reproject__rpc_transformer_option(self, raster_gcp_rpc: gu.Raster, tmp_path: Path) -> None:
-        """Checks that RPC_HEIGHT transformer option behaves properly with eager/lazy reprojection."""
+        """Checks that RPC_HEIGHT transformer option behaves properly with in-memory/lazy reprojection."""
 
         # We create a DEM with a height of 80 m everywhere across the image
         # RPCs use ground height to locate image pixels, so supplying this DEM through RPC_DEM should give
@@ -1551,7 +1551,7 @@ class TestTransformationChunked:
         reason="Exact GCP/RPC reprojection comparisons require Rasterio 1.5 or newer.",
     )
     def test_reproject__gcp_transformer_option(self, raster_gcp_rpc: gu.Raster) -> None:
-        """Checks that TPS transformer option for GCP behaves properly, and matches lazy/eager."""
+        """Checks that TPS transformer option for GCP behaves properly, and matches lazy/in-memory."""
 
         # We use thin plate splines (GCP_TPS) to map image pixels to ground coordinates
         # This bends the image smoothly through the control points
@@ -1582,7 +1582,7 @@ class TestTransformationChunked:
     def test_reproject__selected_gcp_rcp_chunk_invariance(
         self, raster_gcp_rpc: gu.Raster, tmp_path: Path, source_method: str, backend: str
     ) -> None:
-        """Checks that Dask/MP uses the same selected GCPs/RPCs as eager reprojection and preserves laziness."""
+        """Checks that Dask/MP uses the same selected GCPs/RPCs as in-memory reprojection and preserves laziness."""
 
         # Open an image with both GCPs and RPCs, and select one through transformers options
         source = raster_gcp_rpc
@@ -1680,7 +1680,7 @@ class TestTransformationChunked:
             assert result.dtype == np.dtype("int16")
             values = result.to_nanarray()
 
-        # Check exact equality with eager
+        # Check exact equality with the in-memory result
         np.testing.assert_array_equal(values, expected.to_nanarray())
         assert not source.is_loaded
 
@@ -2192,13 +2192,13 @@ class TestReprojectionOverlapBackends:
 @pytest.mark.skipif(find_spec("dask") is None, reason="Requires Dask")
 class TestReprojectionOperatorsChunked:
     """
-    Test module for eager and lazy agreement when reprojecting operator neighborhoods.
+    Test module for in-memory and lazy agreement when reprojecting operator neighborhoods.
 
     Tests comparing SciPy/Numba backends are covered in test_operators/.
     """
 
     def test_reproject__default_neighb_chunk_invariance(self) -> None:
-        """Checks that default neighborhoods agree between eager and chunked for default neighborhood."""
+        """Checks that default neighborhoods agree between in-memory and chunked for default neighborhood."""
 
         # Synthetic raster with local reducer
         values = np.arange(42, dtype=float).reshape(6, 7)
@@ -2229,7 +2229,7 @@ class TestReprojectionOperatorsChunked:
         ],
     )
     def test_reproject__crs_chunk_invariance(self, tmp_path: Any, operator: Interpolator | Reducer) -> None:
-        """Checks that reprojection across CRS with operators is consistent across eager, Dask and MP execution."""
+        """Checks that reprojection across CRS with operators is consistent across in-memory, Dask and MP execution."""
 
         # Synthetic 4x4 with chunks of 2x3 to get uneven blocks
         values = np.arange(16, dtype=np.float64).reshape(4, 4)
@@ -2273,7 +2273,7 @@ class TestReprojectionOperatorsChunked:
     def test_reproject__overlap_backend_chunk_invariance(
         self, tmp_path: Any, backend: str, source_angle: int, area_weighting: Literal["diagonal_bounds", "intersection"]
     ) -> None:
-        """Checks weighted reprojection across eager, Dask, and MP with north-up or rotated sources."""
+        """Checks weighted reprojection across in-memory, Dask, and MP with north-up or rotated sources."""
 
         pytest.importorskip(backend)
 
@@ -2327,7 +2327,7 @@ class TestReprojectionOperatorsChunked:
         ids=["square", "circular", "offsets"],
     )
     def test_reproject__reducer_neighb_chunk_invariance(self, tmp_path: Any, neighborhood: GridNeighbours) -> None:
-        """Checks Dask and MP give same results as eager for various neighborhoods."""
+        """Checks Dask and MP match the in-memory results for various neighborhoods."""
 
         # 1/ Write raster
 
@@ -2344,7 +2344,7 @@ class TestReprojectionOperatorsChunked:
         )
         operator = Mean(neighborhood=neighborhood)
 
-        # 2/ Run eager, Dask and MP
+        # 2/ Run in-memory, Dask and MP
         expected = raster.reproject(reference, resampling=operator)
         lazy_source = open_raster(source_path, chunks={"y": 3, "x": 2})
         lazy_result = lazy_source.rst.reproject(ref=reference, resampling=operator)
