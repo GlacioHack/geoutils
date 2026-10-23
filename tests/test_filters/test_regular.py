@@ -18,6 +18,7 @@ from geoutils import Raster
 from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
+from geoutils.multiproc.cluster import MpCluster
 from geoutils.operators import GridNeighbours, LinearCoefficients, LocalData, Reducer
 from geoutils.operators.reducer import Count, Maximum, Mean, Median, Minimum, Range, RootMeanSquare, Sum
 from geoutils.raster import get_array_and_mask
@@ -774,11 +775,12 @@ class TestFilterChunked:
 
     @pytest.mark.parametrize("operator", [Mean(), Sum(), SourceIndexSum()])
     @pytest.mark.parametrize("fractional", [False, True])
-    def test_filter__reducer_chunks(self, tmp_path: Any, operator: Reducer, fractional: bool) -> None:
+    def test_filter__reducer_chunks(
+        self, tmp_path: Any, operator: Reducer, fractional: bool, mp_cluster: MpCluster
+    ) -> None:
         """Checks that reducer filters preserve lazy inputs and agree across irregular Dask and worker tiles."""
 
         from geoutils._misc import import_optional
-        from geoutils.multiproc.cluster import MpCluster
 
         da = import_optional("dask").array
         if fractional and isinstance(operator, SourceIndexSum):
@@ -801,9 +803,8 @@ class TestFilterChunked:
 
         # Run in-memory and worker calculations, then build the Dask result without loading its source
         expected = raster.filter(operator, **options).to_nanarray()
-        with MpCluster({"nb_workers": 2}) as cluster:
-            config = MultiprocConfig(cluster=cluster, chunks=6, outfile=str(tmp_path / "filtered.tif"))
-            worker = source.filter(operator, mp_config=config, **options)
+        config = MultiprocConfig(cluster=mp_cluster, chunks=9, outfile=str(tmp_path / "filtered.tif"))
+        worker = source.filter(operator, mp_config=config, **options)
         delayed = lazy.rst.filter(operator, **options)
         assert isinstance(delayed.data, da.Array)
         assert not lazy.rst.is_loaded and not delayed.rst.is_loaded

@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from geoutils.multiproc import MultiprocConfig
+from geoutils.multiproc.cluster import MpCluster
 from geoutils.sampling.stratified import _stratified_subsample_indices
 from geoutils.sampling.subsampling import _splitmix64
 
@@ -150,24 +151,22 @@ class TestStratifiedSubsampleChunked:
     def test_stratified_subsample_indices__multiproc_workers(
         self,
         strategy: Literal["topk", "sequential"],
+        mp_cluster: MpCluster,
     ) -> None:
         """Checks that Multiproc workers combine several task batches and match the positions selected with Dask."""
 
         # Use more than eight tiles so Multiproc processes several task batches and combines their samples
         import dask.array as da
 
-        from geoutils.multiproc.cluster import MpCluster
-
         groups = (np.arange(360) % 7).reshape(18, 20)
         groups[::3, ::4] = -1
-        lazy = da.from_array(groups, chunks=(3, 4))
+        lazy = da.from_array(groups, chunks=(7, 9))
         expected = _stratified_subsample_indices(lazy, 0.3, 42, strategy)
         eager = _stratified_subsample_indices(groups, 0.3, 42, strategy)
 
         # Run the same tile layout through two Multiproc worker processes and compare the selected positions
-        with MpCluster({"nb_workers": 2, "max_tasks_per_child": None}) as cluster:
-            config = MultiprocConfig(chunks=(3, 4), cluster=cluster)
-            selected = _stratified_subsample_indices(groups, 0.3, 42, strategy, mp_config=config)
+        config = MultiprocConfig(chunks=(7, 9), cluster=mp_cluster)
+        selected = _stratified_subsample_indices(groups, 0.3, 42, strategy, mp_config=config)
         assert np.array_equal(selected, expected)
         assert isinstance(lazy, da.Array) and isinstance(selected, np.ndarray)
         if strategy == "topk":

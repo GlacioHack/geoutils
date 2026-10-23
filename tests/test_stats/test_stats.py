@@ -16,6 +16,7 @@ from geoutils import examples
 from geoutils._dispatch import is_dask_array
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
+from geoutils.multiproc.cluster import MpCluster
 from geoutils.operators.reducer import Mean, Mode, Quantile, Range, Sum
 from geoutils.stats.reduction import (
     _STATS_ALIAS_ALL,
@@ -1022,8 +1023,9 @@ class TestStatsChunked:
         np.testing.assert_array_equal(source.compute() if execution == "dask" else source, values)
 
     @pytest.mark.parametrize("method", ["blockwise", "cohorts"])
-    def test_stats__flox_methods_chunk_invariance(self, method: Literal["auto", "map-reduce", "blockwise", "cohorts"]) \
-            -> None:
+    def test_stats__flox_methods_chunk_invariance(
+        self, method: Literal["auto", "map-reduce", "blockwise", "cohorts"]
+    ) -> None:
         """Checks that Flox methods match in-memory statistics."""
 
         # Create groups crossing chunks
@@ -1150,11 +1152,10 @@ class TestStatsChunked:
         np.testing.assert_array_equal(source.compute(), values)
 
     @pytest.mark.parametrize("masked", [False, True])
-    def test_stats__multiprocessing_summary(self, masked: bool) -> None:
+    def test_stats__multiprocessing_summary(self, masked: bool, mp_cluster: MpCluster) -> None:
         """Checks that stats() combines ungrouped array tiles and optional masks in worker processes."""
 
         # Include nodata values and uneven edge tiles in both the array and raster routes
-        from geoutils.multiproc.cluster import MpCluster
 
         values = np.arange(35, dtype=float).reshape(5, 7)
         values[1, 2] = np.nan
@@ -1171,12 +1172,11 @@ class TestStatsChunked:
         expected_reductions = gu.stats.stats(values, ["mean", "std", "sum", "validcount"], mask=keep)
 
         # Run exact default statistics and mergeable reductions through real worker processes
-        with MpCluster({"nb_workers": 2}) as cluster:
-            config = MultiprocConfig(chunks=(2, 3), cluster=cluster)
-            array_summary = gu.stats.stats(values, mask=keep, mp_config=config)
-            array_all = gu.stats.stats(values, "all", mask=keep, mp_config=config, method="groupwise")
-            raster_summary = raster.stats(mask=keep, mp_config=config)
-            reductions = raster.stats(["mean", "std", "sum", "validcount"], mask=keep, mp_config=config)
+        config = MultiprocConfig(chunks=(2, 3), cluster=mp_cluster)
+        array_summary = gu.stats.stats(values, mask=keep, mp_config=config)
+        array_all = gu.stats.stats(values, "all", mask=keep, mp_config=config, method="groupwise")
+        raster_summary = raster.stats(mask=keep, mp_config=config)
+        reductions = raster.stats(["mean", "std", "sum", "validcount"], mask=keep, mp_config=config)
 
         # Match the in-memory values and preserve integer count results in both public APIs
         compare_dict(expected_summary, array_summary)

@@ -1093,7 +1093,7 @@ class TestMaskGeotransformations:
 class TestTransformationChunked:
     """Test module for raster transformations run with Dask or multiprocessing."""
 
-    def test_clip__chunked_backends_equal(self, tmp_path: Any) -> None:
+    def test_clip__chunked_backends_equal(self, tmp_path: Any, mp_cluster: MpCluster) -> None:
         """Checks that clip with Dask and multiprocessing give the same result as in-memory."""
 
         import dask.array as da
@@ -1114,9 +1114,8 @@ class TestTransformationChunked:
         dask_source = open_raster(path, chunks={"band": 1, "y": 2, "x": 3})
         raster_source = gu.Raster(path)
         dask_result = dask_source.rst.clip(geometry)
-        with MpCluster({"nb_workers": 2}) as cluster:
-            mp_config = MultiprocConfig(chunks=(2, 3), outfile=str(tmp_path / "clip_multiproc.tif"), cluster=cluster)
-            multiproc_result = raster_source.clip(geometry, mp_config=mp_config)
+        mp_config = MultiprocConfig(chunks=(2, 3), outfile=str(tmp_path / "clip_multiproc.tif"), cluster=mp_cluster)
+        multiproc_result = raster_source.clip(geometry, mp_config=mp_config)
 
         # Check Dask laziness and loading behaviour
         assert isinstance(dask_result.data, da.Array)
@@ -1229,7 +1228,7 @@ class TestTransformationChunked:
     @pytest.mark.parametrize("apply_vertical", [False, True])
     @pytest.mark.parametrize("tolerance", [0, 0.125])
     def test_reproject__vertical_shift_chunk_invariance(
-        self, tmp_path: Path, backend: str, apply_vertical: bool, tolerance: float
+        self, tmp_path: Path, backend: str, apply_vertical: bool, tolerance: float, request: pytest.FixtureRequest
     ) -> None:
         """Checks that Dask/MP applies vertical shift or tolerance, matching in-memory."""
 
@@ -1266,11 +1265,11 @@ class TestTransformationChunked:
             assert not lazy.rst.is_loaded
             result_raster = result.rst
         else:
-            with MpCluster({"nb_workers": 2}) as cluster:
-                config = MultiprocConfig(cluster=cluster, chunks=(3, 4), outfile=str(tmp_path / "shifted.tif"))
-                result = source.reproject(
-                    res=2, resampling="nearest", transformer_options=options, mp_config=config, **controls
-                )
+            cluster = request.getfixturevalue("mp_cluster")
+            config = MultiprocConfig(cluster=cluster, chunks=(3, 4), outfile=str(tmp_path / "shifted.tif"))
+            result = source.reproject(
+                res=2, resampling="nearest", transformer_options=options, mp_config=config, **controls
+            )
             assert not source.is_loaded
             assert not result.is_loaded
             result_values = result.to_nanarray()
@@ -1471,7 +1470,7 @@ class TestTransformationChunked:
         reason="Exact GCP/RPC reprojection comparisons require Rasterio 1.5 or newer.",
     )
     def test_reproject__chunk_invariance(
-        self, raster_gcp_rpc: gu.Raster, tmp_path: Path, resampling: str, backend: str
+        self, raster_gcp_rpc: gu.Raster, tmp_path: Path, resampling: str, backend: str, request: pytest.FixtureRequest
     ) -> None:
         """Checks that uneven GCP/RPC chunks reproduce in-memory values exactly, and respect laziness."""
 
@@ -1485,7 +1484,7 @@ class TestTransformationChunked:
         # Then we run with Dask/MP, which should stay lazy/unloaded
         if backend == "dask":
             import_optional("dask")
-            lazy = gu.open_raster(source.name, chunks={"band": 1, "y": 7, "x": 9})
+            lazy = gu.open_raster(source.name, chunks={"band": 1, "y": 23, "x": 29})
             result = lazy.rst.reproject(crs=3857, resampling=resampling, transformer_options=options)
             assert lazy.rst._chunks is not None
             assert result.rst._chunks is not None
@@ -1496,11 +1495,9 @@ class TestTransformationChunked:
             assert result.rst.rpcs is None
             assert result.rst.gcps == ([], None)
         else:
-            with MpCluster({"nb_workers": 2}) as cluster:
-                config = MultiprocConfig(cluster=cluster, chunks=(7, 9), outfile=str(tmp_path / "warped.tif"))
-                result = source.reproject(
-                    crs=3857, resampling=resampling, transformer_options=options, mp_config=config
-                )
+            cluster = request.getfixturevalue("mp_cluster")
+            config = MultiprocConfig(cluster=cluster, chunks=(23, 29), outfile=str(tmp_path / "warped.tif"))
+            result = source.reproject(crs=3857, resampling=resampling, transformer_options=options, mp_config=config)
             assert not result.is_loaded
             assert not source.is_loaded
             assert result.rpcs is None
@@ -1580,7 +1577,12 @@ class TestTransformationChunked:
         reason="Exact GCP/RPC reprojection comparisons require Rasterio 1.5 or newer.",
     )
     def test_reproject__selected_gcp_rcp_chunk_invariance(
-        self, raster_gcp_rpc: gu.Raster, tmp_path: Path, source_method: str, backend: str
+        self,
+        raster_gcp_rpc: gu.Raster,
+        tmp_path: Path,
+        source_method: str,
+        backend: str,
+        request: pytest.FixtureRequest,
     ) -> None:
         """Checks that Dask/MP uses the same selected GCPs/RPCs as in-memory reprojection and preserves laziness."""
 
@@ -1602,7 +1604,7 @@ class TestTransformationChunked:
         assert expected.is_loaded
         if backend == "dask":
             import_optional("dask")
-            lazy = gu.open_raster(source.name, chunks={"band": 1, "y": 7, "x": 9})
+            lazy = gu.open_raster(source.name, chunks={"band": 1, "y": 23, "x": 29})
             assert not lazy.rst.is_loaded
             assert lazy.rst._chunks is not None
             result = lazy.rst.reproject(crs=3857, resampling="nearest", transformer_options=options)
@@ -1616,9 +1618,9 @@ class TestTransformationChunked:
             assert lazy.rst.rpcs.to_gdal() == rpcs
             result_raster = result.rst
         else:
-            with MpCluster({"nb_workers": 2}) as cluster:
-                config = MultiprocConfig(cluster=cluster, chunks=(7, 9), outfile=str(tmp_path / "selected.tif"))
-                result = source.reproject(crs=3857, resampling="nearest", transformer_options=options, mp_config=config)
+            cluster = request.getfixturevalue("mp_cluster")
+            config = MultiprocConfig(cluster=cluster, chunks=(23, 29), outfile=str(tmp_path / "selected.tif"))
+            result = source.reproject(crs=3857, resampling="nearest", transformer_options=options, mp_config=config)
             assert not source.is_loaded
             assert not result.is_loaded
             values = result.to_nanarray()

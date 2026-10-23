@@ -1836,9 +1836,7 @@ class TestGroupedStatsChunked:
         pd.testing.assert_frame_equal(result, expected)
 
     @pytest.mark.parametrize("backend,execution", [("geoutils", "dask"), ("geoutils", "mp"), ("flox", "dask")])
-    def test_stats__fractional_chunk(
-        self, backend: Literal["geoutils", "flox"], execution: str
-    ) -> None:
+    def test_stats__fractional_chunk(self, backend: Literal["geoutils", "flox"], execution: str) -> None:
         """Checks that fractional means combine chunk weights correctly."""
 
         # Create a polygon, which gives a cell a fractional weight of 0.01

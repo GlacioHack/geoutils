@@ -24,6 +24,7 @@ from geoutils.interface.resampling import (
     _interpolate_array,
 )
 from geoutils.multiproc import MultiprocConfig
+from geoutils.multiproc.cluster import MpCluster
 from geoutils.operators import GridNeighbours, Interpolator, LocalData, PointNeighbours, Reducer
 from geoutils.operators.interpolator import (
     InverseDistance,
@@ -907,13 +908,11 @@ class TestInterpPointsChunked:
 
     @pytest.mark.parametrize("validity_only", [False, True])
     def test_interp_points__validity_does_not_load_multiprocessing_source(
-        self, validity_only: bool, tmp_path: Path
+        self, validity_only: bool, tmp_path: Path, mp_cluster: MpCluster
     ) -> None:
         """
         Checks that real workers interpolate selected values or validity while the complete raster stays unloaded.
         """
-
-        from geoutils.multiproc.cluster import MpCluster
 
         # Store a raster whose nodata center is distinguishable from finite and out-of-bounds points
         data = np.arange(240, dtype=np.float64).reshape(2, 10, 12)
@@ -927,15 +926,14 @@ class TestInterpPointsChunked:
 
         # Let worker tiles read the file and build only their local one/NaN arrays
         assert not unloaded.is_loaded
-        with MpCluster({"nb_workers": 2}) as cluster:
-            result = unloaded.interp_at_points(
-                points,
-                method="nearest",
-                band=2,
-                as_array=True,
-                _validity_only=validity_only,
-                mp_config=MultiprocConfig(chunks=(5, 6), cluster=cluster),
-            )
+        result = unloaded.interp_at_points(
+            points,
+            method="nearest",
+            band=2,
+            as_array=True,
+            _validity_only=validity_only,
+            mp_config=MultiprocConfig(chunks=(5, 6), cluster=mp_cluster),
+        )
 
         # Preserve the original storage and report validity at the sampled locations as floating values
         assert not unloaded.is_loaded
@@ -1664,10 +1662,10 @@ class TestReductionChunked:
 
     @pytest.mark.parametrize("masked", [False, True])
     @pytest.mark.parametrize("boundless", [False, True])
-    def test_reduce_at_points__callable_workers(self, masked: bool, boundless: bool, tmp_path: Path) -> None:
+    def test_reduce_at_points__callable_workers(
+        self, masked: bool, boundless: bool, tmp_path: Path, mp_cluster: MpCluster
+    ) -> None:
         """Checks that callable reducers receive missing cells consistently in in-memory, Dask and MP windows."""
-
-        from geoutils.multiproc.cluster import MpCluster
 
         # Missing cell shared by neighboring windows; median differs from the containing cell
         values = np.arange(63, dtype=float).reshape(7, 9) ** 2
@@ -1690,10 +1688,9 @@ class TestReductionChunked:
         lazy_source = open_raster(str(filename), chunks={"y": 2, "x": 4})
         unloaded = gu.Raster(filename, load_data=False)
         lazy_result = lazy_source.rst.reduce_at_points(points, **options)
-        with MpCluster({"nb_workers": 2}) as cluster:
-            mp_result = unloaded.reduce_at_points(
-                points, **options, mp_config=MultiprocConfig(chunks=(3, 2), cluster=cluster)
-            )
+        mp_result = unloaded.reduce_at_points(
+            points, **options, mp_config=MultiprocConfig(chunks=(3, 2), cluster=mp_cluster)
+        )
 
         # In-memory values, masks and original loading state
         assert not lazy_source._in_memory

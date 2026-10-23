@@ -602,6 +602,8 @@ class TestDatasetPointCloudAccessor:
                     "max_lag": 8,
                     "estimator": np.mean,
                     "random_state": 7,
+                    # Use the same pair storage for strict metadata comparisons
+                    "force_output_to_memory": True,
                 },
                 True,
                 assert_variograms_equal,

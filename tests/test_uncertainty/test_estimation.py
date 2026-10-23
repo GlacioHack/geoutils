@@ -416,6 +416,7 @@ class TestErrorStructureEstimationChunked:
         components: dict[str, dict[str, Any]],
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
+        request: pytest.FixtureRequest,
     ) -> None:
         """
         Checks that Dask/MP estimates match in-memory components for raster and point inputs.
@@ -426,8 +427,6 @@ class TestErrorStructureEstimationChunked:
            one point and one raster (when another variable to difference with),
          - Error component definition: constant/variable magnitude, with/without correlation, and multiple components.
         """
-
-        from contextlib import ExitStack
 
         # 1/ Synthetic variables
         rows, columns = np.indices((12, 12))
@@ -567,32 +566,30 @@ class TestErrorStructureEstimationChunked:
 
         # For point-point, record MP point difference internally
         submitted_chunks: list[int] = []
-        with ExitStack() as stack:
-            if backend == "multiproc" and input_type == "point-point" and not variable and not correlated:
-                from geoutils.multiproc.cluster import MpCluster
-                from geoutils.uncertainty.estimation import _difference_point_partition
+        if backend == "multiproc" and input_type == "point-point" and not variable and not correlated:
+            from geoutils.uncertainty.estimation import _difference_point_partition
 
-                cluster = stack.enter_context(MpCluster({"nb_workers": 2}))
-                mp_config = MultiprocConfig(chunks=23, cluster=cluster)
-                submit = cluster.submit
+            cluster = request.getfixturevalue("mp_cluster")
+            mp_config = MultiprocConfig(chunks=23, cluster=cluster)
+            submit = cluster.submit
 
-                def record_submit(function: Any, *args: Any, **kwargs: Any) -> Any:
-                    if function is _difference_point_partition:
-                        submitted_chunks.append(len(args[0]))
-                    return submit(function, *args, **kwargs)
+            def record_submit(function: Any, *args: Any, **kwargs: Any) -> Any:
+                if function is _difference_point_partition:
+                    submitted_chunks.append(len(args[0]))
+                return submit(function, *args, **kwargs)
 
-                monkeypatch.setattr(cluster, "submit", record_submit)
+            monkeypatch.setattr(cluster, "submit", record_submit)
 
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", UserWarning)
-                if chunked_other is None:
-                    result = gu.ErrorStructure.estimate(
-                        source_interface, predictors=chunked_predictors, mp_config=mp_config, **options
-                    )
-                else:
-                    result = source_interface.estimate_error_structure(
-                        chunked_other, predictors=chunked_predictors, mp_config=mp_config, **options
-                    )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            if chunked_other is None:
+                result = gu.ErrorStructure.estimate(
+                    source_interface, predictors=chunked_predictors, mp_config=mp_config, **options
+                )
+            else:
+                result = source_interface.estimate_error_structure(
+                    chunked_other, predictors=chunked_predictors, mp_config=mp_config, **options
+                )
 
         # 3/ We check exact equality across Dask/MP
         for spatial_input, kind in input_states:

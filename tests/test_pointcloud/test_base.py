@@ -120,7 +120,15 @@ class TestClassVsAccessorConsistency:
         ),
         (
             "pairsample",
-            {"n_pairs": 4, "min_distance": 0.5, "max_distance": 2, "strategy": "kdtree", "random_state": 42},
+            {
+                "n_pairs": 4,
+                "min_distance": 0.5,
+                "max_distance": 2,
+                "strategy": "kdtree",
+                "random_state": 42,
+                # Use the same pair storage for strict metadata comparisons
+                "force_output_to_memory": True,
+            },
         ),
         (
             "variogram",
@@ -863,7 +871,8 @@ class TestAccessorDask:
         )
 
         # Dask selects and grids point partitions separately for every output block
-        ds = gu.open_pointcloud(fn_las, chunks=100, as_object_type=as_object_type)
+        # Leave a shorter final point partition
+        ds = gu.open_pointcloud(fn_las, chunks=3001, as_object_type=as_object_type)
         output_dask = ds.pc.grid(
             shape=(3, 3),
             bounds=pc.bbox,

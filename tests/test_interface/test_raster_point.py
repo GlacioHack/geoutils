@@ -402,7 +402,7 @@ class TestRasterPointChunked:
     @pytest.mark.parametrize("skip_nodata", [True, False])
     @pytest.mark.parametrize("as_array", [False, True])
     def test_to_pointcloud__chunked_backends_equal(
-        self, subsample: int, skip_nodata: bool, as_array: bool, tmp_path: Path
+        self, subsample: int, skip_nodata: bool, as_array: bool, tmp_path: Path, mp_cluster: MpCluster
     ) -> None:
         """Checks that in-memory, Dask and Multiprocessing conversions return the same point rows."""
 
@@ -436,11 +436,10 @@ class TestRasterPointChunked:
         # Choose GeoPandas output for the geometry comparisons below
         dask_output = dask_source.rst.to_pointcloud(**options, pointcloud_return_type="geodataframe")
         point_output = tmp_path / f"points-{subsample}-{skip_nodata}.gpkg"
-        with MpCluster({"nb_workers": 2}) as cluster:
-            multiprocessing_output = multiprocessing_source.to_pointcloud(
-                **options,
-                mp_config=MultiprocConfig(chunks=(3, 4), outfile=str(point_output), cluster=cluster),
-            )
+        multiprocessing_output = multiprocessing_source.to_pointcloud(
+            **options,
+            mp_config=MultiprocConfig(chunks=(3, 4), outfile=str(point_output), cluster=mp_cluster),
+        )
 
         # 4/ Check that the Dask source and output stay lazy until the result is computed explicitly
         assert dask_source.data is dask_source_array

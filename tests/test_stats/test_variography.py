@@ -549,9 +549,7 @@ class TestVariogramReduction:
         assert result.backend is None
 
     @pytest.mark.parametrize("backend,engine", [("geoutils", None), ("flox", None), ("flox", "numba")])
-    def test_from_pairs__minmax_zero_empty(
-        self, backend: Literal["geoutils", "flox"], engine: str | None
-    ) -> None:
+    def test_from_pairs__minmax_zero_empty(self, backend: Literal["geoutils", "flox"], engine: str | None) -> None:
         """Checks edge case of minmax variogram for zero difference and empty bins."""
 
         if engine == "numba":
@@ -1276,7 +1274,7 @@ class TestVariogramReductionChunked:
         np.testing.assert_allclose(result.lags, expected.lags, rtol=2e-13)
         np.testing.assert_allclose(result.semivariance, expected.semivariance, rtol=2e-13)
 
-    def test_variogram__multiprocess_sampling_and_reduction(self, tmp_path: Path) -> None:
+    def test_variogram__multiprocess_sampling_and_reduction(self, tmp_path: Path, mp_cluster: MpCluster) -> None:
         """Checks that multiprocessing variograms leave file inputs unloaded."""
 
         # Write and reopen a raster with NaNs
@@ -1301,14 +1299,13 @@ class TestVariogramReductionChunked:
         # Sample and reduce pairs with the same process pool
         assert not source.is_loaded
         pytest.importorskip("dask.array")
-        with MpCluster({"nb_workers": 2}) as cluster:
-            result = source.variogram(
-                **options,
-                mp_config=MultiprocConfig(chunks=(4, 3), cluster=cluster),
-                output_storage="disk",
-                output_directory=tmp_path,
-                output_chunks=17,
-            )
+        result = source.variogram(
+            **options,
+            mp_config=MultiprocConfig(chunks=(5, 7), cluster=mp_cluster),
+            output_storage="disk",
+            output_directory=tmp_path,
+            output_chunks=17,
+        )
 
         # Check equality and loading
         assert not source.is_loaded

@@ -763,6 +763,7 @@ class TestPairSampleChunked:
         pointcloud_file: Any,
         mask_form: str,
         tmp_path: Path,
+        request: pytest.FixtureRequest,
     ) -> None:
         """Checks that Dask/MP masks match in-memory sampling without loading the point tables."""
 
@@ -800,7 +801,7 @@ class TestPairSampleChunked:
                 source_filename = tmp_path / "points.gpkg"
                 points.to_file(source_filename)
                 source = gu.PointCloud(source_filename, data_name="height")
-                cluster = stack.enter_context(MpCluster({"nb_workers": 2}))
+                cluster = request.getfixturevalue("mp_cluster")
                 # Chunks of 37 on purpose to leave a shorter final partition
                 options = {"mp_config": MultiprocConfig(chunks=37, cluster=cluster)}
 
@@ -861,6 +862,7 @@ class TestPairSampleChunked:
         strategy: str,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
+        request: pytest.FixtureRequest,
     ) -> None:
         """Checks that Dask/MP point searches match in-memory pairs."""
 
@@ -906,7 +908,7 @@ class TestPairSampleChunked:
                 source_filename = tmp_path / "loglag-points.gpkg"
                 points.to_file(source_filename)
                 source = gu.PointCloud(source_filename, data_name="height")
-                cluster = stack.enter_context(MpCluster({"nb_workers": 2}))
+                cluster = request.getfixturevalue("mp_cluster")
                 options["mp_config"] = MultiprocConfig(chunks=67, cluster=cluster)
             assert not source.is_loaded
             result = source.pairsample(**options)
@@ -934,7 +936,7 @@ class TestPairSampleChunked:
     )
     @pytest.mark.parametrize("execution", ["dask", "mp"])
     def test_pairsample__raster_chunk_invariance(
-        self, sampling: str, strategy: str, execution: str, tmp_path: Path
+        self, sampling: str, strategy: str, execution: str, tmp_path: Path, request: pytest.FixtureRequest
     ) -> None:
         """Checks that Dask and multiprocessing raster reads return the same pairs as in-memory sampling."""
 
@@ -972,9 +974,9 @@ class TestPairSampleChunked:
             result = source.pairsample(**options, force_output_to_memory=True)
             assert isinstance(source.data, da.Array)
         else:
-            with ClusterGenerator("multi", nb_workers=2) as cluster:
-                config = MultiprocConfig(chunks=source.shape, cluster=cluster)
-                result = source.pairsample(mp_config=config, **options)
+            cluster = request.getfixturevalue("mp_cluster")
+            config = MultiprocConfig(chunks=source.shape, cluster=cluster)
+            result = source.pairsample(mp_config=config, **options)
         expected = eager.pairsample(**options)
 
         # 4/ Check pairs and loading
@@ -985,7 +987,7 @@ class TestPairSampleChunked:
 
     @pytest.mark.parametrize("read_strategy", ["native", "reuse_values", "packed_validity"])
     def test_pairsample__raster_multiprocessing_tiles(
-        self, tmp_path: Path, read_strategy: str
+        self, tmp_path: Path, read_strategy: str, mp_cluster: MpCluster
     ) -> None:
         """Checks that multiprocessing tiles keep local pairs inside a file mask and match in-memory values."""
 
@@ -998,8 +1000,8 @@ class TestPairSampleChunked:
         transform = from_origin(0, 24, 1, 1)
         eager_source = gu.Raster.from_array(values, transform, 32633)
         eager_mask = gu.Raster.from_array(keep, transform, 32633)
-        dask_source = gu.DataArrayRasterAccessor.from_array(da.from_array(values, chunks=(7, 9)), transform, 32633)
-        dask_mask = gu.DataArrayRasterAccessor.from_array(da.from_array(keep, chunks=(7, 9)), transform, 32633)
+        dask_source = gu.DataArrayRasterAccessor.from_array(da.from_array(values, chunks=(13, 17)), transform, 32633)
+        dask_mask = gu.DataArrayRasterAccessor.from_array(da.from_array(keep, chunks=(13, 17)), transform, 32633)
         source_filename = tmp_path / "local-values.tif"
         mask_filename = tmp_path / "local-mask.tif"
         gu.Raster.from_array(values, transform, 32633).to_file(source_filename)
@@ -1017,18 +1019,17 @@ class TestPairSampleChunked:
             "read_strategy": read_strategy,
         }
 
-        # 2/ Sample 7 x 9 chunks with shorter final rows and columns
+        # 2/ Sample 13 x 17 chunks with shorter final rows and columns
         dask_pairs = dask_source.rst.pairsample(mask=dask_mask, **options)
-        with ClusterGenerator("multi", nb_workers=2) as cluster:
-            config = MultiprocConfig(chunks=(7, 9), cluster=cluster)
-            mp_pairs = file_source.pairsample(mask=file_mask, mp_config=config, **options)
-            eager_pairs = eager_source.pairsample(mask=eager_mask, mp_config=config, **options)
+        config = MultiprocConfig(chunks=(13, 17), cluster=mp_cluster)
+        mp_pairs = file_source.pairsample(mask=file_mask, mp_config=config, **options)
+        eager_pairs = eager_source.pairsample(mask=eager_mask, mp_config=config, **options)
 
         # 3/ Compare pairs using the same chunk boundaries
         xr.testing.assert_equal(dask_pairs, mp_pairs)
         xr.testing.assert_equal(mp_pairs, eager_pairs)
-        row_edges = np.array([0, 7, 14, 21, 24])
-        column_edges = np.array([0, 9, 18, 24])
+        row_edges = np.array([0, 13, 24])
+        column_edges = np.array([0, 17, 24])
         rows = np.searchsorted(row_edges, dask_pairs.row, side="right")
         columns = np.searchsorted(column_edges, dask_pairs.column, side="right")
         assert np.array_equal(rows[:, 0], rows[:, 1])
@@ -1047,7 +1048,7 @@ class TestPairSampleChunked:
     @pytest.mark.parametrize("sampling", ["loglag", "random_xy"])
     @pytest.mark.parametrize("dtype", [np.int64, np.uint64])
     def test_pairsample__multiprocess_cached_integer_values(
-        self, tmp_path: Path, n_pairs: int, read_strategy: str, sampling: str, dtype: Any
+        self, tmp_path: Path, n_pairs: int, read_strategy: str, sampling: str, dtype: Any, mp_cluster: MpCluster
     ) -> None:
         """Checks that MP caches preserve 64-bit integer endpoints after excluding masked cells."""
 
@@ -1067,9 +1068,8 @@ class TestPairSampleChunked:
         }
 
         # Sample the same file through actual workers without loading the source object
-        with ClusterGenerator("multi", nb_workers=2) as cluster:
-            config = MultiprocConfig(chunks=(4, 3), cluster=cluster)
-            result = source.pairsample(**options, mp_config=config)
+        config = MultiprocConfig(chunks=(6, 7), cluster=mp_cluster)
+        result = source.pairsample(**options, mp_config=config)
         expected = eager.pairsample(**options)
 
         # Check integer values directly, then compare pairs with eager sampling
@@ -1400,7 +1400,7 @@ class TestPairOutputChunked:
             filename = tmp_path / "source.tif"
             eager.to_file(filename)
             source = gu.Raster(filename, load_data=False)
-            chunks: Any = (7, 9)
+            chunks: Any = (13, 17)
         else:
             rows, columns = np.indices(values.shape)
             eager = gu.PointCloud.from_xyz(columns.ravel(), rows.ravel(), values.ravel(), 32633, data_name="height")
@@ -1744,6 +1744,7 @@ class TestPairSampleErrors:
         mask_change: str,
         message: str,
         tmp_path: Path,
+        request: pytest.FixtureRequest,
     ) -> None:
         """Checks an error is raised for a chunked point mask with a different CRS or row order."""
 
@@ -1788,7 +1789,7 @@ class TestPairSampleErrors:
                 mask_path = tmp_path / "mask.gpkg"
                 point_mask.to_file(mask_path)
                 mask = gu.PointCloud(mask_path, data_name="include")
-                cluster = stack.enter_context(MpCluster({"nb_workers": 2}))
+                cluster = request.getfixturevalue("mp_cluster")
                 options["mp_config"] = MultiprocConfig(chunks=7, cluster=cluster)
 
             # Check the error without loading either point table

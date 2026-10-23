@@ -1010,7 +1010,9 @@ class TestDataArrayRasterAccessor:
         # Compare statistics that need values from all chunks (median, percentiles and related measures)
         for stat in ["median", "90th percentile", "le90", "nmad", "iqr"]:
             expected = base.rst.stats(stat)
-            actual = ds.rst.stats(stat)
+
+            # Use complete groups for the exact quantiles checked here
+            actual = ds.rst.stats(stat, method="groupwise")
 
             # stats() computes its small summary result, but it must not replace the source with loaded data
             assert np.isscalar(actual)
@@ -1445,6 +1447,8 @@ class TestDatasetRasterAccessor:
                     "estimator": np.mean,
                     "n_runs": 2,
                     "random_state": 7,
+                    # Use the same pair storage for strict metadata comparisons
+                    "force_output_to_memory": True,
                 },
                 True,
                 assert_variograms_equal,

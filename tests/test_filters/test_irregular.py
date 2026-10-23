@@ -215,7 +215,7 @@ class TestPointCloudFilterChunked:
 
     @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_filter__chunked_backends_equal(
-        self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
+        self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path, mp_cluster: MpCluster
     ) -> None:
         """
         Checks that filtering with max_points=2 stays lazy with Dask/MP and matches in-memory results.
@@ -242,15 +242,14 @@ class TestPointCloudFilterChunked:
             dask_filtered = lazy.pc.filter(method="median", radius=1.1, max_points=2, include_self=False, batch_size=2)
 
         # MP: filter with two workers, then join rows in input order
-        with MpCluster({"nb_workers": 2}) as cluster:
-            configuration = MultiprocConfig(
-                chunks=2,
-                outfile=str(output_filename),
-                cluster=cluster,
-            )
-            mp_filtered = source.filter(
-                method="median", radius=1.1, max_points=2, include_self=False, mp_config=configuration
-            )
+        configuration = MultiprocConfig(
+            chunks=2,
+            outfile=str(output_filename),
+            cluster=mp_cluster,
+        )
+        mp_filtered = source.filter(
+            method="median", radius=1.1, max_points=2, include_self=False, mp_config=configuration
+        )
 
         # We check zero executed tasks, lazy inputs/outputs and point metadata
         assert tasks == []

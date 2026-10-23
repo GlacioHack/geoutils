@@ -392,14 +392,13 @@ class TestArraySubsampleChunked:
         mask_form: str,
         lazy_test_files_tiny: list[str],
         tmp_path: Path,
+        mp_cluster: MpCluster,
     ) -> None:
         """
         Checks that masks and finite data jointly define fractional samples across in-memory, Dask and worker tiles.
         """
 
         import dask.array as da
-
-        from geoutils.multiproc.cluster import MpCluster
 
         # Prepare a common mask and compute the eligible population from the original raster values
         path = lazy_test_files_tiny[0]
@@ -439,30 +438,27 @@ class TestArraySubsampleChunked:
         results = []
 
         # Real processes check that both count and selection workers receive the same sliced mask
-        with MpCluster({"nb_workers": 2, "max_tasks_per_child": None}) as cluster:
-            config = MultiprocConfig(chunks=(6, 10), cluster=cluster)
-            sources = [(raster, mask, None), (lazy.rst, lazy_mask, None), (unloaded, worker_mask, config)]
-            for source, source_mask, source_config in sources:
-                options: dict[str, Any] = {
-                    "mask": source_mask,
-                    "random_state": 42,
-                    "strategy": strategy,
-                    "mp_config": source_config,
-                }
-                indices = _subsample_values(source, 0.25, return_indices=True, **options)
-                sampled = _subsample_values(source, 0.25, **options)
+        config = MultiprocConfig(chunks=(13, 14), cluster=mp_cluster)
+        sources = [(raster, mask, None), (lazy.rst, lazy_mask, None), (unloaded, worker_mask, config)]
+        for source, source_mask, source_config in sources:
+            options: dict[str, Any] = {
+                "mask": source_mask,
+                "random_state": 42,
+                "strategy": strategy,
+                "mp_config": source_config,
+            }
+            indices = _subsample_values(source, 0.25, return_indices=True, **options)
+            sampled = _subsample_values(source, 0.25, **options)
 
-                # Compute only the small sample results; the original raster objects are not loaded
-                indices = tuple(
-                    np.asarray(index.compute() if hasattr(index, "compute") else index) for index in indices
-                )
-                sampled = sampled.compute() if hasattr(sampled, "compute") else sampled
-                assert len(indices) == 2 and len(indices[0]) == expected_size
-                assert np.all(eligible[indices])
-                assert len(np.unique(np.ravel_multi_index(indices, raster.shape))) == expected_size
-                np.testing.assert_array_equal(sampled, values[indices])
-                assert sampled.dtype == values.dtype
-                results.append(indices)
+            # Compute only the small sample results; the original raster objects are not loaded
+            indices = tuple(np.asarray(index.compute() if hasattr(index, "compute") else index) for index in indices)
+            sampled = sampled.compute() if hasattr(sampled, "compute") else sampled
+            assert len(indices) == 2 and len(indices[0]) == expected_size
+            assert np.all(eligible[indices])
+            assert len(np.unique(np.ravel_multi_index(indices, raster.shape))) == expected_size
+            np.testing.assert_array_equal(sampled, values[indices])
+            assert sampled.dtype == values.dtype
+            results.append(indices)
 
         # Check that inputs are not loaded and topk returns the same sample for every chunk layout
         assert not lazy._in_memory and isinstance(lazy.data, da.Array)
@@ -1825,7 +1821,9 @@ class TestRasterSubsampleChunked:
 
     @pytest.mark.parametrize("backend", ["dask", "multiprocessing"])
     @pytest.mark.parametrize("as_array", [False, True])
-    def test_subsample__empty_output(self, backend: str, as_array: bool, tmp_path: Path) -> None:
+    def test_subsample__empty_output(
+        self, backend: str, as_array: bool, tmp_path: Path, request: pytest.FixtureRequest
+    ) -> None:
         """Checks that both chunked backends return empty array or point output without loading the source."""
 
         # Create an empty input
@@ -1837,17 +1835,17 @@ class TestRasterSubsampleChunked:
 
         # Subsample with the requested backend
         if backend == "dask":
-            source = open_raster(str(source_file), chunks={"x": 5, "y": 5})
+            source = open_raster(str(source_file), chunks={"x": 13, "y": 11})
             result = source.rst.subsample(1, random_state=42, as_array=as_array)
         else:
             source = gu.Raster(source_file)
-            with MpCluster({"nb_workers": 2}) as cluster:
-                result = source.subsample(
-                    1,
-                    random_state=42,
-                    as_array=as_array,
-                    mp_config=MultiprocConfig(chunks=(5, 5), outfile=str(output_file), cluster=cluster),
-                )
+            cluster = request.getfixturevalue("mp_cluster")
+            result = source.subsample(
+                1,
+                random_state=42,
+                as_array=as_array,
+                mp_config=MultiprocConfig(chunks=(11, 13), outfile=str(output_file), cluster=cluster),
+            )
 
         # Check the empty output and loading behavior
         if as_array:

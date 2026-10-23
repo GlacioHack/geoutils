@@ -14,7 +14,8 @@ from pyproj import CRS
 from rasterio.transform import from_origin
 
 import geoutils as gu
-from geoutils.multiproc import ClusterGenerator, MultiprocConfig
+from geoutils.multiproc import MultiprocConfig
+from geoutils.multiproc.cluster import BasicCluster
 from geoutils.multiproc.readers import (
     _read_selected_values,
     _read_values,
@@ -37,7 +38,13 @@ class TestValueReaderChunked:
         [(None, 2, 1, False), ([3, 1], 1, 1, True), ([3, 1], 2, 2, False)],
     )
     def test_value_reader__raster_windows(
-        self, source_bands: list[int] | None, band: int, downsample: int, workers: bool, tmp_path: Path
+        self,
+        source_bands: list[int] | None,
+        band: int,
+        downsample: int,
+        workers: bool,
+        tmp_path: Path,
+        request: pytest.FixtureRequest,
     ) -> None:
         """
         Checks that Multiproc readers load only the requested raster band and window,
@@ -63,8 +70,8 @@ class TestValueReaderChunked:
         assert reader.size == np.prod(source.shape)
         assert reader.dtype == values.dtype
         assert not source.is_loaded
-        with ClusterGenerator("multi" if workers else "basic", nb_workers=2) as cluster:
-            result = cluster.compute(cluster.submit(_read_values, block))
+        cluster = request.getfixturevalue("mp_cluster") if workers else BasicCluster()
+        result = cluster.compute(cluster.submit(_read_values, block))
 
         # Compare the selected values and nodata mask with an independent small in-memory read
         expected = reference.data[band - 1][tile]
@@ -108,7 +115,9 @@ class TestValueReaderChunked:
             assert not mask_source.is_loaded
 
     @pytest.mark.parametrize("column", ["height", "weight", None])
-    def test_value_reader__geopackage_rows(self, column: str | None, tmp_path: Path) -> None:
+    def test_value_reader__geopackage_rows(
+        self, column: str | None, tmp_path: Path, request: pytest.FixtureRequest
+    ) -> None:
         """Checks that row slices select point columns or geometry Z without loading the GeoPackage source."""
 
         # Write a GeoPackage file to disk with geometry elevations differing from its height/weight columns
@@ -125,8 +134,8 @@ class TestValueReaderChunked:
         # Read the second through fourth rows from height, weight, or geometry Z, using a worker process for weight
         reader = _reader_from_source(source, column, source, MultiprocConfig(chunks=2))
         assert reader is not None and not source.is_loaded
-        with ClusterGenerator("multi" if column == "weight" else "basic", nb_workers=2) as cluster:
-            result = cluster.compute(cluster.submit(_read_values, reader.block(slice(1, 4))))
+        cluster = request.getfixturevalue("mp_cluster") if column == "weight" else BasicCluster()
+        result = cluster.compute(cluster.submit(_read_values, reader.block(slice(1, 4))))
 
         # Read the same rows as point geometries
         point_rows = reader.read_points(slice(1, 4))
@@ -170,7 +179,12 @@ class TestValueReaderChunked:
     @pytest.mark.parametrize("source_kind", ["raster", "pointcloud"])
     @pytest.mark.parametrize("workers", [False, True])
     def test_read_selected_values__order_masks_and_edge_chunks(
-        self, source_kind: str, workers: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        source_kind: str,
+        workers: bool,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        request: pytest.FixtureRequest,
     ) -> None:
         """Checks that selected raster cells and point rows preserve order, masks, and repeated edge positions."""
 
@@ -210,19 +224,19 @@ class TestValueReaderChunked:
         # Record source windows while submitting the original reader callbacks to either backend
         reader = replace(_ValueReader(source, selector), mask=keep)
         windows: list[tuple[slice, ...]] = []
-        with ClusterGenerator("multi" if workers else "basic", nb_workers=2) as cluster:
-            config = MultiprocConfig(chunks=chunks, cluster=cluster)
-            original_submit = cluster.submit
+        cluster = request.getfixturevalue("mp_cluster") if workers else BasicCluster()
+        config = MultiprocConfig(chunks=chunks, cluster=cluster)
+        original_submit = cluster.submit
 
-            def submit(function: Any, *arguments: Any, **kwargs: Any) -> Any:
-                """Record each selected source window before submitting its original callback."""
+        def submit(function: Any, *arguments: Any, **kwargs: Any) -> Any:
+            """Record each selected source window before submitting its original callback."""
 
-                windows.append(arguments[0].slices)
-                return original_submit(function, *arguments, **kwargs)
+            windows.append(arguments[0].slices)
+            return original_submit(function, *arguments, **kwargs)
 
-            monkeypatch.setattr(cluster, "submit", submit)
-            assert not source.is_loaded
-            result = _read_selected_values(reader, indexes, config)
+        monkeypatch.setattr(cluster, "submit", submit)
+        assert not source.is_loaded
+        result = _read_selected_values(reader, indexes, config)
 
         # Compare the original position order with direct eager indexing, including masks and duplicate edge values
         expected = np.ma.array(values, mask=~keep).ravel()[indexes]

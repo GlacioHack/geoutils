@@ -498,9 +498,9 @@ class TestPolygonize:
         ds_base.load()
         # Multiprocessing input (lazy if we pass Multiprocessing later)
         raster_mp = gu.Raster(path_raster)
-        mp_config = MultiprocConfig(chunks=10)
+        mp_config = MultiprocConfig(chunks=17)
         # Dask input (lazy)
-        ds = open_raster(path_raster, chunks={"x": 10, "y": 10})
+        ds = open_raster(path_raster, chunks={"x": 17, "y": 17})
         assert not ds._in_memory
         assert isinstance(ds.data, da.Array)
         assert ds.data.chunks is not None

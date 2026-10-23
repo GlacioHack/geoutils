@@ -17,6 +17,7 @@ import geoutils as gu
 from geoutils._dispatch import is_dask_array
 from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
+from geoutils.multiproc.cluster import MpCluster
 from geoutils.multiproc.readers import _ValueReader
 from geoutils.stats.reduction import (
     _aggregate_collected,
@@ -330,7 +331,6 @@ class TestReduction:
         assert reindex is expected_reindex
         assert can_merge is mergeable
 
-
     @pytest.mark.parametrize("engine", [None, "numpy", "numba"])
     def test_flox_groupby_reduce__multiple_groupings(self, engine: str | None) -> None:
         """Checks that Flox handles multiple grouping arrays."""
@@ -475,7 +475,9 @@ class TestReductionChunked:
             np.testing.assert_array_equal(array, expected[2][name])
 
     @pytest.mark.parametrize("with_quantiles", [False, True])
-    def test_reduce_values__multiproc_reader_loading(self, tmp_path: Path, with_quantiles: bool) -> None:
+    def test_reduce_values__multiproc_reader_loading(
+        self, tmp_path: Path, with_quantiles: bool, mp_cluster: MpCluster
+    ) -> None:
         """Checks that Multiproc reduces raster blocks without loading the complete source."""
 
         names = ["mean", "std", "sum", "min", "max"]
@@ -496,16 +498,14 @@ class TestReductionChunked:
         expected, _ = _reduce_values([values], statistics, group_ids=group_ids, total_groups=3)
 
         # Read only raster windows in worker processes and return a computed table
-        from geoutils.multiproc.cluster import MpCluster
 
-        with MpCluster({"nb_workers": 2}) as cluster:
-            result, _ = _reduce_values(
-                [reader],
-                statistics,
-                group_ids=group_ids,
-                total_groups=3,
-                mp_config=MultiprocConfig(chunks=(2, 3), cluster=cluster),
-            )
+        result, _ = _reduce_values(
+            [reader],
+            statistics,
+            group_ids=group_ids,
+            total_groups=3,
+            mp_config=MultiprocConfig(chunks=(2, 3), cluster=mp_cluster),
+        )
 
         # Compare every result while the original Raster still has no loaded data
         pd.testing.assert_frame_equal(result, expected)
@@ -754,11 +754,10 @@ class TestReductionChunked:
         np.testing.assert_allclose(result[(0, "median")], [1.0, 2.0, 5.5])
 
     @pytest.mark.parametrize("method,reindex", [("map-reduce", True), ("map-reduce", False), ("groupwise", None)])
-    def test_reduce_values__multiproc_workers(self, method: str, reindex: bool | None) -> None:
+    def test_reduce_values__multiproc_workers(self, method: str, reindex: bool | None, mp_cluster: MpCluster) -> None:
         """Checks that real Multiproc workers return the same grouped table as the in-memory reducer."""
 
         # Split a rectangular array so every group crosses several worker tiles
-        from geoutils.multiproc.cluster import MpCluster
 
         shape = (31, 47)
         values = np.arange(np.prod(shape), dtype=float).reshape(shape)
@@ -769,16 +768,15 @@ class TestReductionChunked:
         )
 
         # Calculate the same groups with two worker processes
-        with MpCluster({"nb_workers": 2}) as cluster:
-            result, _ = _reduce_values(
-                [values],
-                statistics,
-                group_ids=group_ids,
-                total_groups=3,
-                method=method,
-                reindex=reindex,
-                mp_config=MultiprocConfig(chunks=(7, 11), cluster=cluster),
-            )
+        result, _ = _reduce_values(
+            [values],
+            statistics,
+            group_ids=group_ids,
+            total_groups=3,
+            method=method,
+            reindex=reindex,
+            mp_config=MultiprocConfig(chunks=(13, 19), cluster=mp_cluster),
+        )
 
         # Check the complete computed table
         pd.testing.assert_frame_equal(result, expected)

@@ -89,7 +89,7 @@ class TestTransformationChunked:
 
     @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_clip__chunked_backends_equal(
-        self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
+        self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path, mp_cluster: MpCluster
     ) -> None:
         """Checks that Dask and multiprocessing clip() select the same points as an in-memory call."""
 
@@ -105,9 +105,8 @@ class TestTransformationChunked:
         lazy = gu.open_pointcloud(str(filename), data_name="intensity", chunks=4, as_object_type=as_object_type)
         multiproc = gu.PointCloud(filename, data_name="intensity")
         lazy_result = lazy.pc.clip(self.clip_geometry)
-        with MpCluster({"nb_workers": 2}) as cluster:
-            config = MultiprocConfig(chunks=4, outfile=str(tmp_path / "points_clipped.gpkg"), cluster=cluster)
-            multiproc_result = multiproc.clip(self.clip_geometry, mp_config=config)
+        config = MultiprocConfig(chunks=4, outfile=str(tmp_path / "points_clipped.gpkg"), cluster=mp_cluster)
+        multiproc_result = multiproc.clip(self.clip_geometry, mp_config=config)
 
         # Check that Dask and file results have the expected types and remain unloaded
         assert isinstance(lazy_result, xr.DataArray if as_object_type == "dataarray" else dgpd.GeoDataFrame)
@@ -218,7 +217,12 @@ class TestTransformationChunked:
     @pytest.mark.parametrize("loaded", [False, True])
     @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_reproject__chunked_backends_equal(
-        self, as_object_type: Literal["dataarray", "geodataframe"], chunks: int, loaded: bool, tmp_path: Path
+        self,
+        as_object_type: Literal["dataarray", "geodataframe"],
+        chunks: int,
+        loaded: bool,
+        tmp_path: Path,
+        mp_cluster: MpCluster,
     ) -> None:
         """
         Checks that in-memory, Dask and multiprocessing reprojection return the same rows and metadata.
@@ -250,9 +254,8 @@ class TestTransformationChunked:
         accessor_result = accessor.pc.reproject(crs=target_crs)
         lazy_result = lazy.pc.reproject(crs=target_crs)
         outfile = tmp_path / "projected.gpkg"
-        with MpCluster({"nb_workers": 2}) as cluster:
-            configuration = MultiprocConfig(chunks=chunks, outfile=str(outfile), cluster=cluster)
-            multiproc_result = multiproc.reproject(crs=target_crs, mp_config=configuration)
+        configuration = MultiprocConfig(chunks=chunks, outfile=str(outfile), cluster=mp_cluster)
+        multiproc_result = multiproc.reproject(crs=target_crs, mp_config=configuration)
 
         # 3/ Check the output types, metadata and loaded state before reading any partitioned result
         assert isinstance(eager_result, gu.PointCloud) and eager_result.is_loaded
@@ -285,7 +288,7 @@ class TestTransformationChunked:
 
     @pytest.mark.parametrize("source_suffix,output_suffix", [(".gpkg", ".las"), (".las", ".laz")])
     def test_reproject__las_coordinates_and_attributes(
-        self, source_suffix: str, output_suffix: str, tmp_path: Path
+        self, source_suffix: str, output_suffix: str, tmp_path: Path, mp_cluster: MpCluster
     ) -> None:
         """Checks that LAS/LAZ keep elevations and attributes when intensity is the active value column."""
 
@@ -316,9 +319,8 @@ class TestTransformationChunked:
         source = gu.PointCloud(filename, data_name="intensity")
         expected = self.points.to_crs(32632)
         outfile = tmp_path / ("projected" + output_suffix)
-        with MpCluster({"nb_workers": 2}) as cluster:
-            configuration = MultiprocConfig(chunks=4, outfile=str(outfile), cluster=cluster)
-            result = source.reproject(crs=32632, mp_config=configuration)
+        configuration = MultiprocConfig(chunks=4, outfile=str(outfile), cluster=mp_cluster)
+        result = source.reproject(crs=32632, mp_config=configuration)
         assert not source.is_loaded and not result.is_loaded
         assert result.data_name == "intensity"
         assert result.crs == expected.crs and result.point_count == len(expected)

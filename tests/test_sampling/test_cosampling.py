@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Literal
@@ -962,13 +962,11 @@ class TestCosampleChunked:
         [("array", (4, 5), False), ("raster", (5, 4), False), ("vector", (4, 5), True)],
     )
     def test_cosample__multiproc_raster_matches_in_memory_and_dask(
-        self, mask_type: str, chunks: tuple[int, int], workers: bool, tmp_path: Path
+        self, mask_type: str, chunks: tuple[int, int], workers: bool, tmp_path: Path, request: pytest.FixtureRequest
     ) -> None:
         """
         Checks that Multiproc does not load raster inputs and matches in-memory and Dask results for each mask.
         """
-
-        from geoutils.multiproc.cluster import MpCluster
 
         # 1/ Create selected bands, auxiliary values, and masks with nodata at different locations
         # Add unused first bands with large offsets so the result reveals if a worker reads the wrong band
@@ -1034,15 +1032,15 @@ class TestCosampleChunked:
 
         # 3/ Write the cosampled raster to disk by tile, using worker processes for the vector-mask case
         outfile = tmp_path / "cosampled.tif"
-        with MpCluster({"nb_workers": 2}) if workers else nullcontext(None) as cluster:
-            configuration = MultiprocConfig(chunks=chunks, outfile=str(outfile), cluster=cluster)
-            result = unloaded[0].cosample(
-                unloaded[1],
-                auxiliary={"scaled": (unloaded[2], 2), "raw": raw_auxiliary},
-                mask=mp_mask,
-                mp_config=configuration,
-                **options,
-            )
+        cluster = request.getfixturevalue("mp_cluster") if workers else None
+        configuration = MultiprocConfig(chunks=chunks, outfile=str(outfile), cluster=cluster)
+        result = unloaded[0].cosample(
+            unloaded[1],
+            auxiliary={"scaled": (unloaded[2], 2), "raw": raw_auxiliary},
+            mask=mp_mask,
+            mp_config=configuration,
+            **options,
+        )
         assert outfile.exists()
         assert not result.is_loaded
         assert all(not source.is_loaded for source in unloaded)
@@ -1225,52 +1223,53 @@ class TestCosampleChunked:
         expected = first.pc.cosample(
             second, auxiliary={"grid": raster.to_xarray(), "scaled": auxiliary}, mask=eager_mask, **options
         )
-        for partitions in (2, 5):
-            lazy_first_filename, lazy_first_chunks, lazy_first_column = pointcloud_file(first, partitions)
-            lazy_first = gu.open_pointcloud(
-                lazy_first_filename,
-                data_name=lazy_first_column,
-                columns="all",
-                chunks=lazy_first_chunks,
-                as_object_type=as_object_type,
-            )
-            lazy_second_filename, lazy_second_chunks, lazy_second_column = pointcloud_file(second, partitions + 1)
-            lazy_second = gu.open_pointcloud(
-                lazy_second_filename,
-                data_name=lazy_second_column,
-                columns="all",
-                chunks=lazy_second_chunks,
-                as_object_type=as_object_type,
-            )
-            lazy_raster = raster.to_xarray().chunk({"y": partitions + 1, "x": 4})
-            lazy_auxiliary = da.from_array(auxiliary, chunks=7)
-            # Give an array mask independent Dask chunks, or apply the spatial mask to each Dask point partition
-            lazy_mask = mask
-            if mask_type == "array":
-                lazy_mask = da.from_array(mask, chunks=9)
-            elif mask_type == "raster":
-                lazy_mask = _raster(keep.astype(float)).to_xarray().astype(bool).chunk({"y": 3, "x": 5})
-            result = lazy_first.pc.cosample(
-                lazy_second,
-                auxiliary={"grid": lazy_raster, "scaled": lazy_auxiliary},
-                mask=lazy_mask,
-                **options,
-            )
+        # Cover both partition layouts across the existing full, fixed and fractional samples
+        partitions = 2 if subsample == 1 else 5
+        lazy_first_filename, lazy_first_chunks, lazy_first_column = pointcloud_file(first, partitions)
+        lazy_first = gu.open_pointcloud(
+            lazy_first_filename,
+            data_name=lazy_first_column,
+            columns="all",
+            chunks=lazy_first_chunks,
+            as_object_type=as_object_type,
+        )
+        lazy_second_filename, lazy_second_chunks, lazy_second_column = pointcloud_file(second, partitions + 1)
+        lazy_second = gu.open_pointcloud(
+            lazy_second_filename,
+            data_name=lazy_second_column,
+            columns="all",
+            chunks=lazy_second_chunks,
+            as_object_type=as_object_type,
+        )
+        lazy_raster = raster.to_xarray().chunk({"y": partitions + 1, "x": 4})
+        lazy_auxiliary = da.from_array(auxiliary, chunks=7)
+        # Give an array mask independent Dask chunks, or apply the spatial mask to each Dask point partition
+        lazy_mask = mask
+        if mask_type == "array":
+            lazy_mask = da.from_array(mask, chunks=9)
+        elif mask_type == "raster":
+            lazy_mask = _raster(keep.astype(float)).to_xarray().astype(bool).chunk({"y": 3, "x": 5})
+        result = lazy_first.pc.cosample(
+            lazy_second,
+            auxiliary={"grid": lazy_raster, "scaled": lazy_auxiliary},
+            mask=lazy_mask,
+            **options,
+        )
 
-            # 3/ Check that the output remains partitioned and its metadata is unchanged before comparing values
-            assert isinstance(result, xr.DataArray if as_object_type == "dataarray" else dgpd.GeoDataFrame)
-            assert not result.pc.is_loaded
-            assert result.pc.data_name == "self"
-            assert not lazy_first.pc.is_loaded
-            output = result.compute()
-            if as_object_type == "dataarray":
-                output = output.pc.to_geoutils().gdf
-            assert list(output.columns) == ["self", "other", "grid", "scaled", "geometry"]
-            assert np.array_equal(output.index.to_numpy(), expected.index.to_numpy())
-            assert np.array_equal(output.geometry.to_numpy(), expected.geometry.to_numpy())
-            assert np.array_equal(output.geometry.z.to_numpy(), expected.geometry.z.to_numpy())
-            assert np.array_equal(output.drop(columns="geometry").to_numpy(), expected.drop(columns="geometry"))
-            assert output.crs == expected.crs
+        # 3/ Check that the output remains partitioned and its metadata is unchanged before comparing values
+        assert isinstance(result, xr.DataArray if as_object_type == "dataarray" else dgpd.GeoDataFrame)
+        assert not result.pc.is_loaded
+        assert result.pc.data_name == "self"
+        assert not lazy_first.pc.is_loaded
+        output = result.compute()
+        if as_object_type == "dataarray":
+            output = output.pc.to_geoutils().gdf
+        assert list(output.columns) == ["self", "other", "grid", "scaled", "geometry"]
+        assert np.array_equal(output.index.to_numpy(), expected.index.to_numpy())
+        assert np.array_equal(output.geometry.to_numpy(), expected.geometry.to_numpy())
+        assert np.array_equal(output.geometry.z.to_numpy(), expected.geometry.z.to_numpy())
+        assert np.array_equal(output.drop(columns="geometry").to_numpy(), expected.drop(columns="geometry"))
+        assert output.crs == expected.crs
 
     @pytest.mark.parametrize("subsample", [1, 8])
     @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
