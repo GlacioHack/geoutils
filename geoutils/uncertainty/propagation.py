@@ -550,8 +550,12 @@ def _propagate_local_operator_numerically(
     def calculate(error: NDArray[np.float64]) -> NDArray[np.float64]:
         """Apply one shared source draw to every local target before evaluating the operator."""
 
-        perturbed = _perturb_local_data(data, error, source_positions)
-        values = _evaluate_batch(operator, perturbed, handling)
+        # A zero draw leaves the inputs unchanged
+        if not np.any(error):
+            values = estimate.copy()
+        else:
+            perturbed = _perturb_local_data(data, error, source_positions)
+            values = _evaluate_batch(operator, perturbed, handling)
         values[~np.isfinite(estimate)] = np.nan
         return values[0] if scalar else values
 
