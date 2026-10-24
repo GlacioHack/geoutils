@@ -446,10 +446,10 @@ class TestMultiproc:
 
 
 class TestMapOverlapChunked:
-    """Test module for map_overlap() loading behavior and exact equality with eager raster calculations."""
+    """Test module for map_overlap() loading behavior and exact equality with in-memory raster calculations."""
 
     def test_map_overlap__depth_larger_than_half_chunk(self, tmp_path: Path) -> None:
-        """Checks that an overlap deeper than half a chunk gives the same result as eager."""
+        """Checks that an overlap deeper than half a chunk gives the same result as the in-memory calculation."""
 
         # Write a 9 x 11 raster so the final row and column chunks are shorter than the requested 4 x 5 chunks
         values = np.arange(99, dtype=np.float32).reshape(9, 11)
@@ -464,7 +464,7 @@ class TestMapOverlapChunked:
         result = map_overlap(_custom_func_overlap, source, config, 3, depth=3)
         expected = _custom_func_overlap(Raster(source_file), 3)
 
-        # Check file is unloaded and matches the eager result
+        # Check file is unloaded and matches the in-memory result
         assert not source.is_loaded
         assert result.raster_equal(expected)
 

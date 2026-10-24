@@ -828,7 +828,7 @@ class TestRasterRemoteChunked:
     def test_open_raster__remote_laziness(
         self, remote_files: RemoteFiles, remote_url: Callable[[str], str], remote_raster: str
     ) -> None:
-        """Checks that remote raster chunks stay lazy and compute exactly the eager local raster."""
+        """Checks that remote raster chunks stay lazy and compute exactly the in-memory local raster."""
 
         pytest.importorskip("dask")
 

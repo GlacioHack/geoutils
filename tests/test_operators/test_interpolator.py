@@ -166,7 +166,7 @@ class TestInterpolatorRegular:
 
     @pytest.mark.parametrize("method", ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"])  # type: ignore
     def test_interpn_interpolator__matches_scipy(self, method: ScipyInterpolationMethod) -> None:
-        """Checks that regular interpolation returns exactly the same result as scipy.interpolate.interpn()."""
+        """Checks that regular interpolation agrees with scipy.interpolate.interpn()."""
 
         # Create synthetic 2D array with non-aligned coordinates in X/Y, and X in descending order to mirror a raster's
         # coordinates
@@ -191,7 +191,11 @@ class TestInterpolatorRegular:
         interpolator = _interpn_interpolator(points=coords, values=values, method=method)
         vals2 = interpolator((i, j))
 
-        assert np.array_equal(vals, vals2, equal_nan=True)
+        # SciPy's iterative spline solver uses rtol=1e-5 for residuals, which can amplify in interpolated values
+        if method in {"slinear", "cubic", "quintic"}:
+            np.testing.assert_allclose(vals, vals2, rtol=1e-5, atol=1e-4)
+        else:
+            np.testing.assert_array_equal(vals, vals2)
 
     @pytest.mark.parametrize("method", ["nearest", "linear", "slinear", "pchip"])
     def test_resample_at_points__exact_stencil(self, method: ScipyInterpolationMethod) -> None:
@@ -1499,7 +1503,11 @@ class TestRegularInterpolationUncertainty:
             n_samples=2,
             random_state=4,
         )
-        assert np.allclose(summary.mean, result, equal_nan=True)
+        # Allow for larger residual errors when comparing independent iterative spline fits
+        if method in {"slinear", "cubic", "quintic"}:
+            np.testing.assert_allclose(summary.mean, result, rtol=1e-5, atol=1e-4)
+        else:
+            np.testing.assert_allclose(summary.mean, result)
         np.testing.assert_array_equal(summary.variance, np.where(np.isfinite(result), 0, np.nan))
 
 

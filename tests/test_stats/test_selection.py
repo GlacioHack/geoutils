@@ -17,7 +17,8 @@ from rasterio.transform import from_origin
 from shapely.geometry import box
 
 import geoutils as gu
-from geoutils.multiproc import ClusterGenerator, MultiprocConfig
+from geoutils.multiproc import MultiprocConfig
+from geoutils.multiproc.cluster import BasicCluster, MpCluster
 
 
 @pytest.fixture(params=["raster", "gpkg", "las"])
@@ -61,7 +62,7 @@ def stats_file(request: pytest.FixtureRequest, tmp_path: Path) -> tuple[Any, Any
         )
         dataframe.to_file(filename, index=False)
 
-    # Open one unloaded source for Multiproc and one eager source for the expected result
+    # Open one unloaded source for Multiproc and one in-memory source for the expected result
     source = gu.PointCloud(filename, data_name="first")
     reference = gu.PointCloud(filename, data_name="first")
     reference.load(columns="all")
@@ -268,12 +269,12 @@ class TestSelectionChunked:
     """
     Checks stats() input selection with Dask and Multiproc inputs.
 
-    Dask and Multiproc results are compared with eager calculations. Raster and point cloud files stay unloaded while
-    their values, masks and common support are read in chunks.
+    Dask and Multiproc results are compared with in-memory calculations. Raster and point cloud files stay unloaded
+    while their values, masks and common support are read in chunks.
     """
 
     def test_stats__masked_dask_summary_is_computed(self) -> None:
-        """Checks that a masked Dask raster gives computed values and the same counts as eager data."""
+        """Checks that a masked Dask raster gives computed values and the same counts as in-memory data."""
 
         # Use mismatched data and mask chunks so masking also checks automatic chunk alignment
         import dask.array as da
@@ -291,7 +292,7 @@ class TestSelectionChunked:
         result = lazy_raster.stats(statistics, mask=lazy_keep)
         assert not isinstance(result["mean"], da.Array)
 
-        # Compare the result with the same masked eager raster
+        # Compare the result with the same masked in-memory raster
         expected = raster.stats(statistics, mask=keep)
         assert result == pytest.approx(expected)
         assert isinstance(lazy_raster.data, da.Array) and isinstance(lazy_keep.data, da.Array)
@@ -300,7 +301,7 @@ class TestSelectionChunked:
     def test_stats__dask_point_vector_mask(
         self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
     ) -> None:
-        """Checks that eager and Dask points agree on points lying along a polygon boundary."""
+        """Checks that in-memory and Dask points agree on points lying along a polygon boundary."""
 
         # Write a point file to disk with two points inside the polygon, one on its edge, and one outside it
         import geopandas as gpd
@@ -317,7 +318,7 @@ class TestSelectionChunked:
         ).pc
         assert not lazy_points.is_loaded
 
-        # Calculate the same masked summary from Dask partitions and eager points
+        # Calculate the same masked summary from Dask partitions and in-memory points
         statistics = ["mean", "validinliercount"]
         expected = points.stats(statistics, mask=mask)
         result = lazy_points.stats(statistics, mask=mask)
@@ -327,10 +328,10 @@ class TestSelectionChunked:
         assert result == pytest.approx({"mean": 15, "validinliercount": 2})
         assert not lazy_points.is_loaded
 
-    def test_stats__mixed_eager_and_dask_values(self) -> None:
-        """Checks that one stats() call returns computed summaries for mixed eager and Dask values."""
+    def test_stats__mixed_in_memory_and_dask_values(self) -> None:
+        """Checks that one stats() call returns computed summaries for mixed in-memory and Dask values."""
 
-        # Select the same locations from eager and Dask values with distinct scales
+        # Select the same locations from in-memory and Dask values with distinct scales
         import dask.array as da
 
         eager = np.array([1.0, np.nan, 3.0, 4.0, 5.0, 6.0])
@@ -350,15 +351,16 @@ class TestSelectionChunked:
     @pytest.mark.parametrize("workers", [False, True])
     @pytest.mark.parametrize("grouped", [False, True])
     @pytest.mark.parametrize("exact", [False, True])
-    def test_stats__file_values_match_eager(
+    def test_stats__file_values_match_in_memory(
         self,
         stats_file: tuple[Any, Any, dict[str, Any], Any],
         workers: bool,
         grouped: bool,
         exact: bool,
         monkeypatch: pytest.MonkeyPatch,
+        request: pytest.FixtureRequest,
     ) -> None:
-        """Checks that Multiproc statistics match eager while the complete source stays on disk."""
+        """Checks that Multiproc statistics match in-memory results while the complete source stays on disk."""
 
         # Select both value columns so their separate nodata locations produce different counts and statistics
         source, reference, values, group = stats_file
@@ -375,11 +377,11 @@ class TestSelectionChunked:
 
         with monkeypatch.context() as guarded:
             guarded.setattr(type(source), "load", reject_load)
-            with ClusterGenerator("multi" if workers else "basic", nb_workers=2) as cluster:
-                config = MultiprocConfig(chunks=(2, 3), cluster=cluster)
-                result = source.stats(statistics, values=values, mp_config=config, **options)
+            cluster = request.getfixturevalue("mp_cluster") if workers else BasicCluster()
+            config = MultiprocConfig(chunks=(4, 5), cluster=cluster)
+            result = source.stats(statistics, values=values, mp_config=config, **options)
 
-        # Compare the complete grouped table or every global result with the eager stats() call
+        # Compare the complete grouped table or every global result with the in-memory stats() call
         if grouped:
             pd.testing.assert_frame_equal(result, expected, check_dtype=False)
         else:
@@ -390,7 +392,7 @@ class TestSelectionChunked:
 
     @pytest.mark.parametrize("workers", [False, True])
     def test_stats__automatic_bins_sampling_and_masks(
-        self, stats_file: tuple[Any, Any, dict[str, Any], Any], workers: bool
+        self, stats_file: tuple[Any, Any, dict[str, Any], Any], workers: bool, request: pytest.FixtureRequest
     ) -> None:
         """Checks that automatic bins and sampling return full group masks while the source is not loaded."""
 
@@ -411,9 +413,9 @@ class TestSelectionChunked:
         expected, expected_masks = reference.stats(["mean", "std"], **options)
 
         # Find automatic bin edges, select a repeatable sample, and calculate its statistics in file blocks
-        with ClusterGenerator("multi" if workers else "basic", nb_workers=2) as cluster:
-            config = MultiprocConfig(chunks=(2, 3), cluster=cluster)
-            result, masks = source.stats(["mean", "std"], mp_config=config, **options)
+        cluster = request.getfixturevalue("mp_cluster") if workers else BasicCluster()
+        config = MultiprocConfig(chunks=(4, 5), cluster=cluster)
+        result, masks = source.stats(["mean", "std"], mp_config=config, **options)
         pd.testing.assert_frame_equal(result, expected, check_dtype=False)
         assert not source.is_loaded
 
@@ -427,7 +429,9 @@ class TestSelectionChunked:
         assert group_location_count == int(keep.sum()) == 42
 
     @pytest.mark.parametrize("workers", [False, True])
-    def test_stats__file_mask_summary_counts(self, workers: bool, tmp_path: Path) -> None:
+    def test_stats__file_mask_summary_counts(
+        self, workers: bool, tmp_path: Path, request: pytest.FixtureRequest
+    ) -> None:
         """Checks that unloaded boolean masks preserve original valid counts and selected inlier counts."""
 
         # Write a value raster and boolean mask raster to disk, with one value nodata pixel inside and outside the mask
@@ -444,9 +448,9 @@ class TestSelectionChunked:
         expected = gu.stats.stats(values, statistics, mask=keep)
 
         # Count the original finite values separately from values retained by the file mask
-        with ClusterGenerator("multi" if workers else "basic", nb_workers=2) as cluster:
-            config = MultiprocConfig(chunks=(3, 5), cluster=cluster)
-            result = source.stats(statistics, mask=mask_source, mp_config=config)
+        cluster = request.getfixturevalue("mp_cluster") if workers else BasicCluster()
+        config = MultiprocConfig(chunks=(3, 5), cluster=cluster)
+        result = source.stats(statistics, mask=mask_source, mp_config=config)
 
         # The edge windows have one row or column, and all twenty selected pixels include one nodata pixel
         assert result == pytest.approx(expected)
@@ -502,7 +506,9 @@ class TestSelectionChunked:
 
     @pytest.mark.parametrize("kind", ["raster", "points"])
     @pytest.mark.parametrize("mask_mode", ["inside", "outside"])
-    def test_stats__vector_masks_and_values(self, kind: str, mask_mode: str, tmp_path: Path) -> None:
+    def test_stats__vector_masks_and_values(
+        self, kind: str, mask_mode: str, tmp_path: Path, mp_cluster: MpCluster
+    ) -> None:
         """Checks that file statistics apply vector masks and attributes while preserving all summary counts."""
 
         # Create twelve values on both sides of a polygon, with one nonfinite value on each side
@@ -531,10 +537,9 @@ class TestSelectionChunked:
         # Use edge tiles with one row or column and retain counts from before the vector mask
         statistics = ["mean", "validcount", "totalcount", "validinliercount", "totalinliercount"]
         expected = reference.stats(statistics, mask=zones, mask_mode=mask_mode)
-        with ClusterGenerator("multi", nb_workers=2) as cluster:
-            config = MultiprocConfig(chunks=(2, 3), cluster=cluster)
-            result = source.stats(statistics, mask=zones, mask_mode=mask_mode, mp_config=config)
-            attribute = source.stats("mean", values={"rating": (zones, "rating")}, mp_config=config)
+        config = MultiprocConfig(chunks=(2, 3), cluster=mp_cluster)
+        result = source.stats(statistics, mask=zones, mask_mode=mask_mode, mp_config=config)
+        attribute = source.stats("mean", values={"rating": (zones, "rating")}, mp_config=config)
 
         # Both selections contain five finite values, while the vector attribute is constant where defined
         assert result == pytest.approx(expected)
@@ -542,7 +547,9 @@ class TestSelectionChunked:
         assert result["totalinliercount"] == 6 and attribute == 10
         assert not source.is_loaded
 
-    def test_stats__raster_values_at_file_points(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_stats__raster_values_at_file_points(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mp_cluster: MpCluster
+    ) -> None:
         """Checks that Multiproc interpolates raster values at file point locations while both sources stay unloaded."""
 
         # Create a raster and points on distant, exactly known raster pixels
@@ -572,16 +579,15 @@ class TestSelectionChunked:
         with monkeypatch.context() as guarded:
             guarded.setattr(gu.Raster, "load", reject_load)
             guarded.setattr(gu.PointCloud, "load", reject_load)
-            with ClusterGenerator("multi", nb_workers=2) as cluster:
-                config = MultiprocConfig(chunks=(2, 3), cluster=cluster)
-                result = source.stats("mean", at=support, interpolation="nearest", mp_config=config)
+            config = MultiprocConfig(chunks=(2, 3), cluster=mp_cluster)
+            result = source.stats("mean", at=support, interpolation="nearest", mp_config=config)
 
-        # Compare the Multiproc mean with eager stats() and the exact raster values at the point locations
+        # Compare the Multiproc mean with in-memory stats() and the exact raster values at the point locations
         assert result == pytest.approx(expected)
         assert result == pytest.approx(values[rows, columns].mean())
         assert not source.is_loaded and not support.is_loaded
 
-    def test_stats__point_files_on_common_support(self, tmp_path: Path) -> None:
+    def test_stats__point_files_on_common_support(self, tmp_path: Path, mp_cluster: MpCluster) -> None:
         """Checks that distinct point files with matching ordered coordinates are reduced together."""
 
         # Create two point datasets with matching coordinates
@@ -602,13 +608,12 @@ class TestSelectionChunked:
         support = gu.PointCloud(point_filename, data_name="height")
 
         # Compare all ordered coordinates in Multiproc row blocks without loading either complete file
-        with ClusterGenerator("multi", nb_workers=2) as cluster:
-            config = MultiprocConfig(chunks=3, cluster=cluster)
-            result = source.stats("mean", at=support, mp_config=config)
-            assert result == pytest.approx(values.height.mean())
+        config = MultiprocConfig(chunks=3, cluster=mp_cluster)
+        result = source.stats("mean", at=support, mp_config=config)
+        assert result == pytest.approx(values.height.mean())
         assert not source.is_loaded and not support.is_loaded
 
-    def test_stats__file_raster_alignment(self, tmp_path: Path) -> None:
+    def test_stats__file_raster_alignment(self, tmp_path: Path, mp_cluster: MpCluster) -> None:
         """Checks that Multiproc aligns an unloaded raster to another raster before calculating statistics."""
 
         # Write two raster files to disk with a non-default value band and a coarser common support grid
@@ -623,11 +628,10 @@ class TestSelectionChunked:
         expected = raster.stats(["mean", "std"], values=2, at=reference, align="reproject")
 
         # Reproject to a temporary file and read its selected band in separate reduction workers
-        with ClusterGenerator("multi", nb_workers=2) as cluster:
-            config = MultiprocConfig(chunks=(3, 4), cluster=cluster)
-            result = source.stats(["mean", "std"], values=2, at=support, align="reproject", mp_config=config)
+        config = MultiprocConfig(chunks=(3, 4), cluster=mp_cluster)
+        result = source.stats(["mean", "std"], values=2, at=support, align="reproject", mp_config=config)
 
-        # The completed statistics match eager alignment, and original sources remain available on disk
+        # The completed statistics match in-memory alignment, and original sources remain available on disk
         assert result == pytest.approx(expected)
         assert not source.is_loaded and not support.is_loaded
         assert source_filename.exists() and reference_filename.exists()
@@ -717,7 +721,7 @@ class TestSelectionErrors:
         with pytest.raises(ValueError, match="Dask inputs cannot be combined with Multiprocessing"):
             gu.stats.stats(lazy_values, "mean", mp_config=MultiprocConfig(chunks=2), **options)
 
-    def test_stats__error_point_files_on_reordered_support(self, tmp_path: Path) -> None:
+    def test_stats__error_point_files_on_reordered_support(self, tmp_path: Path, mp_cluster: MpCluster) -> None:
         """Checks that point files with different coordinate order cannot share support."""
 
         # Create value and support point datasets with two coordinates in a different order
@@ -738,8 +742,7 @@ class TestSelectionErrors:
         support = gu.PointCloud(point_filename, data_name="height")
 
         # Reject reordered support without loading either complete point file
-        with ClusterGenerator("multi", nb_workers=2) as cluster:
-            config = MultiprocConfig(chunks=3, cluster=cluster)
-            with pytest.raises(ValueError, match="ordered support coordinates"):
-                source.stats("mean", at=support, mp_config=config)
+        config = MultiprocConfig(chunks=3, cluster=mp_cluster)
+        with pytest.raises(ValueError, match="ordered support coordinates"):
+            source.stats("mean", at=support, mp_config=config)
         assert not source.is_loaded and not support.is_loaded

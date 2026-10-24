@@ -99,7 +99,7 @@ when opening {class}`~geoutils.Raster` and {class}`~geoutils.PointCloud` objects
 ```{code-cell} ipython3
 :tags: [remove-cell]
 
-# Check the reduced grid and that eager and lazy point samples select the same complete rows
+# Check the reduced grid and that in-memory and lazy point samples select the same complete rows
 assert ds_coarse.rst.shape == (154, 134) and ds_coarse.rst.res == (120, 120)
 assert not ds._in_memory and not ds_coarse._in_memory
 assert ds_coarse.rst.crs == ds.rst.crs

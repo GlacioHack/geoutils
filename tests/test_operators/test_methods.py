@@ -299,10 +299,10 @@ class TestResamplingKriging:
 
 
 class TestResamplingNamesChunked:
-    """Test module for lazy named resampling and exact agreement with eager window reductions."""
+    """Test module for lazy named resampling and exact agreement with in-memory window reductions."""
 
     def test_resample_at_points__loading_laziness(self) -> None:
-        """Checks that string window reductions stay lazy and match eager results across shorter final chunks."""
+        """Checks that string window reductions stay lazy and match in-memory results across shorter final chunks."""
 
         # Split five rows and columns into chunks of two, leaving a shorter final chunk on each axis
         if find_spec("dask") is None:
@@ -317,7 +317,7 @@ class TestResamplingNamesChunked:
         result = lazy.rst.resample_at_points(points, resampling="sum", backend="scipy", window=3, as_array=True)
         expected = raster.resample_at_points(points, resampling="sum", backend="scipy", window=3, as_array=True)
 
-        # Input and output remain lazy; computing the result reproduces each complete eager window
+        # Input and output remain lazy; computing the result reproduces each complete in-memory window
         assert isinstance(lazy.data, dask_array.Array)
         assert isinstance(result, dask_array.Array)
         np.testing.assert_array_equal(result.compute(), expected)

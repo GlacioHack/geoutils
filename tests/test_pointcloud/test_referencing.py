@@ -135,7 +135,7 @@ class TestPointReferencingChunked:
 
     @pytest.mark.parametrize("representation", ["dataarray", "dataset"])
     def test_methods__loading_laziness(self, representation: str) -> None:
-        """Checks that coordinate and CRS resolution run no tasks and match the same calls on eager point data."""
+        """Checks that coordinate and CRS resolution run no tasks and match the same calls on in-memory point data."""
 
         pytest.importorskip("dask")
         from dask.callbacks import Callback
@@ -156,7 +156,7 @@ class TestPointReferencingChunked:
             coordinates = _point_coordinates(source)
             crs = _point_crs(lazy)
 
-        # Check metadata matches eager inputs, with lazy graphs unloaded
+        # Check metadata matches in-memory inputs, with lazy graphs unloaded
         assert not tasks
         assert coordinates == _point_coordinates(reference)
         assert crs == _point_crs(eager)

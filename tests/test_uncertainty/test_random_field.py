@@ -16,7 +16,6 @@ from rasterio.transform import from_origin, xy
 
 import geoutils as gu
 from geoutils.multiproc import MultiprocConfig
-from geoutils.multiproc.cluster import MpCluster
 from geoutils.raster.xr_accessor import open_raster
 from geoutils.stats.variography import VariogramModel
 
@@ -301,7 +300,9 @@ class TestRandomFieldChunked:
     """Test module for random field with chunked (Dask/MP) backends."""
 
     @pytest.mark.parametrize("backend", ["gstools", "gpytorch"])
-    def test_random_field__raster_dask_mp_equal(self, tmp_path: Path, backend: Literal["gstools", "gpytorch"]) -> None:
+    def test_random_field__raster_dask_mp_equal(
+        self, tmp_path: Path, backend: Literal["gstools", "gpytorch"], request: pytest.FixtureRequest
+    ) -> None:
         """Checks that both Dask/MP backends match in-memory random fields."""
 
         pytest.importorskip(backend)
@@ -350,17 +351,17 @@ class TestRandomFieldChunked:
         assert all(hasattr(field, "rst") for field in lazy)
         assert hasattr(lazy_source.data, "compute") and hasattr(lazy_quality.data, "compute")
         assert all(hasattr(field.data, "compute") for field in lazy)
-        with MpCluster({"nb_workers": 2}) as cluster:
-            config = MultiprocConfig(chunks=(3, 3), outfile=str(tmp_path / "field.tif"), cluster=cluster)
-            multiproc = chunked_source.random_field(
-                structure,
-                predictors={"quality": chunked_quality},
-                random_state=7,
-                n_fields=2,
-                mp_config=config,
-                backend=backend,
-                gpytorch_inducing_points=inducing_points,
-            )
+        cluster = request.getfixturevalue("mp_cluster")
+        config = MultiprocConfig(chunks=(3, 3), outfile=str(tmp_path / "field.tif"), cluster=cluster)
+        multiproc = chunked_source.random_field(
+            structure,
+            predictors={"quality": chunked_quality},
+            random_state=7,
+            n_fields=2,
+            mp_config=config,
+            backend=backend,
+            gpytorch_inducing_points=inducing_points,
+        )
         assert not chunked_source.is_loaded and not chunked_quality.is_loaded
         assert all(not field.is_loaded for field in multiproc)
 
@@ -385,8 +386,9 @@ class TestRandomFieldChunked:
         as_object_type: Literal["dataarray", "geodataframe"],
         tmp_path: Path,
         backend: Literal["gstools", "gpytorch"],
+        request: pytest.FixtureRequest,
     ) -> None:
-        """Checks that both backends match eager fields across Dask and MP point rows."""
+        """Checks that both backends match in-memory fields across Dask and MP point rows."""
 
         pytest.importorskip(backend)
         dask_geopandas = pytest.importorskip("dask_geopandas")
@@ -480,16 +482,16 @@ class TestRandomFieldChunked:
         )
         assert isinstance(file_lazy, xr.DataArray if as_object_type == "dataarray" else dask_geopandas.GeoDataFrame)
         assert not file_points.is_loaded and not file_lazy.pc.is_loaded
-        with MpCluster({"nb_workers": 2}) as cluster:
-            config = MultiprocConfig(chunks=4, outfile=str(tmp_path / "field.gpkg"), cluster=cluster)
-            multiproc = file_points.random_field(
-                structure,
-                predictors={"quality": "quality"},
-                random_state=11,
-                mp_config=config,
-                backend=backend,
-                gpytorch_inducing_points=inducing_points,
-            )
+        cluster = request.getfixturevalue("mp_cluster")
+        config = MultiprocConfig(chunks=4, outfile=str(tmp_path / "field.gpkg"), cluster=cluster)
+        multiproc = file_points.random_field(
+            structure,
+            predictors={"quality": "quality"},
+            random_state=11,
+            mp_config=config,
+            backend=backend,
+            gpytorch_inducing_points=inducing_points,
+        )
         assert not file_points.is_loaded and not multiproc.is_loaded
         assert isinstance(multiproc, gu.PointCloud)
 
@@ -671,7 +673,7 @@ class TestRandomFieldErrors:
         points = gu.PointCloud.from_xyz([0, 1], [0, 1], [10, 20], crs=32631)
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
 
-        # Error on a wrong point input, from PointCloud or eager DataFrame
+        # Error on a wrong point input, from PointCloud or in-memory DataFrame
         with pytest.raises(ValueError, match="Dask point chunks require a Dask GeoDataFrame input"):
             points.random_field(structure, chunksizes=1)
         with pytest.raises(ValueError, match="Dask point chunks require a Dask GeoDataFrame input"):

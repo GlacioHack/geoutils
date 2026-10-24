@@ -112,7 +112,7 @@ The callbacks and return types differ from Dask's similarly named functions:
 
 | Function | Callback input | Result |
 |---|---|---|
-| `geoutils.multiproc.map_collect()` | A georeferenced Raster block | An eager list of arbitrary results |
+| `geoutils.multiproc.map_collect()` | A georeferenced Raster block | A computed list of arbitrary results |
 | `dask.array.map_blocks()` | A NumPy array block | A lazy Dask array with blocks assembled into an array |
 | `geoutils.multiproc.map_overlap(..., depth=0)` | A georeferenced Raster block | A raster written to disk |
 

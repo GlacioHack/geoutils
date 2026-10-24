@@ -111,8 +111,8 @@ class TestPredictors:
 class TestPredictorsChunked:
     """Test module for chunked (Dask/MP) error magnitude prediction on raster and point."""
 
-    def test_predict_magnitude__raster_dask_mp_equal(self, tmp_path: Path) -> None:
-        """Checks that Dask and MP raster tiles predict the eager magnitude map without loading source files."""
+    def test_predict_magnitude__raster_dask_mp_equal(self, tmp_path: Path, mp_cluster: MpCluster) -> None:
+        """Checks that Dask and MP raster tiles predict the in-memory magnitude map without loading source files."""
 
         pytest.importorskip("dask")
 
@@ -147,9 +147,8 @@ class TestPredictorsChunked:
         assert hasattr(dask_source.data, "compute") and hasattr(dask_quality.data, "compute")
         assert hasattr(lazy.data, "compute")
         assert lazy.data.chunks == ((3, 2), (3, 3, 1))
-        with MpCluster({"nb_workers": 2}) as cluster:
-            config = MultiprocConfig(chunks=(3, 3), outfile=str(tmp_path / "magnitude.tif"), cluster=cluster)
-            multiproc = structure.predict_magnitude({"quality": file_quality}, like=file_source, mp_config=config)
+        config = MultiprocConfig(chunks=(3, 3), outfile=str(tmp_path / "magnitude.tif"), cluster=mp_cluster)
+        multiproc = structure.predict_magnitude({"quality": file_quality}, like=file_source, mp_config=config)
         assert not file_source.is_loaded and not file_quality.is_loaded and not multiproc.is_loaded
 
         # 3/ Check exact equality of output
@@ -158,9 +157,9 @@ class TestPredictorsChunked:
 
     @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_predict_magnitude__point_dask_mp_equal(
-        self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
+        self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path, mp_cluster: MpCluster
     ) -> None:
-        """Checks that Dask and MP point partitions predict the eager values in the same row order."""
+        """Checks that Dask and MP point partitions predict the in-memory values in the same row order."""
 
         pytest.importorskip("dask_geopandas")
 
@@ -184,9 +183,8 @@ class TestPredictorsChunked:
         lazy = structure.predict_magnitude({"quality": "quality"}, like=dask_points)
         assert not dask_points.pc.is_loaded and not lazy.pc.is_loaded
         assert hasattr(lazy, "compute")
-        with MpCluster({"nb_workers": 2}) as cluster:
-            config = MultiprocConfig(chunks=3, outfile=str(tmp_path / "magnitude.gpkg"), cluster=cluster)
-            multiproc = structure.predict_magnitude({"quality": "quality"}, like=file_points, mp_config=config)
+        config = MultiprocConfig(chunks=3, outfile=str(tmp_path / "magnitude.gpkg"), cluster=mp_cluster)
+        multiproc = structure.predict_magnitude({"quality": "quality"}, like=file_points, mp_config=config)
         assert not file_points.is_loaded and not multiproc.is_loaded
 
         # 3/ Exact equality across backends
@@ -262,7 +260,7 @@ class TestPredictorsChunked:
         raster = gu.Raster.from_array(np.ones((2, 7)), transform=from_origin(0, 2, 1, 1), crs=32631)
         points = gu.PointCloud.from_xyz(np.arange(7), np.arange(7), np.ones(7), crs=32631)
 
-        # Dask predictor chunks select lazy output even with eager source data
+        # Dask predictor chunks select lazy output even with in-memory source data
         raster_predictor = dask.from_array(np.tile(quality, (2, 1)), chunks=(1, 3))
         point_predictor = dask.from_array(quality, chunks=3)
         raster_result = structure.predict_magnitude({"quality": raster_predictor}, like=raster)
@@ -275,7 +273,7 @@ class TestPredictorsChunked:
         assert hasattr(scalar_result.data, "compute")
         np.testing.assert_array_equal(np.asarray(scalar_result.compute()), np.full((2, 7), 1.5))
 
-        # Computing both maps matches the same predictions on eager inputs
+        # Computing both maps matches the same predictions on in-memory inputs
         eager_raster = structure.predict_magnitude({"quality": np.tile(quality, (2, 1))}, like=raster)
         eager_points = structure.predict_magnitude({"quality": quality}, like=points)
         np.testing.assert_array_equal(np.asarray(raster_result.compute()), eager_raster.to_nanarray())
@@ -302,7 +300,7 @@ class TestPredictorsChunked:
         np.testing.assert_array_equal(result.geometry.y, expected.geometry.y)
         np.testing.assert_array_equal(result.geometry.z, expected.geometry.z)
 
-    def test_predict_magnitude__point_array_dask_mp_equal(self, tmp_path: Path) -> None:
+    def test_predict_magnitude__point_array_dask_mp_equal(self, tmp_path: Path, mp_cluster: MpCluster) -> None:
         """Checks that Dask and MP align array predictors with uneven point row partitions."""
 
         pytest.importorskip("dask_geopandas")
@@ -320,9 +318,8 @@ class TestPredictorsChunked:
         assert points.is_loaded and not lazy.pc.is_loaded
 
         # Worker output stays file-backed until its values are read
-        with MpCluster({"nb_workers": 2}) as cluster:
-            config = MultiprocConfig(chunks=3, outfile=str(tmp_path / "magnitude.gpkg"), cluster=cluster)
-            multiproc = structure.predict_magnitude({"quality": quality}, like=points, mp_config=config)
+        config = MultiprocConfig(chunks=3, outfile=str(tmp_path / "magnitude.gpkg"), cluster=mp_cluster)
+        multiproc = structure.predict_magnitude({"quality": quality}, like=points, mp_config=config)
         assert points.is_loaded and not multiproc.is_loaded
 
         # All outputs should match exactly
@@ -401,7 +398,7 @@ class TestPredictorsErrors:
             if chunked:
                 pytest.importorskip("dask_geopandas")
 
-        # Should fail for both eager/Dask
+        # Should fail for both in-memory/Dask
         with pytest.raises(
             ValueError, match="Spatial predictor 'quality' must be scalar or match every output location"
         ):
@@ -432,19 +429,18 @@ class TestPredictorsErrors:
         with pytest.raises(ValueError, match="chunk size"):
             structure.predict_magnitude(like=like, chunksizes=chunksizes)
 
-    def test_predict_magnitude__error_conflicting_backends(self, tmp_path: Path) -> None:
+    def test_predict_magnitude__error_conflicting_backends(self, tmp_path: Path, mp_cluster: MpCluster) -> None:
         """Checks an error is raised when Dask/MP are used together."""
 
         raster = gu.Raster.from_array(np.ones((2, 2)), transform=from_origin(0, 2, 1, 1), crs=32631)
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
 
         # Check MP+Dask raises an error
-        with MpCluster({"nb_workers": 2}) as cluster:
-            config = MultiprocConfig(chunks=(1, 1), outfile=str(tmp_path / "magnitude.tif"), cluster=cluster)
-            with pytest.raises(ValueError, match="Choose chunksizes for Dask or mp_config for multiprocessing"):
-                structure.predict_magnitude(like=raster, chunksizes=(1, 1), mp_config=config)
+        config = MultiprocConfig(chunks=(1, 1), outfile=str(tmp_path / "magnitude.tif"), cluster=mp_cluster)
+        with pytest.raises(ValueError, match="Choose chunksizes for Dask or mp_config for multiprocessing"):
+            structure.predict_magnitude(like=raster, chunksizes=(1, 1), mp_config=config)
 
-    def test_predict_magnitude__error_multiproc_with_dask_raster(self, tmp_path: Path) -> None:
+    def test_predict_magnitude__error_multiproc_with_dask_raster(self, tmp_path: Path, mp_cluster: MpCluster) -> None:
         """Checks an error is raised when MP output receives a Dask raster input."""
 
         dask = pytest.importorskip("dask.array")
@@ -455,8 +451,7 @@ class TestPredictorsErrors:
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
 
         # Error should be raised here
-        with MpCluster({"nb_workers": 2}) as cluster:
-            config = MultiprocConfig(chunks=(1, 1), outfile=str(tmp_path / "magnitude.tif"), cluster=cluster)
-            with pytest.raises(ValueError, match="Multiprocessing cannot be combined with Dask raster inputs"):
-                structure.predict_magnitude(like=raster, mp_config=config)
+        config = MultiprocConfig(chunks=(1, 1), outfile=str(tmp_path / "magnitude.tif"), cluster=mp_cluster)
+        with pytest.raises(ValueError, match="Multiprocessing cannot be combined with Dask raster inputs"):
+            structure.predict_magnitude(like=raster, mp_config=config)
         assert hasattr(raster.data, "compute")

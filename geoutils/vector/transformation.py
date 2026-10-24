@@ -67,7 +67,7 @@ def _crop_geodataframe(
 
 
 def _crop(source_vector: Any, bbox: Any, mode: Literal["intersects", "within"]) -> Any:
-    """Crop vector data, dispatching to eager or partitioned execution."""
+    """Crop vector data, dispatching to in-memory or partitioned execution."""
 
     if mode not in ("intersects", "within"):
         raise ValueError("Argument 'mode' must be either 'intersects' or 'within'.")
@@ -83,7 +83,7 @@ def _crop(source_vector: Any, bbox: Any, mode: Literal["intersects", "within"]) 
                 cropped = cropped[cropped.geometry.within(box(*bounds))]
             return cropped
 
-        # Otherwise apply the same eager selection independently inside each partition
+        # Otherwise apply the same in-memory selection independently inside each partition
         return source_vector._dataset.map_partitions(
             _crop_geodataframe, bounds, mode, meta=source_vector._dataset._meta
         )

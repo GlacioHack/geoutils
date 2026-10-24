@@ -120,7 +120,15 @@ class TestClassVsAccessorConsistency:
         ),
         (
             "pairsample",
-            {"n_pairs": 4, "min_distance": 0.5, "max_distance": 2, "strategy": "kdtree", "random_state": 42},
+            {
+                "n_pairs": 4,
+                "min_distance": 0.5,
+                "max_distance": 2,
+                "strategy": "kdtree",
+                "random_state": 42,
+                # Use the same pair storage for strict metadata comparisons
+                "force_output_to_memory": True,
+            },
         ),
         (
             "variogram",
@@ -214,7 +222,7 @@ class TestClassVsAccessorConsistency:
         loaded: bool,
         chunks: int | None,
     ) -> None:
-        """Checks that point methods load as needed and match eager class and accessor outputs."""
+        """Checks that point methods load as needed and match in-memory class and accessor outputs."""
 
         if not loaded and (as_object_type == "geodataframe" or chunks is not None):
             pytest.importorskip("dask_geopandas")
@@ -269,7 +277,7 @@ class TestClassVsAccessorConsistency:
                 output_loaded = True
             assert output_interface.is_loaded is output_loaded
 
-        # Compare eager and deferred values through both representations
+        # Compare in-memory and deferred values through both representations
         if method == "to_xarray":
             # File readers can omit the implicit point index; compare point values and coordinates
             output_pc = output_pc.pc.to_geoutils()
@@ -701,9 +709,9 @@ class TestArrayVsGeometryConsistency:
 
 
 class TestAccessorDask:
-    """Test module for Dask loading, laziness and eager comparisons through the point cloud accessors."""
+    """Test module for Dask loading, laziness and in-memory comparisons through the point cloud accessors."""
 
-    # Use the same compact fixture as the eager class-versus-accessor tests
+    # Use the same compact fixture as the in-memory class-versus-accessor tests
     ds = TestClassVsAccessorConsistency.ds
 
     @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
@@ -731,7 +739,7 @@ class TestAccessorDask:
     def test_bbox__dask(self, as_object_type: Literal["dataarray", "geodataframe"]) -> None:
         """Checks that a lazy point cloud reads its bounding box without replacing its Dask collection."""
 
-        # Write the eager points and reopen them as two lazy row partitions
+        # Write the in-memory points and reopen them as two lazy row partitions
         pytest.importorskip("dask_geopandas")
         temp_dir = tempfile.TemporaryDirectory()
         temp_file = os.path.join(temp_dir.name, "test.gpkg")
@@ -747,7 +755,7 @@ class TestAccessorDask:
         self, as_object_type: Literal["dataarray", "geodataframe"]
     ) -> None:
         """
-        Checks that chunked point methods match eager outputs and preserve their expected loading and laziness.
+        Checks that chunked point methods match in-memory outputs and preserve their expected loading and laziness.
         """
 
         # Load both lazy dataframe and lazy array types used by this test
@@ -756,7 +764,7 @@ class TestAccessorDask:
             warnings.filterwarnings("ignore", category=FutureWarning, module="dask.dataframe")
             import dask.array as da
 
-        # Prepare matching lazy and eager point-cloud interfaces
+        # Prepare matching lazy and in-memory point-cloud interfaces
         temp_dir = tempfile.TemporaryDirectory()
         temp_file = os.path.join(temp_dir.name, "test.gpkg")
         self.ds.to_file(temp_file)
@@ -764,7 +772,7 @@ class TestAccessorDask:
         ds = gu.open_pointcloud(temp_file, data_name="b1", chunks=2, as_object_type=as_object_type)
         pc = PointCloud(self.ds, data_name="b1")
 
-        # Array conversion should create a Dask array with the eager values
+        # Array conversion should create a Dask array with the in-memory values
         array_ds = ds.pc.to_array()
         array_pc = pc.to_array()
 
@@ -772,7 +780,7 @@ class TestAccessorDask:
         assert np.array_equal(array_ds.compute(), array_pc)
         assert not ds.pc.is_loaded
 
-        # Loading returns an eager replacement because a Dask collection cannot be mutated in place
+        # Loading returns an in-memory replacement because a Dask collection cannot be mutated in place
         loaded = ds.pc.load()
         assert_output_equal(pc, loaded)
         assert not ds.pc.is_loaded
@@ -814,7 +822,7 @@ class TestAccessorDask:
         if as_object_type == "geodataframe":
             dgpd = pytest.importorskip("dask_geopandas")
 
-        # Establish one eager reference for both chunked backends
+        # Establish one in-memory reference for both chunked backends
         fn_las = gu.examples.get_path_test("coromandel_lidar")
 
         pc = PointCloud(fn_las)
@@ -850,7 +858,7 @@ class TestAccessorDask:
         if as_object_type == "geodataframe":
             pytest.importorskip("dask_geopandas")
 
-        # Build a small eager grid that both chunked implementations must match
+        # Build a small in-memory grid that both chunked implementations must match
         fn_las = gu.examples.get_path_test("coromandel_lidar")
 
         pc = PointCloud(fn_las)
@@ -863,7 +871,8 @@ class TestAccessorDask:
         )
 
         # Dask selects and grids point partitions separately for every output block
-        ds = gu.open_pointcloud(fn_las, chunks=100, as_object_type=as_object_type)
+        # Leave a shorter final point partition
+        ds = gu.open_pointcloud(fn_las, chunks=3001, as_object_type=as_object_type)
         output_dask = ds.pc.grid(
             shape=(3, 3),
             bounds=pc.bbox,
@@ -890,7 +899,7 @@ class TestAccessorDask:
             mp_config=MultiprocConfig(chunks=(2, 1)),
         )
 
-        # Its file-backed raster result should equal the eager and Dask results
+        # Its file-backed raster result should equal the in-memory and Dask results
         assert not pc_file.is_loaded
         assert not output_mp.is_loaded
         assert np.array_equal(expected.data, output_mp.data, equal_nan=True)
@@ -1382,7 +1391,7 @@ class TestPointCloudRemoteChunked:
         options: dict[str, Any],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Checks that remote point chunks stay lazy and compute exactly the eager local points."""
+        """Checks that remote point chunks stay lazy and compute exactly the in-memory local points."""
 
         pytest.importorskip("dask")
         if as_object_type == "geodataframe" or remote_native_points.endswith(".gpkg"):
@@ -1438,7 +1447,7 @@ class TestPointCloudRemoteChunked:
     def test_open_pointcloud__remote_process_workers(
         self, remote_files: RemoteFiles, remote_url: Callable[[str], str], remote_native_points: str
     ) -> None:
-        """Checks that Dask processes reopen remote files and compute the same points as eager local reads."""
+        """Checks that Dask processes reopen remote files and compute the same points as in-memory local reads."""
 
         pytest.importorskip("dask")
 

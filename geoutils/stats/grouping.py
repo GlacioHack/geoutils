@@ -58,7 +58,7 @@ from geoutils.sampling.support import (
     _sampling_specification,
     _values_at_support,
 )
-from geoutils.stats.reduction import _reduce_values
+from geoutils.stats.reduction import _TDIGEST_STATISTICS, _reduce_values
 from geoutils.stats.selection import _coordinates_at_support, _sample_eligible_indices
 from geoutils.vector.base import _as_geodataframe
 
@@ -201,7 +201,7 @@ def _prepare_grouper(values: Any, definition: _GroupDefinition) -> _PreparedGrou
 #####################################
 
 
-def _normalize_grouped_inputs_dask_eager(
+def _normalize_grouped_array_inputs(
     values: Mapping[str, Any],
     by: Mapping[str, _PreparedGrouper],
     mask: Any | None,
@@ -332,7 +332,7 @@ def _group_definition_from_limits(name: str, bin_count: int, lower: float, upper
     return _GroupDefinition(groups=pd.IntervalIndex.from_breaks(edges, closed="left", name=name), edges=edges)
 
 
-def _derive_bin_edges_from_count_dask_eager(
+def _derive_bin_edges_from_count(
     by: Mapping[str, _PreparedGrouper],
     *,
     mask: Any | None,
@@ -340,13 +340,13 @@ def _derive_bin_edges_from_count_dask_eager(
     chunks: Any | None,
 ) -> dict[str, _PreparedGrouper]:
     """
-    Derive equal-width bin edges for eager or Dask groupers declared by bin count.
+    Derive equal-width bin edges for in-memory or Dask groupers declared by bin count.
 
     Only required for binning defined by a count requiring min/max knowledge of the variable, otherwise this function
     skips the grouping variable.
 
     :param use_dask: Whether to derive limits lazily with Dask or eagerly with NumPy.
-    :param chunks: Common Dask chunk layout, or None for eager inputs.
+    :param chunks: Common Dask chunk layout, or None for in-memory inputs.
     :returns: Prepared groupers with bin counts replaced by their derived interval labels and edges.
     """
 
@@ -413,7 +413,7 @@ def _derive_bin_edges_from_count_mp(
     """
     Derive equal-width bin edges for multiprocessing groupers declared by bin count.
 
-    Same as eager/Dask logic.
+    Same as NumPy/Dask logic.
     Only required for binning defined by a count requiring min/max knowledge of the variable, otherwise this function
     skips the grouping variable.
 
@@ -463,7 +463,7 @@ def _encode_grouper(values: NDArray[Any], *, groups: pd.Index, edges: NDArray[An
     Numeric edges follow histogram conventions (left close, right open), users can pass an IntervalIndex instead to
     have it explicitly defined.
 
-    :param values: One block of a single grouping variable passed to _assign_group_ids_dask_eager().
+    :param values: One block of a single grouping variable passed to _assign_array_group_ids().
     :param groups: Ordered category or interval labels.
     :param edges: Explicit numeric bin boundaries, or None to match the labels or intervals in groups directly.
 
@@ -514,7 +514,7 @@ class _GroupAssignmentMP:
     directory: str
 
 
-def _assign_group_ids_dask_eager(
+def _assign_array_group_ids(
     by: Mapping[str, _PreparedGrouper],
     *,
     mask: Any | None,
@@ -523,15 +523,15 @@ def _assign_group_ids_dask_eager(
     chunks: Any | None,
 ) -> tuple[Any, list[pd.Index], int]:
     """
-    Assign combined group IDs to eager or Dask arrays.
+    Assign combined group IDs to in-memory or Dask arrays.
 
     _encode_grouper() gives an ID to each variable's categories or intervals, following order of ``by``.
     A location receives -1 if the user mask excludes it or any grouper is missing or undeclared.
 
-    :param by: Groupers returned by _derive_bin_edges_from_count_dask_eager().
+    :param by: Groupers returned by _derive_bin_edges_from_count().
     :param shape: Common shape of the values, grouping variables and user mask.
     :param use_dask: Whether to assign group IDs lazily with Dask or eagerly with NumPy.
-    :param chunks: Common Dask chunk layout, or None for eager inputs.
+    :param chunks: Common Dask chunk layout, or None for in-memory inputs.
     :returns: Combined group IDs with the input shape, ordered label indexes for each grouper, and the total number
         of declared combinations. Negative IDs mark excluded locations.
     """
@@ -586,7 +586,7 @@ def _wrapper_assign_group_ids_block_mp(groupers: Mapping[str, Any], mask: Any, s
         for name, grouper in groupers.items()
     }
     block_mask = _normalize_mask_array(_read_values(mask), shape)
-    ids, _, _ = _assign_group_ids_dask_eager(prepared, mask=block_mask, shape=shape, use_dask=False, chunks=None)
+    ids, _, _ = _assign_array_group_ids(prepared, mask=block_mask, shape=shape, use_dask=False, chunks=None)
     return ids
 
 
@@ -600,7 +600,7 @@ def _assign_group_ids_mp(
     """
     Assign group IDs from unloaded readers into temporary storage with multiprocessing.
 
-    Follows the same logic as the eager/Dask implementation above.
+    Follows the same logic as the NumPy/Dask implementation above.
 
     _assign_group_ids_block_mp() handles one block at a time, we keep the combined numbers on disk so sampling,
     reduction and optional returned masks can reuse them without loading all grouping arrays at once.
@@ -657,7 +657,7 @@ def _assign_group_ids_mp(
 ################################
 
 
-def _sample_grouped_values_dask_eager(
+def _sample_grouped_arrays(
     values: Mapping[str, Any],
     group_ids: Any,
     *,
@@ -667,7 +667,7 @@ def _sample_grouped_values_dask_eager(
     subsampling_strategy: Literal["sequential", "topk"],
     use_dask: bool,
 ) -> tuple[dict[str, Any], NDArray[Any]]:
-    """Sample matching group IDs and selected values from eager or Dask arrays."""
+    """Sample matching group IDs and selected values from in-memory or Dask arrays."""
 
     # If we subsample per group, we call stratified subsampling
     if subsample_per_group:
@@ -715,7 +715,7 @@ def _sample_grouped_values_mp(
     """
     Sample values with matching group IDs using multiprocessing backend.
 
-    It mirrors the eager/Dask logic above.
+    It mirrors the NumPy/Dask logic above.
 
     NumPy values are indexed directly. For unloaded readers, we use _read_selected_values() so
     workers read only the selected value locations.
@@ -781,7 +781,7 @@ class _GroupMasks(Mapping[Hashable, Any]):
     on the common support.
     We build each mask only when its result key is requested, avoiding one stored array per group.
 
-    :param group_ids: Complete combined memberships from _assign_group_ids_dask_eager() or
+    :param group_ids: Complete combined memberships from _assign_array_group_ids() or
         _assign_group_ids_mp(), before subsampling.
     :param key_ids: Mapping from result row labels to the integer group IDs represented by those rows.
     :param shape: Original value-array shape restored when a group mask is requested.
@@ -889,7 +889,7 @@ def _group_index(
 
     We use a categorical or interval index for one grouper, and a MultiIndex for several groupers.
 
-    :param levels: Ordered label indexes returned by the eager, Dask or multiprocessing group assignment.
+    :param levels: Ordered label indexes returned by the in-memory, Dask or multiprocessing group assignment.
     :param names: Grouper names in the same order as levels.
     :param group_numbers: Combined integer group IDs to include, in the requested row order.
     :returns: A Pandas index naming each requested group combination.
@@ -915,8 +915,11 @@ def _group_index(
 def _format_grouped_stats(
     table: pd.DataFrame,
     statistics: _Statistics,
-    resolved_strategy: str,
+    resolved_method: str,
     *,
+    backend: str,
+    reindex: bool | None,
+    split_every: int | None,
     value_names: Sequence[str],
     by_names: Sequence[str],
     levels: Sequence[pd.Index],
@@ -965,7 +968,10 @@ def _format_grouped_stats(
         "observed": observed,
         "subsample": subsample,
         "subsample_per_group": subsample_per_group,
-        "strategy": resolved_strategy,
+        "backend": backend,
+        "method": resolved_method,
+        "reindex": reindex,
+        "split_every": split_every,
         "subsampling_strategy": subsampling_strategy,
         "mask_membership": "groupers",
     }
@@ -983,289 +989,6 @@ def _format_grouped_stats(
 ##########################################
 
 
-def _group_values_for_flox(
-    by: Mapping[str, _PreparedGrouper], *, use_dask: bool
-) -> tuple[list[Any], list[pd.Index | NDArray[Any]]]:
-    """Prepare grouping values and their declared order for the eager or Dask Flox backend."""
-
-    group_values = []
-    expected_groups = []
-    for prepared in by.values():
-        values = prepared.values
-        groups = prepared.definition.groups
-        assert groups is not None
-
-        # Keep ordinary category values for Flox to match, including their declared order
-        masked = np.ma.isMaskedArray(values._meta) if use_dask else np.ma.isMaskedArray(values)
-        if not prepared.encoded and not isinstance(groups, pd.IntervalIndex) and not masked:
-            group_values.append(values)
-            expected_groups.append(groups)
-            continue
-
-        # Keep existing category codes, or encode bins whose boundary rules differ from Flox's native bins
-        if prepared.encoded:
-            codes = values.astype(np.int64)
-        elif use_dask:
-            codes = values.map_blocks(
-                _encode_grouper,
-                groups=groups,
-                edges=prepared.definition.edges,
-                dtype=np.int64,
-            )
-        else:
-            codes = _encode_grouper(values, groups=groups, edges=prepared.definition.edges)
-        group_values.append(codes)
-        expected_groups.append(np.arange(len(groups), dtype=np.int64))
-    return group_values, expected_groups
-
-
-def _groupby_reduce_flox(
-    values: Any,
-    group_values: Sequence[Any],
-    expected_groups: Sequence[pd.Index | NDArray[Any]],
-    *,
-    function: str,
-    use_dask: bool,
-    fill_value: float | int,
-    dtype: Any,
-    finalize_kwargs: Mapping[str, Any] | None = None,
-) -> Any:
-    """Run one eager or Dask Flox reduction over every grouping variable."""
-
-    flox = import_optional("flox")
-    expected: Any = expected_groups[0] if len(expected_groups) == 1 else tuple(expected_groups)
-    axes = tuple(range(-group_values[0].ndim, 0))
-    return flox.groupby_reduce(
-        values,
-        *group_values,
-        func=function,
-        expected_groups=expected,
-        sort=False,
-        axis=axes,
-        fill_value=fill_value,
-        dtype=dtype,
-        method="map-reduce" if use_dask else None,
-        finalize_kwargs=finalize_kwargs,
-    )[0]
-
-
-def _calculate_grouped_stats_flox(
-    values: Mapping[str, Any],
-    by: Mapping[str, _PreparedGrouper],
-    *,
-    statistics: _Statistics,
-    mask: Any | None,
-    full_group_ids: Any | None,
-    shape: tuple[int, ...],
-    support: RasterBase | PointCloudBase | None,
-    observed: bool,
-    subsample: int | float,
-    subsampling_strategy: Literal["sequential", "topk"],
-) -> pd.DataFrame:
-    """
-    Calculate grouped statistics with Flox from eager or Dask values and grouping variables.
-
-    Flox matches the separate grouping values itself. GeoUtils only converts interval definitions to preserve their
-    boundary rules, applies the common mask and finite-data rules, and builds the established result dataframe.
-    """
-
-    # Check statistics that Flox cannot reproduce through its grouped reductions
-    unsupported = [
-        name for name, alias in zip(statistics.names, statistics.aliases) if alias is None or alias == "nmad"
-    ]
-    if unsupported:
-        raise ValueError(f"The Flox backend does not support these statistics: {unsupported!r}.")
-    exact = {"median", "90thpercentile", "iqr", "le90"}
-    use_dask = any(is_dask_array(array) for array in values.values())
-    if use_dask and any(alias in exact for alias in statistics.aliases):
-        raise ValueError("The Dask Flox backend does not support exact median or percentile statistics.")
-
-    # Prepare Flox group inputs while keeping the categories and bins used for the final row index
-    group_values, expected_groups = _group_values_for_flox(by, use_dask=use_dask)
-    levels, total_groups = _group_layout(by)
-    if use_dask:
-        import_optional("dask")
-        import dask.array as da
-
-    # Apply the user mask and each value's missing data independently before stacking the selected values
-    selected_values = []
-    for array in values.values():
-        if use_dask:
-            data = da.ma.getdata(array)
-            valid = ~da.ma.getmaskarray(array) & da.isfinite(data)
-            if mask is not None:
-                valid &= mask
-            selected_values.append(da.where(valid, data, np.nan))
-        else:
-            data = np.ma.getdata(array)
-            valid = ~get_mask_from_array(array)
-            if mask is not None:
-                valid &= mask
-            selected_values.append(np.where(valid, data, np.nan))
-    stacked = da.stack(selected_values) if use_dask else np.stack(selected_values)
-
-    # Count all eligible group locations separately from each value's finite observations
-    first = next(iter(values.values()))
-    reduction_shape = tuple(first.shape)
-    if use_dask:
-        membership = da.ones(reduction_shape, chunks=first.chunks, dtype=float)
-        if mask is not None:
-            membership = da.where(mask, 1.0, np.nan)
-    else:
-        membership = np.ones(reduction_shape, dtype=float)
-        if mask is not None:
-            membership = np.where(mask, 1.0, np.nan)
-    scheduled = {
-        "membership": _groupby_reduce_flox(
-            membership,
-            group_values,
-            expected_groups,
-            function="count",
-            use_dask=use_dask,
-            fill_value=0,
-            dtype=np.int64,
-        ),
-        "count": _groupby_reduce_flox(
-            stacked,
-            group_values,
-            expected_groups,
-            function="count",
-            use_dask=use_dask,
-            fill_value=0,
-            dtype=np.int64,
-        ),
-    }
-
-    # Ask Flox only for the reductions needed by the requested statistics
-    aliases = {alias for alias in statistics.aliases if alias is not None}
-    direct_functions = {
-        "mean": "nanmean",
-        "median": "nanmedian",
-        "max": "nanmax",
-        "min": "nanmin",
-        "sum": "nansum",
-        "std": "nanstd",
-    }
-    for alias, function in direct_functions.items():
-        if alias in aliases:
-            scheduled[alias] = _groupby_reduce_flox(
-                stacked,
-                group_values,
-                expected_groups,
-                function=function,
-                use_dask=use_dask,
-                fill_value=np.nan,
-                dtype=np.float64,
-                finalize_kwargs={"ddof": 0} if alias == "std" else None,
-            )
-
-    # Reduce squared values for sum of squares and RMSE without assigning combined group IDs
-    squared = np.square(stacked)
-    if "sumofsquares" in aliases:
-        scheduled["sumofsquares"] = _groupby_reduce_flox(
-            squared,
-            group_values,
-            expected_groups,
-            function="nansum",
-            use_dask=use_dask,
-            fill_value=np.nan,
-            dtype=np.float64,
-        )
-    if "rmse" in aliases:
-        scheduled["mean_square"] = _groupby_reduce_flox(
-            squared,
-            group_values,
-            expected_groups,
-            function="nanmean",
-            use_dask=use_dask,
-            fill_value=np.nan,
-            dtype=np.float64,
-        )
-
-    # Request the quantiles shared by the percentile, IQR and LE90 statistics
-    quantiles = {}
-    if "90thpercentile" in aliases:
-        quantiles["q90"] = 0.90
-    if "iqr" in aliases:
-        quantiles.update(q75=0.75, q25=0.25)
-    if "le90" in aliases:
-        quantiles.update(q95=0.95, q05=0.05)
-    for name, quantile in quantiles.items():
-        scheduled[name] = _groupby_reduce_flox(
-            stacked,
-            group_values,
-            expected_groups,
-            function="nanquantile",
-            use_dask=use_dask,
-            fill_value=np.nan,
-            dtype=np.float64,
-            finalize_kwargs={"q": quantile},
-        )
-
-    # Compute all small Dask results together before constructing the Pandas output
-    if use_dask:
-        import dask
-
-        keys = list(scheduled)
-        scheduled = dict(zip(keys, dask.compute(*(scheduled[key] for key in keys))))
-    membership_count = np.asarray(scheduled["membership"], dtype=np.int64).reshape(total_groups)
-    finite_count = np.asarray(scheduled["count"], dtype=np.int64).reshape(len(values), total_groups)
-
-    # Restore GeoUtils statistic names and count fields for each selected value
-    columns = {}
-    for value_index in range(len(values)):
-        columns[(value_index, "count")] = finite_count[value_index]
-        for name, statistic_alias in zip(statistics.names, statistics.aliases):
-            if statistic_alias == "validcount":
-                result = finite_count[value_index]
-            elif statistic_alias == "totalcount":
-                result = membership_count
-            elif statistic_alias == "percentagevalidpoints":
-                result = np.divide(
-                    100 * finite_count[value_index],
-                    membership_count,
-                    out=np.full(total_groups, np.nan),
-                    where=membership_count > 0,
-                )
-            elif statistic_alias == "rmse":
-                result = np.sqrt(np.asarray(scheduled["mean_square"])[value_index].reshape(total_groups))
-            elif statistic_alias == "90thpercentile":
-                result = np.asarray(scheduled["q90"])[value_index].reshape(total_groups)
-            elif statistic_alias == "iqr":
-                result = np.asarray(scheduled["q75"])[value_index].reshape(total_groups) - np.asarray(scheduled["q25"])[
-                    value_index
-                ].reshape(total_groups)
-            elif statistic_alias == "le90":
-                result = np.asarray(scheduled["q95"])[value_index].reshape(total_groups) - np.asarray(scheduled["q05"])[
-                    value_index
-                ].reshape(total_groups)
-            else:
-                assert statistic_alias is not None
-                result = np.asarray(scheduled[statistic_alias])[value_index].reshape(total_groups)
-            columns[(value_index, name)] = result
-    table = pd.DataFrame(columns, index=np.arange(total_groups))
-    table = table.loc[membership_count > 0]
-
-    # Use the common formatter to restore declared group labels, empty groups and output metadata
-    return _format_grouped_stats(
-        table,
-        statistics,
-        "flox",
-        value_names=list(values),
-        by_names=list(by),
-        levels=levels,
-        total_groups=total_groups,
-        full_group_ids=np.empty(0, dtype=np.int64) if full_group_ids is None else full_group_ids,
-        shape=shape,
-        support=support,
-        observed=observed,
-        subsample=subsample,
-        subsample_per_group=False,
-        subsampling_strategy=subsampling_strategy,
-        return_masks=False,
-    )
-
-
 def _calculate_grouped_stats(
     values: ArrayLike | Mapping[str, ArrayLike],
     by: Mapping[str, _PreparedGrouper],
@@ -1275,8 +998,12 @@ def _calculate_grouped_stats(
     subsample: int | float,
     subsample_per_group: bool,
     random_state: int | np.random.Generator | None,
-    strategy: Literal["auto", "dense", "sparse", "groupwise"],
     backend: Literal["geoutils", "flox"],
+    flox_engine: str | None = None,
+    tdigest_compression: float = 100,
+    method: str = "auto",
+    reindex: bool | None = None,
+    split_every: int | None = None,
     subsampling_strategy: Literal["sequential", "topk"],
     observed: bool,
     return_masks: bool,
@@ -1287,12 +1014,17 @@ def _calculate_grouped_stats(
     """
     Calculate statistics for values with prepared group definitions and aligned grouping values.
 
-    Both backends first normalize their array inputs and derive bin edges when only a bin count was given. The Flox
-    backend then lets Flox match group values and calculate the result. The GeoUtils backend assigns combined group
-    IDs, optionally samples them, and passes them to _reduce_values(). Both paths finish with _format_grouped_stats().
+    Internal logic (now the same with Flox or GeoUtils backend):
+    1. Normalize array inputs and chunk layouts.
+    2. Derive bin edges from each grouper minimum and maximum (runs only if a "bin count" was given, instead of bin
+      edges).
+    3. Assign integer group IDs with _assign_array_group_ids() or _assign_group_ids_mp().
+    4. Optionally subsample the common support, globally or per group.
+    5. Reduce the selected values with _reduce_values(), then restore group labels and output metadata with
+       _format_grouped_stats().
     """
 
-    # 1/ Normalize array inputs (eager vs Dask), chunk layout
+    # 1/ Normalize array inputs (in-memory vs Dask), chunk layout
     named_values: dict[str, Any] = dict(values) if isinstance(values, Mapping) else {"value": values}
     if not named_values or any(not isinstance(name, str) or not name for name in named_values):
         raise ValueError("Argument ``values`` must contain at least one non-empty name.")
@@ -1303,68 +1035,23 @@ def _calculate_grouped_stats(
         arrays, groupers, mask, shape, tiles = _normalize_grouped_inputs_mp(named_values, by, mask, mp_config)
         use_dask, chunks = False, None
     else:
-        arrays, groupers, mask, shape, use_dask, chunks = _normalize_grouped_inputs_dask_eager(
+        arrays, groupers, mask, shape, use_dask, chunks = _normalize_grouped_array_inputs(
             named_values, by, mask, mp_config
         )
         tiles = None
     if _return_local_data and (use_reader_mp or use_dask or mp_config is not None or subsample != 1):
-        raise ValueError("Statistics uncertainty propagation currently requires eager inputs without subsampling.")
+        raise ValueError("Statistics uncertainty propagation currently requires in-memory inputs without subsampling.")
 
     # 2/ Derive bin edges from each grouper min/max when only a bin count was passed (e.g., 20) for a grouper
     if use_reader_mp:
         assert mp_config is not None and tiles is not None
         groupers = _derive_bin_edges_from_count_mp(groupers, mask, tiles, mp_config)
     else:
-        groupers = _derive_bin_edges_from_count_dask_eager(
+        groupers = _derive_bin_edges_from_count(
             groupers,
             mask=mask,
             use_dask=use_dask,
             chunks=chunks,
-        )
-
-    # Let Flox match the grouping values directly; combined group IDs are only needed for global subsampling
-    if backend == "flox":
-        if _return_local_data:
-            raise ValueError("Statistics uncertainty propagation requires backend='geoutils'.")
-        full_group_ids = None
-        if subsample != 1:
-            full_group_ids, _, _ = _assign_group_ids_dask_eager(
-                groupers,
-                mask=mask,
-                shape=shape,
-                use_dask=use_dask,
-                chunks=chunks,
-            )
-            sample_inputs = {
-                **{f"value_{index}": array for index, array in enumerate(arrays.values())},
-                **{f"grouper_{index}": grouper.values for index, grouper in enumerate(groupers.values())},
-            }
-            sampled, _ = _sample_grouped_values_dask_eager(
-                sample_inputs,
-                full_group_ids,
-                subsample=subsample,
-                subsample_per_group=False,
-                random_state=random_state,
-                subsampling_strategy=subsampling_strategy,
-                use_dask=use_dask,
-            )
-            arrays = {name: sampled[f"value_{index}"] for index, name in enumerate(arrays)}
-            groupers = {
-                name: replace(grouper, values=sampled[f"grouper_{index}"])
-                for index, (name, grouper) in enumerate(groupers.items())
-            }
-            mask = None
-        return _calculate_grouped_stats_flox(
-            arrays,
-            groupers,
-            statistics=statistics,
-            mask=mask,
-            full_group_ids=full_group_ids,
-            shape=shape,
-            support=support,
-            observed=observed,
-            subsample=subsample,
-            subsampling_strategy=subsampling_strategy,
         )
 
     # 3/ Assign an integer ID to each group before sampling
@@ -1378,11 +1065,21 @@ def _calculate_grouped_stats(
             levels = assignment_mp.levels
             total_groups = assignment_mp.total_groups
         else:
-            full_group_ids, levels, total_groups = _assign_group_ids_dask_eager(
-                groupers,
+            # Preserve known group locations so Flox can select blockwise or cohorts without loading lazy labels
+            assign_in_memory = backend == "flox" and not any(
+                is_dask_array(array) for array in [*(grouper.values for grouper in by.values()), mask]
+            )
+            assignment_groupers = groupers
+            if assign_in_memory and use_dask:
+                assignment_groupers = {
+                    name: replace(grouper, values=np.asanyarray(by[name].values).reshape(shape))
+                    for name, grouper in groupers.items()
+                }
+            full_group_ids, levels, total_groups = _assign_array_group_ids(
+                assignment_groupers,
                 mask=mask,
                 shape=shape,
-                use_dask=use_dask,
+                use_dask=use_dask and not assign_in_memory,
                 chunks=chunks,
             )
 
@@ -1402,7 +1099,7 @@ def _calculate_grouped_stats(
                     assignment=assignment_mp,
                 )
             else:
-                arrays, group_ids = _sample_grouped_values_dask_eager(
+                arrays, group_ids = _sample_grouped_arrays(
                     arrays,
                     full_group_ids,
                     subsample=subsample,
@@ -1412,20 +1109,28 @@ def _calculate_grouped_stats(
                     use_dask=use_dask,
                 )
 
-        # 5/ Reduce every grouped input for all the statistics defined by the user
-        table, resolved_strategy = _reduce_values(
+        # 5/ Reduce the identical selected values with either backend, without resampling in Flox
+        table, resolved_method = _reduce_values(
             list(arrays.values()),
             statistics,
             group_ids=group_ids,
             total_groups=total_groups,
-            strategy=strategy,
             mp_config=mp_config if subsample == 1 else None,
+            backend=backend,
+            flox_engine=flox_engine,
+            tdigest_compression=tdigest_compression,
+            method=method,
+            reindex=reindex,
+            split_every=split_every,
         )
         reduced_group_numbers = table.index.to_numpy(copy=True)
         result = _format_grouped_stats(
             table,
             statistics,
-            resolved_strategy,
+            resolved_method,
+            backend=backend,
+            reindex=reindex,
+            split_every=split_every,
             value_names=list(arrays),
             by_names=list(by),
             levels=levels,
@@ -1444,6 +1149,19 @@ def _calculate_grouped_stats(
                 else None
             ),
         )
+
+        if backend == "flox":
+            assert isinstance(result, pd.DataFrame)
+            result.attrs["grouped_stats"]["flox_engine"] = flox_engine
+        if resolved_method not in {"groupwise", "blockwise"} and any(
+            alias in _TDIGEST_STATISTICS for alias in statistics.aliases
+        ):
+            table_result = result[0] if return_masks else result
+            assert isinstance(table_result, pd.DataFrame)
+            table_result.attrs["grouped_stats"]["approximation"] = {
+                "method": "tdigest",
+                "compression": tdigest_compression,
+            }
 
         # Keep files available for masks returned after multiprocessing has finished
         if return_masks and assignment_mp is not None:
@@ -1715,8 +1433,12 @@ def _grouped_stats(
     subsample: int | float,
     subsample_per_group: bool,
     random_state: int | np.random.Generator | None,
-    strategy: Literal["auto", "dense", "sparse", "groupwise"],
     backend: Literal["geoutils", "flox"],
+    flox_engine: str | None = None,
+    tdigest_compression: float = 100,
+    method: str = "auto",
+    reindex: bool | None = None,
+    split_every: int | None = None,
     subsampling_strategy: Literal["sequential", "topk"],
     interpolation: InterpolationMethod,
     align: Literal["raise", "reproject"],
@@ -1763,8 +1485,12 @@ def _grouped_stats(
         subsample=subsample,
         subsample_per_group=subsample_per_group,
         random_state=random_state,
-        strategy=strategy,
         backend=backend,
+        flox_engine=flox_engine,
+        tdigest_compression=tdigest_compression,
+        method=method,
+        reindex=reindex,
+        split_every=split_every,
         subsampling_strategy=subsampling_strategy,
         observed=observed,
         return_masks=return_masks,

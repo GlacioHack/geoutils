@@ -31,7 +31,7 @@ def _raster(data: NDArrayNum, *, x_origin: float = 0) -> gu.Raster:
 
 class TestSupport:
     """
-    Test the functions to choose a common support and reproject point/raster on them for eager inputs.
+    Test the functions to choose a common support and reproject point/raster on them for in-memory inputs.
 
     Dask inputs are tested further below in TestSupportChunked, while Multiproc integration is covered in
     test_cosampling.py.
@@ -263,11 +263,11 @@ class TestSupport:
 class TestSupportChunked:
     """
     Test module checking that the support helpers respect Dask/MP chunked execution and that their values exactly
-    match eager results.
+    match in-memory results.
     """
 
     def test_values_at_support__backends(self, tmp_path: Path) -> None:
-        """Checks that Dask and Multiproc raster alignment exactly matches eager without loading the inputs."""
+        """Checks that Dask and Multiproc raster alignment matches the in-memory result without loading the inputs."""
 
         import dask.array as da
 
@@ -277,7 +277,7 @@ class TestSupportChunked:
         source.data[1, 2, 3] = np.ma.masked
         support = _raster(np.zeros(source.shape, dtype=float), x_origin=1)
 
-        # Calculate the eager reference from the selected second band
+        # Calculate the in-memory reference from the selected second band
         expected = _values_at_support(
             source,
             2,
@@ -331,7 +331,7 @@ class TestSupportChunked:
         assert not multiproc_source.is_loaded
 
     def test_mask_at_support__backends(self, tmp_path: Path) -> None:
-        """Checks that Dask and Multiproc vector masks exactly match eager without loading the support grids."""
+        """Checks that Dask and Multiproc vector masks match the in-memory result without loading the support grids."""
 
         import dask.array as da
 
@@ -339,7 +339,7 @@ class TestSupportChunked:
         support = _raster(np.zeros((5, 6), dtype=float))
         mask = gu.Vector(gpd.GeoDataFrame(geometry=[box(0, 0, 3, 5)], crs=support.crs))
 
-        # Calculate the eager reference, then place the same vector mask through Dask chunks
+        # Calculate the in-memory reference, then place the same vector mask through Dask chunks
         expected = _mask_at_support(mask, support, align="reproject")
         lazy_support = support.to_xarray().chunk({"y": 2, "x": 3})
         dask_result = _mask_at_support(mask, lazy_support.rst, align="reproject")

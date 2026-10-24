@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Testing helpers for eager and Dask-backed vector dataframes."""
+"""Testing helpers for in-memory and Dask-backed vector dataframes."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ from geoutils._misc import import_optional
 
 
 def _get_dataframe(obj: Any) -> Any:
-    """Return an eager or Dask GeoDataFrame without computing it."""
+    """Return an in-memory or Dask GeoDataFrame without computing it."""
 
     ds = obj if isinstance(obj, gpd.GeoDataFrame) or is_dask_dataframe(obj) else get_geo_attr(obj, "_dataset")
     if not isinstance(ds, gpd.GeoDataFrame) and not is_dask_dataframe(ds):
@@ -67,14 +67,14 @@ def _geometry_allclose(left: Any, right: Any, rtol: float, atol: float) -> bool:
     return bool(left.equals_exact(right, tolerance=atol + rtol * coordinate_scale))
 
 
-def _vector_allclose_eager(
+def _vector_allclose_partition(
     left: gpd.GeoDataFrame,
     right: gpd.GeoDataFrame,
     rtol: float,
     atol: float,
     check_dtype: bool,
 ) -> bool:
-    """Compare two eager vector partitions with numeric tolerances."""
+    """Compare two in-memory vector partitions with numeric tolerances."""
 
     if (
         left.shape != right.shape
@@ -104,8 +104,8 @@ def _vector_allclose_eager(
     return True
 
 
-def _vector_equal_eager(left: gpd.GeoDataFrame, right: gpd.GeoDataFrame, kwargs: dict[str, Any]) -> bool:
-    """Compare two eager vector partitions exactly."""
+def _vector_equal_partition(left: gpd.GeoDataFrame, right: gpd.GeoDataFrame, kwargs: dict[str, Any]) -> bool:
+    """Compare two in-memory vector partitions exactly."""
 
     try:
         assert_geodataframe_equal(left, right, **kwargs)
@@ -115,7 +115,7 @@ def _vector_equal_eager(left: gpd.GeoDataFrame, right: gpd.GeoDataFrame, kwargs:
 
 
 def _dataframe_partition_lengths(ds: Any) -> list[int]:
-    """Return row counts for eager or Dask dataframe partitions."""
+    """Return row counts for in-memory or Dask dataframe partitions."""
 
     if not is_dask_dataframe(ds):
         return [len(ds)]
@@ -124,7 +124,7 @@ def _dataframe_partition_lengths(ds: Any) -> list[int]:
 
 
 def _slice_dataframe_partition(partition: gpd.GeoDataFrame, start: int, stop: int) -> gpd.GeoDataFrame:
-    """Slice one eager dataframe partition by row position."""
+    """Slice one in-memory dataframe partition by row position."""
 
     return partition.iloc[start:stop]
 
@@ -173,19 +173,19 @@ def _compare_dataframes_partitionwise(
 
 
 def _vector_equal(left_obj: Any, right_obj: Any, **kwargs: Any) -> bool:
-    """Compare eager or Dask-backed vector-like objects exactly."""
+    """Compare in-memory or Dask-backed vector-like objects exactly."""
 
     try:
         left = _get_dataframe(left_obj)
         right = _get_dataframe(right_obj)
     except (AttributeError, TypeError):
         return False
-    comparator = partial(_vector_equal_eager, kwargs=kwargs)
+    comparator = partial(_vector_equal_partition, kwargs=kwargs)
     return _compare_dataframes_partitionwise(left, right, comparator=comparator)
 
 
 def _vector_allclose(left_obj: Any, right_obj: Any, rtol: float, atol: float, **kwargs: Any) -> bool:
-    """Compare eager or Dask-backed vector-like objects with numeric tolerances."""
+    """Compare in-memory or Dask-backed vector-like objects with numeric tolerances."""
 
     try:
         left = _get_dataframe(left_obj)
@@ -198,5 +198,5 @@ def _vector_allclose(left_obj: Any, right_obj: Any, rtol: float, atol: float, **
         return False
 
     check_dtype = kwargs.get("check_dtype", True)
-    comparator = partial(_vector_allclose_eager, rtol=rtol, atol=atol, check_dtype=check_dtype)
+    comparator = partial(_vector_allclose_partition, rtol=rtol, atol=atol, check_dtype=check_dtype)
     return _compare_dataframes_partitionwise(left, right, comparator=comparator)

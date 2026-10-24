@@ -4,13 +4,25 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Iterator
 from typing import Any
 
 import numpy as np
 import pytest
 
 from geoutils import Raster, examples
+from geoutils.multiproc.cluster import MpCluster
 from tests.remote_helpers import remote_files, remote_url  # noqa: F401
+
+
+@pytest.fixture(scope="module")
+def mp_cluster() -> Iterator[MpCluster]:
+    """Reuse two workers cluster across tests."""
+    cluster = MpCluster({"nb_workers": 2, "max_tasks_per_child": None})
+    try:
+        yield cluster
+    finally:
+        cluster.close()
 
 
 class LoggingWarningCollector(logging.Handler):

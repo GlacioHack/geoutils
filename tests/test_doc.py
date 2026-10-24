@@ -99,7 +99,7 @@ class TestReadmeChunked:
         assert variogram.model is not None
         assert variogram.model.model_name == "spherical"
 
-        # Compare the computed predictions exactly with the same method and fitted model on eager files
+        # Compare the computed predictions exactly with the same method and fitted model on in-memory files
         eager_raster = gu.open_raster("dem.tif")
         eager_points = gu.open_pointcloud("lidar.laz", data_name="Z", load=True)
         expected_points = eager_raster.rst.resample_at_points(

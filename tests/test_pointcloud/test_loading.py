@@ -367,7 +367,7 @@ class TestPointCloudOpeningChunked:
     def test_open_pointcloud__disk_metadata(
         self, tmp_path: Path, suffix: str, as_object_type: Literal["dataarray", "dataset", "geodataframe"]
     ) -> None:
-        """Checks that disk metadata stays available without computing point values and matches eager opening."""
+        """Checks that disk metadata stays available without computing point values and matches in-memory opening."""
         pytest.importorskip("dask")
         from dask.callbacks import Callback
 
@@ -397,7 +397,7 @@ class TestPointCloudOpeningChunked:
             for key in keys:
                 assert attrs[key] == eager.attrs[key]
 
-        # Check lazy loading and exact equality with the eager values and metadata
+        # Check lazy loading and exact equality with the in-memory values and metadata
         eager_values = eager["Z"] if as_object_type == "dataset" else eager
         lazy_values = lazy["Z"] if as_object_type == "dataset" else lazy
         assert eager_values.pc.is_loaded and not lazy_values.pc.is_loaded
@@ -480,7 +480,7 @@ class TestPointCloudOpeningChunked:
             pytest.importorskip("dask_geopandas")
         laspy = pytest.importorskip("laspy")
 
-        # Open an eager reference with same options
+        # Open an in-memory reference with same options
         eager = gu.open_pointcloud(copc_file, columns="all", as_object_type=as_object_type, **options, load=True)
         fetch_nodes = laspy.CopcReader._fetch_and_decompress_points_of_nodes
 
@@ -517,7 +517,7 @@ class TestPointCloudOpeningChunked:
         with dask.config.set(scheduler="synchronous"):
             actual = lazy.compute()
 
-        # Check every field matches the eager call
+        # Check every field matches the in-memory call
         if as_object_type in ("dataarray", "dataset"):
             xr.testing.assert_identical(actual, eager)
         else:

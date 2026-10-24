@@ -38,7 +38,12 @@ from geoutils.stats.reduction import (
 )
 
 ORDER = 10
-STRATEGIES = ("auto", "dense", "sparse", "groupwise")
+REDUCTION_OPTIONS = {
+    "auto": {"method": "auto", "reindex": None},
+    "dense": {"method": "map-reduce", "reindex": True},
+    "sparse": {"method": "map-reduce", "reindex": False},
+    "groupwise": {"method": "groupwise", "reindex": None},
+}
 STRATEGY_LABELS = {
     "auto": "Automatic",
     "dense": "Dense summaries",
@@ -57,7 +62,7 @@ def statistics_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
     if config.value("operation") == "statistics":
         return {"statistics": ["mean", "std", "valid count"]}
     statistics = ["mean", "std", "min", "max"] if case.method == "moments" else ["median", "nmad"]
-    return {"statistics": statistics, "strategy": case.strategy or "auto"}
+    return {"statistics": statistics, **REDUCTION_OPTIONS[case.strategy or "auto"]}
 
 
 def prepare_statistics(runner: Any, case: Case) -> None:
@@ -167,6 +172,112 @@ def grouped_statistics(runner: Any, raster: Any, case: Case) -> float:
     return 1.0
 
 
+def mergeable_statistics_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
+    """Select the public reduction backend while preserving the same spatial or stratified workload."""
+
+    options: dict[str, Any] = {"statistics": ("sum", "mean", "valid count"), "backend": "geoutils"}
+    if case.engine != "native":
+        options.update(backend="flox", flox_engine="numba" if case.engine == "flox_numba" else None)
+    if case.method == "stratified":
+        options.update(subsample=128, subsample_per_group=True, random_state=42)
+    elif case.method in {"fractional", "separate_bands"}:
+        options["fractional"] = True
+    return options
+
+
+def prepare_mergeable_statistics(runner: Any, case: Case) -> None:
+    """Prepare identical interleaved groups or sparse partial-pixel polygons for every reduction backend."""
+
+    import geoutils as gu
+
+    if case.engine != "native":
+        try:
+            import_optional("flox", extra_name="num")
+        except ImportError as exc:
+            raise NotImplementedError("Install geoutils[num] for this grouped comparison") from exc
+    values, groups, mask, categories = prepare_grouped_inputs(
+        runner.config.shape[0],
+        8,
+        "interleaved",
+        runner.backend,
+        runner.config.chunks,
+    )
+    if case.method == "stratified":
+        runner.mergeable_inputs = {
+            "source": {"first": values[0], "second": values[1]},
+            "by": {"zone": groups},
+            "categories": {"zone": categories},
+            "mask": mask,
+        }
+    else:
+        import geopandas as gpd
+        from rasterio.transform import from_origin
+        from shapely.geometry import box
+
+        # Small overlapping polygons touch few chunks; repeated labels require union before cell intersections
+        size = runner.config.shape[0]
+        locations = np.arange(8, size - 8, 64)
+        polygons = [
+            box(x + offset + 0.25, y + 0.25, x + offset + 7.75, y + 9.75)
+            for x in locations
+            for y in locations
+            for offset in (0, 4)
+        ]
+        labels = np.arange(len(polygons)) // 2
+        vector = gu.Vector(gpd.GeoDataFrame({"zone": labels}, geometry=polygons, crs=32633))
+        constructor = gu.DataArrayRasterAccessor if runner.backend == "dask" else gu.Raster
+        raster = constructor.from_array(values, from_origin(0, size, 1, 1), 32633, nodata=-99999)
+        runner.mergeable_inputs = {
+            "source": raster,
+            "values": {"first": 1, "second": 2},
+            "by": {"zone": (vector, "zone")},
+        }
+
+    # Compile the selected numerical engine outside the ASV operation timing
+    if case.engine != "native":
+        gu.stats.stats(
+            np.arange(16.0),
+            "mean",
+            by={"zone": np.zeros(16, dtype=int)},
+            categories={"zone": [0]},
+            backend="flox",
+            flox_engine="numba" if case.engine == "flox_numba" else None,
+        )
+
+
+def run_mergeable_statistics(runner: Any, case: Case) -> float:
+    """Run unchanged selection or spatial intersections followed by the explicitly selected grouped reduction."""
+
+    from geoutils.stats import stats
+
+    mp_config = runner._multiproc_config() if runner.backend == "multiprocessing" else None
+    inputs = dict(runner.mergeable_inputs)
+    options = mergeable_statistics_options(case, runner.config)
+
+    # Include label rasterization in the center and all-touched timings
+    if case.method in {"center", "all_touched"}:
+        vector, column = inputs["by"]["zone"]
+        labels = vector.rasterize(
+            ref=inputs["source"],
+            in_value=(vector.gdf[column] + 1).tolist(),
+            out_value=0,
+            out_dtype=np.int32,
+            all_touched=case.method == "all_touched",
+            mp_config=mp_config,
+        )
+        inputs.update(by={"zone": labels}, categories={"zone": np.unique(vector.gdf[column]) + 1})
+
+    # Compare shared intersections across bands with a complete call for each band
+    selectors = [inputs.pop("values", None)]
+    if case.method == "separate_bands":
+        selectors = [{name: band} for name, band in selectors[0].items()]
+    count = 0.0
+    for values in selectors:
+        table = stats(**inputs, values=values, **options, mp_config=mp_config)
+        count += float(table.xs("count", axis=1, level="statistic").to_numpy().sum())
+    return count
+
+
 # Multiprocessing currently tiles arrays already resident in the client, so only Dask is out of core
 STATISTICS = Operation(
     "statistics",
@@ -184,7 +295,7 @@ GROUPED_STATS = Operation(
     prepare_statistics,
     run_statistics,
     statistics_options,
-    ("statistics", "strategy"),
+    ("statistics", "method", "reindex"),
     call_name="stats",
     label="Grouped statistics",
     benchmark_name="stats",
@@ -199,7 +310,18 @@ GROUPED_STATS = Operation(
         ),
     ),
 )
-OPERATIONS = (STATISTICS, GROUPED_STATS)
+MERGEABLE_GROUPED_STATS = Operation(
+    "mergeable_grouped_stats",
+    prepare_mergeable_statistics,
+    run_mergeable_statistics,
+    mergeable_statistics_options,
+    ("statistics", "backend", "fractional", "subsample"),
+    call_name="stats",
+    label="Mergeable grouped statistics",
+    benchmark_name="mergeablestats",
+    order=8,
+)
+OPERATIONS = (STATISTICS, GROUPED_STATS, MERGEABLE_GROUPED_STATS)
 
 
 ###################
@@ -218,7 +340,7 @@ STRATEGY_CASES = {
     sweep_id: strategy_cases(
         "moments",
         "numpy",
-        STRATEGIES,
+        tuple(REDUCTION_OPTIONS),
         execution="dask",
         options={"operation": "grouped_stats"},
         strategy_labels=STRATEGY_LABELS,
@@ -262,6 +384,31 @@ FLOX_REFERENCES = {
     )
     for sweep_id in FLOX_CASES
 }
+
+MERGEABLE_CASES = tuple(
+    Case(
+        method=method,
+        engine=engine,
+        execution=execution,
+        labels={"engine": {"native": "GeoUtils", "flox_default": "Flox default", "flox_numba": "Flox Numba"}[engine]},
+    )
+    for method in ("stratified", "fractional")
+    for engine in ("native", "flox_default", "flox_numba")
+    for execution in ("inmem", "dask", "multiprocessing")
+    if engine == "native" or execution != "multiprocessing"
+)
+MERGEABLE_CASES += tuple(
+    Case(method=method, engine="native", execution=execution, labels={"engine": "GeoUtils"})
+    for method in ("center", "all_touched", "separate_bands")
+    for execution in ("inmem", "dask", "multiprocessing")
+)
+
+
+def mergeable_raster_size(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
+    """Vary source size with uneven spatial chunks and a fixed per-group sample bound."""
+
+    assert parameter is not None
+    return {"shape": (int(parameter), int(parameter)), "chunks": (127, 131)}
 
 
 def chunk_size(parameter: int | float | None, case: Case) -> Mapping[str, Any]:
@@ -404,6 +551,18 @@ BENCHMARKS = (
     ),
 )
 
+BENCHMARKS += (
+    parameter_config(
+        "raster_size",
+        (256, 512, 1024),
+        MERGEABLE_GROUPED_STATS,
+        MERGEABLE_CASES,
+        mergeable_raster_size,
+        parameter_label="Size of raster (pixels per side)",
+        parameter_title="raster size",
+    ),
+)
+
 
 #############################
 # Define report comparisons
@@ -438,6 +597,31 @@ COMPARISONS = (
         )
     ),
     comparison(BENCHMARKS[6], by="execution", documentation=False),
+    *tuple(
+        comparison(
+            BENCHMARKS[7],
+            by="engine",
+            cases=tuple(case for case in MERGEABLE_CASES if case.method == method and case.execution == execution),
+            slug=f"mergeable-stats-{method}-{execution}",
+            documentation=False,
+        )
+        for method in ("stratified", "fractional")
+        for execution in ("inmem", "dask", "multiprocessing")
+    ),
+    *tuple(
+        comparison(
+            BENCHMARKS[7],
+            by="method",
+            cases=tuple(
+                case
+                for case in MERGEABLE_CASES
+                if case.method != "stratified" and case.engine == "native" and case.execution == execution
+            ),
+            slug=f"zonal-stats-{execution}",
+            documentation=False,
+        )
+        for execution in ("inmem", "dask", "multiprocessing")
+    ),
 )
 
 

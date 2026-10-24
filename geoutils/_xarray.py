@@ -49,7 +49,7 @@ def _select_dataset_variables(
 
 
 def _same_coordinate(left: xr.Variable, right: xr.Variable) -> bool:
-    """Compare coordinate metadata, accounting for eager/lazy."""
+    """Compare coordinate metadata, accounting for in-memory/lazy."""
 
     # 1/ Check dimensions and shape (before comparing metadata or values)
     if left.dims != right.dims or left.shape != right.shape:

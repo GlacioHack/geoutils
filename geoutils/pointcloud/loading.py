@@ -239,7 +239,7 @@ def _open_pointcloud_array(
 def _open_deferred_vector_points(filename: str, data_name: str | None) -> xr.DataArray:
     """Describe vector point arrays from file metadata and defer geometry and attribute reads."""
 
-    # Use an empty GeoDataFrame to preserve the same attribute metadata as eager conversion
+    # Use an empty GeoDataFrame to preserve the same attribute metadata as in-memory conversion
     info = pyogrio.read_info(filename)
     geometry_type = info.get("geometry_type", "")
     if "Point" not in geometry_type:
@@ -293,7 +293,7 @@ def _open_pointcloud_geodataframe(
     if _is_parquet_supported(filename):
         return _open_parquet_geodataframe(filename, data_name=data_name, columns=columns, chunks=chunks)
     if chunks is None:
-        # Preserve the established eager PointCloud loading and validation path
+        # Preserve the established in-memory PointCloud loading and validation path
         pc = PointCloud(filename, data_name=data_name)
         pc._dataset.attrs["data_name"] = pc.data_name
         return pc._dataset
@@ -357,7 +357,7 @@ def _downsample_open_pointcloud(
     if downsample == 1:
         return pointcloud
 
-    # Convert the factor to the count convention shared by eager and Dask point subsampling
+    # Convert the factor to the count convention shared by in-memory and Dask point subsampling
     source = pointcloud.pc
     original_count = source.point_count if source_count is None else source_count
     if original_count == 0:
@@ -447,7 +447,7 @@ def _filter_points_by_bounds(pc: gpd.GeoDataFrame, bounds: BoundingBox) -> gpd.G
     if len(pc) == 0 or not np.all(np.isfinite(tuple(bounds))):
         return pc
 
-    # Apply the same inclusive bounds to eager and distributed point partitions
+    # Apply the same inclusive bounds to in-memory and distributed point partitions
     if isinstance(pc, xr.DataArray):
         selected = pc.pc.crop(tuple(bounds))
         return selected.compute() if selected.pc._is_dask else selected

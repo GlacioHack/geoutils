@@ -123,7 +123,7 @@ def _polygonize_base(
     """
     Polygonize from arrays.
 
-    Backend-agnostic core function that we use both for eager base polygonize, and per-block polygonize in chunked
+    Backend-agnostic core function that we use both for in-memory base polygonize, and per-block polygonize in chunked
     backends.
 
     :param values: 2D array of values to polygonize.
@@ -323,7 +323,7 @@ def _build_selection_mask(
     """
     Build the uint8 selection mask for polygonize.
 
-    Works with NumPy or Dask arrays. Compute eager mask for the former, and delayed mask for the latter.
+    Works with NumPy or Dask arrays. Compute in-memory mask for the former, and delayed mask for the latter.
     """
     eff = prepared.target_values
 
@@ -2178,7 +2178,7 @@ def _polygonize(
       - Dispatches to base, Dask, or Multiprocessing wrapper.
 
     :param connectivity: Pixel connectivity for label-based strategies (4 or 8).
-    :param strategy: Chunked strategy. Defaults to ``"label_stitch"`` and has no effect for the eager backend.
+    :param strategy: Chunked strategy. Defaults to ``"label_stitch"`` and has no effect for the in-memory backend.
     :param band: Raster band to polygonize.
     :param mp_config: Multiprocessing configuration.
     :param float_tol: Absolute tolerance to distinguish two classes for floating input.
@@ -2237,7 +2237,7 @@ def _polygonize(
             )
         # For base implementation
         else:
-            # Eager: materialize values and build selection mask with SAME semantics as chunked backends
+            # In-memory: materialize values and build selection mask with SAME semantics as chunked backends
             if np.issubdtype(prepared.final_dtype, np.integer):
                 fill_value = _cast_nodata(out_dtype=prepared.final_dtype, nodata=source_raster.nodata)
             else:

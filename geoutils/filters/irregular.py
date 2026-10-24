@@ -367,7 +367,7 @@ def _filter_array_partition(
 ) -> NDArrayNum:
     """Calculate a chunk point values from source arrays and row IDs."""
 
-    # Source chunks arrive in row order so ties and custom reducers agree with eager calculations
+    # Source chunks arrive in row order so ties and custom reducers agree with in-memory calculations
     source_arrays = [np.concatenate([part[index] for part in sources]) for index in range(4)]
     source_coordinates = np.column_stack(source_arrays[:2])
     target_coordinates = np.column_stack(target[:2])
@@ -666,7 +666,9 @@ def _multiproc_filter_pointcloud(
     from geoutils.pointcloud.writing import _resolve_pointcloud_output, _write_pointcloud_partitions
 
     if source_pointcloud._is_dask:
-        raise ValueError("Cannot use Multiprocessing and Dask simultaneously. Remove ``mp_config`` or use eager data.")
+        raise ValueError(
+            "Cannot use Multiprocessing and Dask simultaneously. Remove ``mp_config`` or use in-memory data."
+        )
     assert neighborhood.radius is not None
 
     # Choose the row partition size and file format before starting the worker processes
@@ -801,7 +803,9 @@ def _filter_pointcloud(
     if (is_dask or mp_config is not None) and neighborhood.radius is None:
         raise ValueError("Dask and multiprocessing point filtering require a finite ``radius``.")
     if is_dask and mp_config is not None:
-        raise ValueError("Cannot use Multiprocessing and Dask simultaneously. Remove ``mp_config`` or use eager data.")
+        raise ValueError(
+            "Cannot use Multiprocessing and Dask simultaneously. Remove ``mp_config`` or use in-memory data."
+        )
 
     if isinstance(source_pointcloud, tuple) or source_pointcloud._is_xr:
         arrays = source_pointcloud if isinstance(source_pointcloud, tuple) else source_pointcloud.to_xyz()

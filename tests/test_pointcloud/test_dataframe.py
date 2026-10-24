@@ -45,7 +45,7 @@ class TestPointDataframe:
     The Dask and multiprocessing tests are gathered in TestPointDataframeChunked further below.
     """
 
-    def test_dataframe_attrs__eager_mapping(self) -> None:
+    def test_dataframe_attrs__in_memory_mapping(self) -> None:
         """Checks that metadata is copied from the input dictionary and that later updates add to it."""
 
         # Start with one metadata entry and save it on the dataframe
@@ -62,8 +62,8 @@ class TestPointDataframe:
         assert _get_dataframe_attrs(frame) == {"source": "fixture", "quality": "checked"}
 
     @pytest.mark.parametrize("as_dataframe", [False, True])
-    def test_build_pointcloud_output__eager_metadata(self, as_dataframe: bool) -> None:
-        """Checks that eager output metadata matches its rows and that the requested output type is returned."""
+    def test_build_pointcloud_output__in_memory_metadata(self, as_dataframe: bool) -> None:
+        """Checks that in-memory output metadata matches its rows and that the requested output type is returned."""
 
         # Start with the wrong point count and old bounds so the result has to replace both
         frame = _make_point_frame()
@@ -97,7 +97,7 @@ class TestPointDataframe:
         }
         assert attrs == original_attrs
 
-    def test_build_pointcloud_output__preserve_eager_locations(self) -> None:
+    def test_build_pointcloud_output__preserve_in_memory_locations(self) -> None:
         """Checks that preserve_locations=True keeps known bounds but updates the point count."""
 
         # Start with correct bounds for these coordinates but the wrong number of points
@@ -120,7 +120,7 @@ class TestPointDataframe:
         assert output_attrs["bounds"] == source_bounds
 
     def test_assign_point_values__position_with_duplicate_labels(self) -> None:
-        """Checks that eager values follow row positions when dataframe labels repeat."""
+        """Checks that in-memory values follow row positions when dataframe labels repeat."""
 
         # Keep only the geometry and use values whose row order is easy to see (0, 10, 20, ...)
         frame = _make_point_frame()
@@ -155,8 +155,8 @@ class TestPointDataframe:
             (np.array([0, 2, 2, 5]), [0, 2, 2, 5]),
         ],
     )
-    def test_select_point_rows__eager_position(self, indices: NDArray[Any], expected_positions: list[int]) -> None:
-        """Checks that eager masks and row numbers select positions even when index labels repeat."""
+    def test_select_point_rows__in_memory_position(self, indices: NDArray[Any], expected_positions: list[int]) -> None:
+        """Checks that in-memory masks and row numbers select positions even when index labels repeat."""
 
         # Select rows with either a six-value boolean mask or an ordered list of row numbers
         frame = _make_point_frame()
@@ -238,15 +238,15 @@ class TestPointDataframeChunked:
         assert attrs == original_attrs
 
     def test_build_pointcloud_output__dask_to_pointcloud(self) -> None:
-        """Checks that asking for a PointCloud computes Dask rows and returns the same eager data."""
+        """Checks that asking for a PointCloud computes Dask rows and returns the same in-memory data."""
 
         import dask_geopandas as dgpd
 
-        # Split the rows into three partitions so making an eager PointCloud has work to compute
+        # Split the rows into three partitions so making an in-memory PointCloud has work to compute
         frame = _make_point_frame()
         lazy = dgpd.from_geopandas(frame, npartitions=3, sort=False)
 
-        # Build a PointCloud (store an eager GeoDataFrame, not Dask)
+        # Build a PointCloud (store an in-memory GeoDataFrame, not Dask)
         result = _build_pointcloud_output(lazy, data_name="height", as_dataframe=False)
 
         # The PointCloud should have the same ordered rows, height column and point count
@@ -287,7 +287,7 @@ class TestPointDataframeChunked:
         assert tasks == []
         assert is_dask_dataframe(result)
 
-        # Compute the final selection and compare it with the same boolean mask on the eager dataframe
+        # Compute the final selection and compare it with the same boolean mask on the in-memory dataframe
         output = result.compute()
         expected = frame.iloc[positions % 3 == 0]
         assert np.array_equal(output.index, expected.index)
@@ -296,8 +296,8 @@ class TestPointDataframeChunked:
         assert np.array_equal(output["other"], expected["height"] * 2)
         assert is_dask_dataframe(lazy) and is_dask_dataframe(result)
 
-    def test_assign_point_values__dask_values_to_eager_rows(self) -> None:
-        """Checks that Dask values are computed before they are added to an eager dataframe."""
+    def test_assign_point_values__dask_values_to_in_memory_rows(self) -> None:
+        """Checks that Dask values are computed before they are added to an in-memory dataframe."""
 
         import dask.array as da
 
@@ -305,7 +305,7 @@ class TestPointDataframeChunked:
         frame = _make_point_frame()
         values = da.from_array(np.arange(len(frame)) * 2, chunks=4)
 
-        # Add the values to rows that are already in memory, which requires an eager output
+        # Add the values to rows that are already in memory, which requires an in-memory output
         result = _assign_point_values(frame[["geometry"]], {"value": values})
 
         # The result is a GeoDataFrame, and each doubled value stays with its original row number
@@ -350,7 +350,7 @@ class TestPointDataframeChunked:
         # Let the helper find the values and split them across the same three point partitions
         result = _assign_point_values(lazy[["geometry"]], {"value": values})
 
-        # Compare the computed rows with adding 0..5 directly to the eager dataframe
+        # Compare the computed rows with adding 0..5 directly to the in-memory dataframe
         output = result.compute()
         expected = frame[["geometry"]].copy()
         expected["value"] = np.arange(len(frame))
@@ -380,11 +380,11 @@ class TestPointDataframeChunked:
 
 
 class TestPointDataframeErrors:
-    """Test module for validation errors raised by eager and chunked point dataframe helpers."""
+    """Test module for validation errors raised by in-memory and chunked point dataframe helpers."""
 
     @pytest.mark.parametrize("values", [np.arange(5), np.arange(12).reshape(6, 2)])
     def test_assign_point_values__error_invalid_shape(self, values: NDArray[Any]) -> None:
-        """Checks that eager assignment rejects five values for six rows and a two-dimensional array."""
+        """Checks that in-memory assignment rejects five values for six rows and a two-dimensional array."""
 
         # Try either five values for six points or a 6 x 2 array with two values per point
         frame = _make_point_frame()

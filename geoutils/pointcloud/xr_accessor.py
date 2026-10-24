@@ -186,7 +186,7 @@ class DataArrayPointCloudAccessor(PointCloudBase):
         Lazy arrays are copied without computing their values.
 
         :param new_array: Optional replacement values with one value per point.
-        :param deep: Whether to copy eager arrays as well as their metadata.
+        :param deep: Whether to copy in-memory arrays as well as their metadata.
         :returns: A DataArray with the same point locations and attributes.
         """
         return self._dataset.copy(data=new_array, deep=deep)
@@ -294,7 +294,7 @@ class DataArrayPointCloudAccessor(PointCloudBase):
         return self._dataset
 
     def to_geoutils(self) -> Any:
-        """Convert to an eager GeoUtils PointCloud object."""
+        """Convert to an in-memory GeoUtils PointCloud object."""
         from geoutils.pointcloud.pointcloud import PointCloud
 
         points = self._dataset.compute().pc
@@ -485,7 +485,7 @@ class DataArrayPointCloudAccessor(PointCloudBase):
     #####################################
 
     def load(self) -> xr.DataArray:
-        """Compute a separate eager DataArray, leaving the source's Dask arrays lazy."""
+        """Compute a separate in-memory DataArray, leaving the source's Dask arrays lazy."""
         return self._dataset.compute()
 
     def plot(
@@ -639,11 +639,11 @@ def _subsample_point_rows(
     """
     Select common point rows without reading value arrays.
 
-    An eager mask is checked against the point coordinates, CRS and row labels before _subsample_numpy() draws
+    An in-memory mask is checked against the point coordinates, CRS and row labels before _subsample_numpy() draws
     positions from the eligible rows. Sampling placeholder values includes rows with missing point measurements.
     """
 
-    # Resolve eligible rows from an eager mask without reading point values
+    # Resolve eligible rows from an in-memory mask without reading point values
     eligible = None
     if mask is not None:
         from geoutils.sampling.support import _mask_at_support, _normalize_mask_array
@@ -1035,7 +1035,7 @@ class DatasetPointCloudAccessor:
         Estimate a lightweight empirical variogram from point pairs.
 
         Each selected variable is sampled independently after excluding its missing values. Dask point arrays are
-        read in chunks; the returned variograms contain eager NumPy arrays. An integer random_state is reused for
+        read in chunks; the returned variograms contain NumPy arrays. An integer random_state is reused for
         each variable, while a supplied generator advances in the selected variable order.
 
         See :meth:`DataArray.pc.variogram() <geoutils.DataArrayPointCloudAccessor.variogram>` for shared arguments.

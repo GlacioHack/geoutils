@@ -69,7 +69,7 @@ def _distance_sampling_and_overlap(
 ) -> tuple[int | tuple[float | int, float | int], int]:
     """Return the SciPy sampling and overlap depth for the requested distance unit."""
 
-    # Express distances with the same sampling used by the eager calculation
+    # Express distances with the same sampling used by the in-memory calculation
     if distance_unit.lower() == "georeferenced":
         sampling: int | tuple[float | int, float | int] = raster.res
         smallest_pixel_size = min(abs(float(resolution)) for resolution in raster.res)
@@ -94,7 +94,7 @@ def _vector_target_mask(
 
 
 def _raster_target_mask(raster: RasterType, target_values: list[float] | None) -> Any:
-    """Define distance targets from an eager or Dask raster array."""
+    """Define distance targets from an in-memory or Dask raster array."""
 
     # Get the raster array, converting masked values to NaNs while leaving a Dask source lazy
     raster_array = raster.data
@@ -202,7 +202,7 @@ def _multiproc_proximity_block(
 ) -> Raster:
     """Calculate proximity on one padded raster block with multiprocessing."""
 
-    # Prepare target cells on the padded block using the same raster or vector path as eager execution
+    # Prepare target cells on the padded block using the same raster or vector path as in-memory execution
     sampling, _ = _distance_sampling_and_overlap(block, distance_unit, max_distance)
     if vector is None:
         target_mask = _raster_target_mask(block, target_values)
@@ -229,14 +229,14 @@ def _proximity_from_vector_or_raster(
 ) -> Any:
     """
     Calculate proximity to a Raster's target values if no Vector is provided, otherwise to a Vector's current geometry
-    rasterized on the Raster, with eager, Dask, or multiprocessing execution.
+    rasterized on the Raster, with in-memory, Dask, or multiprocessing execution.
 
     This function is defined here as mostly raster-based, but used in a class method for both Raster and Vector.
 
     Internally, it does the following:
     _raster_target_mask() or _vector_target_mask() first selects target cells.
-    Eager and Dask execution then call _proximity_from_target_mask() directly, while multiprocessing applies the same
-    steps to padded raster blocks in _multiproc_proximity_block().
+    In-memory and Dask execution then call _proximity_from_target_mask() directly, while multiprocessing applies
+    the same steps to padded raster blocks in _multiproc_proximity_block().
     _build_proximity_output() restores the source grid and metadata for every backend.
 
     :param raster: Raster grid and optional raster values used to calculate proximity.

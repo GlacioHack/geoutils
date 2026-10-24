@@ -51,7 +51,7 @@ class TestPointCloudAccessor:
     def test_open_pointcloud__empty_las_dask(
         self, tmp_path: Path, suffix: str, columns: Literal["main", "all"] | list[str]
     ) -> None:
-        """Checks that empty LAS/LAZ files open lazily with the same columns, dtypes and CRS as eager reading."""
+        """Checks that empty LAS/LAZ files open lazily with the same columns, dtypes and CRS as in-memory reading."""
 
         laspy = pytest.importorskip("laspy")
         if suffix == ".laz":
@@ -82,7 +82,7 @@ class TestPointCloudAccessor:
         assert source.expr is graph and not source.pc.is_loaded
 
     def test_open_pointcloud__downsample_loading_laziness(self, tmp_path: Path) -> None:
-        """Checks that chunked opening keeps the sample lazy and exactly matches eager opening."""
+        """Checks that chunked opening keeps the sample lazy and exactly matches in-memory opening."""
 
         pytest.importorskip("dask_geopandas")
 
@@ -97,7 +97,7 @@ class TestPointCloudAccessor:
             str(filename), data_name="value", chunks=17, downsample=4, as_object_type="geodataframe"
         )
 
-        # Check source is lazy, and result is exactly the same with eager
+        # Check source is lazy and matches the in-memory result exactly
         assert lazy.pc._is_dask
         assert lazy.pc.point_count == 25
         assert_geodataframe_equal(
@@ -171,7 +171,7 @@ class TestPointCloudAccessor:
         temp_file = os.path.join(temp_dir.name, "test.gpkg")
         self.gdf.to_file(temp_file)
 
-        # The eager path should reproduce the original point cloud
+        # The in-memory path should reproduce the original point cloud
         ds = gu.open_pointcloud(temp_file, data_name="z", as_object_type="geodataframe", load=True)
 
         assert isinstance(ds, gpd.GeoDataFrame)
@@ -197,7 +197,7 @@ class TestPointCloudAccessor:
             lazy_polygons.pc.load()
 
     def test_reproject_pointcloud__dask_geopandas(self) -> None:
-        """Reproject point partitions lazily and match eager GeoPandas output."""
+        """Reproject point partitions lazily and match in-memory GeoPandas output."""
 
         dgpd = pytest.importorskip("dask_geopandas")
 
@@ -231,7 +231,7 @@ class TestPointCloudAccessor:
         dgpd = pytest.importorskip("dask_geopandas")
         from dask.callbacks import Callback
 
-        # Open one on-disk source lazily and build the expected result through the eager accessor
+        # Open one on-disk source lazily and build the expected result through the in-memory accessor
         temp_dir = tempfile.TemporaryDirectory()
         temp_file = os.path.join(temp_dir.name, "test.gpkg")
         self.gdf.to_file(temp_file)
@@ -274,7 +274,7 @@ class TestPointCloudAccessor:
             assert_geodataframe_equal(value_copy.compute(), expected_values)
 
     def test_to_file__dask_geopandas(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Checks that GeoPackage writing computes separate Dask partitions and matches eager point output."""
+        """Checks that GeoPackage writing computes separate Dask partitions and matches in-memory point output."""
 
         pytest.importorskip("dask_geopandas")
 
@@ -365,11 +365,11 @@ class TestPointCloudAccessor:
 
     @pytest.mark.skipif(find_spec("laspy") is None, reason="Only runs if laspy is installed.")
     def test_reproject_pointcloud_las__dask_geopandas(self) -> None:
-        """Reproject a partitioned LAS point cloud and match the eager result."""
+        """Reproject a partitioned LAS point cloud and match the in-memory result."""
 
         dgpd = pytest.importorskip("dask_geopandas")
 
-        # Load an eager reference independently of the lazy LAS partitions
+        # Load an in-memory reference independently of the lazy LAS partitions
         ds = gu.open_pointcloud(self.fn_las, chunks=100, as_object_type="geodataframe")
         pc = gu.PointCloud(self.fn_las)
         pc.load()
@@ -385,7 +385,7 @@ class TestPointCloudAccessor:
 
     @pytest.mark.skipif(find_spec("laspy") is None, reason="Only runs if laspy is installed.")
     def test_load_las__multiprocessing(self) -> None:
-        """Load LAS row chunks through multiprocessing with the same eager result."""
+        """Load LAS row chunks through multiprocessing with the same in-memory result."""
 
         # Load the source once by worker chunks and once through the regular path
         pc_chunked = gu.PointCloud(self.fn_las)

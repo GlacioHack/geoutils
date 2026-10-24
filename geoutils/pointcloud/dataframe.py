@@ -107,7 +107,7 @@ def _build_pointcloud_output(
     _set_dataframe_attrs() records the active value column, CRS and point geometry type without changing supplied
     metadata. Row selections may change counts and bounds, so bounds and lazy counts are cleared unless
     preserve_locations is True, meaning the result has the same ordered points and unchanged X/Y coordinates.
-    Eager results always receive a fresh count. Return the eager or Dask dataframe when as_dataframe is True;
+    In-memory results always receive a fresh count. Return the in-memory or Dask dataframe when as_dataframe is True;
     otherwise compute Dask rows before constructing a PointCloud.
     """
 
@@ -140,7 +140,7 @@ def _build_pointcloud_output(
     )
     _set_dataframe_attrs(dataframe, metadata)
 
-    # Accessors return dataframes; object callers receive an eager PointCloud with the selected value column
+    # Accessors return dataframes; object callers receive an in-memory PointCloud with the selected value column
     if as_dataframe:
         return dataframe
 
@@ -238,7 +238,7 @@ def _assign_point_values(
     dataframe: Any, values: Mapping[str, Any], *, partition_lengths: Sequence[int] | None = None
 ) -> Any:
     """
-    Attach named values to point rows by position while keeping the dataframe's eager or lazy backend.
+    Attach named values to point rows by position while keeping the dataframe's in-memory or lazy backend.
 
     _point_array_partitions() matches lazy values to point partitions. _assign_point_partition() assigns each
     partition by position, avoiding index alignment when several points have the same row label.
@@ -256,7 +256,7 @@ def _assign_point_values(
     if not values:
         return dataframe
 
-    # Preserve eager output even when a selected value array was computed lazily
+    # Preserve in-memory output even when a selected value array was computed lazily
     if not is_dask_dataframe(dataframe):
         columns = list(values.values())
         if any(is_dask_array(array) or is_dask_dataframe(array) for array in columns):
@@ -334,7 +334,7 @@ def _select_point_rows(dataframe: Any, indices: Any, *, partition_lengths: Seque
     :returns: Selected rows in their original order, preserving the dataframe backend, geometry and index labels.
     """
 
-    # Eager point supports keep eager results, including when their eligibility mask was generated lazily
+    # In-memory point supports keep in-memory results, including when their eligibility mask was generated lazily
     if not is_dask_dataframe(dataframe):
         selected = indices.compute() if is_dask_array(indices) or is_dask_dataframe(indices) else indices
         return dataframe.iloc[np.asarray(selected)]

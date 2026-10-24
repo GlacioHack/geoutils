@@ -82,16 +82,16 @@ requiring to hold the whole sample at once. Others require the group in memory.
 
 | Estimator | Meaning                                                | Mergeable |
 | --- |--------------------------------------------------------| --- |
-| Mean | Arithmetic average                                     | **Yes** |
-| Standard deviation | Spread around the mean                                 | **Yes** |
-| Min | Smallest value                                         | **Yes** |
-| Max | Largest value                                          | **Yes** |
-| Sum, sum of squares | Sum of values or their squares                         | **Yes** |
-| RMSE | Square root of the mean squared value                  | **Yes** |
-| Counts and percentages | Valid and total counts, and their relative proportions | **Yes** |
-| Median | Middle value                                           | **No** |
-| NMAD | Normalized median absolute deviation ("median-STD")     | **No** |
-| Percentiles, IQR, LE90 | Quantiles and ranges derived from them                 | **No** |
+| Mean | Arithmetic average                                     | **Yes, exact** |
+| Standard deviation | Spread around the mean                                 | **Yes, exact** |
+| Min | Smallest value                                         | **Yes, exact** |
+| Max | Largest value                                          | **Yes, exact** |
+| Sum, sum of squares | Sum of values or their squares                         | **Yes, exact** |
+| RMSE | Square root of the mean squared value                  | **Yes, exact** |
+| Counts and percentages | Valid and total counts, and their relative proportions | **Yes, exact** |
+| Median | Middle value                                           | **Yes, approximate** |
+| NMAD | Normalized median absolute deviation ("median-STD")     | **Yes, approximate** |
+| Percentiles, IQR, LE90 | Quantiles and ranges derived from them                 | **Yes, approximate** |
 | Custom callable | User-defined calculation                               | **No** |
 
 
@@ -351,8 +351,6 @@ This mode currently requires **one vector grouper on raster values**. Polygons w
 different labels are evaluated independently, allowing a cell to contribute to several overlapping zones.
 `overlap_backend=` selects ExactExtract or Shapely, as for {ref}`transformations-fractional`.
 
-Fractional zonal statistics currently require **eager raster values**. Crop the raster to the area of interest
-before loading it; ordinary center-based zonal statistics support Dask inputs.
 
 #### Several grouping variables
 
@@ -430,18 +428,22 @@ formats such as GSTools or GPyTorch for kriging, random field generation and oth
 (stats-spatial-estimators)=
 ### Estimators
 
- For mergeable estimators listed below, we also implement a specific aggregation routine
+The default estimator is **Matheron**, which calculates half the mean squared pair difference using exact chunk
+reductions without optional reduction packages. It is sensitive to outliers. Set `estimator="dowd"` for a robust
+median-based estimate; its default t-digest reduction requires `crick`, available through `geoutils[num]`.
+
+For mergeable estimators listed below, we also implement a specific aggregation routine
 to derive them without holding more than a chunk in memory.
 
 | Estimator | Meaning | Mergeable |
 | --- | --- | --- |
-| Matheron | Half the mean squared pair difference | **Yes** |
-| Cressie–Hawkins | Robust transform of the mean square-root difference | **Yes** |
-| MinMax | Difference between the maximum and minimum, normalized by the mean | **Yes** |
-| Dowd | Robust median-based semivariance | **No** |
+| Matheron | Half the mean squared pair difference | **Yes, exact** |
+| Cressie–Hawkins | Robust transform of the mean square-root difference | **Yes, exact** |
+| MinMax | Difference between the maximum and minimum, normalized by the mean | **Yes, exact** |
+| Dowd | Robust median-based semivariance | **Yes, approximate** |
 | Genton | Robust order statistic of within-bin differences | **No** |
 | Shannon entropy | Entropy of the pair differences | **No** |
-| Percentile | Selected percentile of the pair differences | **No** |
+| Percentile | Selected percentile of the pair differences | **Yes, approximate** |
 | Custom callable | User-defined calculation | **No** |
 
 ### Variography
