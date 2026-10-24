@@ -519,17 +519,25 @@ class TestPairSampleChunked:
 
         # Compare pairs using the same seed
         with warnings.catch_warnings(record=True) as expected_warnings:
-            warnings.simplefilter("always")
+            warnings.simplefilter("always", UserWarning)
             expected = eager.pairsample(**options)
         with warnings.catch_warnings(record=True) as actual_warnings:
-            warnings.simplefilter("always")
+            warnings.simplefilter("always", UserWarning)
             result = source.pairsample(**options, read_strategy=read_strategy, output_chunks=37)
-        assert [str(item.message) for item in actual_warnings] == [str(item.message) for item in expected_warnings]
+
+        # Compare sampling warnings without deprecation notices from Xarray transform lookups
+        expected_messages = [str(item.message) for item in expected_warnings if isinstance(item.message, UserWarning)]
+        actual_messages = [str(item.message) for item in actual_warnings if isinstance(item.message, UserWarning)]
+        assert actual_messages == expected_messages
+
+        # Check lazy inputs and outputs, output chunk sizes and value dtype
         assert not source.is_loaded and isinstance(source.data, da.Array)
         assert isinstance(result.value.data, da.Array)
         assert max(result.value.data.chunks[0]) <= 37
         assert all(isinstance(column.data, da.Array) for column in result.data_vars.values())
         assert result.value.dtype == np.float32
+
+        # Compare computed pairs with the in-memory result
         computed = result.compute()
         for name in ("read_strategy", "lazy_output", "output_chunks"):
             computed.attrs.pop(name)
