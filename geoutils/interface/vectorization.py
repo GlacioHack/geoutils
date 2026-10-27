@@ -371,15 +371,19 @@ def _build_selection_mask(
     if prepared.is_mask_raster:
         return values.astype(bool).astype(np.uint8)
 
+    # If range, perform logical comparison
+    if isinstance(eff, tuple):
+        # Handle single value tuples
+        if len(eff) == 1:
+            eff = eff[0]
+        else:
+            return ((values >= eff[0]) & (values <= eff[1])).astype(np.uint8)
+
     # If scalar, perform equality
     if isinstance(eff, (int, float, np.integer, np.floating)):
         return (values == eff).astype(np.uint8)
 
-    # If range, perform logical comparison
-    if isinstance(eff, tuple):
-        return ((values >= eff[0]) & (values <= eff[1])).astype(np.uint8)
-
-    raise ValueError("target_values must be a number, a tuple, a sequence, or 'all'.")
+    raise ValueError(f"target_values ({values}) must be a number, a tuple, a sequence, or 'all'.")
 
 
 # Chunked execution abstractions (runner + reader)

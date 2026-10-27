@@ -552,6 +552,16 @@ class TestPolygonize:
         assert_vectors_equal(base, mp_vect, setwise=True)
         assert_vectors_equal(base, xr_base, setwise=True)
 
+    def test_polygonize__one_value(self) -> None:
+        """Test that polygonize works with a list of only one value."""
+        img = gu.Raster(self.landsat_b4_path)
+
+        # Get raster pixel area
+        value = np.unique(img)[0]
+        polygonized_scalar = img.polygonize(target_values=value)
+        polygonized_tuple = img.polygonize(target_values=(value,))
+        assert_vectors_equal(polygonized_scalar, polygonized_tuple)
+
     def test_polygonal_only__nested_collection(self) -> None:
         """Checks that nested geometry collections contribute only their polygon parts to a chunk result."""
 
