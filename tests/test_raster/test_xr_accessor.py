@@ -350,6 +350,106 @@ class TestDataArrayRasterAccessor:
         result.close()
 
     @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
+    @pytest.mark.parametrize("factors", [[], [2, 4]])
+    @pytest.mark.parametrize("downsample", [1, 1.3, 2, 3, 6])
+    @pytest.mark.parametrize("mask_and_scale", [False, True])
+    @pytest.mark.parametrize("area_or_point", ["Area", "Point"])
+    def test_open_raster__downsample_source_attributes(
+        self,
+        tmp_path: Path,
+        as_object_type: Literal["dataarray", "dataset"],
+        factors: list[int],
+        downsample: float,
+        mask_and_scale: bool,
+        area_or_point: str,
+    ) -> None:
+        """Downsampling preserves native attributes without replacing reduced-grid metadata or encoding."""
+
+        # Store arbitrary file/band tags as well as values handled specially by Rioxarray.
+        path = tmp_path / "source_attributes.tif"
+        transform = from_origin(500000, 8600000, 20, 20)
+        with rio.open(
+            path,
+            "w",
+            driver="GTiff",
+            width=32,
+            height=32,
+            count=2,
+            dtype="uint16",
+            crs=32633,
+            transform=transform,
+            nodata=65535,
+        ) as source:
+            values = np.arange(2048, dtype=np.uint16).reshape(2, 32, 32)
+            values[:, :8, :8] = 65535
+            source.write(values)
+            source.scales = (0.1, 0.1)
+            source.offsets = (20, 20)
+            source.set_band_description(1, "reflectance")
+            source.set_band_description(2, "reflectance")
+            source.update_tags(
+                AREA_OR_POINT=area_or_point,
+                OVR_RESAMPLING_ALG="AVERAGE",
+                DataType="Synthetic",
+                custom_tag="kept",
+                sample_count="123",
+                scale_factor="99",
+                add_offset="-42",
+                _FillValue="777",
+                overview_selected_factor="stale",
+            )
+            source.update_tags(1, band_quality="good", band_number="12")
+            if factors:
+                source.build_overviews(factors, rio.enums.Resampling.average)
+                source.update_tags(ns="rio_overview", resampling="average")
+
+        # Native opening defines how tags are parsed. Packing can differ for the selected overview.
+        selected_level = max((i for i, factor in enumerate(factors) if factor <= downsample * 1.2), default=-1)
+        with (
+            open_raster(str(path), mask_and_scale=mask_and_scale) as native,
+            open_raster(str(path), overview_level=selected_level, mask_and_scale=mask_and_scale) as selected,
+        ):
+            with open_raster(
+                str(path), downsample=downsample, as_object_type=as_object_type, mask_and_scale=mask_and_scale
+            ) as result:
+                variable = result["raster"] if as_object_type == "dataset" else result
+                for key in (
+                    "AREA_OR_POINT",
+                    "OVR_RESAMPLING_ALG",
+                    "DataType",
+                    "custom_tag",
+                    "sample_count",
+                    "band_quality",
+                    "band_number",
+                    "long_name",
+                ):
+                    assert variable.attrs[key] == native.attrs[key]
+                assert variable.attrs["sample_count"] == 123
+                assert variable.attrs["band_number"] == 12
+                for key in ("_FillValue", "scale_factor", "add_offset"):
+                    assert variable.attrs.get(key) == selected.attrs.get(key)
+                    assert variable.encoding.get(key) == selected.encoding.get(key)
+                assert variable.rio.encoded_nodata == 65535
+                assert variable.rio.crs == native.rio.crs
+                assert variable.rio.transform() == Affine(20 * downsample, 0, 500000, 0, -20 * downsample, 8600000)
+                assert variable.shape == (2, int(32 // downsample), int(32 // downsample))
+                assert not variable.rst.is_loaded
+
+                # Selection describes the source overview, not the requested output factor or a stored stale tag.
+                selected_factor = factors[selected_level] if selected_level >= 0 else 1
+                for attrs in (result.attrs, variable.attrs):
+                    assert attrs["overview_factors"] == factors
+                    assert attrs["overview_selected_level"] == selected_level
+                    assert attrs["overview_selected_factor"] == selected_factor
+                    assert attrs["block_shape"] == (32, 32)
+                    if factors:
+                        assert attrs["overview_resampling"] == "average"
+
+                # Restoring metadata leaves nodata masking intact when the lazy values are read.
+                assert np.all(np.isnan(variable.values[:, 0, 0]))
+                assert np.all(np.isfinite(variable.values[:, -1, -1]))
+
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
     @pytest.mark.parametrize(
         "options, selected_level, selected_factor",
         [

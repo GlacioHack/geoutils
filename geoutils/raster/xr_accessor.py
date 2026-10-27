@@ -128,6 +128,17 @@ def open_raster(
         nullcontext(filename) if isinstance(filename, rasterio.io.DatasetReaderBase) else rasterio.open(filename)
     )
     with source_context as source:
+        if downsample > 1:
+            # A WarpedVRT can omit file and band tags. Let Rioxarray parse the native attributes, including
+            # packing fields moved into encoding, without constructing coordinates or reading pixel values.
+            metadata_kwargs = {
+                key: value
+                for key, value in kwargs.items()
+                if key not in ("overview_level", "parse_coordinates", "chunks", "cache")
+            }
+            with rioxr.open_rasterio(source, masked=True, parse_coordinates=False, **metadata_kwargs) as native:
+                ds.attrs = {**native.attrs, **ds.attrs}
+
         # Store overview metadata
         overview_metadata = _raster_overview_metadata(source, overview_level)
         disk_metadata = {"block_shape": tuple(source.block_shapes[0])}
