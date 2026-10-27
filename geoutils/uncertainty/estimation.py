@@ -55,7 +55,7 @@ if TYPE_CHECKING:
 
 
 def _prepare_proxy_inputs(
-    error_proxy: RasterBase | PointCloudBase,
+    source: RasterBase | PointCloudBase,
     predictors: Mapping[str, Any],
     mask: Any | None,
     mp_config: MultiprocConfig | None,
@@ -69,11 +69,11 @@ def _prepare_proxy_inputs(
     """
 
     # Input checks
-    raster_proxy = _get_raster_interface(error_proxy)
-    pointcloud_proxy = _get_pointcloud_interface(error_proxy) if raster_proxy is None else None
-    proxy = raster_proxy if raster_proxy is not None else pointcloud_proxy
-    if proxy is None:
-        raise TypeError("Argument 'error_proxy' must be a raster or point cloud.")
+    raster_source = _get_raster_interface(source)
+    pointcloud_source = _get_pointcloud_interface(source) if raster_source is None else None
+    sampler = raster_source if raster_source is not None else pointcloud_source
+    if sampler is None:
+        raise TypeError("Argument 'source' must be a raster or point cloud.")
 
     # We give predictors private names to avoid conflict with cosample() columns
     auxiliary: dict[str, Any] = {}
@@ -83,9 +83,9 @@ def _prepare_proxy_inputs(
         output_name = f"predictor_{index}"
         output_names[name] = output_name
         if isinstance(predictor, str):
-            if pointcloud_proxy is None:
+            if pointcloud_source is None:
                 raise TypeError("Raster magnitude predictors cannot be column names.")
-            auxiliary[output_name] = (error_proxy, predictor)
+            auxiliary[output_name] = (source, predictor)
         else:
             predictor_is_spatial = _is_raster(predictor) or _is_pointcloud(predictor)
             if predictor_is_spatial:
@@ -95,8 +95,8 @@ def _prepare_proxy_inputs(
                 auxiliary_at[output_name] = "self"
 
     # We sample the two datasets and predictors at valid locations inside the mask
-    sampled = proxy.cosample(
-        error_proxy if other is None else other,
+    sampled = sampler.cosample(
+        source if other is None else other,
         auxiliary=auxiliary or None,
         auxiliary_at=auxiliary_at or None,
         at="self",
@@ -643,36 +643,6 @@ def _build_error_components(
 ################################
 
 
-def _representative_variogram(
-    empirical: Variogram,
-    components: list[ErrorComponent],
-) -> Variogram:
-    """Attach the representative normalized component model to empirical bins."""
-
-    # Normalize reference component variances so the combined model retains unit sill
-    reference_variances = np.array(
-        [cast(ErrorMagnitude, component.magnitude).reference_value ** 2 for component in components]
-    )
-    fractions = reference_variances / np.sum(reference_variances)
-    structured: list[VariogramModel] = []
-    nugget = 0.0
-
-    # Represent independent variance as a nugget and retain normalized structured contributions
-    for component, fraction in zip(components, fractions):
-        if component.correlation is None:
-            nugget += float(fraction)
-        else:
-            structured.append(replace(cast(VariogramModel, component.correlation), partial_sill=float(fraction)))
-    if not structured:
-        raise ValueError("At least one spatially correlated component is required for variogram fitting.")
-
-    # Attach the combined model and its predictions at the original empirical lag centers
-    model = (
-        replace(structured[0], nugget=nugget) if len(structured) == 1 else VariogramModel.sum(structured, nugget=nugget)
-    )
-    return replace(empirical, model=model, fitted_semivariance=model.variogram(empirical.lags))
-
-
 def _estimate_correlation(
     standardized_proxy: Any,
     configuration: list[dict[str, Any]],
@@ -727,9 +697,6 @@ def _estimate_correlation(
     # Now, we inspect output components to warn if something looks fishy
     fitted_components = _build_error_components(configuration, total_magnitude, empirical)
 
-    # Update variogram predictions to match the final component decomposition
-    empirical = _representative_variogram(empirical, fitted_components)
-
     # We report weak range separation and domain limited long range estimates explicitly
     messages: list[str] = []
     ranges = [
@@ -757,7 +724,7 @@ def _estimate_correlation(
 
 
 def _estimate_error_structure(
-    error_proxy: RasterBase | PointCloudBase,
+    source: RasterBase | PointCloudBase,
     *,
     other: Any | None,
     other_precision: Literal["same", "negligible"],
@@ -806,7 +773,7 @@ def _estimate_error_structure(
     if other_precision not in ("same", "negligible"):
         raise ValueError("other_precision must be 'same' or 'negligible'.")
 
-    # Normalize component configuration and run ``cosample`` on error proxy
+    # Normalize component configuration before sampling the inputs
     predictor_mapping = {} if predictors is None else dict(predictors)
     configuration = _normalize_component_configuration(components, has_predictors=bool(predictor_mapping))
 
@@ -827,7 +794,7 @@ def _estimate_error_structure(
     with ExitStack() as temporary_files:
         cosample_config = temporary_files.enter_context(mp_config.temporary()) if mp_config is not None else None
         sampled, output_names = _prepare_proxy_inputs(
-            error_proxy, predictor_mapping, mask, cosample_config, other, other_precision, temporary_files
+            source, predictor_mapping, mask, cosample_config, other, other_precision, temporary_files
         )
 
         # 2.1/ Estimate error magnitude from the error proxy
@@ -963,7 +930,6 @@ def _refit_error_structure(
     ):
         item["correlation"] = model_name
     components = _build_error_components(configuration, total_magnitude, empirical)
-    empirical = _representative_variogram(empirical, components)
 
     return ErrorStructure(
         components,

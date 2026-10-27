@@ -42,6 +42,7 @@ import xarray as xr
 from pyproj import CRS
 
 from geoutils import profiler
+from geoutils._config import config
 from geoutils._dispatch import (
     _get_pointcloud_interface,
     get_geo_attr,
@@ -916,7 +917,7 @@ class PointCloudBase(ABC):
         res: float | tuple[float, float] | None = None,
         shape: tuple[int, int] | None = None,
         bounds: tuple[float, float, float, float] | None = None,
-        resampling: ResamplingMethod | Interpolator | Reducer = "linear",
+        resampling: ResamplingMethod | Interpolator | Reducer | None = None,
         radius: float = 1.0,
         nodata: int | float = -9999,
         *,
@@ -947,6 +948,7 @@ class PointCloudBase(ABC):
         :param bounds: Output bounds as ``(left, bottom, right, top)``. Defaults to the point-cloud bounds.
         :param resampling: Interpolation, circular statistic or distance method. ``average``, ``min`` and ``max`` are
             aliases for ``mean``, ``minimum`` and ``maximum``.
+            Defaults to "linear". Can be configured globally with geoutils.config["point_resampling_method"].
         :param backend: "auto" uses SciPy; "numba" selects supported built-in gridding methods.
             "gstools" and "gpytorch" select a kriging solver. Advanced callers can pass an operator in resampling.
         :param resampling_kwargs: Method settings, such as a quantile q or a fitted kriging model.
@@ -958,7 +960,8 @@ class PointCloudBase(ABC):
             the nearest source point is missing. ``"ignore"`` uses available finite values; ``"propagate"`` masks
             cells using a missing source. Reducers default to ``"ignore"`` and cannot use ``"nearest"``. A
             non-negative integer or half-order choice masks cells within that distance of missing source values.
-            Interpolators default to the configured choice.
+            Interpolators default to "nearest". Can be configured globally with
+            geoutils.config["interpolation_nodata_handling"].
         :param distance_power: Distance exponent used for inverse-distance weighting.
         :param min_points: Minimum number of finite points required inside a circular neighborhood.
         :param max_points: Maximum number of nearest observations used for each cell, including missing values.
@@ -983,6 +986,8 @@ class PointCloudBase(ABC):
             raise ValueError("Argument 'max_points' must be a positive integer or None.")
 
         # Resolve string choices before eager, Dask or multiprocessing gridding
+        if resampling is None:
+            resampling = config["point_resampling_method"]
         selected_backend = _resampling_backend(
             backend, default="scipy", allowed=("scipy", "numba", "gstools", "gpytorch"), engine=engine
         )

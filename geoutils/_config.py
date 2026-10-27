@@ -22,9 +22,10 @@ from __future__ import annotations
 
 import configparser
 import os
-from typing import Any
+from numbers import Integral
+from typing import Any, get_args
 
-from rasterio.enums import Resampling
+from geoutils._typing import ResamplingMethod
 
 # The setup is inspired by that of Matplotlib and Geowombat
 # https://github.com/matplotlib/matplotlib/blob/main/lib/matplotlib/rcsetup.py
@@ -47,24 +48,13 @@ def validate_bool(b: bool | str | int) -> bool:
         raise ValueError(f"Cannot convert {b!r} to bool")
 
 
-def validate_reprojection_method(reprojection_method: bool | str | int) -> str:
-    """Test reprojection_method"""
-    if isinstance(reprojection_method, str):
-        if reprojection_method.lower() in [method.name for method in Resampling]:
-            return reprojection_method.lower()
-    raise ValueError(
-        f"'{reprojection_method}' is not a valid rasterio.enums.Resampling method"
-        f"Valid methods: {[method.name for method in Resampling]}"
-    )
+def validate_resampling_method(method: Any) -> str:
+    """Validate resampling method input name and convert it to lowercase."""
 
-
-def validate_interpolation_method(interpolation_method: bool | str | int) -> str:
-    """Test interpolation_method"""
-    valid_methods = ["nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"]
-    if isinstance(interpolation_method, str) and interpolation_method.lower() in valid_methods:
-        return interpolation_method.lower()
-    else:
-        raise ValueError(f"'{interpolation_method}' is not a valid interpolation methodValid methods: {valid_methods}")
+    valid_methods = get_args(ResamplingMethod)
+    if isinstance(method, str) and method.lower() in valid_methods:
+        return method.lower()
+    raise ValueError(f"'{method}' is not a valid resampling method. Valid methods: {valid_methods}")
 
 
 def validate_nodata_handling(nodata_handling: bool | str | int) -> str | int:
@@ -86,6 +76,14 @@ def validate_nodata_handling(nodata_handling: bool | str | int) -> str | int:
     )
 
 
+def validate_raster_return_type(value: Any) -> str:
+    """Validate the default representation of newly created rasters."""
+    choices = ("dataarray", "dataset")
+    if isinstance(value, str) and value.lower() in choices:
+        return value.lower()
+    raise ValueError(f"'{value}' is not a valid raster_return_type. Use one of {choices}.")
+
+
 def validate_pointcloud_return_type(value: Any) -> str:
     """Validate the default representation of newly created point clouds."""
     choices = ("dataarray", "dataset", "geodataframe")
@@ -94,14 +92,29 @@ def validate_pointcloud_return_type(value: Any) -> str:
     raise ValueError(f"'{value}' is not a valid pointcloud_return_type. Use one of {choices}.")
 
 
+def validate_densify_points(value: Any) -> int:
+    """Validate the integer input for densifying lines in projected bounds and footprints."""
+
+    if isinstance(value, str):
+        try:
+            value = int(value)
+        except ValueError:
+            raise ValueError("densify_points must be a positive integer.") from None
+
+    if isinstance(value, bool) or not isinstance(value, Integral) or value < 1:
+        raise ValueError("densify_points must be a positive integer.")
+    return int(value)
+
+
 # Map the parameter names with a validating function to check user input
 _validators = {
-    "shift_area_or_point": validate_bool,
     "warn_area_or_point": validate_bool,
-    "reprojection_method": validate_reprojection_method,
-    "interpolation_method": validate_interpolation_method,
+    "raster_resampling_method": validate_resampling_method,
+    "point_resampling_method": validate_resampling_method,
     "interpolation_nodata_handling": validate_nodata_handling,
+    "raster_return_type": validate_raster_return_type,
     "pointcloud_return_type": validate_pointcloud_return_type,
+    "densify_points": validate_densify_points,
 }
 
 

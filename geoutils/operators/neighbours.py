@@ -517,8 +517,6 @@ def _prepare_grid_neighbours_data(
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
     operator: Interpolator | Reducer,
     *,
-    area_or_point: Literal["Area", "Point"] | None,
-    shift_area_or_point: bool | None,
     nodata_propagation: NodataPropagation,
     neighborhood: GridNeighbours | None = None,
     band: int = 1,
@@ -543,11 +541,10 @@ def _prepare_grid_neighbours_data(
         x,
         y,
         transform=transform,
-        area_or_point=area_or_point,
-        shift_area_or_point=shift_area_or_point,
     )
 
     # Apply the window offsets around the source cell containing each requested point
+    source_rows, source_cols = source_rows + 0.5, source_cols + 0.5
     center_rows = np.floor(source_rows).astype(np.int64)
     center_cols = np.floor(source_cols).astype(np.int64)
     global_shape = (array.shape[0], array.shape[1]) if source_shape is None else source_shape
@@ -619,7 +616,6 @@ def _prepare_fractional_window_data(
     transform: rio.transform.Affine,
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
     *,
-    area_or_point: Literal["Area", "Point"] | None,
     fractional_window: int,
     fractional_shape: Literal["square", "circular"] | None,
     coverage: GridCoverage = "fractional",
@@ -637,9 +633,8 @@ def _prepare_fractional_window_data(
     from geoutils.raster.referencing import _xy2ij
 
     # Floating row and column positions center each footprint on the requested point
-    source_rows, source_cols = _xy2ij(
-        points[0], points[1], transform, area_or_point, op=np.float64, shift_area_or_point=False
-    )
+    source_rows, source_cols = _xy2ij(points[0], points[1], transform, op=np.float64)
+    source_rows, source_cols = source_rows + 0.5, source_cols + 0.5
     if fractional_shape == "circular":
         # Match the circle used to select cell centers for this window size
         radius = fractional_window / 2
@@ -710,8 +705,6 @@ def _prepare_regular_interpolation_data(
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
     method: ScipyInterpolationMethod | Interpolator,
     *,
-    area_or_point: Literal["Area", "Point"] | None,
-    shift_area_or_point: bool | None,
     nodata_propagation: NodataPropagation,
     band: int = 1,
     array_indices: tuple[NDArrayNum, NDArrayNum] | None = None,
@@ -741,8 +734,6 @@ def _prepare_regular_interpolation_data(
             transform,
             points,
             operator,
-            area_or_point=area_or_point,
-            shift_area_or_point=shift_area_or_point,
             nodata_propagation=nodata_propagation,
             band=band,
             source_index_offset=source_index_offset,
@@ -784,8 +775,6 @@ def _prepare_regular_interpolation_data(
             source.dtype,
             transform,
             method_name,
-            area_or_point,
-            shift_area_or_point,
             nodata_propagation,
         )
         return prediction, spline_inputs, "ignore"
@@ -799,8 +788,6 @@ def _prepare_regular_interpolation_data(
             x,
             y,
             transform=transform,
-            area_or_point=area_or_point,
-            shift_area_or_point=shift_area_or_point,
             op=index_type,
         )
     else:

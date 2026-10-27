@@ -768,12 +768,13 @@ def _grid_from_coords(coords: tuple[NDArrayNum, NDArrayNum]) -> tuple[tuple[int,
     x, y = coords
 
     # Get affine transform
-    shape = len(coords[0]), len(coords[1])
+    dx, dy = abs(float(dxdy[0])), abs(float(dxdy[1]))
+    shape = len(y), len(x)
     return shape, rio.transform.from_origin(
-        west=x.min(),
-        north=y.max(),
-        xsize=dxdy[0],
-        ysize=dxdy[0],
+        west=x.min() - dx / 2,
+        north=y.max() + dy / 2,
+        xsize=dx,
+        ysize=dy,
     )
 
 

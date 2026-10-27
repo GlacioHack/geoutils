@@ -30,7 +30,7 @@ from packaging.version import Version
 
 from geoutils._misc import deprecate
 from geoutils._typing import NDArrayNum
-from geoutils.projtools import align_bounds, merge_bounds
+from geoutils.projtools import _get_bounds_projected, align_bounds, merge_bounds
 from geoutils.raster.raster import Raster, _default_nodata
 
 
@@ -88,11 +88,8 @@ def load_multiple_rasters(
             return output_rst
 
         for i, rst in enumerate(output_rst):
-            # Calculate bounds in rst's CRS
-            # rasterio's default for densify_pts is too low for very large images, set a default of 5000
-            new_bounds = rio.warp.transform_bounds(
-                ref_crs, rst.crs, intersection[0], intersection[1], intersection[2], intersection[3], densify_pts=5000
-            )
+            # Project the intersection edges using the configured densification
+            new_bounds = _get_bounds_projected(rio.coords.BoundingBox(*intersection), in_crs=ref_crs, out_crs=rst.crs)
             # Ensure bounds align with the original ones, to avoid resampling at this stage
             new_bounds = align_bounds(rst.transform, new_bounds)
             output_rst[i] = output_rst[i].crop(new_bounds)
@@ -147,7 +144,8 @@ def stack(
     :param rasters: List of rasters to be stacked.
     :param reference: Index of reference raster in the list or separate reference raster.
         Defaults to the first raster in the list.
-    :param resampling_method: Resampling method for reprojection.
+    :param resampling_method: Resampling method for reprojection. Defaults to "linear". Can be configured
+        globally with geoutils.config["raster_resampling_method"].
     :param use_ref_bounds: If True, will use reference bounds, otherwise will use maximum bounds of all rasters.
 
     :returns: The merged raster with same CRS and resolution (and optionally bounds) as the reference.
@@ -266,7 +264,8 @@ def merge_rasters(
         Defaults to the first raster in the list.
     :param merge_algorithm: Reductor function (or list of functions) to merge the rasters with. Defaults to the mean.
         If several algorithms are provided, each result is returned as a separate band.
-    :param resampling_method: Resampling method for reprojection.
+    :param resampling_method: Resampling method for reprojection. Defaults to "linear". Can be configured
+        globally with geoutils.config["raster_resampling_method"].
     :param use_ref_bounds: If True, will use reference bounds, otherwise will use maximum bounds of all rasters.
 
     :returns: The merged raster with same CRS and resolution (and optionally bounds) as the reference.

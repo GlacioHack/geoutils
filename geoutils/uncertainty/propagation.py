@@ -67,7 +67,7 @@ class PropagationSummary:
     :param method: "analytical" for exact weighted sums, or "numerical" for repeated random draws (Monte Carlo).
     :param selection: Labels and original estimates for selected samples or quantiles.
     :param samples: Optional output values calculated from random draws of the source errors.
-    :param n_samples: Number of random draws requested.
+    :param n_simulations: Number of random draws requested.
     :param n_valid: Number of finite draws at each output.
     :param metadata: Details about the calculation and any approximation it used.
     """
@@ -81,7 +81,7 @@ class PropagationSummary:
     output: Mapping[str, Any] = field(default_factory=dict)
     samples: pd.DataFrame | None = None
     quantiles: pd.DataFrame | None = None
-    n_samples: int | None = None
+    n_simulations: int | None = None
     n_success: int | None = None
     n_valid: Any = None
     failures: Mapping[int, str] = field(default_factory=dict)
@@ -538,7 +538,7 @@ def _propagate_local_operator_numerically(
     error_structure: ErrorStructure,
     scalar: bool,
     handling: NodataHandling,
-    n_samples: int,
+    n_simulations: int,
     random_state: int | np.random.Generator | None,
     return_samples: bool,
     max_sample_bytes: int,
@@ -568,7 +568,7 @@ def _propagate_local_operator_numerically(
         calculate=calculate,
         error_structure=error_structure,
         selection=selection,
-        n_samples=int(n_samples),
+        n_simulations=int(n_simulations),
         random_state=random_state,
         return_samples=return_samples,
         max_sample_bytes=max_sample_bytes,
@@ -671,9 +671,11 @@ def _propagate_spatial_method(
     quantiles use _InputInterpolator or _InputReducer to collect groups in destination order.
     """
 
+    from rasterio.enums import Resampling
+
     from geoutils._config import config
-    from geoutils.interface.gridding import _resolve_gridding_operator
-    from geoutils.operators.interpolator import Kriging, _regular_interpolation_method, _resolve_interpolator
+    from geoutils.operators.interpolator import Kriging, _regular_interpolation_method
+    from geoutils.operators.methods import _resampling_keyword, _resampling_operator
     from geoutils.operators.neighbours import _build_kriging_grid_neighbours
     from geoutils.operators.reducer import Mean
     from geoutils.operators.weighting import _with_error_structure
@@ -710,8 +712,14 @@ def _propagate_spatial_method(
     if name in {"interp_points", "interp_at_points", "resample_at_points"}:
         operation = source.resample_at_points
         parameter = "method"
-        selected_method = kwargs.get(parameter, config["interpolation_method"])
-        operator = selected_method if isinstance(selected_method, Reducer) else _resolve_interpolator(selected_method)
+        selected_method = _resampling_keyword(
+            kwargs.get(parameter), kwargs.pop("resampling", None), default=config["raster_resampling_method"]
+        )
+        operator = _resampling_operator(
+            selected_method,
+            backend=kwargs.get("backend", "auto"),
+            options=kwargs.pop("resampling_kwargs", None),
+        )
     elif name in {"reduce_points", "reduce_at_points"}:
         operation = source.reduce_at_points
         parameter = "reducer_function"
@@ -722,12 +730,28 @@ def _propagate_spatial_method(
             kwargs["window"] = 1
     elif name == "grid":
         parameter = "resampling"
-        operator = _resolve_gridding_operator(
-            kwargs.get(parameter, "nearest"), distance_power=kwargs.get("distance_power", 2)
+        selected_method = kwargs.get(parameter)
+        if selected_method is None:
+            selected_method = config["point_resampling_method"]
+        operator = _resampling_operator(
+            selected_method,
+            backend=kwargs.get("backend", "auto"),
+            options=kwargs.pop("resampling_kwargs", None),
+            distance_power=kwargs.get("distance_power", 2),
         )
     elif name == "reproject":
         parameter = "resampling"
-        operator = _resolve_reprojection_operator(kwargs.get(parameter, config["reprojection_method"]))
+        selected_method = kwargs.get(parameter)
+        if selected_method is None:
+            selected_method = config["raster_resampling_method"]
+        if isinstance(selected_method, Resampling):
+            operator = _resolve_reprojection_operator(selected_method)
+        else:
+            operator = _resampling_operator(
+                selected_method,
+                backend=kwargs.get("backend", "auto"),
+                options=kwargs.pop("resampling_kwargs", None),
+            )
     else:
         raise TypeError("Spatial propagation supports grid(), reproject(), and the point resampling methods.")
 
@@ -807,7 +831,7 @@ def _propagate_spatial_method(
             "local_marginals": True,
             "output_distribution": "normal" if method == "analytical" else "unknown",
         },
-        n_samples=options["n_samples"] if method == "numerical" else None,
+        n_simulations=options["n_simulations"] if method == "numerical" else None,
         n_valid=n_valid,
     )
 
@@ -824,7 +848,7 @@ def simulate(
     calculate: Callable[[Any], Any],
     error_structure: ErrorStructure,
     selection: pd.DataFrame,
-    n_samples: int,
+    n_simulations: int,
     random_state: int | np.random.Generator | None = None,
     output: Mapping[str, Any] | None = None,
     return_samples: bool = False,
@@ -844,7 +868,7 @@ def simulate(
     :param calculate: Apply one complete calculation to that draw.
     :param error_structure: Initial error model used for the draws.
     :param selection: Output keys and flat positions selected for samples or quantiles.
-    :param n_samples: Number of requested realizations, at least two.
+    :param n_simulations: Number of requested realizations, at least two.
     :param random_state: Seed or generator controlling source draws.
     :param output: Optional circular period for angular outputs.
     :param return_samples: Whether to save every selected realization.
@@ -856,8 +880,12 @@ def simulate(
     """
 
     # 1/ Check user input
-    if isinstance(n_samples, (bool, np.bool_)) or not isinstance(n_samples, (int, np.integer)) or n_samples < 2:
-        raise ValueError("n_samples must be an integer of at least two.")
+    if (
+        isinstance(n_simulations, (bool, np.bool_))
+        or not isinstance(n_simulations, (int, np.integer))
+        or n_simulations < 2
+    ):
+        raise ValueError("n_simulations must be an integer of at least two.")
     if on_error not in {"raise", "warn"}:
         raise ValueError("on_error must be 'raise' or 'warn'.")
     if max_sample_bytes < 1:
@@ -879,10 +907,10 @@ def simulate(
     if len(set(probabilities)) != len(probabilities):
         raise ValueError("quantiles must be distinct.")
     keep_buffer = return_samples or bool(probabilities)
-    required_bytes = int(n_samples) * len(positions) * np.dtype(np.float64).itemsize
+    required_bytes = int(n_simulations) * len(positions) * np.dtype(np.float64).itemsize
     if keep_buffer and required_bytes > max_sample_bytes:
         raise ValueError(f"Selected sample buffer needs {required_bytes} bytes, exceeding max_sample_bytes.")
-    samples_buffer = np.full((int(n_samples), len(positions)), np.nan) if keep_buffer else None
+    samples_buffer = np.full((int(n_simulations), len(positions)), np.nan) if keep_buffer else None
     output_info = dict(output or {})
     period = output_info.get("circular_period")
     if period is not None and (not np.isfinite(period) or period <= 0):
@@ -899,7 +927,7 @@ def simulate(
     generator = np.random.default_rng(random_state)
 
     # 4/ We draw random source errors and update each output by accumulation
-    for number in range(1, int(n_samples) + 1):
+    for number in range(1, int(n_simulations) + 1):
         try:
             values = np.asarray(_numeric_values(calculate(draw_error(generator))), dtype=float)
             if values.shape != shape:
@@ -910,7 +938,7 @@ def simulate(
             if on_error == "raise":
                 raise
             failures[number] = str(exception)
-            warnings.warn(f"Simulation {number} of {n_samples} failed and was skipped: {exception}", stacklevel=2)
+            warnings.warn(f"Simulation {number} of {n_simulations} failed and was skipped: {exception}", stacklevel=2)
             continue
 
         valid = np.isfinite(values)
@@ -935,7 +963,7 @@ def simulate(
             samples_buffer[number - 1] = values.reshape(-1)[positions]
 
     if n_success < 2:
-        raise RuntimeError(f"Only {n_success} of {n_samples} simulations succeeded; at least two are required.")
+        raise RuntimeError(f"Only {n_success} of {n_simulations} simulations succeeded; at least two are required.")
 
     # 5/ Angular means and spreads use the circular resultant; ordinary outputs use sample variance
     std = np.full(shape, np.nan, dtype=float)
@@ -962,7 +990,9 @@ def simulate(
     if samples_buffer is not None:
         if return_samples:
             samples = pd.DataFrame(
-                samples_buffer, index=pd.RangeIndex(1, int(n_samples) + 1, name="simulation"), columns=selection.index
+                samples_buffer,
+                index=pd.RangeIndex(1, int(n_simulations) + 1, name="simulation"),
+                columns=selection.index,
             )
         if probabilities:
             values = samples_buffer
@@ -991,7 +1021,7 @@ def simulate(
         output=output_info,
         samples=samples,
         quantiles=quantile_table,
-        n_samples=int(n_samples),
+        n_simulations=int(n_simulations),
         n_success=n_success,
         n_valid=n_valid,
         failures=failures,
@@ -1012,7 +1042,7 @@ def propagate(
     nominal_estimate: ArrayLike | float | None = None,
     output_labels: Sequence[Hashable] | None = None,
     at: Literal["all"] | Sequence[Hashable] | None = None,
-    n_samples: int = 1_000,
+    n_simulations: int = 1_000,
     random_state: int | np.random.Generator | None = None,
     return_samples: bool = False,
     max_sample_bytes: int = 268_435_456,
@@ -1047,7 +1077,7 @@ def propagate(
     :param nominal_estimate: Optional results already calculated from the original source values.
     :param output_labels: Unique labels for stored samples and quantiles.
     :param at: Output labels selected for samples or quantiles. Small results are selected by default.
-    :param n_samples: Number of random draws for numerical propagation.
+    :param n_simulations: Number of random draws for numerical propagation.
     :param random_state: Seed or generator for numerical propagation.
     :param return_samples: Whether to return the result of each random draw. This selects numerical propagation in
         automatic mode and cannot be combined with method="analytical".
@@ -1084,7 +1114,7 @@ def propagate(
             {
                 "predictors": predictors,
                 "method": method,
-                "n_samples": n_samples,
+                "n_simulations": n_simulations,
                 "random_state": random_state,
                 "max_sample_bytes": max_sample_bytes,
                 "on_error": on_error,
@@ -1211,7 +1241,7 @@ def propagate(
         error_structure=error_structure,
         scalar=scalar,
         handling=handling,
-        n_samples=n_samples,
+        n_simulations=n_simulations,
         random_state=random_state,
         return_samples=return_samples,
         max_sample_bytes=max_sample_bytes,

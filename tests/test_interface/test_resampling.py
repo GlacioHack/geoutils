@@ -107,6 +107,53 @@ class TestResampling:
         np.testing.assert_array_equal(reduced, [12])
         np.testing.assert_array_equal(accessor_interpolated, [12])
 
+    @pytest.mark.parametrize("interpretation", ["Area", "Point"])
+    @pytest.mark.parametrize("method", ["nearest", "linear"])
+    def test_interp_at_points__gdal_pixel_centers(self, tmp_path: Path, interpretation: str, method: str) -> None:
+        """Checks that interpolation agrees with GDAL for Area and Point GeoTIFFs."""
+
+        if find_spec("osgeo") is None:
+            pytest.skip("GDAL Python bindings are unavailable")
+        gdal = import_optional("osgeo.gdal").gdal
+        if not hasattr(gdal.Band, "InterpolateAtPoint"):
+            pytest.skip("This GDAL version does not provide point interpolation")
+
+        # Write a curved surface so a half-pixel error changes the interpolated values
+        rows, columns = np.indices((7, 9))
+        values = (rows**2 + 3 * columns**2).astype(np.float64)
+        transform = from_origin(600000, 5100000, 10, 20)
+        filename = tmp_path / "centers.tif"
+        with rio.open(
+            filename,
+            "w",
+            driver="GTiff",
+            height=7,
+            width=9,
+            count=1,
+            dtype=values.dtype,
+            transform=transform,
+            crs=32632,
+        ) as dataset:
+            dataset.write(values, 1)
+            dataset.update_tags(AREA_OR_POINT=interpretation)
+
+        # Query centers and fractional positions using GDAL's corner-based pixel coordinates
+        pixel_x = np.array([1.5, 3.25, 5.8, 7.5])
+        pixel_y = np.array([1.5, 2.7, 4.2, 5.5])
+        x, y = transform * (pixel_x, pixel_y)
+        raster = gu.Raster(filename)
+        actual = raster.interp_at_points((x, y), method=method, as_array=True)
+        with gdal.ExceptionMgr():
+            dataset = gdal.Open(str(filename))
+            algorithm = gdal.GRIORA_NearestNeighbour if method == "nearest" else gdal.GRIORA_Bilinear
+            expected = [
+                dataset.GetRasterBand(1).InterpolateAtPoint(px, py, algorithm) for px, py in zip(pixel_x, pixel_y)
+            ]
+
+        # GDAL and Rasterio normalize Point tiepoints to the same corner transform
+        np.testing.assert_array_equal(dataset.GetGeoTransform(), transform.to_gdal())
+        np.testing.assert_allclose(actual, expected, rtol=0, atol=1e-10)
+
     def test_at_points__deprecated_names(self) -> None:
         """Checks that the old point sampling names warn and forward their options to the new methods."""
 
@@ -162,14 +209,14 @@ class TestResampling:
         arr = (np.arange(nrows)[:, None] * ncols + np.arange(ncols)[None, :]).astype("float32")
         transform = rio.transform.from_bounds(0, 0, ncols, nrows, ncols, nrows)
         raster = gu.Raster.from_array(data=arr, transform=transform, crs=None, nodata=-9999)
-        raster.set_area_or_point("Area", shift_area_or_point=False)
+        raster.set_area_or_point("Area", shift_half_pixel=False)
 
         # Sample every pixel centre, plus one clearly out-of-bounds point, in the same call.
         index_i, index_j = np.meshgrid(np.arange(nrows), np.arange(ncols), indexing="ij")
-        x, y = raster.ij2xy(i=index_i.ravel(), j=index_j.ravel(), shift_area_or_point=True)
+        x, y = raster.ij2xy(i=index_i.ravel(), j=index_j.ravel())
         x = np.append(x, -5.0)
         y = np.append(y, -5.0)
-        vals = raster.interp_at_points((x, y), method="nearest", shift_area_or_point=True, as_array=True)
+        vals = raster.interp_at_points((x, y), method="nearest", as_array=True)
 
         # Every valid pixel centre is finite and equals its pixel value; the out-of-bounds point stays NaN
         assert np.all(np.isfinite(vals[:-1]))
@@ -833,6 +880,31 @@ class TestInterpPointsChunked:
 
     Numerical accuracy and SciPy comparisons are covered in test_operators/test_interpolator.py.
     """
+
+    @pytest.mark.parametrize("interpretation", ["Area", "Point"])
+    @pytest.mark.parametrize("shift_transform", [False, True])
+    def test_interp_at_points__dask_pixel_centers(self, interpretation: str, shift_transform: bool) -> None:
+        """Checks that Dask interpolation at pixel centers stays lazy and matches eager values exactly."""
+
+        # Split a rectangular raster into chunks with shorter final rows and columns
+        values = np.arange(35, dtype=float).reshape(5, 7)
+        opposite = "Area" if interpretation == "Point" else "Point"
+        raster = gu.Raster.from_array(values, from_origin(100, 200, 10, 20), 32632, area_or_point=opposite)
+        raster.set_area_or_point(interpretation, shift_half_pixel=shift_transform)
+        chunked = raster.to_xarray().chunk({"y": 3, "x": 4})
+        x, y = rio.transform.xy(raster.transform, [0, 2, 4], [0, 3, 6], offset="center")
+
+        # Sample the same centers eagerly and lazily
+        eager = raster.interp_at_points((x, y), method="linear", as_array=True)
+        actual = chunked.rst.interp_at_points((x, y), method="linear", as_array=True)
+
+        # Inputs and outputs remain lazy until we compute the known array values
+        assert gu._dispatch.is_dask_array(chunked.data)
+        assert gu._dispatch.is_dask_array(actual)
+        np.testing.assert_array_equal(eager, values[[0, 2, 4], [0, 3, 6]])
+        np.testing.assert_array_equal(actual.compute(), eager)
+        assert gu._dispatch.is_dask_array(chunked.data)
+        assert gu._dispatch.is_dask_array(actual)
 
     @pytest.mark.parametrize("backend", ["eager", "dask", "multiprocessing"])
     @pytest.mark.parametrize("dtype", ["int16", "float64"])
@@ -1836,8 +1908,8 @@ class TestKrigingRasterChunked:
         assert expected.raster_equal(multiproc, strict_masked=False)
 
 
-class TestResamplingEdgeCases:
-    """Test module for partial windows, missing or outside targets and invalid resampling options."""
+class TestResamplingErrors:
+    """Test module for errors and warnings for resampling."""
 
     def test_resample_at_points__reducer_edge_and_outside(self) -> None:
         """Checks that edge windows use the cells inside the raster and outside points return NaN."""

@@ -34,6 +34,7 @@ from affine import Affine
 from pyproj import CRS, Transformer
 from rasterio.coords import BoundingBox
 
+from geoutils._config import config
 from geoutils._dispatch import _clip_geometry, _get_reproject_crs, get_geo_attr, has_geo_attr, is_dask_array
 from geoutils._misc import _deprecate_keyword, import_optional
 from geoutils._xarray import _rebuild_dataset, _same_coordinate, _select_dataset_variables
@@ -265,17 +266,22 @@ class DataArrayPointCloudAccessor(PointCloudBase):
         """Return an array point result with independent metadata."""
         return output.pc.copy(deep=False)
 
-    def _cast_raster_output(self, raster: Any) -> xr.DataArray:
+    def _cast_raster_output(self, raster: Any) -> xr.DataArray | xr.Dataset:
         """Expose a gridded result through the Xarray raster accessor."""
         from geoutils.raster.xr_accessor import DataArrayRasterAccessor, open_raster
 
+        # Convert arrays or reopen file results
         if isinstance(raster, xr.DataArray):
-            raster.name = None
-            return raster
-        if not raster.is_loaded and raster.name is not None:
+            result = raster
+        elif not raster.is_loaded and raster.name is not None:
             return open_raster(raster.name)
-        result = DataArrayRasterAccessor.from_array(raster.data, raster.transform, raster.crs, nodata=raster.nodata)
+        else:
+            result = DataArrayRasterAccessor.from_array(raster.data, raster.transform, raster.crs, nodata=raster.nodata)
+
+        # Apply the configured raster representation
         result.name = None
+        if config["raster_return_type"] == "dataset":
+            return result.to_dataset(name="raster")
         return result
 
     def _select_rows(self, indices: Any) -> xr.DataArray:
@@ -975,7 +981,10 @@ class DatasetPointCloudAccessor:
 
             # Grid each active value variable on the same destination
             point = support.pc.set_data_name(name)
-            transformed[name] = getattr(point.pc, operation)(*args, **kwargs).rename(name)
+            result = getattr(point.pc, operation)(*args, **kwargs)
+            if isinstance(result, xr.Dataset):
+                result = result[next(iter(result.data_vars))]
+            transformed[name] = result.rename(name)
 
         # 4/ We combine gridded values with untouched Dataset variables
         return _rebuild_dataset(dataset, transformed)

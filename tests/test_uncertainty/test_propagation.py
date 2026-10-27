@@ -208,7 +208,7 @@ class TestNumericalOperatorPropagation:
             NonlinearMeanSquare(),
             data,
             structure,
-            n_samples=2_000,
+            n_simulations=2_000,
             random_state=7,
         )
 
@@ -225,9 +225,11 @@ class TestNumericalOperatorPropagation:
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 0.5)])
 
         # Compare automatic/explicit numerical draws with same seed
-        automatic = gu.uncertainty.propagate(Mean(), data, structure, n_samples=4, random_state=6, return_samples=True)
+        automatic = gu.uncertainty.propagate(
+            Mean(), data, structure, n_simulations=4, random_state=6, return_samples=True
+        )
         numerical = gu.uncertainty.propagate(
-            Mean(), data, structure, method="numerical", n_samples=4, random_state=6, return_samples=True
+            Mean(), data, structure, method="numerical", n_simulations=4, random_state=6, return_samples=True
         )
         assert automatic.method == "numerical"
         assert automatic.samples is not None and numerical.samples is not None
@@ -243,7 +245,7 @@ class TestNumericalOperatorPropagation:
 
         # Should sue the nominal estimate of 2, calling on 3 times
         summary = gu.uncertainty.propagate(
-            operator, data, structure, method="numerical", nominal_estimate=2, n_samples=3, random_state=6
+            operator, data, structure, method="numerical", nominal_estimate=2, n_simulations=3, random_state=6
         )
         assert summary.estimate == 2
         assert operator.calls == 3
@@ -262,7 +264,7 @@ class TestNumericalOperatorPropagation:
 
         # We check identical draws with zero error for masked (square of unmasked value = 2)
         summary = gu.uncertainty.propagate(
-            NonlinearMeanSquare(), data, errors, method="numerical", n_samples=4, return_samples=True
+            NonlinearMeanSquare(), data, errors, method="numerical", n_simulations=4, return_samples=True
         )
         assert summary.estimate == 4
         assert summary.samples is not None
@@ -280,7 +282,7 @@ class TestNumericalOperatorPropagation:
             [first, second],
             structure,
             method="numerical",
-            n_samples=20,
+            n_simulations=20,
             random_state=9,
             return_samples=True,
             output_labels=["first", "second"],
@@ -290,7 +292,7 @@ class TestNumericalOperatorPropagation:
             [second, first],
             structure,
             method="numerical",
-            n_samples=20,
+            n_simulations=20,
             random_state=9,
             return_samples=True,
             output_labels=["second", "first"],
@@ -329,7 +331,7 @@ class TestSimulation:
             calculate=lambda draw: draw,
             error_structure=structure,
             selection=selection,
-            n_samples=3,
+            n_simulations=3,
             return_samples=True,
             quantiles=(0.5,),
         )
@@ -359,7 +361,7 @@ class TestSimulation:
             calculate=lambda draw: np.asarray(draw),
             error_structure=structure,
             selection=selection,
-            n_samples=2,
+            n_simulations=2,
             output={"circular_period": 360.0},
             return_samples=True,
             quantiles=(0.5,),
@@ -398,7 +400,7 @@ class TestSimulation:
                 calculate=calculate,
                 error_structure=structure,
                 selection=selection,
-                n_samples=3,
+                n_simulations=3,
                 on_error="warn",
                 return_samples=True,
             )
@@ -425,7 +427,7 @@ class TestSimulation:
             calculate=lambda draw: draw,
             error_structure=structure,
             selection=selection,
-            n_samples=2,
+            n_simulations=2,
         )
         # Check finite first output and missing second output
         np.testing.assert_allclose(summary.mean, [2, np.nan], equal_nan=True)
@@ -444,7 +446,7 @@ class TestSpatialPropagation:
         if engine == "numba":
             pytest.importorskip("numba")
         points = gu.PointCloud.from_xyz([0.0, 4.0], [1.0, 0.0], [10.0, 20.0], crs=32631)
-        reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(0, 0, 10, 1), crs=32631)
+        reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(-5, 0.5, 10, 1), crs=32631)
         errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 0.5)])
         kwargs = {"ref": reference, "resampling": method, "dist_nodata_pixel": 2, "engine": engine}
 
@@ -609,14 +611,14 @@ class TestSpatialPropagation:
             spatial_method,
             error_structure=errors,
             operation_kwargs=kwargs,
-            n_samples=8,
+            n_simulations=8,
             random_state=6,
             return_samples=return_samples,
         )
 
         # We independently draw the samples with the same random state, and estimate the covariance
         source_samples = errors.iter_samples(
-            np.arange(values.size), nominal=values.ravel(), kind="value", n_samples=8, random_state=6
+            np.arange(values.size), nominal=values.ravel(), kind="value", n_simulations=8, random_state=6
         )
         source_draws = np.array(list(source_samples))
         expected_samples = np.array([statistic(draw) for draw in source_draws])
@@ -674,7 +676,7 @@ class TestPropagationSummary:
         data = LocalData(values=np.array([1.0, 3.0]), valid=np.ones(2, dtype=bool), source_ids=np.array(["a", "b"]))
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 0.5)])
         summary = gu.uncertainty.propagate(
-            Mean(), data, structure, method="numerical", n_samples=4, random_state=6, return_samples=True
+            Mean(), data, structure, method="numerical", n_simulations=4, random_state=6, return_samples=True
         )
 
         # Compare with saved draws
@@ -763,7 +765,7 @@ class TestPropagationSummary:
         # Numerical propagation without saved draws
         data = LocalData(values=np.array([1.0, 3.0]), valid=np.ones(2, dtype=bool), source_ids=np.array(["a", "b"]))
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 0.5)])
-        summary = gu.uncertainty.propagate(Mean(), data, structure, method="numerical", n_samples=4, random_state=6)
+        summary = gu.uncertainty.propagate(Mean(), data, structure, method="numerical", n_simulations=4, random_state=6)
         with pytest.raises(ValueError, match="no saved draws or known marginal"):
             summary.marginal("value")
         with pytest.raises(ValueError, match="Quantiles require saved draws"):
@@ -914,7 +916,7 @@ class TestSimulationErrors:
                 calculate=lambda draw: draw,
                 error_structure=structure,
                 selection=selection,
-                n_samples=2,
+                n_simulations=2,
             )
 
     def test_simulate__error_insufficient_successful_draws(self) -> None:
@@ -932,15 +934,15 @@ class TestSimulationErrors:
                     calculate=lambda draw: draw,
                     error_structure=structure,
                     selection=selection,
-                    n_samples=2,
+                    n_simulations=2,
                     on_error="warn",
                 )
 
     @pytest.mark.parametrize(
         "options, message",
         [
-            ({"n_samples": 1}, "n_samples must be an integer"),
-            ({"n_samples": True}, "n_samples must be an integer"),
+            ({"n_simulations": 1}, "n_simulations must be an integer"),
+            ({"n_simulations": True}, "n_simulations must be an integer"),
             ({"on_error": "ignore"}, "on_error must be"),
             ({"max_sample_bytes": 0}, "max_sample_bytes must be positive"),
             ({"quantiles": (1.1,)}, "quantiles must be finite probabilities"),
@@ -954,7 +956,7 @@ class TestSimulationErrors:
 
         selection = pd.DataFrame({"flat_index": [0], "estimate": [0.0]}, index=["value"])
         structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
-        arguments: dict[str, object] = {"n_samples": 2, "selection": selection}
+        arguments: dict[str, object] = {"n_simulations": 2, "selection": selection}
         arguments.update(options)
         with pytest.raises(ValueError, match=message):
             simulate(
@@ -987,5 +989,5 @@ class TestSimulationErrors:
                 calculate=lambda draw: draw,
                 error_structure=structure,
                 selection=selection,
-                n_samples=2,
+                n_simulations=2,
             )

@@ -75,6 +75,7 @@ from geoutils.interface.vectorization import _polygonize
 from geoutils.multiproc import MultiprocConfig
 from geoutils.operators.interpolator import Interpolator, Kriging, KrigingBackend
 from geoutils.operators.methods import (
+    _GDAL_RESAMPLING_ALIASES,
     FilterMethod,
     ResamplingBackend,
     ResamplingMethod,
@@ -191,7 +192,7 @@ class RasterBase(ABC):
         from geoutils.raster.xr_accessor import DataArrayRasterAccessor, open_raster
 
         if raster.name is not None and not raster.is_loaded:
-            return open_raster(raster.name, is_mask=raster.is_mask)
+            return open_raster(raster.name, is_mask=raster.is_mask, as_object_type="dataarray")
         return DataArrayRasterAccessor.from_array(
             data=raster.data,
             transform=raster.transform,
@@ -546,30 +547,25 @@ class RasterBase(ABC):
         self._rpcs = new_rpcs
 
     def set_area_or_point(
-        self, new_area_or_point: Literal["Area", "Point"] | None, shift_area_or_point: bool | None = None
+        self, new_area_or_point: Literal["Area", "Point"] | None, shift_half_pixel: bool = False
     ) -> None:
         """
         Set new pixel interpretation of the raster.
 
         Overwrites the `area_or_point` attribute and updates "AREA_OR_POINT" in raster metadata tags.
 
-        Optionally, shifts the raster to correct value coordinates in relation to interpretation:
+        Optionally, shifts the transform when changing pixel interpretation:
 
         - By half a pixel (right and downwards) if old interpretation was "Area" and new is "Point",
         - By half a pixel (left and upwards) if old interpretration was "Point" and new is "Area",
         - No shift for all other cases.
 
         :param new_area_or_point: New pixel interpretation "Area", "Point" or None.
-        :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
-            indexes if self.area_or_point is "Point" and maintains corner pixel indexes if it is "Area" or None.
-            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
+        :param shift_half_pixel: Whether to shift the transform by half a pixel when changing between
+            "Area" and "Point". Defaults to False.
 
         :return: None.
         """
-
-        # If undefined, default to the global system config
-        if shift_area_or_point is None:
-            shift_area_or_point = config["shift_area_or_point"]
 
         # Check input
         if new_area_or_point is not None and not (
@@ -592,23 +588,22 @@ class RasterBase(ABC):
 
         # If shift is True, and both interpretation were different strings, a change is needed
         if (
-            shift_area_or_point
+            shift_half_pixel
             and isinstance(old_area_or_point, str)
             and isinstance(new_area_or_point, str)
             and old_area_or_point != new_area_or_point
         ):
-            # The shift below represents +0.5/+0.5 or opposite in indexes (as done in xy2ij)
-
-            # If the new one is Point, we shift back by half a pixel
+            # Move by half a pixel along each image axis when changing to Point
             if new_area_or_point == "Point":
                 xoff = 0.5
                 yoff = 0.5
-            # Otherwise we shift forward half a pixel
+            # Move in the opposite direction when changing to Area
             else:
                 xoff = -0.5
                 yoff = -0.5
-            # We perform the shift in place
-            self.translate(xoff=xoff, yoff=yoff, distance_unit="pixel", inplace=True)
+            # Apply the shift in pixel coordinates, including any rotation
+            _check_affine_georeferencing(self, "set_area_or_point()")
+            self.set_transform(self.transform * rio.transform.Affine.translation(xoff, yoff))
 
     def edit(
         self: RasterType,
@@ -653,7 +648,7 @@ class RasterBase(ABC):
                 updated_tags.update(cast(dict[str, Any], tags))
                 edited.tags = updated_tags
         if area_or_point is not _UNSET:
-            edited.set_area_or_point(cast(Literal["Area", "Point"] | None, area_or_point), shift_area_or_point=False)
+            edited.set_area_or_point(cast(Literal["Area", "Point"] | None, area_or_point))
         return raster_copy
 
     @abstractmethod
@@ -667,8 +662,8 @@ class RasterBase(ABC):
 
         Based on the "AREA_OR_POINT" raster metadata:
 
-        - If pixel interpretation is "Area", the value of the pixel is associated with its upper left corner.
-        - If pixel interpretation is "Point", the value of the pixel is associated with its center.
+        - If pixel interpretation is "Area", the value represents a measurement averaged over the pixel's area.
+        - If pixel interpretation is "Point", the value represents a measurement at the pixel center.
 
         When setting with self.area_or_point = new_area_or_point, uses the default arguments of
         self.set_area_or_point().
@@ -679,8 +674,7 @@ class RasterBase(ABC):
         """
         Setter for pixel interpretation.
 
-        Uses default arguments of self.set_area_or_point(): shifts by half a pixel going from "Area" to "Point",
-        or the opposite.
+        Uses default arguments of self.set_area_or_point(): changes the interpretation without shifting the transform.
 
         :param new_area_or_point: New pixel interpretation "Area", "Point" or None.
 
@@ -981,8 +975,9 @@ class RasterBase(ABC):
         :param cbar_title: Colorbar label.
         :param add_cbar: Whether to display a colorbar. Multi-band RGB(A) plots never add one.
         :param ax: Matplotlib axes, ``"new"`` to create axes, or None to use the current axes.
-        :param resampling: Rasterio resampling method used when the display grid changes. Defaults to the configured
-            reprojection method, except for boolean rasters whose reprojection uses nearest-neighbor resampling.
+        :param resampling: Rasterio resampling method used when the display grid changes. Defaults to "linear".
+            Can be configured globally with geoutils.config["raster_resampling_method"]. Boolean rasters default
+            to nearest-neighbor resampling.
         :param return_axes: Whether to return the image and colorbar axes.
         :param savefig_fname: Optional path at which to save the current figure.
         :returns: None, or the image axes and optional colorbar axes when ``return_axes=True``.
@@ -1362,18 +1357,20 @@ class RasterBase(ABC):
 
         return same_grid
 
-    def get_bbox_projected(self, out_crs: CRS, densify_points: int = 5000) -> rio.coords.BoundingBox:
+    def get_bbox_projected(self, out_crs: CRS, densify_points: int | None = None) -> rio.coords.BoundingBox:
         """
         Get the raster bounding box projected in a specified CRS.
 
         :param out_crs: Output CRS.
         :param densify_points: Maximum points to be added between image corners to account for non linear edges.
-         Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+            Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+            Defaults to 5000. Can be configured globally with geoutils.config["densify_points"].
+            Limited to the larger raster dimension in pixels.
 
         """
-        # Max points to be added between image corners to account for non linear edges
-        # rasterio's default is a bit low for very large images
-        # instead, use image dimensions, with a maximum of 50000
+        # Limit the configured or input point count to the raster dimensions
+        if densify_points is None:
+            densify_points = config["densify_points"]
         densify_points = min(max(self.width, self.height), densify_points)
 
         # Calculate new bounds
@@ -1381,7 +1378,7 @@ class RasterBase(ABC):
 
         return new_bbox
 
-    def get_footprint_projected(self, out_crs: CRS, densify_points: int = 5000) -> Vector:
+    def get_footprint_projected(self, out_crs: CRS, densify_points: int | None = None) -> Vector:
         """
         Get raster footprint projected in a specified CRS.
 
@@ -1390,7 +1387,8 @@ class RasterBase(ABC):
 
         :param out_crs: Output CRS.
         :param densify_points: Maximum points to be added between image corners to account for non linear edges.
-         Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+            Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+            Defaults to 5000. Can be configured globally with geoutils.config["densify_points"].
         """
 
         # Runtime import for circular safety
@@ -1761,8 +1759,7 @@ class RasterBase(ABC):
         :param resampling: Built-in method name, such as "linear", "mean" or "median". Advanced callers can supply
             an Interpolator or Reducer. By default, a Reducer weights source cells by their
             covered area. With GridNeighbours, it uses a fixed window around the transformed destination center.
-            Defaults to bilinear.
-            Can be configured with the global setting geoutils.config["reprojection_method"].
+            Defaults to "linear". Can be configured globally with geoutils.config["raster_resampling_method"].
             See https://rasterio.readthedocs.io/en/stable/api/rasterio.enums.html#rasterio.enums.Resampling
             for the full list.
         :param backend: "auto" preserves GDAL for supported string methods and uses SciPy for operator settings
@@ -1810,20 +1807,12 @@ class RasterBase(ABC):
 
         # If resampling method undefined, default to the global system config
         if resampling is None:
-            resampling = config["reprojection_method"]
+            resampling = config["raster_resampling_method"]
         # Match public aliases to GDAL names before choosing the calculation backend
         name = resampling.name if isinstance(resampling, Resampling) else resampling
         gdal_name = None
         if isinstance(name, str):
-            gdal_aliases = {
-                "linear": "bilinear",
-                "cubic_convolution": "cubic",
-                "mean": "average",
-                "median": "med",
-                "minimum": "min",
-                "maximum": "max",
-            }
-            gdal_name = gdal_aliases.get(name, name)
+            gdal_name = _GDAL_RESAMPLING_ALIASES.get(name, name)
 
         # Window geometry and observation errors need the GeoUtils calculation
         needs_operator = (
@@ -1925,7 +1914,7 @@ class RasterBase(ABC):
             if self._is_xr:
                 from geoutils.raster.xr_accessor import open_raster
 
-                result_raster = open_raster(mp_config.outfile, is_mask=self.is_mask)
+                result_raster = open_raster(mp_config.outfile, is_mask=self.is_mask, as_object_type="dataarray")
             else:
                 result_raster = self.__class__(mp_config.outfile)
                 # Restore logical interpretation without changing subclass constructor arguments
@@ -2122,14 +2111,11 @@ class RasterBase(ABC):
         y: ArrayLike,
         op: type = np.float32,
         precision: float | None = None,
-        shift_area_or_point: bool | None = None,
     ) -> tuple[NDArrayNum, NDArrayNum]:
         """
         Get indexes (row,column) of coordinates (x,y).
 
-        By default, the indexes are shifted with the interpretation of pixel coordinates "AREA_OR_POINT" of the raster,
-        to ensure that the indexes of points represent the right location. See parameter description of
-        shift_area_or_point for more details.
+        Integer indexes locate pixel centers for every pixel interpretation.
 
         This function is reversible with ij2xy for any pixel interpretation.
 
@@ -2137,9 +2123,6 @@ class RasterBase(ABC):
         :param y: Y coordinates.
         :param op: Operator to compute index.
         :param precision: Precision passed to :func:`rasterio.transform.rowcol`.
-        :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
-            indexes if self.area_or_point is "Point" and maintains corner pixel indexes if it is "Area" or None.
-            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
 
         :returns i, j: Indices of (x,y) in the image.
         """
@@ -2149,31 +2132,22 @@ class RasterBase(ABC):
             x=x,
             y=y,
             transform=self.transform,
-            area_or_point=self.area_or_point,
             op=op,
             precision=precision,
-            shift_area_or_point=shift_area_or_point,
         )
 
-    def ij2xy(
-        self, i: ArrayLike, j: ArrayLike, shift_area_or_point: bool | None = None, force_offset: str | None = None
-    ) -> tuple[NDArrayNum, NDArrayNum]:
+    def ij2xy(self, i: ArrayLike, j: ArrayLike, force_offset: str = "center") -> tuple[NDArrayNum, NDArrayNum]:
         """
         Get coordinates (x,y) of indexes (row,column).
 
-        By default, the indexes are shifted with the interpretation of pixel coordinates "AREA_OR_POINT" of the
-        raster, to ensure that the indexes of points represent the right location. See parameter description of
-        shift_area_or_point for more details.
+        Integer indexes correspond to pixel centers for every pixel interpretation.
 
-        This function is reversible with xy2ij for any pixel interpretation.
+        This function is reversible with xy2ij.
 
         :param i: Row (i) index of pixel.
         :param j: Column (j) index of pixel.
-        :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
-            coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
-            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
-        :param force_offset: Ignore pixel interpretation and force coordinate to a certain offset: "center" of pixel, or
-            any corner (upper-left "ul", "ur", "ll", lr"). Default coordinate of a raster is upper-left.
+        :param force_offset: Pixel position used to calculate coordinates: "center" of pixel, or
+            any corner (upper-left "ul", "ur", "ll", lr"). Default is "center".
 
         :returns x, y: x,y coordinates of i,j in reference system.
         """
@@ -2183,16 +2157,13 @@ class RasterBase(ABC):
             i=i,
             j=j,
             transform=self.transform,
-            area_or_point=self.area_or_point,
-            shift_area_or_point=shift_area_or_point,
             force_offset=force_offset,
         )
 
     def coords(
         self,
         grid: bool = True,
-        shift_area_or_point: bool | None = None,
-        force_offset: str | None = None,
+        force_offset: str = "center",
         crs: CRS | int | None = None,
     ) -> tuple[NDArrayNum, NDArrayNum]:
         """
@@ -2200,11 +2171,8 @@ class RasterBase(ABC):
 
         :param grid: Whether to return coordinate matrix, otherwise only X/Y axis coordinates. Required for rotated
             rasters where X/Y axis coordinates do not suffice to represent grid coordinates.
-        :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
-            coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
-            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
-        :param force_offset: Ignore pixel interpretation and force coordinate to a certain offset: "center" of pixel, or
-            any corner (upper-left "ul", "ur", "ll", lr"). Default coordinate of a raster is upper-left.
+        :param force_offset: Pixel position used to calculate coordinates: "center" of pixel, or
+            any corner (upper-left "ul", "ur", "ll", lr"). Default coordinate is center.
         :param crs: Coordinate reference system in which the coordinates are provided. Defaults to CRS of
             the input raster.
 
@@ -2220,9 +2188,7 @@ class RasterBase(ABC):
         return _coords(
             transform=dst_transform,
             shape=self.shape,
-            area_or_point=self.area_or_point,
             grid=grid,
-            shift_area_or_point=shift_area_or_point,
             force_offset=force_offset,
         )
 
@@ -2240,9 +2206,7 @@ class RasterBase(ABC):
         # Pixel indices remain valid without an affine grid, while ground coordinates do not
         if not index:
             _check_affine_georeferencing(self, "outside_image()")
-        return _outside_bounds(
-            xi=xi, yj=yj, transform=self.transform, shape=self.shape, area_or_point=self.area_or_point, index=index
-        )
+        return _outside_bounds(xi=xi, yj=yj, transform=self.transform, shape=self.shape, index=index)
 
     @overload
     def interp_at_points(
@@ -2254,7 +2218,6 @@ class RasterBase(ABC):
         input_latlon: bool = False,
         *,
         as_array: Literal[False] = False,
-        shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
         error_structure: ErrorStructure | None = None,
         resampling: ResamplingMethod | Interpolator | None = None,
@@ -2273,7 +2236,6 @@ class RasterBase(ABC):
         input_latlon: bool = False,
         *,
         as_array: Literal[True],
-        shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
         error_structure: ErrorStructure | None = None,
         resampling: ResamplingMethod | Interpolator | None = None,
@@ -2292,7 +2254,6 @@ class RasterBase(ABC):
         input_latlon: bool = False,
         *,
         as_array: bool = False,
-        shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
         error_structure: ErrorStructure | None = None,
         resampling: ResamplingMethod | Interpolator | None = None,
@@ -2310,7 +2271,6 @@ class RasterBase(ABC):
         band: int = 1,
         input_latlon: bool = False,
         as_array: bool = False,
-        shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
         error_structure: ErrorStructure | None = None,
         *,
@@ -2327,9 +2287,7 @@ class RasterBase(ABC):
          Uses scipy.ndimage.map_coordinates if the Raster is on an equal grid using "nearest" or "linear" (for speed),
          otherwise uses scipy.interpn on a regular grid.
 
-         Optionally, user can enforce the interpretation of pixel coordinates in self.tags['AREA_OR_POINT']
-         to ensure that the interpolation of points is done at the right location. See parameter description
-         of shift_area_or_point for more details.
+         Pixel values are located at cell centers for every pixel interpretation.
 
          This method forwards its options to resample_at_points().
 
@@ -2338,23 +2296,19 @@ class RasterBase(ABC):
             If points fall outside of image, value returned is nan.
         :param method: Interpolator or one of 'nearest', 'linear', 'cubic', 'quintic', 'slinear', 'pchip' or
             'splinef2d'. String methods use the existing SciPy array functions. A custom Interpolator defines the
-            calculation for source cells at fixed GridNeighbours offsets. Defaults to the configured interpolation
-            method.
+            calculation for source cells at fixed GridNeighbours offsets. Alias for resampling.
         :param resampling: Built-in interpolation name, such as "nearest" or "linear", or an advanced Interpolator.
-            method remains an alias; defaults to the configured interpolation method.
+            Defaults to "linear". Can be configured globally with geoutils.config["raster_resampling_method"].
         :param backend: "auto" uses SciPy; "gstools" and "gpytorch" select a kriging solver.
         :param resampling_kwargs: Settings for the named interpolation, including a fitted model for kriging.
         :param nodata_handling: ``"nearest"`` masks values whose nearest source cell is missing; ``"ignore"`` uses
             available finite cells; ``"propagate"`` masks values using a missing source cell. A non-negative integer
             or half-order choice instead masks cells within that distance of missing source values. Defaults to
-            geoutils.config["interpolation_nodata_handling"], which is ``"nearest"`` unless changed.
+            "nearest". Can be configured globally with geoutils.config["interpolation_nodata_handling"].
         :param band: Band to use (from 1 to self.count).
         :param input_latlon: (Only for tuple point input) Whether to convert input coordinates from latlon to raster
             CRS.
         :param as_array: Whether to return an array of interpolated values instead of a point cloud.
-        :param shift_area_or_point: Whether to shift with pixel interpretation, which shifts to center of pixel
-            coordinates if self.area_or_point is "Point" and maintains corner pixel coordinate if it is "Area" or None.
-            Defaults to True. Can be configured with the global setting geoutils.config["shift_area_or_point"].
         :param error_structure: Optional observation error model used for weighting and fitting.
             Use geoutils.uncertainty.propagate() to calculate output uncertainty.
 
@@ -2370,7 +2324,6 @@ class RasterBase(ABC):
             band=band,
             input_latlon=input_latlon,
             as_array=as_array,
-            shift_area_or_point=shift_area_or_point,
             nodata_handling=nodata_handling,
             mp_config=mp_config,
             error_structure=error_structure,
@@ -2387,7 +2340,6 @@ class RasterBase(ABC):
         input_latlon: bool = False,
         *,
         as_array: Literal[False] = False,
-        shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
         error_structure: ErrorStructure | None = None,
         resampling: ResamplingMethod | Interpolator | None = None,
@@ -2406,7 +2358,6 @@ class RasterBase(ABC):
         input_latlon: bool = False,
         *,
         as_array: Literal[True],
-        shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
         error_structure: ErrorStructure | None = None,
         resampling: ResamplingMethod | Interpolator | None = None,
@@ -2425,7 +2376,6 @@ class RasterBase(ABC):
         input_latlon: bool = False,
         *,
         as_array: bool = False,
-        shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
         error_structure: ErrorStructure | None = None,
         resampling: ResamplingMethod | Interpolator | None = None,
@@ -2442,7 +2392,6 @@ class RasterBase(ABC):
         band: int = 1,
         input_latlon: bool = False,
         as_array: bool = False,
-        shift_area_or_point: bool | None = None,
         mp_config: MultiprocConfig | None = None,
         error_structure: ErrorStructure | None = None,
         *,
@@ -2469,7 +2418,6 @@ class RasterBase(ABC):
             band=band,
             input_latlon=input_latlon,
             as_array=as_array,
-            shift_area_or_point=shift_area_or_point,
             mp_config=mp_config,
             error_structure=error_structure,
             **kwargs,
@@ -2506,7 +2454,7 @@ class RasterBase(ABC):
         :param points: X/Y coordinates or a point cloud defining the requested positions.
         :param method: Legacy alias for resampling, also accepting a reduction callable.
         :param resampling: Built-in method name, such as "linear", "mean" or "median", or an advanced operator.
-            Defaults to the configured interpolation method.
+            Defaults to "linear". Can be configured globally with geoutils.config["raster_resampling_method"].
         :param backend: "auto" uses SciPy; "gstools" and "gpytorch" select a kriging solver.
         :param resampling_kwargs: Method settings, such as a quantile q or a fitted kriging model.
         :param coverage: Select cells by center, include all touched cells, or weight by covered area.
@@ -2514,7 +2462,8 @@ class RasterBase(ABC):
         :param input_latlon: Convert tuple coordinates from longitude/latitude to the raster CRS.
         :param as_array: Return values rather than a point cloud at the requested coordinates.
         :param nodata_handling: How missing source values affect the result. Reducers omit them by default. A distance
-            choice also masks results near missing source cells.
+            choice also masks results near missing source cells. Interpolators default to "nearest". Can be
+            configured globally with geoutils.config["interpolation_nodata_handling"].
         :param error_structure: Optional observation error model used for weighting and fitting.
             Use geoutils.uncertainty.propagate() to calculate output uncertainty.
         :param window: Optional odd window size for a reducer, overriding its configured neighborhood for this call.
@@ -2526,7 +2475,7 @@ class RasterBase(ABC):
         """
 
         # Resolve the public choices once before dispatching eager or chunked inputs
-        method = _resampling_keyword(method, resampling, default=config["interpolation_method"])
+        method = _resampling_keyword(method, resampling, default=config["raster_resampling_method"])
         selected_backend = _resampling_backend(backend, default="scipy", allowed=("scipy", "gstools", "gpytorch"))
         if isinstance(method, (str, Interpolator, Reducer)):
             operator_backend: ResamplingBackend = "auto" if backend == "auto" else selected_backend
@@ -2847,7 +2796,7 @@ class RasterBase(ABC):
         *,
         as_array: Literal[False] = False,
         random_state: int | np.random.Generator | None = None,
-        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "center",
         mp_config: MultiprocConfig | None = None,
         force_output_to_memory: bool = False,
         pointcloud_return_type: Literal["dataarray"],
@@ -2865,7 +2814,7 @@ class RasterBase(ABC):
         *,
         as_array: Literal[False] = False,
         random_state: int | np.random.Generator | None = None,
-        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "center",
         mp_config: MultiprocConfig | None = None,
         force_output_to_memory: bool = False,
         pointcloud_return_type: Literal["geodataframe"],
@@ -2883,7 +2832,7 @@ class RasterBase(ABC):
         *,
         as_array: Literal[True],
         random_state: int | np.random.Generator | None = None,
-        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "center",
         mp_config: MultiprocConfig | None = None,
         force_output_to_memory: bool = False,
         pointcloud_return_type: Literal["dataarray", "dataset", "geodataframe"] | None = None,
@@ -2901,7 +2850,7 @@ class RasterBase(ABC):
         *,
         as_array: bool = False,
         random_state: int | np.random.Generator | None = None,
-        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "center",
         mp_config: MultiprocConfig | None = None,
         force_output_to_memory: bool = False,
         pointcloud_return_type: Literal["dataarray", "dataset", "geodataframe"] | None = None,
@@ -2918,7 +2867,7 @@ class RasterBase(ABC):
         skip_nodata: bool = True,
         as_array: bool = False,
         random_state: int | np.random.Generator | None = None,
-        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "center",
         mp_config: MultiprocConfig | None = None,
         force_output_to_memory: bool = False,
         pointcloud_return_type: Literal["dataarray", "dataset", "geodataframe"] | None = None,
@@ -2941,8 +2890,8 @@ class RasterBase(ABC):
         :param skip_nodata: Whether to skip nodata values.
         :param as_array: Return an array instead of a vector.
         :param random_state: Random state or seed number.
-        :param force_pixel_offset: Force offset to derive point coordinate with. Raster coordinates normally only
-            associate to upper-left corner "ul" ("Area" definition) or center ("Point" definition).
+        :param force_pixel_offset: Pixel position used to calculate each point coordinate. Defaults to "center";
+            explicit corner positions are "ul", "ur", "ll" and "lr".
         :param mp_config: Worker, tile and output settings for multiprocessing. Point output uses GeoPackage, LAS or
             LAZ; LAS/LAZ stores the main raster value as elevation. Array output does not write a file. Cannot be
             combined with a Dask source.
@@ -2992,10 +2941,10 @@ class RasterBase(ABC):
         Create a raster from a point cloud with coordinates on a regular grid.
 
         To inform on what grid to create the raster, either pass a tuple of X/Y grid coordinates, or the expected
-        transform and shape. All point cloud coordinates must fall exactly at one of the coordinates of this grid.
+        transform and shape. All point cloud coordinates must fall exactly at a pixel center of this grid.
 
         :param pointcloud: Point cloud.
-        :param grid_coords: Regular coordinate vectors for the raster, from which the geotransform and shape are
+        :param grid_coords: Regular pixel center coordinate vectors, from which the geotransform and shape are
             deduced.
         :param transform: Geotransform of the raster.
         :param shape: Shape of the raster.
@@ -3103,7 +3052,7 @@ class RasterBase(ABC):
         as_array: Literal[False] = False,
         return_indices: Literal[False] = False,
         strategy: Literal["sequential", "topk"] = "topk",
-        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "center",
         force_output_to_memory: bool = False,
         mp_config: MultiprocConfig | None = None,
         pointcloud_return_type: Literal["dataarray"],
@@ -3121,7 +3070,7 @@ class RasterBase(ABC):
         as_array: Literal[False] = False,
         return_indices: Literal[False] = False,
         strategy: Literal["sequential", "topk"] = "topk",
-        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "center",
         force_output_to_memory: bool = False,
         mp_config: MultiprocConfig | None = None,
         pointcloud_return_type: Literal["geodataframe"],
@@ -3139,7 +3088,7 @@ class RasterBase(ABC):
         as_array: Literal[True],
         return_indices: Literal[False] = False,
         strategy: Literal["sequential", "topk"] = "topk",
-        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "center",
         force_output_to_memory: bool = False,
         mp_config: MultiprocConfig | None = None,
         pointcloud_return_type: Literal["dataarray", "dataset", "geodataframe"] | None = None,
@@ -3157,7 +3106,7 @@ class RasterBase(ABC):
         as_array: Literal[True],
         return_indices: Literal[True],
         strategy: Literal["sequential", "topk"] = "topk",
-        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "center",
         force_output_to_memory: bool = False,
         mp_config: MultiprocConfig | None = None,
         pointcloud_return_type: Literal["dataarray", "dataset", "geodataframe"] | None = None,
@@ -3175,7 +3124,7 @@ class RasterBase(ABC):
         as_array: bool = False,
         return_indices: bool = False,
         strategy: Literal["sequential", "topk"] = "topk",
-        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "center",
         force_output_to_memory: bool = False,
         mp_config: MultiprocConfig | None = None,
         pointcloud_return_type: Literal["dataarray", "dataset", "geodataframe"] | None = None,
@@ -3193,7 +3142,7 @@ class RasterBase(ABC):
         as_array: bool = False,
         return_indices: bool = False,
         strategy: Literal["sequential", "topk"] = "topk",
-        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+        force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "center",
         force_output_to_memory: bool = False,
         mp_config: MultiprocConfig | None = None,
         pointcloud_return_type: Literal["dataarray", "dataset", "geodataframe"] | None = None,
@@ -3220,7 +3169,7 @@ class RasterBase(ABC):
         :param as_array: Return sampled values or positions instead of a point cloud or dataframe.
         :param return_indices: With ``as_array=True``, return row and column positions instead of values.
         :param strategy: Use chunk-independent top-k sampling or sequential sampling.
-        :param force_pixel_offset: Pixel position used to calculate each point coordinate.
+        :param force_pixel_offset: Pixel position used to calculate each point coordinate, defaulting to "center".
         :param force_output_to_memory: Keep the complete output in memory instead of using the automatic chunked path.
         :param mp_config: Worker, tile, and output settings for multiprocessing. Point output uses GeoPackage, LAS or
             LAZ; LAS/LAZ stores the first selected band as elevation. Large array output uses NumPy format.

@@ -29,7 +29,6 @@ from scipy.interpolate import RectBivariateSpline, RegularGridInterpolator, grid
 from scipy.ndimage import binary_dilation, distance_transform_edt, map_coordinates
 from scipy.spatial import cKDTree
 
-from geoutils._config import config
 from geoutils._misc import import_optional
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.operators.base import LinearCoefficients, LocalData
@@ -883,8 +882,6 @@ class _RegularGridPrediction(Interpolator):
         dtype: DTypeLike,
         transform: rio.transform.Affine,
         method: ScipyInterpolationMethod,
-        area_or_point: Literal["Area", "Point"] | None,
-        shift_area_or_point: bool | None,
         nodata_propagation: NodataPropagation,
     ) -> None:
         """Store the original raster layout and interpolation options for repeated error draws."""
@@ -894,8 +891,6 @@ class _RegularGridPrediction(Interpolator):
         self.dtype = _interp_output_dtype(dtype)
         self.transform = transform
         self.method = method
-        self.area_or_point = area_or_point
-        self.shift_area_or_point = shift_area_or_point
         self.nodata_propagation = nodata_propagation
 
     def predict(self, data: LocalData) -> float:
@@ -928,19 +923,15 @@ class _RegularGridPrediction(Interpolator):
                 local.coordinates[:, 0],
                 local.coordinates[:, 1],
                 transform=self.transform,
-                area_or_point=None,
-                shift_area_or_point=False,
                 op=np.float64,
             )
-            source[np.floor(rows).astype(int), np.floor(cols).astype(int)] = local.values
+            source[np.rint(rows).astype(int), np.rint(cols).astype(int)] = local.values
             targets = np.asarray([data[index].target for index in indexes])
             values = _interp_points_base(
                 source,
                 self.transform,
                 (targets[:, 0], targets[:, 1]),
                 method=self.method,
-                area_or_point=self.area_or_point,
-                shift_area_or_point=self.shift_area_or_point,
                 nodata_propagation=self.nodata_propagation,
             )
             output[indexes] = values
@@ -1062,16 +1053,14 @@ def _interpn_interpolator(
     fill_value: Number = np.nan,
     bounds_error: bool = False,
     dist_nodata_spread: NodataSpread | None = None,
-    method: ScipyInterpolationMethod | None = None,
+    method: ScipyInterpolationMethod = "linear",
     nodata_propagation: NodataPropagation = "nearest",
 ) -> Callable[[tuple[NDArrayNum, NDArrayNum]], NDArrayNum]:
     """
     Create a SciPy interpolator and apply the chosen nodata rule.
 
     By default, the result is nodata when its nearest source cell is invalid (as in GDAL). A distance choice extends
-    the mask around nodata cells, while "propagate" masks results that use a nodata source value. The method and
-    default nodata choice can be configured with geoutils.config["interpolation_method"] and
-    geoutils.config["interpolation_nodata_handling"].
+    the mask around nodata cells, while "propagate" masks results that use a nodata source value.
 
     Gives the exact same result as scipy.interpolate.interpn, and allows interpolator to be re-used if required (
     for speed).
@@ -1084,10 +1073,6 @@ def _interpn_interpolator(
     Adapted from:
     https://github.com/scipy/scipy/blob/44e4ebaac992fde33f04638b99629d23973cb9b2/scipy/interpolate/_rgi.py#L743.
     """
-
-    # If interpolation method undefined, default to the global system config
-    if method is None:
-        method = config["interpolation_method"]
 
     # Select the mask from the chosen nodata rule or distance
     order = INTERPOLATION_ORDERS[method]

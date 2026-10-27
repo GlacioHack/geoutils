@@ -742,8 +742,6 @@ def _filter_grid(
                     transform,
                     (x, y),
                     operator,
-                    area_or_point=None,
-                    shift_area_or_point=False,
                     nodata_propagation=handling,
                     dist_nodata_spread=None,
                     neighborhood=neighborhood,

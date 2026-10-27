@@ -40,8 +40,6 @@ class TestOperatorDispatch:
             transform,
             (np.array([1.5]), np.array([1.5])),
             operator,
-            area_or_point=None,
-            shift_area_or_point=False,
             nodata_propagation="ignore",
             dist_nodata_spread=None,
         )
@@ -83,8 +81,6 @@ class TestResampleAtPoints:
             transform,
             points,
             Mean(),
-            area_or_point=None,
-            shift_area_or_point=False,
             nodata_propagation="ignore",
             dist_nodata_spread=None,
             neighborhood=GridNeighbours(size=1),

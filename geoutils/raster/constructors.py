@@ -8,6 +8,7 @@ import xarray as xr
 from affine import Affine
 from rasterio.crs import CRS
 
+from geoutils._config import config
 from geoutils._typing import MArrayNum, NDArrayBool, NDArrayNum
 
 
@@ -21,7 +22,7 @@ def from_array(
     cast_nodata: bool = True,
     *,
     data_name: str | None = None,
-    as_object_type: Literal["dataarray", "dataset"] = "dataarray",
+    as_object_type: Literal["dataarray", "dataset"] | None = None,
 ) -> xr.DataArray | xr.Dataset:
     """
     Create a georeferenced raster from a single-band or multiband array.
@@ -38,12 +39,15 @@ def from_array(
     :param tags: Additional raster metadata.
     :param cast_nodata: Nodata conversion option passed to the accessor constructor.
     :param data_name: DataArray or Dataset variable name. An unnamed Dataset variable defaults to raster.
-    :param as_object_type: Returned representation: dataarray (the default) or dataset.
+    :param as_object_type: Returned representation: dataarray or dataset. None uses config["raster_return_type"],
+        which defaults to dataarray.
     :returns: A DataArray or a Dataset containing one raster variable, with values and georeferencing.
     """
     from geoutils.raster.xr_accessor import DataArrayRasterAccessor
 
     # Check inputs
+    if as_object_type is None:
+        as_object_type = config["raster_return_type"]
     if as_object_type not in ("dataarray", "dataset"):
         raise ValueError("Argument 'as_object_type' must be 'dataarray' or 'dataset'.")
     if not isinstance(transform, Affine):

@@ -78,7 +78,7 @@ class TestPointCloud:
         rng = np.random.default_rng(42)
         shape = (10, 12)
         rst_arr = np.linspace(0, 10, int(np.prod(shape))).reshape(*shape)
-        transform = rio.transform.from_origin(0, shape[0] - 1, 1, 1)
+        transform = rio.transform.from_origin(-0.5, shape[0] - 0.5, 1, 1)
         rst = Raster.from_array(rst_arr, transform=transform, crs=4326, nodata=100)
 
         # Generate random coordinates to interpolate, to create an irregular point cloud
@@ -667,7 +667,7 @@ class TestGriddingOperators:
         points = gu.PointCloud.from_xyz([0, 0], [0, 0], [2, 4], crs=32631)
         reference = gu.Raster.from_array(
             np.zeros((1, 1)),
-            transform=rio.transform.from_origin(0, 0, 1, 1),
+            transform=rio.transform.from_origin(-0.5, 0.5, 1, 1),
             crs=32631,
         )
         operator = InverseDistance(neighborhood=PointNeighbours(max_points=2, radius=0))
@@ -690,7 +690,7 @@ class TestGriddingOperators:
         points = gu.PointCloud.from_xyz([0, 1, 10, 20], [0, 0, 0, 0], [1, 3, 7, 11], crs=32631)
         reference = gu.Raster.from_array(
             np.zeros((1, 1)),
-            transform=rio.transform.from_origin(0, 1, 1, 1),
+            transform=rio.transform.from_origin(-0.5, 1.5, 1, 1),
             crs=32631,
         )
 
@@ -795,7 +795,7 @@ class TestKrigingPoints:
         points = gu.PointCloud.from_xyz(coordinates[:, 0], coordinates[:, 1], values, crs=32631)
         reference = gu.Raster.from_array(
             np.zeros((1, 1)),
-            transform=rio.transform.from_origin(0.8, 1.1, 1, 1),
+            transform=rio.transform.from_origin(target[0] - 0.5, target[1] + 0.5, 1, 1),
             crs=32631,
         )
         variogram = gu.Variogram.from_model("exponential", effective_range=4, partial_sill=2)
@@ -954,7 +954,7 @@ class TestGridChunked:
         # Match the requested grid coordinates to the source points so nearest neighbors have no ties
         reference = Raster.from_array(
             np.zeros((3, 3), dtype=np.uint8),
-            transform=rio.transform.from_origin(0, 2, 1, 1),
+            transform=rio.transform.from_origin(-0.5, 2.5, 1, 1),
             crs=self.points.crs,
         )
         raster_file = tmp_path / "reference.tif"

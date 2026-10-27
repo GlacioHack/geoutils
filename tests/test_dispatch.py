@@ -291,6 +291,24 @@ class TestDispatchGridHelpers:
         assert np.isclose(tfm.a, x[1] - x[0])
         assert np.isclose(tfm.e, y[0] - y[1])  # Negative northing
 
+    def test_grid_from_coords__rectangular_centers(self) -> None:
+        """Checks that rectangular coordinate axes correspond to cell centers with separate X/Y resolutions."""
+
+        # Create axes with different lengths and spacings
+        x = np.array([105, 115, 125, 135])
+        y = np.array([210, 230, 250])
+
+        # Build the transform from center coordinates
+        shape, transform = _grid_from_coords((x, y))
+        raster = gu.Raster.from_array(np.zeros(shape), transform, crs=32632)
+        actual_x, actual_y = raster.coords(grid=False)
+
+        # Check array dimensions, bounds and the original center
+        assert shape == (3, 4)
+        assert raster.bounds == (100, 200, 140, 260)
+        np.testing.assert_array_equal(actual_x, x)
+        np.testing.assert_array_equal(actual_y, y)
+
     def test_grid_from_coords__exceptions(self) -> None:
         """Check that invalid coordinates input raise proper errors."""
 

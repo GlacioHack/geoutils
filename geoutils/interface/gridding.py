@@ -178,6 +178,8 @@ def _grid_pointcloud(
         nearest source point is missing. ``"ignore"`` uses available finite values; ``"propagate"`` masks cells
         using a missing source. Reducers default to ``"ignore"`` and cannot use ``"nearest"``. A non-negative
         integer or half-order choice masks cells within that distance of missing source values.
+        Interpolators default to "nearest". Can be configured globally with
+        geoutils.config["interpolation_nodata_handling"].
     :param grid_res: Grid resolution, used for chunks with a single row or column.
     :param distance_power: Distance exponent used for inverse-distance weighting (defaults to 2).
     :param min_points: Minimum number of finite points required inside a circular neighborhood (defaults to 1).
@@ -299,7 +301,9 @@ def _grid_pointcloud(
     aligned_dem = np.flip(aligned_dem, axis=0)
 
     # Derive output transform from input grid
-    transform_from_coords = rio.transform.from_origin(min(grid_coords[0]), max(grid_coords[1]), res_x, res_y)
+    transform_from_coords = rio.transform.from_origin(
+        min(grid_coords[0]) - res_x / 2, max(grid_coords[1]) + res_y / 2, res_x, res_y
+    )
 
     return aligned_dem, transform_from_coords
 
@@ -369,7 +373,7 @@ def _grid_pointcloud_on_geogrid(
     if len(pc) == 0:
         return np.full(geogrid.shape, np.nan, dtype=np.float64)
 
-    grid_coords = _coords(transform=geogrid.transform, shape=geogrid.shape, grid=False, area_or_point=None)
+    grid_coords = _coords(transform=geogrid.transform, shape=geogrid.shape, grid=False)
     gridding_kwargs = kwargs.copy()
     if gridding_func is _grid_pointcloud:
         gridding_kwargs["grid_res"] = geogrid.res

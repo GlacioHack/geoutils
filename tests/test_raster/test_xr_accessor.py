@@ -18,6 +18,7 @@ from shapely.geometry import box
 
 import geoutils as gu
 from geoutils import examples, open_raster
+from geoutils.multiproc import MultiprocConfig
 from geoutils.raster.base import RasterBase
 from tests.accessor_helpers import (
     assert_dataset_output_equal,

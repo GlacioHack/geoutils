@@ -63,7 +63,7 @@ class TestErrorStructureEstimation:
 
         # Fit one constant component without a spatial variogram
         structure = gu.ErrorStructure.estimate(
-            proxy,
+            source=proxy,
             components={"measurement": {"magnitude": "constant", "correlation": None}},
             spread_estimator=np.std,
             random_state=2,
@@ -75,7 +75,8 @@ class TestErrorStructureEstimation:
 
     @pytest.mark.parametrize("kind", ["raster", "point"])
     @pytest.mark.parametrize("other_precision", ["same", "negligible"])
-    def test_estimate_error_structure__two_inputs(self, kind: str, other_precision: str) -> None:
+    @pytest.mark.parametrize("entrypoint", ["class", "method"])
+    def test_estimate_error_structure__two_inputs(self, kind: str, other_precision: str, entrypoint: str) -> None:
         """Checks that two aligned inputs yield the expected error magnitude for either precision assumption."""
 
         # Measurements differ by known errors; one reference value is missing
@@ -92,12 +93,18 @@ class TestErrorStructureEstimation:
             other = gu.PointCloud.from_xyz(x, np.zeros(4), reference, crs=32631)
 
         # The shared finite support has three errors; equal precision splits their variance in half
-        structure = source.estimate_error_structure(
-            other,
-            other_precision=other_precision,
-            components={"measurement": {"magnitude": "constant", "correlation": None}},
-            spread_estimator=np.std,
-        )
+        options: dict[str, Any] = {
+            "other": other,
+            "other_precision": other_precision,
+            "components": {"measurement": {"magnitude": "constant", "correlation": None}},
+            "spread_estimator": np.std,
+        }
+
+        # Estimate through the class with input keywords or the dataset method
+        if entrypoint == "class":
+            structure = gu.ErrorStructure.estimate(source=source, **options)
+        else:
+            structure = source.estimate_error_structure(**options)
 
         # Check the magnitude and that no spatial correlation was fitted
         scale = np.sqrt(2) if other_precision == "same" else 1.0
@@ -287,6 +294,71 @@ class TestErrorStructureEstimation:
         assert result.empirical_variogram is not None
         assert expected.empirical_variogram is not None
         np.testing.assert_allclose(result.empirical_variogram.semivariance, expected.empirical_variogram.semivariance)
+
+    @pytest.mark.parametrize("refit", [False, True], ids=["estimate", "refit"])
+    @pytest.mark.parametrize(
+        ("models", "variable", "independent"),
+        [
+            (["gaussian"], False, False),
+            (["gaussian", "spherical"], False, False),
+            (["gaussian", "spherical"], True, False),
+            (["gaussian"], False, True),
+        ],
+        ids=["single", "nested", "variable", "nugget"],
+    )
+    def test_estimate__fitted_variogram_scale(
+        self, models: list[str], variable: bool, independent: bool, refit: bool
+    ) -> None:
+        """Checks that estimation and refit preserve the fitted scale of empirical variogram diagnostics."""
+
+        pytest.importorskip("skgstat")
+
+        # Create smooth errors whose standardized variogram has a fitted sill different from one
+        y, x = np.mgrid[:40, :40]
+        values = np.sin(x / 4) + 0.5 * np.cos(y / 10)
+        transform = Affine(10, 0, 0, 0, -10, 400)
+        proxy = gu.Raster.from_array(values, transform, 32632, nodata=-9999)
+        quality = gu.Raster.from_array(x / 39, transform, 32632, nodata=-9999)
+        components: dict[str, dict[str, str | None]] = {
+            f"spatial_{index}": {
+                "magnitude": "heteroscedastic" if variable and index == 0 else "constant",
+                "correlation": model,
+            }
+            for index, model in enumerate(models)
+        }
+        if independent:
+            components["noise"] = {"magnitude": "constant", "correlation": None}
+
+        # Estimate the components, optionally refitting the stored empirical bins
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            structure = gu.ErrorStructure.estimate(
+                proxy,
+                predictors={"quality": quality} if variable else {},
+                components=components,
+                n_pairs=1_000,
+                n_lags=8,
+                random_state=42,
+            )
+            if refit:
+                structure = structure.refit(models)
+
+        # Fit the same bins directly, before component magnitudes can normalize the fitted sill
+        empirical = structure.empirical_variogram
+        assert empirical is not None and empirical.model is not None
+        expected = empirical.fit(models, use_nugget=independent)
+        assert expected.model is not None
+        assert not np.isclose(expected.model.sill, 1.0)
+        assert empirical.model.sill == pytest.approx(expected.model.sill)
+        assert empirical.fitted_semivariance is not None and expected.fitted_semivariance is not None
+        np.testing.assert_allclose(empirical.fitted_semivariance, expected.fitted_semivariance)
+        np.testing.assert_allclose(empirical.variogram(empirical.lags), expected.fitted_semivariance)
+
+        # Component correlations still have unit sill because their magnitudes supply the variance
+        for component in structure.components.values():
+            if component.correlation is not None:
+                assert isinstance(component.correlation, VariogramModel)
+                assert component.correlation.sill == pytest.approx(1.0)
 
     def test_refit__uses_retained_empirical_variogram(self) -> None:
         """Checks that refit() changes the correlation model using retained empirical variogram bins."""

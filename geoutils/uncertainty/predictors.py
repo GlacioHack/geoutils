@@ -137,7 +137,7 @@ def _raster_chunk_source(like: RasterBase, chunksizes: tuple[int, int] | None) -
         if like.name is None:
             raise ValueError("An unloaded raster must have a source filename.")
         assert chunksizes is not None
-        return open_raster(like.name, chunks={"y": chunksizes[0], "x": chunksizes[1]}).data
+        return open_raster(like.name, chunks={"y": chunksizes[0], "x": chunksizes[1]}, as_object_type="dataarray").data
     return like.data
 
 

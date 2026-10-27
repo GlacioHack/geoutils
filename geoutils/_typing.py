@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 import sys
-from typing import Any, List, Tuple, Union
+from typing import Any, List, Literal, Tuple, Union
 
 import numpy as np
 
@@ -61,3 +61,43 @@ else:
     NDArrayBool = np.ndarray  # type: ignore
     MArrayNum = np.ma.masked_array  # type: ignore
     MArrayBool = np.ma.masked_array  # type: ignore
+
+
+ResamplingMethod = Literal[
+    "nearest",
+    "linear",
+    "bilinear",
+    "cubic",
+    "cubic_convolution",
+    "cubic_spline",
+    "lanczos",
+    "quintic",
+    "slinear",
+    "pchip",
+    "splinef2d",
+    "idw",
+    "inv_dist",
+    "kriging",
+    "mean",
+    "average",
+    "sum",
+    "median",
+    "med",
+    "quantile",
+    "q1",
+    "q3",
+    "mode",
+    "minimum",
+    "min",
+    "maximum",
+    "max",
+    "range",
+    "count",
+    "stdev",
+    "std",
+    "standard_deviation",
+    "rms",
+    "rmse",
+    "average_distance",
+    "average_distance_pts",
+]

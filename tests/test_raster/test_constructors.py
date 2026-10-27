@@ -81,7 +81,9 @@ class TestRasterConstructorsChunked:
 
     @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
     @pytest.mark.parametrize("bands", [1, 2])
-    def test_from_array__loading_laziness(self, as_object_type: Literal["dataarray", "dataset"], bands: int) -> None:
+    def test_from_array__loading_laziness(
+        self, as_object_type: Literal["dataarray", "dataset"], bands: int, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Checks that lazy construction runs no tasks and exactly matches eager construction."""
         pytest.importorskip("dask")
         import dask.array as da
@@ -96,8 +98,9 @@ class TestRasterConstructorsChunked:
 
         # We construct both outputs, checking there is no task execution during lazy construction
         eager = gu.raster.from_array(values, transform, 32631, data_name="dem", as_object_type=as_object_type)
+        monkeypatch.setitem(gu.config, "raster_return_type", as_object_type)
         with Callback(pretask=lambda *args: pytest.fail("Constructing rasters must not compute pixels")):
-            lazy = gu.raster.from_array(chunks, transform, 32631, data_name="dem", as_object_type=as_object_type)
+            lazy = gu.raster.from_array(chunks, transform, 32631, data_name="dem")
         raster = lazy.dem if as_object_type == "dataset" else lazy
 
         # Check loading, then equality

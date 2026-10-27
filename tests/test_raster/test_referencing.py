@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import warnings
+from pathlib import Path
+
 import numpy as np
 import pytest
+import rasterio as rio
 from affine import Affine
 from rasterio.transform import xy
 
@@ -10,6 +14,8 @@ from geoutils import examples
 
 
 class TestReferencing:
+    """Test module for raster coordinates and georeferencing."""
+
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
     landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
@@ -54,20 +60,13 @@ class TestReferencing:
             assert rst.ij2xy([0], [rst.shape[1] - 1], force_offset=offset) == ([lim[2]], [lim[3]])
             assert rst.ij2xy([rst.shape[0] - 1], [rst.shape[1] - 1], force_offset=offset) == ([lim[2]], [lim[1]])
 
-        # Check that default coordinate is upper-left
+        # Check that default coordinates are pixel centers
+        lims_center = [xmin_center, ymin_center, xmax_center, ymax_center]
 
-        # With shift from pixel interpretation, coordinates will be half a pixel back for "Point"
-        if rst.area_or_point is not None and rst.area_or_point == "Point" and gu.config["shift_area_or_point"]:
-            # Shift is backward in X, forward in Y
-            lims_ul[0] = lims_ul[0] - 0.5 * rst.res[0]
-            lims_ul[1] = lims_ul[1] + 0.5 * rst.res[1]
-            lims_ul[2] = lims_ul[2] - 0.5 * rst.res[0]
-            lims_ul[3] = lims_ul[3] + 0.5 * rst.res[1]
-
-        assert rst.ij2xy([0], [0]) == ([lims_ul[0]], [lims_ul[3]])
-        assert rst.ij2xy([rst.shape[0] - 1], [0]) == ([lims_ul[0]], [lims_ul[1]])
-        assert rst.ij2xy([0], [rst.shape[1] - 1]) == ([lims_ul[2]], [lims_ul[3]])
-        assert rst.ij2xy([rst.shape[0] - 1], [rst.shape[1] - 1]) == ([lims_ul[2]], [lims_ul[1]])
+        assert rst.ij2xy([0], [0]) == ([lims_center[0]], [lims_center[3]])
+        assert rst.ij2xy([rst.shape[0] - 1], [0]) == ([lims_center[0]], [lims_center[1]])
+        assert rst.ij2xy([0], [rst.shape[1] - 1]) == ([lims_center[2]], [lims_center[3]])
+        assert rst.ij2xy([rst.shape[0] - 1], [rst.shape[1] - 1]) == ([lims_center[2]], [lims_center[1]])
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_xy2ij_ij2xy_reversible(self, example: str) -> None:
@@ -94,7 +93,7 @@ class TestReferencing:
         # Out[34]: (75.0, 302.0)
 
     def test_xy2ij(self) -> None:
-        """Test xy2ij with shift_area_or_point argument, and compare to interp_points function for consistency."""
+        """Checks that xy2ij() locates pixel centers and agrees with point interpolation."""
 
         # First, we try on a Raster with a Point interpretation: values interpolated at the center of pixel
         r = gu.Raster(self.landsat_b4_path)
@@ -104,24 +103,19 @@ class TestReferencing:
 
         # We generate random points within the boundaries of the image
         rng = np.random.default_rng(42)
-        xrand = rng.integers(low=0, high=r.width, size=(10,)) * list(r.transform)[0] + xmin
-        yrand = ymax + rng.integers(low=0, high=r.height, size=(10,)) * list(r.transform)[4]
+        xrand = rng.integers(low=1, high=r.width, size=(10,)) * list(r.transform)[0] + xmin
+        yrand = ymax + rng.integers(low=1, high=r.height, size=(10,)) * list(r.transform)[4]
 
-        # Get decimal indexes based on "Point", should refer to the corner still (shift False by default)
-        i, j = r.xy2ij(xrand, yrand, shift_area_or_point=False)
-        assert np.all(i % 1 == 0)
-        assert np.all(j % 1 == 0)
-
-        # Those should all be .5 because values refer to the center and are shifted
-        i, j = r.xy2ij(xrand, yrand, shift_area_or_point=True)
+        # Cell corners lie halfway between integer indices of cell centers
+        i, j = r.xy2ij(xrand, yrand)
         assert np.all(i % 1 == 0.5)
         assert np.all(j % 1 == 0.5)
 
-        # Force "Area", should refer to corner
-        r.set_area_or_point("Area", shift_area_or_point=False)
-        i, j = r.xy2ij(xrand, yrand, shift_area_or_point=True)
-        assert np.all(i % 1 == 0)
-        assert np.all(j % 1 == 0)
+        # Changing the interpretation leaves the array indices unchanged
+        r.set_area_or_point("Area", shift_half_pixel=False)
+        area_i, area_j = r.xy2ij(xrand, yrand)
+        np.testing.assert_array_equal(area_i, i)
+        np.testing.assert_array_equal(area_j, j)
 
         # Now, we calculate the mean of values in each 2x2 slices of the data, and compare with interpolation at order 1
         list_z_ind = []
@@ -156,8 +150,8 @@ class TestReferencing:
 
         # We can test with several method for the exact indexes: interp, and simple read should
         # give back the same values that fall right on the coordinates
-        xrand = rng.integers(low=0, high=r.width, size=(10,)) * list(r.transform)[0] + xmin
-        yrand = ymax + rng.integers(low=0, high=r.height, size=(10,)) * list(r.transform)[4]
+        xrand = (rng.integers(low=0, high=r.width, size=(10,)) + 0.5) * list(r.transform)[0] + xmin
+        yrand = ymax + (rng.integers(low=0, high=r.height, size=(10,)) + 0.5) * list(r.transform)[4]
         # By default, i and j are returned as integers
         i, j = r.xy2ij(xrand, yrand, op=np.float32)
         list_z_ind = []
@@ -227,18 +221,82 @@ class TestReferencing:
         np.testing.assert_array_equal(result_y, np.asarray(expected_y).reshape(raster.shape))
 
     def test_coords__rotated_point_interpretation(self) -> None:
-        """Checks that a rotated Point raster shifts coordinate grids by half a pixel."""
+        """Checks that a rotated Point raster uses pixel centers after an explicit half-pixel shift."""
 
-        # Point interpretation shifts indexes before the affine transform
+        # Create a rotated grid and shift it while changing to Point interpretation
         transform = Affine(2, 0.5, 10, 0.25, -2, 20)
-        raster = gu.Raster.from_array(np.ones((2, 3)), transform=transform, crs=32606, area_or_point="Point")
+        raster = gu.Raster.from_array(np.ones((2, 3)), transform=transform, crs=32606, area_or_point="Area")
+        raster.set_area_or_point("Point", shift_half_pixel=True)
+        transform = transform * Affine.translation(0.5, 0.5)
         rows, columns = np.indices(raster.shape)
 
-        # Compare the shifted upper-left coordinates with Rasterio
-        result_x, result_y = raster.coords(grid=True, shift_area_or_point=True)
-        expected_x, expected_y = xy(transform, rows.ravel() - 0.5, columns.ravel() - 0.5, offset="ul")
+        # Compare pixel center coordinates with Rasterio
+        result_x, result_y = raster.coords(grid=True)
+        expected_x, expected_y = xy(transform, rows.ravel(), columns.ravel(), offset="center")
         np.testing.assert_array_equal(result_x, np.asarray(expected_x).reshape(raster.shape))
         np.testing.assert_array_equal(result_y, np.asarray(expected_y).reshape(raster.shape))
+
+    @pytest.mark.parametrize("area_or_point", [None, "Area", "Point"])
+    @pytest.mark.parametrize("rotation", [0, 17])
+    @pytest.mark.parametrize("shift_transform", [False, True])
+    def test_coordinates__pixel_centers(
+        self, area_or_point: str | None, rotation: float, shift_transform: bool
+    ) -> None:
+        """Checks that coordinates of raster refer to pixel centers for every interpretation."""
+
+        # Create a rectangular grid
+        values = np.arange(35, dtype=float).reshape(5, 7)
+        transform = Affine.translation(600000, 5100000) * Affine.rotation(rotation) * Affine.scale(10, -20)
+        raster = gu.Raster.from_array(values, transform, crs=32632, area_or_point=area_or_point)
+
+        # Shift the grid if requested
+        if shift_transform and area_or_point is not None:
+            raster.set_area_or_point("Area" if area_or_point == "Point" else "Point")
+            raster.set_area_or_point(area_or_point, shift_half_pixel=True)
+            shift = 0.5 if area_or_point == "Point" else -0.5
+            transform *= Affine.translation(shift, shift)
+        assert raster.transform == transform
+
+        # Compare coordinates with Rasterio
+        rows, columns = np.indices(values.shape).reshape(2, -1)
+        expected = xy(transform, rows, columns, offset="center")
+        points = raster.to_pointcloud(as_array=True)
+        array = raster.to_xarray()
+        array_coords = (array.xc, array.yc) if rotation else np.meshgrid(array.x, array.y)
+
+        # Allow rounding after rotation
+        for actual in (raster.coords(), raster.ij2xy(rows, columns), points[:, :2].T, array_coords):
+            np.testing.assert_allclose(np.reshape(actual, (2, -1)), expected, rtol=0, atol=1e-8)
+        np.testing.assert_allclose(raster.xy2ij(*expected, op=np.float64), (rows, columns), rtol=0, atol=1e-8)
+        np.testing.assert_array_equal(points[:, 2], values.ravel())
+
+        # Compare all sampled coordinates
+        sampled = raster.subsample(1.0, as_array=False).gdf.geometry
+        np.testing.assert_allclose(np.sort([sampled.x, sampled.y]), np.sort(expected), rtol=0, atol=1e-8)
+
+    def test_coordinates__geotiff_interpretations(self, tmp_path: Path) -> None:
+        """Checks that Area and Point GeoTIFFs have identical pixel centers and subtract without warnings."""
+
+        # Write both pixel interpretations
+        values = np.arange(35, dtype=np.float64).reshape(5, 7)
+        transform = rio.transform.from_origin(600000, 5100000, 10, 10)
+        rasters = []
+        for interpretation in ("Area", "Point"):
+            filename = tmp_path / f"{interpretation}.tif"
+            gu.Raster.from_array(values, transform, 32632, area_or_point=interpretation).to_file(filename)
+            raster = gu.Raster(filename)
+            assert raster.area_or_point == interpretation
+            assert raster.transform == transform
+            np.testing.assert_array_equal(raster.ij2xy(0, 0), (600005, 5099995))
+            rasters.append(raster)
+
+        # Compare mixed interpretations
+        with warnings.catch_warnings(record=True) as emitted:
+            warnings.simplefilter("always")
+            difference = rasters[0] - rasters[1]
+        assert not emitted
+        np.testing.assert_array_equal(rasters[0].coords(), rasters[1].coords())
+        np.testing.assert_array_equal(difference.data, 0)
 
     @pytest.mark.parametrize("loaded", [False, True])
     def test_icrop__gcp_rcp(self, raster_gcp_rpc: gu.Raster, loaded: bool) -> None:
@@ -262,6 +320,22 @@ class TestReferencing:
             assert result.rpcs.line_scale == source.rpcs.line_scale
             assert result.rpcs.samp_scale == source.rpcs.samp_scale
         np.testing.assert_array_equal(result.data, source.data[:, 7:45, 9:50])
+
+    @pytest.mark.parametrize("interpretation", [None, "Area", "Point"])
+    def test_outside_image__center_indices(self, interpretation: str | None) -> None:
+        """Checks that fractional indices and ground coordinates agree at raster boundaries."""
+
+        # Create a small raster
+        raster = gu.Raster.from_array(
+            np.ones((3, 4)), rio.transform.from_origin(100, 200, 10, 20), 32632, area_or_point=interpretation
+        )
+        positions = [(-0.5, 0, False), (-0.6, 0, True), (0, -0.25, False), (2.5, 0, True), (2.4, 3.4, False)]
+
+        # Compare boundary coordinates and indices
+        for row, column, expected in positions:
+            x, y = raster.ij2xy(row, column)
+            assert raster.outside_image(row, column) == expected
+            assert raster.outside_image(x, y, index=False) == expected
 
     def test_outside_image__gcp_rcp(self, raster_gcp_rpc: gu.Raster) -> None:
         """Checks that outside_image() accepts image indices and requires an affine grid for ground coordinates."""

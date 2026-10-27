@@ -480,9 +480,11 @@ class TestErrorStructure:
         nominal = np.array([10.0, 20.0])
 
         # Check matching error draws and source values plus errors
-        error_samples = list(structure.iter_samples(source_ids=source_ids, n_samples=2, random_state=4))
+        error_samples = list(structure.iter_samples(source_ids=source_ids, n_simulations=2, random_state=4))
         value_samples = list(
-            structure.iter_samples(source_ids=source_ids, nominal=nominal, kind="value", n_samples=2, random_state=4)
+            structure.iter_samples(
+                source_ids=source_ids, nominal=nominal, kind="value", n_simulations=2, random_state=4
+            )
         )
         errors = np.asarray(error_samples)
         values = np.asarray(value_samples)
@@ -578,7 +580,7 @@ class TestErrorStructureErrors:
     @pytest.mark.parametrize(
         "options, message",
         [
-            ({"source_ids": ["a", "b"], "n_samples": 0}, "n_samples must be a positive integer"),
+            ({"source_ids": ["a", "b"], "n_simulations": 0}, "n_simulations must be a positive integer"),
             ({"source_ids": ["a", "b"], "kind": "unknown"}, "kind must"),
             ({"source_ids": ["a", "b"], "nominal": [1.0]}, "nominal must contain one value"),
         ],

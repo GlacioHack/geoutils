@@ -1163,7 +1163,7 @@ class TestReducerUncertainty:
 
         # Two nearby values average to four; the distant value would change the result if selected
         points = gu.PointCloud.from_xyz([0, 1, 4], [0, 0, 0], [2, 6, 100], crs=32631)
-        reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(0, 0, 2, 3), crs=32631)
+        reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(-1, 1.5, 2, 3), crs=32631)
         operator = Mean(neighborhood=neighborhood)
         errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
 
@@ -1231,7 +1231,7 @@ class TestReducerUncertainty:
                 "nodata_handling": "ignore",
             },
             method="numerical",
-            n_samples=2,
+            n_simulations=2,
             random_state=4,
         )
         assert np.allclose(summary.mean.to_nanarray().reshape(-1), result.to_nanarray().reshape(-1), equal_nan=True)

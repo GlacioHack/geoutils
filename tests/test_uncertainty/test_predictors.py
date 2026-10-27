@@ -111,7 +111,7 @@ class TestPredictors:
 class TestPredictorsChunked:
     """Test module for chunked (Dask/MP) error magnitude prediction on raster and point."""
 
-    def test_predict_magnitude__raster_dask_mp_equal(self, tmp_path: Path) -> None:
+    def test_predict_magnitude__raster_dask_mp_equal(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Checks that Dask and MP raster tiles predict the eager magnitude map without loading source files."""
 
         pytest.importorskip("dask")
@@ -147,6 +147,7 @@ class TestPredictorsChunked:
         assert hasattr(dask_source.data, "compute") and hasattr(dask_quality.data, "compute")
         assert hasattr(lazy.data, "compute")
         assert lazy.data.chunks == ((3, 2), (3, 3, 1))
+        monkeypatch.setitem(gu.config, "raster_return_type", "dataset")
         with MpCluster({"nb_workers": 2}) as cluster:
             config = MultiprocConfig(chunks=(3, 3), outfile=str(tmp_path / "magnitude.tif"), cluster=cluster)
             multiproc = structure.predict_magnitude({"quality": file_quality}, like=file_source, mp_config=config)

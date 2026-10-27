@@ -772,7 +772,7 @@ class ErrorStructure:
         coordinates: ArrayLike | None = None,
         predictors: Mapping[str, Any] | None = None,
         nominal: ArrayLike | None = None,
-        n_samples: int = 1,
+        n_simulations: int = 1,
         kind: Literal["error", "value"] = "error",
         random_state: int | np.random.Generator | None = None,
     ) -> Iterator[NDArray[np.float64]]:
@@ -782,14 +782,18 @@ class ErrorStructure:
         :param coordinates: Array of shape (n_observations, n_dimensions), required for correlated components.
         :param predictors: Named values used to calculate each component's error magnitude.
         :param nominal: Original source values, added to the errors when kind="value". Defaults to zero.
-        :param n_samples: Number of independent draws to yield.
+        :param n_simulations: Number of independent draws to yield.
         :param kind: "error" for errors alone or "value" for source values + errors.
         :param random_state: Seed or generator for repeatable draws.
         :returns: An iterator yielding arrays of shape (n_observations,), in source ID order.
         """
 
-        if isinstance(n_samples, (bool, np.bool_)) or not isinstance(n_samples, (int, np.integer)) or n_samples < 1:
-            raise ValueError("n_samples must be a positive integer.")
+        if (
+            isinstance(n_simulations, (bool, np.bool_))
+            or not isinstance(n_simulations, (int, np.integer))
+            or n_simulations < 1
+        ):
+            raise ValueError("n_simulations must be a positive integer.")
         if kind not in {"error", "value"}:
             raise ValueError("kind must be 'error' or 'value'.")
 
@@ -801,7 +805,7 @@ class ErrorStructure:
 
         # Yield one complete draw at a time so we do not store every simulation in memory
         rng = np.random.default_rng(random_state)
-        for _ in range(int(n_samples)):
+        for _ in range(int(n_simulations)):
             error = _draw_source_errors(len(ids), locations, component_data, rng)
             yield error if kind == "error" else nominal_values + error
 
@@ -854,7 +858,7 @@ class ErrorStructure:
     @classmethod
     def estimate(
         cls,
-        error_proxy: Any,
+        source: Any,
         *,
         other: Any | None = None,
         other_precision: Literal["same", "negligible"] = "same",
@@ -879,7 +883,7 @@ class ErrorStructure:
         random_state: int | np.random.Generator | None = None,
     ) -> ErrorStructure:
         """
-        Estimate error structure from an error proxy variable.
+        Estimate error structure from an error proxy or differences between two measurements.
 
         This function works on eager, Dask, or multiprocessing inputs.
 
@@ -899,10 +903,10 @@ class ErrorStructure:
         grouped by predictors to account for variability (e.g., with terrain slope, landcover type).
         The error correlation is estimated by variography, after optional standardization by the variable magnitude.
 
-        When ``other`` is supplied, the proxy is the difference between the two measurements on their common finite
-        support. ``other_precision="same"`` assumes independent errors with the same magnitude and correlation in
-        both inputs, so the difference is divided by the square root of two. Use ``"negligible"`` when the other
-        measurement's error is small enough to ignore.
+        With ``other=None``, source is treated as an error proxy. With two inputs, the proxy is their difference
+        on their common finite support. ``other_precision="same"`` assumes independent errors with the same magnitude
+        and correlation in both inputs, so the difference is divided by the square root of two. Use ``"negligible"``
+        when the other measurement's error is small enough to ignore.
 
 
         This error structure estimation was refactored from that of xDEM (which was method-based, and thus more
@@ -956,9 +960,9 @@ class ErrorStructure:
             errors.predict_magnitude({"quality": np.array([0.2, 0.8])})
             errors.predict_correlation([0, 20, 80])
 
-        :param error_proxy: Raster or point cloud whose values represent errors.
-        :param other: Second raster or point cloud to compare with error_proxy, or None if it already contains errors.
-        :param other_precision: Precision of the second input relative to the first, when other is supplied.
+        :param source: Raster or point cloud of measurements, or an error proxy when other is None.
+        :param other: Second raster or point cloud to compare with source. None treats source as an error proxy.
+        :param other_precision: Precision of the second input relative to the first. Only used with two inputs.
         :param predictors: Named continuous variables controlling a heteroscedastic magnitude.
         :param components: Ordered named component specifications with ``magnitude`` and ``correlation`` entries.
         :param mask: Spatial or Boolean mask identifying values used for estimation.
@@ -985,7 +989,7 @@ class ErrorStructure:
         from geoutils.uncertainty.estimation import _estimate_error_structure
 
         return _estimate_error_structure(
-            error_proxy,
+            source,
             other=other,
             other_precision=other_precision,
             predictors=predictors,
