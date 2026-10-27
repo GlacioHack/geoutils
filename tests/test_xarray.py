@@ -235,13 +235,13 @@ class TestXarrayChunked:
 
     @pytest.mark.parametrize("changed", [False, True])
     def test_same_coordinate__loading_laziness(self, changed: bool) -> None:
-        """Checks that lazy coordinate comparison runs no tasks and matches eager equality."""
+        """Checks that lazy coordinate comparison runs no tasks and matches in-memory equality."""
 
         pytest.importorskip("dask")
         import dask.array as da
         from dask.callbacks import Callback
 
-        # Chunks of 3/3/1 rows include a shorter final coordinate block
+        # Chunks with shorter final block
         coordinate = xr.Variable("point", da.from_array(np.arange(7.0), chunks=3), attrs={"units": "m"})
         other = coordinate.copy(deep=False)
         if changed:
@@ -282,7 +282,7 @@ class TestXarrayChunked:
         assert result.dem.data is source.dem.data
         assert result.xindexes["x"] is source.xindexes["x"]
 
-        # Computing the complete output matches reconstruction from the same eager selection
+        # Computing the complete output matches reconstruction from the same in-memory selection
         eager = source.compute()
         eager_transformed = {name: eager[name].isel(point=positions) for name in transformed}
         expected = _rebuild_dataset(eager, eager_transformed)

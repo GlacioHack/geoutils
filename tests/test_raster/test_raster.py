@@ -1930,7 +1930,7 @@ class TestRaster:
         assert not converted.is_loaded
         assert np.dtype(converted.dtype) == np.dtype("float32")
 
-        # Load result and compare with the eager dtype conversion
+        # Load result and compare with the in-memory dtype conversion
         eager_source = gu.Raster(self.landsat_b4_path, load_data=True)
         expected = eager_source.astype(np.float32)
         np.testing.assert_array_equal(converted.data, expected.data)

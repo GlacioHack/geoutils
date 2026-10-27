@@ -54,7 +54,7 @@ def _prune_stratified_candidates(
     # Keep whole small groups and partially select only slices that exceed their global quota
     chosen = []
     for group, start, count in zip(groups, starts, counts):
-        # A shared fixed cap needs no separate count pass; fractions can also be resolved here for eager input
+        # A shared fixed cap needs no separate count pass; fractions can also be resolved here for in-memory input
         if isinstance(quotas, dict):
             quota = min(quotas[int(group)], int(count))
         else:
@@ -175,7 +175,7 @@ def _stratified_subsample_indices(
     :param random_state: Integer seed or NumPy Generator. Topk draws one seed from a supplied generator and uses zero
         when omitted; sequential sampling uses the generator directly. A subsample of one consumes no draws.
     :param strategy: Topk selects the smallest deterministic keys; sequential draws random member ranks per group.
-    :param mp_config: Tile sizes and worker cluster for a resident NumPy input. Omit for eager or Dask execution.
+    :param mp_config: Tile sizes and worker cluster for a resident NumPy input. Omit for in-memory or Dask execution.
     :returns: Computed one-dimensional NumPy array of flat indices into the original input, ordered by random key
         for topk or by original position for sequential sampling and for a subsample of one.
     """

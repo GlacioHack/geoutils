@@ -270,6 +270,9 @@ def _partition_burn_by_geogrids(burn: _VectorBurnSpec, geogrids: list[GeoGrid]) 
         bounds = geogrid.bounds
         query_box = shapely_box(bounds.left, bounds.bottom, bounds.right, bounds.top)
         indices = _query_indices(tree, geometry_positions=geometry_positions, query_geom=query_box)
+
+        # Rasterio burns later features last, so restore their input order after the spatial query
+        indices.sort()
         block_burns.append(_subset_burn(burn, indices))
     return block_burns
 
@@ -850,7 +853,7 @@ def _rasterize(
     from geoutils.raster import Raster
     from geoutils.raster.xr_accessor import DataArrayRasterAccessor
 
-    # Base backend (eager)
+    # Base backend (in-memory)
     if not mp_backend and not dask_backend:
         data = _rasterize_base(
             burn=burn,

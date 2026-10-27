@@ -292,7 +292,7 @@ class TestDistanceChunked:
         max_distance: float,
         tmp_path: Path,
     ) -> None:
-        """Checks that chunked raster proximity stays lazy and exactly matches the eager result."""
+        """Checks that chunked raster proximity stays lazy and exactly matches the in-memory result."""
 
         import dask.array as da
 
@@ -332,7 +332,7 @@ class TestDistanceChunked:
         assert not multiproc_source.is_loaded
 
     def test_proximity__chunked_vector_backends_equal(self, tmp_path: Path) -> None:
-        """Checks that chunked proximity to a derived vector boundary exactly matches eager execution."""
+        """Checks that chunked proximity to a derived vector boundary exactly matches in-memory execution."""
 
         import dask.array as da
 
@@ -355,7 +355,7 @@ class TestDistanceChunked:
         mp_config = MultiprocConfig(chunks=(4, 5), outfile=str(tmp_path / "vector_proximity_multiproc.tif"))
         multiproc_result = boundary.proximity(raster=multiproc_source, **options, mp_config=mp_config)
 
-        # Check lazy output and compare both chunked calculations with the eager vector result
+        # Check lazy output and compare both chunked calculations with the in-memory vector result
         assert isinstance(dask_result.data, da.Array)
         assert not multiproc_source.is_loaded
         assert not multiproc_result.is_loaded

@@ -279,7 +279,7 @@ def _write_tmp_tif(
 
 
 class TestPolygonize:
-    """Test eager and chunked polygonization results across supported inputs."""
+    """Test in-memory and chunked polygonization results across supported inputs."""
 
     landsat_b4_path = examples.get_path_test("everest_landsat_b4")
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
@@ -481,7 +481,7 @@ class TestPolygonize:
          - Dask backend through Xarray accessor,
          - Multiprocessing backend through Raster class.
 
-        Additionally, both Dask and Multiprocessing inputs remains lazy (unloaded), but output vector is eager.
+        Additionally, both Dask and Multiprocessing inputs remains lazy (unloaded), but output vector is in-memory.
         """
 
         pytest.importorskip("dask")
@@ -498,9 +498,9 @@ class TestPolygonize:
         ds_base.load()
         # Multiprocessing input (lazy if we pass Multiprocessing later)
         raster_mp = gu.Raster(path_raster)
-        mp_config = MultiprocConfig(chunks=10)
+        mp_config = MultiprocConfig(chunks=17)
         # Dask input (lazy)
-        ds = open_raster(path_raster, chunks={"x": 10, "y": 10})
+        ds = open_raster(path_raster, chunks={"x": 17, "y": 17})
         assert not ds._in_memory
         assert isinstance(ds.data, da.Array)
         assert ds.data.chunks is not None

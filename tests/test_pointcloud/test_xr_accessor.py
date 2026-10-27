@@ -31,7 +31,7 @@ from tests.test_pointcloud.test_pd_accessor import TestPointCloudAccessor as Poi
 
 @pytest.fixture
 def pointcloud_file(tmp_path: Any) -> Any:
-    """Fixture for tests, providing a GeoParquet writer to compare lazy point operations with eager results"""
+    """Fixture for tests, providing a GeoParquet writer to compare lazy point operations with in-memory results"""
 
     import geopandas as gpd
 
@@ -556,7 +556,7 @@ class TestDatasetPointCloudAccessor:
             source = source.chunk({"point": 4, "x": 4, "y": 3})
         options = options.copy()
         if "bounds" not in options:
-            # Use the independent DEM as the same grid reference for eager and chunked calls
+            # Use the independent DEM as the same grid reference for in-memory and chunked calls
             options["ref"] = source.dem
         original = source.copy(deep=True)
 
@@ -602,6 +602,8 @@ class TestDatasetPointCloudAccessor:
                     "max_lag": 8,
                     "estimator": np.mean,
                     "random_state": 7,
+                    # Use the same pair storage for strict metadata comparisons
+                    "force_output_to_memory": True,
                 },
                 True,
                 assert_variograms_equal,
@@ -655,7 +657,7 @@ class TestDatasetPointCloudAccessor:
         if with_mask:
             options["mask"] = np.arange(9) != 2
 
-        # Save the eager source for independent DataArray calculations
+        # Save the in-memory source for independent DataArray calculations
         reference = source
 
         # Optionally convert X/Y to data variables
@@ -1203,8 +1205,8 @@ class TestDatasetPointCloudAccessor:
         assert lazy.height.chunks and lazy.point.chunks and result.height.chunks and result.point.chunks
         assert "point" not in result.xindexes
 
-        # 3/ Compare eager outputs and loading behaviour
-        # Compute and compare with the eager operation, including original labels, then check the source stays lazy
+        # 3/ Compare in-memory outputs and loading behaviour
+        # Compute and compare with the in-memory operation, including original labels, then check the source stays lazy
         expected = getattr(eager.pc, method)(**options)
         assert_xarray_equal(result.compute(), expected)
         assert lazy.height.chunks and lazy.point.chunks
@@ -1263,7 +1265,7 @@ class TestDatasetPointCloudAccessorChunked:
             assert variable.chunks == source[name].chunks
             assert variable.data is source[name].data
 
-        # Compute each view and compare values and metadata with the original eager fixture
+        # Compute each view and compare values and metadata with the original in-memory fixture
         for name, variable in arrays.items():
             xr.testing.assert_identical(variable.compute(), mixed_dataset[name])
             assert variable.chunks and source[name].chunks

@@ -214,7 +214,7 @@ class TestTransformation:
 class TestTransformationChunked:
     """Test module for vector transformations run with Dask or multiprocessing."""
 
-    def test_clip__chunked_backends_equal(self, tmp_path: Any) -> None:
+    def test_clip__chunked_backends_equal(self, tmp_path: Any, mp_cluster: MpCluster) -> None:
         """Checks that clip with Dask and multiprocessing gives the same result as in-memory."""
 
         dgpd = pytest.importorskip("dask_geopandas")
@@ -240,9 +240,8 @@ class TestTransformationChunked:
         lazy = gu.open_vector(filename, chunks=2)
         multiproc = gu.Vector(filename)
         lazy_result = lazy.vct.clip(geometry)
-        with MpCluster({"nb_workers": 2}) as cluster:
-            config = MultiprocConfig(chunks=2, outfile=str(tmp_path / "vector_clipped.gpkg"), cluster=cluster)
-            multiproc_result = multiproc.clip(geometry, mp_config=config)
+        config = MultiprocConfig(chunks=2, outfile=str(tmp_path / "vector_clipped.gpkg"), cluster=mp_cluster)
+        multiproc_result = multiproc.clip(geometry, mp_config=config)
 
         # Check that the Dask and MP outputs have expected types and remain unloaded
         assert isinstance(lazy_result, dgpd.GeoDataFrame)

@@ -900,6 +900,36 @@ class TestPropagationErrors:
 class TestSimulationErrors:
     """Test module for warnings/errors in simulate()."""
 
+    def test_simulate__error_fatal_calculation_stops_draws(self) -> None:
+        """Checks an error is raised immediately for fatal simulation failures."""
+
+        # Create a calculation that fails and record attempted draws
+        selection = pd.DataFrame({"flat_index": [0], "estimate": [0.0]}, index=["value"])
+        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        attempted: list[float] = []
+
+        def calculate(draw: float) -> float:
+            """Record the draw and report a calculation whose output no longer matches its original labels."""
+
+            attempted.append(draw)
+            raise ValueError("changed output labels")
+
+        # Simulate with warnings allowed and a fatal exception type
+        with pytest.raises(ValueError, match="changed output labels"):
+            simulate(
+                estimate=0.0,
+                draw_error=lambda _rng: 1.0,
+                calculate=calculate,
+                error_structure=structure,
+                selection=selection,
+                n_simulations=3,
+                on_error="warn",
+                fatal_exceptions=(ValueError,),
+            )
+
+        # Check only one draw was attempted
+        assert attempted == [1.0]
+
     @pytest.mark.parametrize(
         "bad_draw, message", [(np.array([1.0, 2.0]), "changed the output shape"), (np.nan, "no finite values")]
     )

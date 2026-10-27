@@ -111,6 +111,52 @@ class TestErrorStructureEstimation:
         assert structure.predict_magnitude() == pytest.approx(np.std(errors[:3]) / scale)
         assert structure.empirical_variogram is None
 
+    @pytest.mark.parametrize("at", ["other", None])
+    def test_estimate__raster_errors_at_comparison_points(self, at: Literal["other"] | None) -> None:
+        """Checks that raster errors can be estimated at comparison points."""
+
+        # Create a raster and comparison points with one NaN
+        values = np.arange(36, dtype=float).reshape(6, 6)
+        source = gu.Raster.from_array(values, Affine(10, 0, 0, 0, -10, 60), 32632, nodata=-9999)
+        rows, columns = np.array([1, 1, 4, 4]), np.array([1, 4, 1, 4])
+        x, y = source.ij2xy(rows, columns)
+        reference = gu.PointCloud.from_xyz(x, y, np.array([0.0, 0.0, np.nan, 0.0]), crs=32632)
+
+        # Estimate errors at comparison points
+        structure = gu.ErrorStructure.estimate(
+            source,
+            other=reference,
+            other_precision="negligible",
+            at=at,
+            components={"measurement": {"magnitude": "constant", "correlation": None}},
+            spread_estimator=np.std,
+        )
+
+        # Check the standard deviation of the three finite comparisons
+        expected_errors = values[rows, columns][[0, 1, 3]]
+        assert structure.predict_magnitude() == pytest.approx(np.std(expected_errors))
+
+    def test_estimate__reprojected_comparison_grid(self) -> None:
+        """Checks that estimation can reproject a comparison raster."""
+
+        # Create rasters with different resolutions and a zero reference
+        values = np.arange(36, dtype=float).reshape(6, 6)
+        source = gu.Raster.from_array(values, Affine(10, 0, 0, 0, -10, 60), 32632, nodata=-9999)
+        reference = gu.Raster.from_array(np.zeros((3, 3)), Affine(20, 0, 0, 0, -20, 60), 32632, nodata=-9999)
+
+        # Estimate errors after reprojection
+        structure = gu.ErrorStructure.estimate(
+            source,
+            other=reference,
+            other_precision="negligible",
+            align="reproject",
+            components={"measurement": {"magnitude": "constant", "correlation": None}},
+            spread_estimator=np.std,
+        )
+
+        # Check equality with the source standard deviation
+        assert structure.predict_magnitude() == pytest.approx(np.std(values))
+
     def test_estimate_independent_variable_component_without_variography(self) -> None:
         """Checks that an independent component recovers increasing magnitudes without fitting a variogram."""
 
@@ -252,10 +298,11 @@ class TestErrorStructureEstimation:
         np.testing.assert_allclose(result.predict_correlation(distances), expected.predict_correlation(distances))
         assert result.empirical_variogram is not None
         assert expected.empirical_variogram is not None
+        assert result.empirical_variogram.estimator == "matheron"
         np.testing.assert_allclose(result.empirical_variogram.semivariance, expected.empirical_variogram.semivariance)
 
-    def test_estimate_error_structure__eager_raster_accessor_variable_correlation(self) -> None:
-        """Checks that an eager DataArray fits the same variable magnitude and correlation as a Raster."""
+    def test_estimate_error_structure__in_memory_raster_accessor_variable_correlation(self) -> None:
+        """Checks that an in-memory DataArray fits the same variable magnitude and correlation as a Raster."""
 
         pytest.importorskip("skgstat")
 
@@ -277,7 +324,7 @@ class TestErrorStructureEstimation:
             "random_state": 4,
         }
 
-        # Fit the same scaled difference through Raster and eager DataArray inputs
+        # Fit the same scaled difference through Raster and in-memory DataArray inputs
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
             expected = measured.estimate_error_structure(reference, predictors={"quality": predictor}, **options)
@@ -433,7 +480,7 @@ class TestErrorStructureEstimationChunked:
             ),
         ],
     )
-    def test_estimate__chunked_inputs_and_components_match_eager(
+    def test_estimate__chunked_inputs_and_components_match_in_memory(
         self,
         as_object_type: Literal["dataarray", "geodataframe"],
         pointcloud_file: Any,
@@ -442,18 +489,17 @@ class TestErrorStructureEstimationChunked:
         components: dict[str, dict[str, Any]],
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
+        request: pytest.FixtureRequest,
     ) -> None:
         """
-        Checks that Dask/MP estimates match eager components for raster and point inputs.
+        Checks that Dask/MP estimates match in-memory components for raster and point inputs.
 
         We vary:
-         - Dask vs Multiproc (and compare to eager)
+         - Dask vs Multiproc (and compare to in-memory)
          - Input: single raster, single point (when directly an error proxy), or two points, two raster,
            one point and one raster (when another variable to difference with),
          - Error component definition: constant/variable magnitude, with/without correlation, and multiple components.
         """
-
-        from contextlib import ExitStack
 
         # 1/ Synthetic variables
         rows, columns = np.indices((12, 12))
@@ -593,32 +639,30 @@ class TestErrorStructureEstimationChunked:
 
         # For point-point, record MP point difference internally
         submitted_chunks: list[int] = []
-        with ExitStack() as stack:
-            if backend == "multiproc" and input_type == "point-point" and not variable and not correlated:
-                from geoutils.multiproc.cluster import MpCluster
-                from geoutils.uncertainty.estimation import _difference_point_partition
+        if backend == "multiproc" and input_type == "point-point" and not variable and not correlated:
+            from geoutils.uncertainty.estimation import _difference_point_partition
 
-                cluster = stack.enter_context(MpCluster({"nb_workers": 2}))
-                mp_config = MultiprocConfig(chunks=23, cluster=cluster)
-                submit = cluster.submit
+            cluster = request.getfixturevalue("mp_cluster")
+            mp_config = MultiprocConfig(chunks=23, cluster=cluster)
+            submit = cluster.submit
 
-                def record_submit(function: Any, *args: Any, **kwargs: Any) -> Any:
-                    if function is _difference_point_partition:
-                        submitted_chunks.append(len(args[0]))
-                    return submit(function, *args, **kwargs)
+            def record_submit(function: Any, *args: Any, **kwargs: Any) -> Any:
+                if function is _difference_point_partition:
+                    submitted_chunks.append(len(args[0]))
+                return submit(function, *args, **kwargs)
 
-                monkeypatch.setattr(cluster, "submit", record_submit)
+            monkeypatch.setattr(cluster, "submit", record_submit)
 
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", UserWarning)
-                if chunked_other is None:
-                    result = gu.ErrorStructure.estimate(
-                        source_interface, predictors=chunked_predictors, mp_config=mp_config, **options
-                    )
-                else:
-                    result = source_interface.estimate_error_structure(
-                        chunked_other, predictors=chunked_predictors, mp_config=mp_config, **options
-                    )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            if chunked_other is None:
+                result = gu.ErrorStructure.estimate(
+                    source_interface, predictors=chunked_predictors, mp_config=mp_config, **options
+                )
+            else:
+                result = source_interface.estimate_error_structure(
+                    chunked_other, predictors=chunked_predictors, mp_config=mp_config, **options
+                )
 
         # 3/ We check exact equality across Dask/MP
         for spatial_input, kind in input_states:

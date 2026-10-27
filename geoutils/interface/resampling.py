@@ -457,7 +457,7 @@ def _resample_points_base(
     if points is None:
         raise ValueError("Raster reduction requires target points.")
 
-    # Same neighborhood and global cell IDs for eager arrays and worker tiles
+    # Same neighborhood and global cell IDs for in-memory arrays and worker tiles
     return _resample_array_at_points(
         array,
         transform,
@@ -816,7 +816,7 @@ def _resample_points_dask_pointcloud(
 ) -> Any:
     """Resample raster values at a Dask-GeoPandas point cloud."""
 
-    # Reject options whose eager return type cannot be represented by partitions
+    # Reject options whose return type cannot be represented by partitions
     if return_interpolator:
         raise ValueError("Option 'return_interpolator' of interp_points cannot be used with Dask point-cloud inputs.")
     if input_latlon:
@@ -845,7 +845,7 @@ def _resample_points_dask_pointcloud(
         "force_scipy_function": force_scipy_function,
         "return_interpolator": False,
     }
-    # Map the eager partition helper while keeping the complete point cloud lazy
+    # Map the partition helper while keeping the complete point cloud lazy
     out = points_in_crs.map_partitions(
         _resample_points_partition,
         source_raster,
@@ -870,7 +870,7 @@ def _resample_points_dask_pointcloud(
 
 
 ###############################################
-# 1.3.1/ EAGER OR DASK ARRAY POINT TARGETS
+# 1.3.1/ IN-MEMORY OR DASK ARRAY POINT TARGETS
 ###############################################
 
 

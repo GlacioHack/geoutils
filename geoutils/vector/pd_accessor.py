@@ -95,11 +95,12 @@ def open_vector(
     Open a vector file.
 
     :param filename: Path to the vector file to open.
-    :param chunks: Number of features per Dask partition. None uses one partition, or eager GeoPandas with load=True.
+    :param chunks: Number of features per Dask partition. None uses one partition, or in-memory GeoPandas
+        with load=True.
     :param load: Whether to read features immediately when chunks is None. The default False opens one Dask partition
         and requires Dask-GeoPandas. Explicit chunks always stay lazy.
     :param kwargs: Keyword arguments passed to :func:`geopandas.read_file`.
-    :returns: A lazy Dask-GeoPandas GeoDataFrame, or an eager GeoDataFrame when load=True without chunks.
+    :returns: A lazy Dask-GeoPandas GeoDataFrame, or an in-memory GeoDataFrame when load=True without chunks.
     """
 
     if not load and chunks is None:
@@ -115,7 +116,7 @@ def open_vector(
         _register_dask_vector_accessor()
         return dgpd.read_file(filename, chunksize=chunks, **kwargs)
 
-    # Without chunks, keep GeoPandas' regular eager behavior
+    # Without chunks, use GeoPandas' regular behavior
     return gpd.read_file(filename, **kwargs)
 
 
@@ -139,7 +140,7 @@ class GeoDataFrameVectorAccessor(VectorBase):
         self.ds = new_ds
 
     def __init__(self, pandas_obj: Any) -> None:
-        """Validate and retain an eager or lazy geospatial dataframe."""
+        """Validate and retain an in-memory or lazy geospatial dataframe."""
 
         super().__init__()
 
@@ -177,8 +178,8 @@ class GeoDataFrameVectorAccessor(VectorBase):
         """
         Return a copy of the vector GeoDataFrame.
 
-        :param deep: Whether to copy eager data deeply. Dask-backed dataframes always copy their task graph.
-        :returns: A copy with the same eager or lazy dataframe type.
+        :param deep: Whether to copy in-memory data deeply. Dask-backed dataframes always copy their task graph.
+        :returns: A copy with the same in-memory or lazy dataframe type.
         """
 
         # Dask copies its task graph and does not expose Pandas' deep-copy option
@@ -191,7 +192,7 @@ class GeoDataFrameVectorAccessor(VectorBase):
 
         from geoutils.vector.vector import Vector
 
-        # Vector is eager by design, so compute lazy partitions only at conversion time
+        # Compute lazy partitions when converting to a Vector
         ds = self._obj.compute() if is_dask_dataframe(self._obj) else self._obj
         return Vector(ds)
 
@@ -201,7 +202,7 @@ class GeoDataFrameVectorAccessor(VectorBase):
 
         :param filename: Path to the output file or dataset.
         :param driver: Output format driver. By default, infer it from ``filename``.
-        :param schema: Schema passed to GeoPandas for eager vector formats. Not supported for Dask GeoParquet.
+        :param schema: Schema passed to GeoPandas for vector formats. Not supported for Dask GeoParquet.
         :param index: Whether to write the dataframe index.
         :param kwargs: Additional keyword arguments passed to GeoPandas or Dask-GeoPandas.
         """
@@ -222,7 +223,7 @@ class GeoDataFrameVectorAccessor(VectorBase):
                 self._obj.to_parquet(filename, **kwargs)
                 return
 
-            # Other vector formats require one eager GeoDataFrame for GeoPandas writing
+            # Other vector formats require one in-memory GeoDataFrame for GeoPandas writing
             ds = self._obj.compute()
         else:
             ds = self._obj

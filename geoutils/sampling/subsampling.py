@@ -2356,7 +2356,7 @@ def _subsample(
     arr = data if data.ndim == 2 else data[band - 1]
     mask_array = _mask_at_support(mask, source_raster)
 
-    # Keep Dask data and mask blocks lazy; an eager source collects only a supplied lazy mask
+    # Keep Dask data and mask blocks lazy; an in-memory source collects only a supplied lazy mask
     if dask_backend:
         return _dask_subsample(
             arr,
@@ -2449,7 +2449,8 @@ def _subsample_pointcloud_array(
 
     _dask_subsample() treats point rows as a single-column grid and preserves NumPy's random-draw order.
     _mask_at_support() places the optional mask on these rows before either sampler counts eligible values.
-    Eager columns use _subsample_numpy() directly. Both paths return computed results without changing the value dtype.
+    In-memory columns use _subsample_numpy() directly. Both paths return computed results without changing
+    the value dtype.
 
     :param source_pointcloud: Point cloud or accessor whose selected data attribute supplies the sampled values.
     :param subsample: Positive fraction of finite values at most one, or maximum number of values above one.
@@ -2466,7 +2467,9 @@ def _subsample_pointcloud_array(
     from geoutils.sampling.support import _as_array, _mask_at_support
 
     if mp_config is not None and source_pointcloud._is_dask:
-        raise ValueError("Cannot use Multiprocessing and Dask simultaneously. Remove ``mp_config`` or use eager data.")
+        raise ValueError(
+            "Cannot use Multiprocessing and Dask simultaneously. Remove ``mp_config`` or use in-memory data."
+        )
 
     point_partition_size = None
     if mp_config is not None:
@@ -2535,7 +2538,7 @@ def _subsample_pointcloud_array(
             return (first_array.compute(),)
         return first_array.compute()
 
-    # Preserve the established NumPy sampling rules for eager point data
+    # Preserve the established NumPy sampling rules for in-memory point data
     if mask_array is not None and is_dask_array(mask_array):
         mask_array = mask_array.compute()
     if mp_config is not None and not force_output_to_memory:
@@ -2595,7 +2598,7 @@ def _pointcloud_from_subsample_indices(
     partition_lengths: Sequence[int] | None = None,
 ) -> Any:
     """
-    Build an eager or lazy point cloud containing the sampled source rows.
+    Build an in-memory or lazy point cloud containing the sampled source rows.
 
     Known partition lengths let Dask select rows without first reading partitions to count them.
     """
@@ -2694,7 +2697,9 @@ def _multiproc_subsample_pointcloud(
     )
 
     if source_pointcloud._is_dask:
-        raise ValueError("Cannot use Multiprocessing and Dask simultaneously. Remove ``mp_config`` or use eager data.")
+        raise ValueError(
+            "Cannot use Multiprocessing and Dask simultaneously. Remove ``mp_config`` or use in-memory data."
+        )
     partition_size = _point_partition_size(mp_config)
     output_filename, driver = _resolve_pointcloud_output(
         mp_config.outfile,
@@ -2704,7 +2709,7 @@ def _multiproc_subsample_pointcloud(
     )
     output_filename.parent.mkdir(parents=True, exist_ok=True)
 
-    # Keep unopened GPKG/LAS sources on disk and split eager dataframes before submitting them
+    # Keep unopened GPKG/LAS sources on disk and split in-memory dataframes before submitting them
     source_filename = pathlib.Path(source_pointcloud.name) if source_pointcloud.name is not None else None
     if not source_pointcloud.is_loaded:
         if source_filename is None:
@@ -2789,7 +2794,7 @@ def _multiproc_subsample_pointcloud(
                 las_bounds=[bounds for _, bounds in partition_results] if driver in ("LAS", "LAZ") else None,
             )
 
-    # Accessors return an eager GeoDataFrame while PointCloud inputs keep the output file unloaded
+    # Accessors return an in-memory GeoDataFrame while PointCloud inputs keep the output file unloaded
     if source_pointcloud._is_pd:
         pointcloud.load(columns="all")
         return source_pointcloud._cast_pointcloud_output(pointcloud._dataset)
@@ -2930,7 +2935,7 @@ def _extract_raster_cell_values(
         # Join the selected bands while keeping their values lazy
         pixel_data = da.stack(band_values, axis=0)
 
-    # Eager
+    # In-memory
     elif data is not None:
         # Select each requested band directly from the raster array in memory
         band_values = [data[rows, columns] if data.ndim == 2 else data[band - 1, rows, columns] for band in bands]
@@ -2997,7 +3002,7 @@ def _subsample_raster_from_indices(
     All subsample indices and values will at some point concatenate in memory at once.
 
     Thus, this function is used by:
-    - Eager,
+    - In-memory,
     - Dask only for sample sizes smaller than raster chunk size, otherwise it requires different logic explained in
         chunked helpers below),
     - Multiproc for small sample sizes too, but also when as_array=True, because Multiproc cannot stream chunk-by-chunk
@@ -3067,7 +3072,7 @@ def _subsample_raster_from_indices(
             auxiliary=auxiliary,
         )
 
-    # 5/ Build output, lazy for Dask, otherwise eager
+    # 5/ Build output, lazy for Dask, otherwise in-memory
     if is_dask_array(pixel_data):
         import dask.array as da
 
@@ -3104,7 +3109,7 @@ def _subsample_raster_from_indices(
         # Finalize point metadata; the shared builder also adds ``.pc`` and ``.vct`` to this Dask frame
         return _build_pointcloud_output(dataframe, data_name=data_name, as_dataframe=True)
 
-    # Build an eager array or PointCloud result
+    # Build an in-memory array or PointCloud result
     if as_array:
         return np.vstack((np.asarray(x_coords), np.asarray(y_coords), pixel_data)).T
 
@@ -3208,11 +3213,11 @@ def _raster_values_to_point_partition(
 
 
 ###########################
-# 3C/ EAGER SUBSAMPLING
+# 3C/ IN-MEMORY SUBSAMPLING
 ###########################
 
 
-def _eager_subsample_raster(
+def _subsample_raster_in_memory(
     source_raster: RasterType,
     bands: list[int],
     column_names: list[str],
@@ -3224,7 +3229,7 @@ def _eager_subsample_raster(
     as_array: bool | Literal["xarray"],
 ) -> Any:
     """
-    Build an eager point output, reading an unloaded partial raster in bounded tiles.
+    Build an in-memory point output, reading an unloaded partial raster in bounded tiles.
 
     If the entire raster should be converted (subsample == 1), it is loaded.
     For a smaller requested subsample, values are read in small parts without loading the source raster.
@@ -3884,12 +3889,12 @@ def _subsample_raster(
     rename_default_data_name: bool = True,
 ) -> Any:
     """
-    Subsample raster cells into point output with eager, Dask, or multiprocessing execution.
+    Subsample raster cells into point output with in-memory, Dask, or multiprocessing execution.
 
     See RasterBase.subsample() and to_pointcloud() for details on the arguments.
 
     Internally, this function checks user inputs, then passes on to:
-    - _eager_subsample_raster() for an in-memory input,
+    - _subsample_raster_in_memory() for an in-memory output,
     - _dask_subsample_raster() for a Dask input, reading chunk by chunk and returning a lazy Dask array or
         GeoDataFrame, optionally written chunk-by-chunk as well,
     - _multiproc_subsample_raster() for a multiprocessing input, reading the raster chunk by chunk and writing to a
@@ -3984,7 +3989,7 @@ def _subsample_raster(
     if random_state is None and subsample != 1:
         random_state = int(np.random.default_rng().integers(0, np.iinfo(np.uint32).max, dtype=np.uint32))
 
-    # 3/ Call the relevant backend depending on input type (eager, Dask, Multiproc)
+    # 3/ Call the relevant backend depending on input type (in-memory, Dask, Multiproc)
     if dask_backend:
         return _dask_subsample_raster(
             source_raster=source_raster,
@@ -4014,7 +4019,7 @@ def _subsample_raster(
             force_output_to_memory=force_output_to_memory,
         )
 
-    return _eager_subsample_raster(
+    return _subsample_raster_in_memory(
         source_raster=source_raster,
         bands=all_bands,
         column_names=all_column_names,

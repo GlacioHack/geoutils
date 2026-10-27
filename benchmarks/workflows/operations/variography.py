@@ -26,7 +26,9 @@ from benchmarks.workflows.config import (
 from benchmarks.workflows.core import (
     Benchmark,
     Case,
+    ExecutionMode,
     Operation,
+    comparison,
     execution_cases,
     parameter_config,
 )
@@ -108,7 +110,11 @@ def prepare_estimator(estimator: str) -> None:
 def variogram_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
     """Define variogram options."""
 
-    return {"estimator": case.method}
+    options = {"estimator": case.method}
+    for name in ("reduction_backend", "flox_engine", "method", "tdigest_compression"):
+        if name in case.options:
+            options[name] = case.options[name]
+    return options
 
 
 def pair_sampling_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any]:
@@ -116,7 +122,10 @@ def pair_sampling_options(case: Case, config: RuntimeConfig) -> Mapping[str, Any
 
     if case.method == "random_xy":
         return {"sampling": "random_xy", "strategy": "chunk_anchors"}
-    return {"sampling": "loglag", "strategy": case.method}
+    options = {"sampling": "loglag", "strategy": case.method}
+    if "read_strategy" in case.options:
+        options["read_strategy"] = case.options["read_strategy"]
+    return options
 
 
 def prepare_raster_variogram(runner: Any, case: Case) -> None:
@@ -134,7 +143,8 @@ def run_raster_variogram(runner: Any, case: Case) -> float:
     assert case.method is not None
     result = variogram(
         runner.variography_source,
-        estimator=case.method,
+        **variogram_options(case, runner.config),
+        output_chunks=int(runner.config.value("pair_chunk_size", 10_007)),
         n_lags=int(runner.config.value("n_lags", VARIOGRAM_N_LAGS)),
         n_pairs=int(runner.config.value("n_pairs", VARIOGRAM_SAMPLE_PAIRS)),
         sampling="loglag",
@@ -153,7 +163,22 @@ def prepare_pair_reduction(runner: Any, case: Case) -> None:
 
     assert case.method is not None
     prepare_estimator(case.method)
+    if case.options.get("reduction_backend") == "flox":
+        try:
+            import_optional("flox", extra_name="num")
+            if case.method in {"dowd", "percentile"} and case.options.get("method") != "groupwise":
+                import_optional("crick", extra_name="num")
+        except ImportError as exc:
+            raise NotImplementedError("Install geoutils[num] for this variogram comparison") from exc
     runner.variography_pairs = prepare_variogram_pairs(int(runner.config.value("n_pairs")))
+    if runner.backend == "dask":
+        # This measures reduction of identical prepared pairs, independently of spatial sampling
+        runner.variography_pairs = runner.variography_pairs.chunk(
+            {"pair": int(runner.config.value("pair_chunk_size", 10_007))}
+        )
+
+    # Warm the local engine outside the ASV operation timing
+    Variogram.from_pairs(prepare_variogram_pairs(64), **variogram_options(case, runner.config), n_lags=4)
 
 
 def run_pair_reduction(runner: Any, case: Case) -> float:
@@ -162,7 +187,7 @@ def run_pair_reduction(runner: Any, case: Case) -> float:
     assert case.method is not None
     result = Variogram.from_pairs(
         runner.variography_pairs,
-        estimator=case.method,
+        **variogram_options(case, runner.config),
         n_lags=int(runner.config.value("n_lags", VARIOGRAM_N_LAGS)),
     )
     return float(np.sum(result.counts))
@@ -243,7 +268,7 @@ RASTER_PAIR_SAMPLING = Operation(
     prepare_raster_pair_sampling,
     run_raster_pair_sampling,
     pair_sampling_options,
-    ("sampling", "strategy"),
+    ("sampling", "strategy", "read_strategy"),
     call_name=".pairsample",
     label="Raster pair sampling",
     benchmark_name="rasterpairsample",
@@ -270,20 +295,68 @@ RASTER_VARIOGRAM_CASES = execution_cases(
     "dowd",
     None,
     executions=("inmem", "dask"),
-    labels={"method": "Dowd"},
+    labels={"method": "Dowd", "engine": "GeoUtils"},
 )
-PAIR_REDUCTION_CASES = tuple(
-    Case(method=estimator, labels={"method": estimator.title()}) for estimator in ("matheron", "dowd")
+PAIR_EXECUTIONS: tuple[ExecutionMode, ...] = ("inmem", "dask")
+PAIR_REDUCTION_CASES = (
+    tuple(
+        Case(
+            method=estimator,
+            execution=execution,
+            options={"method": "groupwise" if estimator == "dowd" else "map-reduce"},
+            labels={"method": estimator.title(), "engine": "GeoUtils"},
+        )
+        for estimator in ("matheron", "cressie", "dowd")
+        for execution in PAIR_EXECUTIONS
+    )
+    + tuple(
+        Case(
+            method=estimator,
+            engine=engine,
+            execution=execution,
+            options={"reduction_backend": "flox", "flox_engine": "numba" if engine == "flox_numba" else None},
+            labels={"method": estimator.title(), "engine": "Flox Numba" if engine == "flox_numba" else "Flox default"},
+        )
+        for estimator in ("matheron", "cressie")
+        for engine in ("flox_default", "flox_numba")
+        for execution in PAIR_EXECUTIONS
+    )
+    + tuple(
+        Case(
+            method="dowd",
+            engine="tdigest",
+            execution=execution,
+            options={"reduction_backend": "flox", "method": "map-reduce", "tdigest_compression": 200},
+            labels={"method": "Dowd", "engine": "Flox t-digest"},
+        )
+        for execution in PAIR_EXECUTIONS
+    )
+)
+RASTER_VARIOGRAM_CASES += tuple(
+    case for case in PAIR_REDUCTION_CASES if case.method != "dowd" or case.engine == "tdigest"
 )
 RASTER_PAIR_METHODS = ("independent", "anchors", "chunk_anchors", "anchor_batched", "random_xy")
 RASTER_PAIR_CASES = tuple(
-    Case(method=method, execution=execution) for method in RASTER_PAIR_METHODS for execution in ("inmem", "dask")
+    Case(method=method, execution=execution) for method in RASTER_PAIR_METHODS for execution in PAIR_EXECUTIONS
 )
 RASTER_PAIR_SIZE_CASES = execution_cases(
     "chunk_anchors",
     None,
     executions=("inmem", "dask"),
 )
+RASTER_PAIR_READ_CASES = tuple(
+    Case(
+        method="chunk_anchors",
+        engine=read_strategy,
+        execution=execution,
+        options={"read_strategy": read_strategy},
+        labels={"engine": read_strategy.replace("_", " ").title()},
+    )
+    for read_strategy in ("reuse_values", "packed_validity")
+    for execution in PAIR_EXECUTIONS
+)
+RASTER_PAIR_CASES += RASTER_PAIR_READ_CASES
+RASTER_PAIR_SIZE_CASES += RASTER_PAIR_READ_CASES
 POINT_PAIR_CASES = tuple(Case(method=strategy) for strategy in ("kdtree", "hashgrid", "nn_logvector"))
 
 
@@ -403,4 +476,33 @@ BENCHMARKS: tuple[Benchmark, ...] = (
         parameter_label="Number of input points",
         parameter_title="point count",
     ),
+)
+
+
+#############################
+# Define report comparisons
+#############################
+
+COMPARISONS = tuple(
+    comparison(
+        benchmark,
+        by="engine",
+        cases=tuple(case for case in benchmark.cases if case.method == estimator and case.execution == execution),
+        slug=f"{benchmark.id}-{estimator}-{execution}",
+        documentation=False,
+    )
+    for benchmark in BENCHMARKS[:3]
+    for estimator in ("matheron", "cressie", "dowd")
+    for execution in ("inmem", "dask")
+)
+COMPARISONS += tuple(
+    comparison(
+        benchmark,
+        by="engine",
+        cases=tuple(case for case in benchmark.cases if case.method == "chunk_anchors" and case.execution == execution),
+        slug=f"{benchmark.id}-reads-{execution}",
+        documentation=False,
+    )
+    for benchmark in BENCHMARKS[3:5]
+    for execution in PAIR_EXECUTIONS
 )

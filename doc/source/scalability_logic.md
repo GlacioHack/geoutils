@@ -131,7 +131,7 @@ Because points within a point chunk may fall into different raster chunks, inter
 
 This approach keeps memory usage low, as only the raster chunks needed for the current point chunk are loaded at any given time, and minimizes speed loss by evaluating all points belonging in a same raster chunk at once.
 
-Finally, note that **using eager (in-memory) point coordinates is typically much faster** when the number of points is moderate. Unless necessary, keep points in memory to avoid additional chunking overhead.
+Finally, note that **using in-memory point coordinates is typically much faster** when the number of points is moderate. Unless necessary, keep points in memory to avoid additional chunking overhead.
 
 ### Chunked subsampling
 

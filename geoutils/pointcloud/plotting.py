@@ -84,7 +84,7 @@ def _prepare_display_pointcloud(
 
     Internal behaviour:
     - _display_point_count() translates the axes size to a point limit,
-    - subsample() selects the same rows for eager and chunked inputs, and
+    - subsample() selects the same rows for in-memory and chunked inputs, and
     - reproject() changes only the CRS of the subsample, if necessary.
 
     The returned bounding box is the one from the full source before subsampling to avoid over-cropping.

@@ -210,7 +210,7 @@ class ChunkedGeoGrid:
         for bid in block_ids:
             block_shape = (bid["ye"] - bid["ys"], bid["xe"] - bid["xs"])
             if self.grid.transform.b == 0 and self.grid.transform.d == 0:
-                # Preserve established north-up coordinates across eager and chunked calculations
+                # Preserve established north-up coordinates across in-memory and chunked calculations
                 geogrid_tmp = GeoGrid(transform=self.grid.transform, crs=self.grid.crs, shape=block_shape)
                 geogrid_block = geogrid_tmp.translate(xoff=bid["xs"], yoff=-bid["ys"])
             else:

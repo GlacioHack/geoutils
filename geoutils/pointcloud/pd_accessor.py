@@ -131,7 +131,7 @@ class GeoDataFramePointCloudAccessor(GeometryPointCloudBase, GeoDataFrameVectorA
             self._data_name = _infer_data_name(pandas_obj)
             return
 
-        # Normalize eager Pandas inputs to a GeoDataFrame with a named geometry column
+        # Normalize in-memory Pandas inputs to a GeoDataFrame with a named geometry column
         if isinstance(pandas_obj, gpd.GeoDataFrame):
             obj = pandas_obj
         elif isinstance(pandas_obj, pd.DataFrame) and "geometry" in pandas_obj.columns:
@@ -139,7 +139,7 @@ class GeoDataFramePointCloudAccessor(GeometryPointCloudBase, GeoDataFrameVectorA
             obj.attrs.update(getattr(pandas_obj, "attrs", {}))
         else:
             raise AttributeError("The 'pc' accessor is only available for point-cloud GeoDataFrame objects.")
-        # Point-cloud operations require every eager geometry to be a point
+        # Point-cloud operations require every in-memory geometry to be a point
         if not all(p == "Point" for p in obj.geom_type):
             raise AttributeError("The 'pc' accessor is only available for GeoDataFrames with point geometries.")
 
@@ -192,14 +192,14 @@ class GeoDataFramePointCloudAccessor(GeometryPointCloudBase, GeoDataFrameVectorA
 
     @property
     def geometry(self) -> gpd.GeoSeries | Any:
-        """Point geometry column as an eager or lazy GeoSeries."""
+        """Point geometry column as an in-memory or lazy GeoSeries."""
 
         if self._is_dask:
             return self.ds["geometry"]
         return self.ds.geometry
 
     def load(self) -> gpd.GeoDataFrame:
-        """Compute and return a Dask-backed point cloud as an eager GeoDataFrame."""
+        """Compute and return a Dask-backed point cloud as an in-memory GeoDataFrame."""
 
         if not self._is_dask:
             raise ValueError("Data are already loaded.")
@@ -232,8 +232,8 @@ class GeoDataFramePointCloudAccessor(GeometryPointCloudBase, GeoDataFrameVectorA
         :param offsets: Coordinate offsets for X, Y and Z.
         :param scales: Coordinate scales for X, Y and Z.
         :param chunks: Number of points per sequential write chunk. Dask inputs use their existing partitions.
-        :param mp_config: Multiprocessing configuration for writing eager point-cloud chunks in workers. Not supported
-            for Dask-backed point clouds.
+        :param mp_config: Multiprocessing configuration for writing in-memory point-cloud chunks in workers.
+            Not supported for Dask-backed point clouds.
         :param laz_chunk_size: Number of points per compressed LAZ disk chunk. Requires Lazrs; None uses its default.
         :param kwargs: Additional attributes to set on the LasPy header.
         """

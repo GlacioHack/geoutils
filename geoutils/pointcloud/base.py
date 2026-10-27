@@ -24,6 +24,7 @@ import pathlib
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -72,7 +73,7 @@ from geoutils.pointcloud.dataframe import (
 from geoutils.pointcloud.testing import _georeferenced_coords_equal
 from geoutils.sampling.subsampling import _subsample_pointcloud
 from geoutils.stats.stats import stats as _stats
-from geoutils.stats.stats import variogram as _variogram
+from geoutils.stats.variography import variogram as _variogram
 from geoutils.vector.base import VectorBase
 
 if TYPE_CHECKING:
@@ -349,7 +350,7 @@ class PointCloudBase(ABC):
         :param include_self: Whether each point contributes its current value to its own neighborhood.
         :param min_points: Minimum number of finite neighbors, combined with the Reducer's own minimum requirement.
         :param nodata_propagation: Omit invalid neighbors (``"ignore"``), propagate them, or use the Reducer default.
-        :param n_threads: SciPy query threads for eager execution. Zero uses the CPU count minus one.
+        :param n_threads: SciPy query threads for in-memory execution. Zero uses the CPU count minus one.
         :param batch_size: Maximum number of target points queried together. Lower this value to reduce temporary
             memory when each point has many neighbors.
         :param mp_config: Worker count, row partition size and output file for multiprocessing execution.
@@ -387,8 +388,12 @@ class PointCloudBase(ABC):
         subsample: int | float = 1,
         subsample_per_group: bool = False,
         random_state: int | np.random.Generator | None = None,
-        strategy: Literal["auto", "dense", "sparse", "groupwise"] = "auto",
+        method: Literal["auto", "map-reduce", "blockwise", "cohorts", "groupwise"] = "auto",
+        reindex: bool | None = None,
+        split_every: int | None = None,
         backend: Literal["geoutils", "flox"] = "geoutils",
+        flox_engine: str | None = None,
+        tdigest_compression: float = 100,
         subsampling_strategy: Literal["sequential", "topk"] = "topk",
         interpolation: InterpolationMethod = "linear",
         align: Literal["raise", "reproject"] = "raise",
@@ -429,11 +434,19 @@ class PointCloudBase(ABC):
         :param subsample_per_group: Apply subsample within each combined group (True, stratified sampling) or once
             across all groups (False). Without by, both use one global sample.
         :param random_state: Seed to reproduce subsampling (e.g. 42), or an existing random generator.
-        :param strategy: Combine chunk statistics for all groups ("dense"), only groups present in each chunk
-            ("sparse"), or gather each complete group ("groupwise"). "auto" chooses from the statistics and group count;
-            exact quantiles and custom functions require "auto" or "groupwise" for chunked data.
-        :param backend: Use the GeoUtils reducer ("geoutils") or optional Flox reducer ("flox") for grouped statistics;
-            see stats() for the Flox restrictions.
+        :param method: Combine chunk statistics ("map-reduce"), or gather each complete group ("groupwise").
+            "auto" chooses from the statistics and group count; exact quantiles and custom functions require "auto"
+            or "groupwise" for chunked data. Flox also supports "blockwise" and "cohorts".
+        :param reindex: Combine chunk statistics for all groups (True) or only groups present in each chunk (False).
+            None lets the backend choose.
+        :param split_every: Maximum block summaries per merge (at least 2). None uses Dask configuration or the backend
+            default (8 for GeoUtils).
+        :param backend: Use the GeoUtils reducer ("geoutils") or optional Flox reducer ("flox") for global or
+            grouped statistics. Both support Dask and multiprocessing. Exact quantiles collect complete groups;
+            map-reduce uses t-digests for quantiles. Group masks and custom functions require GeoUtils.
+        :param flox_engine: Local Flox reduction algorithm: None (automatic), "numpy", "numba", "flox" or "numbagg".
+            This is independent of Dask/MP execution. The "numbagg" engine does not support t-digests.
+        :param tdigest_compression: Digest accuracy/memory setting from 20 to 1000 (default 100).
         :param subsampling_strategy: "topk" keeps the same sampled locations across chunk layouts for a fixed seed;
             "sequential" draws random locations using traversal order and can depend on the chunks.
         :param interpolation: Raster values at point locations use interp_points() with SciPy methods "nearest",
@@ -466,8 +479,12 @@ class PointCloudBase(ABC):
             subsample=subsample,
             subsample_per_group=subsample_per_group,
             random_state=random_state,
-            strategy=strategy,
+            method=method,
+            reindex=reindex,
+            split_every=split_every,
             backend=backend,
+            flox_engine=flox_engine,
+            tdigest_compression=tdigest_compression,
             subsampling_strategy=subsampling_strategy,
             interpolation=interpolation,
             align=align,
@@ -667,7 +684,7 @@ class PointCloudBase(ABC):
         agree with any explicit mode. Raw auxiliary arrays must identify their primary input's grid or point ordering.
 
         Spatial inputs, explicit output support and raster or point masks must use one family: Raster/PointCloud
-        objects, or DataArray/GeoDataFrame objects. The latter may mix eager and Dask storage. Plain arrays and
+        objects, or DataArray/GeoDataFrame objects. The latter may mix in-memory and Dask storage. Plain arrays and
         vector outlines are accepted with either family.
 
         :param other: Dataset to sample alongside this point cloud. A plain array follows this point cloud's order.
@@ -702,7 +719,7 @@ class PointCloudBase(ABC):
             Point inputs must still share the same ordered coordinates when sampled at points.
         :param mp_config: Worker and tile settings for multiprocessing. Raster output uses its outfile; cannot be
             combined with Dask inputs.
-        :returns: Raster or point cloud on the selected support; Xarray DataArray or eager/lazy GeoDataFrame for
+        :returns: Raster or point cloud on the selected support; Xarray DataArray or in-memory/lazy GeoDataFrame for
             accessor calls. Bands or columns contain "self", "other", then auxiliaries in mapping order.
             Raster outputs retain the target grid with a common mask; point outputs retain selected geometries
             and index labels, with "self" as the active data attribute.
@@ -754,6 +771,10 @@ class PointCloudBase(ABC):
         index_dtype: DTypeLike = np.int32,
         distance_dtype: DTypeLike = np.float32,
         mp_config: MultiprocConfig | None = None,
+        force_output_to_memory: bool = False,
+        output_chunks: int = 100_000,
+        output_storage: Literal["memory", "disk"] = "memory",
+        output_directory: str | Path | None = None,
     ) -> xr.Dataset:
         """
         Sample point pairs in the point cloud.
@@ -781,11 +802,22 @@ class PointCloudBase(ABC):
         Memory and chunked inputs
         -------------------------
 
-        ``n_pairs`` limits the returned data held in memory. Dask partitions and multiprocessing row partitions are
-        processed separately, and their eligible coordinates, values, and original row indexes are staged in
-        temporary disk-backed arrays. The complete point table is not collected in memory and the PointCloud stays
-        unloaded. Log-lag sampling still builds a KD-tree or hash-grid index whose memory grows with the number of
-        eligible points. Pair selection and the returned Xarray Dataset are eager for both backends.
+        ``n_pairs`` limits the returned pair count. Dask partitions are read once and their finite coordinates, values
+        and original row indexes are collected in memory for pair selection. Multiprocessing file reads instead use
+        temporary disk-backed arrays. The source PointCloud stays unloaded. Log-lag sampling builds a KD-tree or
+        hash-grid index whose memory grows with the number of eligible points.
+
+        Pair selection and geometry are calculated before returning. Dask inputs return every data column as a Dask
+        array without writing files; in-memory inputs return NumPy arrays. ``force_output_to_memory=True`` returns all
+        columns in memory. Dask output can be reduced directly or saved through Xarray's to_netcdf() or to_zarr().
+
+        With multiprocessing, ``output_storage="disk"`` writes accepted batches, including indexes, coordinates and
+        distances, without collecting a complete pair sample. Every pair column is Dask-backed unless
+        ``force_output_to_memory=True``.
+        Pair buffers are bounded by the candidate and output batch sizes; file/graph metadata grows with the number
+        of output chunks. Random sampling removes duplicates through a disk index with an 8 MiB cache. The spatial
+        search index still grows with the number of eligible source points. Output files survive in derived graphs
+        and pending persisted reads, independently of the temporary source arrays.
 
         :param n_pairs: Requested number of pairs with two finite values; fewer may be returned if sampling stops early.
         :param sampling: ``"loglag"`` balances short and long distances on a log scale; ``"random_xy"`` draws
@@ -815,8 +847,13 @@ class PointCloudBase(ABC):
         :param index_dtype: Integer NumPy dtype for returned row indexes (e.g. ``"int64"`` for very large point clouds).
         :param distance_dtype: Floating NumPy dtype for returned distances (e.g. ``"float64"`` for greater precision).
         :param mp_config: Worker and row partition settings for reading an unloaded point cloud into temporary
-            disk-backed arrays. Cannot be combined with Dask inputs. Pair selection and the returned Xarray Dataset
-            are eager.
+            disk-backed arrays. Cannot be combined with Dask inputs.
+        :param force_output_to_memory: Return every output column in memory, including disk output.
+        :param output_chunks: Maximum pairs per returned Dask chunk or saved disk batch.
+        :param output_storage: ``"memory"`` (default) or ``"disk"`` for temporary pair output with mp_config.
+            Save Dask output through Xarray's to_netcdf() or to_zarr().
+        :param output_directory: Existing parent directory for temporary disk output; defaults to the system's
+            temporary directory. Files are removed when the last graph or pending read releases them.
         :returns: Xarray Dataset with pair and endpoint dimensions, containing original row indexes, values,
             coordinates, and distances.
         """
@@ -844,6 +881,10 @@ class PointCloudBase(ABC):
             index_dtype=index_dtype,
             distance_dtype=distance_dtype,
             mp_config=mp_config,
+            force_output_to_memory=force_output_to_memory,
+            output_chunks=output_chunks,
+            output_storage=output_storage,
+            output_directory=output_directory,
         )
 
     def variogram(
@@ -851,7 +892,13 @@ class PointCloudBase(ABC):
         *,
         n_pairs: int = 1_000_000,
         sampling: Literal["loglag", "random_xy"] = "loglag",
-        estimator: str | Callable[[NDArrayNum], float] = "dowd",
+        estimator: str | Callable[[NDArrayNum], float] = "matheron",
+        percentile: float = 50,
+        reduction_backend: Literal["geoutils", "flox"] = "geoutils",
+        flox_engine: str | None = None,
+        method: Literal["auto", "map-reduce", "groupwise"] = "auto",
+        tdigest_compression: float = 100,
+        mp_config: MultiprocConfig | None = None,
         bins: Literal["log", "uniform"] | Iterable[float] = "log",
         n_lags: int = 24,
         min_lag: float | None = None,
@@ -869,9 +916,19 @@ class PointCloudBase(ABC):
         :param n_pairs: Number of finite pairs targeted in each run (e.g. 100_000).
         :param sampling: How to select pairs: ``"loglag"`` balances short and long distances, while ``"random_xy"``
             selects endpoints independently.
-        :param estimator: Semivariance estimator from SciKit-GStat: ``"dowd"``, ``"matheron"``, ``"cressie"``,
+        :param estimator: Semivariance estimator from SciKit-GStat: ``"matheron"`` (default), ``"dowd"``, ``"cressie"``,
             ``"genton"``, ``"minmax"``, ``"entropy"`` or ``"percentile"``. A function can instead map absolute pair
             differences to one value per distance bin.
+        :param percentile: Percentile from 0 to 100 for estimator="percentile" (default 50), exact or approximate.
+        :param reduction_backend: Chunked reduction backend, either "geoutils" or "flox".
+        :param flox_engine: If using "flox" backend, Flox reduction algorithm: None (automatic), "numpy", "numba",
+            "flox" or "numbagg". This is independent of Dask/MP execution. The "numbagg" engine does not support
+            t-digests.
+        :param method: Calculate complete bins exactly ("groupwise") or combine summaries ("map-reduce").
+            "auto" uses t-digests for Dowd and percentiles, and complete bins for other nonmergeable estimators.
+        :param tdigest_compression: Digest accuracy/memory setting from 20 to 1000 (default 100).
+        :param mp_config: Worker and tile settings for sampling and pair reduction. Cannot be combined with
+            Dask source inputs. File-backed sources stay unloaded.
         :param bins: Distance bins: ``"log"`` for logarithmic spacing, ``"uniform"`` for equal widths, or explicit
             edges (e.g. [1, 10, 100]).
         :param n_lags: Number of distance bins when bins is ``"log"`` or ``"uniform"``.
@@ -896,6 +953,12 @@ class PointCloudBase(ABC):
             sampling=sampling,
             n_runs=n_runs,
             estimator=estimator,
+            percentile=percentile,
+            reduction_backend=reduction_backend,
+            flox_engine=flox_engine,
+            method=method,
+            tdigest_compression=tdigest_compression,
+            mp_config=mp_config,
             bins=bins,
             n_lags=n_lags,
             min_lag=min_lag,
@@ -969,7 +1032,7 @@ class PointCloudBase(ABC):
         :param engine: Legacy alias for backend ("scipy" or "numba").
         :param chunksizes: Output chunk size as ``(rows, columns)`` for Dask or multiprocessing execution.
         :param mp_config: Multiprocessing configuration for computing output chunks in workers.
-        :param n_threads: Number of SciPy threads for eager nearest gridding. ``0`` uses all but one available CPU.
+        :param n_threads: Number of SciPy threads for in-memory nearest gridding. ``0`` uses all but one available CPU.
         :param error_structure: Optional observation error model used for weighting and fitting.
             Use geoutils.uncertainty.propagate() to calculate output uncertainty.
         :param kwargs: Deprecated aliases, including dist_nodata_pixel for radius.
@@ -1119,7 +1182,7 @@ class PointCloudBase(ABC):
         :param mp_config: Worker, row partition and output file settings for multiprocessing fields.
         :param backend: Library used to draw correlated errors. Chunked GPyTorch fields use an inducing grid.
         :param gpytorch_inducing_points: Target grid size for approximate GPyTorch fields. "auto" uses 256 points
-            for eager and chunked point clouds; None requests an exact eager draw.
+            for in-memory and chunked point clouds; None requests an exact in-memory draw.
         :returns: One result of the same point cloud type, or a list when n_fields is greater than one.
         """
 
@@ -1478,7 +1541,7 @@ class GeometryPointCloudBase(PointCloudBase, VectorBase):
         """Convert point cloud to a list of 3-tuples."""
 
         if self._is_dask:
-            # Tuple output is eager, so compute all three coordinate collections here
+            # Compute all three coordinate collections before returning tuple output
             return list(zip(*[v.compute() for v in self.to_xyz()]))
         return list(zip(self.geometry.x.values, self.geometry.y.values, self.data))
 
@@ -1523,7 +1586,7 @@ class GeometryPointCloudBase(PointCloudBase, VectorBase):
         return vector_close and data_name_close
 
     def to_geoutils(self) -> Any:
-        """Convert to an eager GeoUtils PointCloud object."""
+        """Convert to an in-memory GeoUtils PointCloud object."""
 
         from geoutils.pointcloud.pointcloud import PointCloud
 
@@ -1603,7 +1666,7 @@ class GeometryPointCloudBase(PointCloudBase, VectorBase):
         """
         Reproject point coordinates, preserving their order and value columns.
 
-        Without multiprocessing, eager inputs return eager results and Dask inputs remain lazy. Multiprocessing
+        Without multiprocessing, in-memory inputs return in-memory results and Dask inputs remain lazy. Multiprocessing
         reads and writes row partitions, keeping file-backed PointCloud inputs and results unloaded. LAS/LAZ
         output rounds coordinates to its stored precision; GeoPackage preserves floating-point coordinates.
         Reopened indices follow the file format. LAS attributes must fit their dimension types; GeoPackage
@@ -1611,7 +1674,7 @@ class GeometryPointCloudBase(PointCloudBase, VectorBase):
 
         :param ref: Raster or vector whose CRS should be matched; mutually exclusive with ``crs``.
         :param crs: Target coordinate reference system; mutually exclusive with ``ref``.
-        :param inplace: Update this object for eager execution. Unsupported with Dask or multiprocessing.
+        :param inplace: Update this object for in-memory execution. Unsupported with Dask or multiprocessing.
         :param mp_config: Worker configuration with an integer number of points per chunk. The output format is
             inferred from ``outfile`` or selected by ``driver`` (``GPKG``, ``LAS`` or ``LAZ``), defaulting to
             GeoPackage. Cannot be combined with Dask input.
@@ -1651,7 +1714,7 @@ class GeometryPointCloudBase(PointCloudBase, VectorBase):
             )
             x, y, values = (value.to_dask_array(lengths=lengths) for value in (x, y, values))
 
-            # Convert string attributes to object arrays, matching eager conversion without a Dask warning
+            # Convert string attributes to object arrays, matching in-memory conversion without a Dask warning
             auxiliary_arrays = {}
             for name, value in auxiliary.items():
                 if isinstance(value.dtype, pd.StringDtype):

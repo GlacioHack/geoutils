@@ -71,7 +71,7 @@ def _spatial_predictors(
             value = (
                 predictor.data if hasattr(predictor, "data") and not isinstance(predictor, np.ndarray) else predictor
             )
-        # Eager fields read predictor values before binding the complete support
+        # In-memory fields read predictor values before binding the complete support
         value = value.compute() if hasattr(value, "compute") else value
 
         # Represent masked predictor values as NaN before prediction
@@ -411,11 +411,11 @@ def _point_magnitude_rows(
 
 
 ########################
-# 4/ EAGER RASTER/POINT
+# 4/ IN-MEMORY RASTER/POINT
 ########################
 
 
-def _eager_raster_magnitude(
+def _raster_magnitude_in_memory(
     like: RasterBase, model: ErrorStructure, predictors: Mapping[str, Any] | None, component: str | None
 ) -> Any:
     """Predict raster error magnitudes with the entire array in-memory."""
@@ -432,7 +432,7 @@ def _eager_raster_magnitude(
     return like.copy(new_array=np.ma.masked_invalid(values))
 
 
-def _eager_point_magnitude(
+def _point_magnitude_in_memory(
     like: PointCloudBase, model: ErrorStructure, predictors: Mapping[str, Any] | None, component: str | None
 ) -> Any:
     """Predict point cloud error magnitudes with the entire array in-memory."""
@@ -616,14 +616,14 @@ def _dask_point_magnitude(
 
 
 ############################################
-# ARRAY POINT MAGNITUDES (EAGER OR DASK)
+# ARRAY POINT MAGNITUDES (IN-MEMORY OR DASK)
 ############################################
 
 
 def _array_point_magnitudes(
     values: Any, *predictors: Any, model: ErrorStructure, names: tuple[str, ...], component: str | None
 ) -> Any:
-    """Predict one magnitude per point in an eager array or a Dask block."""
+    """Predict one magnitude per point in an in-memory array or a Dask block."""
     predicted = model.predict_magnitude(dict(zip(names, predictors)), component=component)
     return np.broadcast_to(np.asarray(predicted, dtype=float), values.shape).copy()
 
@@ -822,7 +822,7 @@ def predict_magnitude_map(
     mp_config: MultiprocConfig | None,
 ) -> Any:
     """
-    Predict error magnitudes on a raster or point cloud support using its eager, Dask, or MP backend.
+    Predict error magnitudes on a raster or point cloud support using its in-memory, Dask, or MP backend.
     """
 
     # 1/ Input checks
@@ -847,7 +847,7 @@ def predict_magnitude_map(
             has_dask_predictor = True
             break
 
-    # 2/ If input is a raster, dispatch to MP, Dask or eager
+    # 2/ If input is a raster, dispatch to MP, Dask or in-memory
     if raster is not None:
         if chunksizes is not None and (not isinstance(chunksizes, tuple) or len(chunksizes) != 2):
             raise ValueError("Raster chunk sizes must be a (rows, columns) tuple.")
@@ -858,7 +858,7 @@ def predict_magnitude_map(
             return _multiproc_raster_magnitude(raster, model, predictors, component, mp_config)
         if chunksizes is not None or dask_source or has_dask_predictor:
             return _dask_raster_magnitude(raster, model, predictors, component, chunksizes)
-        return _eager_raster_magnitude(raster, model, predictors, component)
+        return _raster_magnitude_in_memory(raster, model, predictors, component)
 
     # 3/ If input is point, dispatch the same way
     assert point is not None
@@ -874,4 +874,4 @@ def predict_magnitude_map(
         return _multiproc_point_magnitude(point, model, predictors, component, mp_config)
     if chunksizes is not None or point._is_dask or has_dask_predictor:
         return _dask_point_magnitude(point, model, predictors, component, chunksizes)
-    return _eager_point_magnitude(point, model, predictors, component)
+    return _point_magnitude_in_memory(point, model, predictors, component)

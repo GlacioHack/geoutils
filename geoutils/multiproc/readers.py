@@ -302,10 +302,10 @@ class _BlockReader:
             # Read point rows and check that a separate support file uses the same order
             dataframe = _read_point_rows(self.source, self.slices[0], self.selector)
             if self.support is not None:
-                from geoutils.pointcloud.testing import _point_coords_equal_eager
+                from geoutils.pointcloud.testing import _point_coords_equal
 
                 reference = _read_point_rows(self.support, self.slices[0], None)
-                if not _point_coords_equal_eager(dataframe, reference):
+                if not _point_coords_equal(dataframe, reference):
                     raise ValueError("Point values do not share the ordered support coordinates.")
             values = np.asarray(dataframe.geometry.z if self.selector is None else dataframe[self.selector])
 
@@ -415,28 +415,48 @@ def _read_block_sample(block: Any, indexes: tuple[Any, ...]) -> Any:
 def _read_selected_values(reader: _ValueReader, indexes: Any, mp_config: MultiprocConfig | None) -> Any:
     """Read selected raster cells or points from only the blocks that contain them, preserving their order."""
 
-    from geoutils.multiproc.chunked import iter_chunk_slices
     from geoutils.multiproc.cluster import _map_bounded
 
     assert mp_config is not None
-    arguments = []
-    positions_in_sample = []
+    count = len(indexes)
+    if count == 0:
+        return np.empty(0, dtype=reader.dtype)
     coordinates = np.unravel_index(indexes, reader.shape)
+    del indexes
 
     # Find which requested positions belong to each block
-    for slices in iter_chunk_slices(reader.shape, mp_config.chunks):
-        selected = np.ones(len(indexes), dtype=bool)
-        for positions, part in zip(coordinates, slices):
-            selected &= (positions >= part.start) & (positions < part.stop)
-        if not np.any(selected):
-            continue
+    lengths = (mp_config.chunks,) if isinstance(mp_config.chunks, int) else mp_config.chunks
+    chunk_shape = tuple(lengths[axis % len(lengths)] for axis in range(len(reader.shape)))
+    grid_shape = tuple((size + length - 1) // length for size, length in zip(reader.shape, chunk_shape))
+    chunk_ids = np.ravel_multi_index(
+        tuple(positions // length for positions, length in zip(coordinates, chunk_shape)), grid_shape
+    )
 
+    # Sort once to avoid scanning the complete selection for every source block
+    chunk_order = np.argsort(chunk_ids, kind="stable")
+    sorted_ids = chunk_ids[chunk_order]
+    del chunk_ids
+    boundaries = np.r_[0, np.flatnonzero(np.diff(sorted_ids)) + 1, count]
+    occupied = sorted_ids[boundaries[:-1]]
+    del sorted_ids
+
+    # Prepare local positions only for occupied blocks, including shorter blocks at the array edges
+    arguments = []
+    positions_in_sample = []
+    for chunk, start, stop in zip(occupied, boundaries[:-1], boundaries[1:]):
+        grid_position = np.unravel_index(chunk, grid_shape)
+        starts = tuple(int(position) * length for position, length in zip(grid_position, chunk_shape))
+        slices = tuple(
+            slice(start, min(start + length, size)) for start, length, size in zip(starts, chunk_shape, reader.shape)
+        )
+        selected = chunk_order[start:stop]
         # Record local positions and their place in the requested order
         local = tuple(positions[selected] - part.start for positions, part in zip(coordinates, slices))
         arguments.append((reader.block(slices), local))
-        positions_in_sample.append(np.flatnonzero(selected))
+        positions_in_sample.append(selected)
 
     # Read only blocks that contain selected positions
+    del coordinates
     pieces = [result for _, result in _map_bounded(mp_config.cluster, _read_block_sample, arguments)]
     if not pieces:
         return np.empty(0, dtype=reader.dtype)

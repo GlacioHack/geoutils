@@ -9,7 +9,8 @@ import geopandas as gpd
 import numpy as np
 import pytest
 import xarray as xr
-from shapely import LineString, MultiLineString, MultiPolygon, Polygon
+from shapely import LineString, MultiLineString, MultiPolygon, Polygon, box
+from shapely.affinity import rotate
 
 import geoutils as gu
 from geoutils import examples
@@ -174,8 +175,8 @@ class TestRasterVectorInterface:
         np.testing.assert_allclose(result.data, expected)
         assert result.tags["long_name"] == ("shared", "right")
 
-    def test_rasterize__fractional_chunked_backends_match_eager(self, tmp_path: Any) -> None:
-        """Checks that fractional layers stay lazy with Dask and match eager and multiprocessing chunks."""
+    def test_rasterize__fractional_chunked_backends_match_in_memory(self, tmp_path: Any) -> None:
+        """Checks that fractional layers stay lazy with Dask and match in-memory and multiprocessing chunks."""
 
         pytest.importorskip("dask")
         import dask.array as da
@@ -188,7 +189,7 @@ class TestRasterVectorInterface:
         vector = gu.Vector(gpd.GeoDataFrame(geometry=polygons, crs=32631))
         options = {"res": 1, "bounds": (0, 0, 3, 3), "crs": 32631, "fractional": True}
 
-        # Calculate the eager reference and construct the same coverage as a lazy block graph
+        # Calculate the in-memory reference and construct the same coverage as a lazy block graph
         expected = vector.rasterize(**options, overlap_backend="shapely")
         lazy = vector.rasterize(**options, dask=True, chunksizes=(1, 1), overlap_backend="shapely")
         assert isinstance(lazy, xr.DataArray)
@@ -380,7 +381,7 @@ class TestRasterVectorInterface:
         in_value_mode: str,
     ) -> None:
         """
-        Checks that rasterize() and create_mask() return the same eager, Dask and multiprocessing outputs.
+        Checks that rasterize() and create_mask() return the same in-memory, Dask and multiprocessing outputs.
 
         Dask outputs must remain lazy until computed and Multiprocessing outputs must initially remain file-backed.
         """
@@ -545,3 +546,57 @@ class TestRasterVectorInterface:
         # Computing the blocks uses their selected features without rebuilding the index
         rasterized.data.compute(scheduler="synchronous")
         assert index_count == 1
+
+
+class TestRasterizationChunked:
+    """Test module for feature order at polygon overlaps in Dask and multiprocessing rasterization."""
+
+    @pytest.mark.parametrize("execution", ["dask", "multiprocessing"])
+    @pytest.mark.parametrize("all_touched", [False, True])
+    def test_rasterize__overlapping_feature_order(self, tmp_path: Any, execution: str, all_touched: bool) -> None:
+        """Checks that later overlapping features overwrite earlier features in every chunked backend."""
+
+        da = pytest.importorskip("dask.array")
+
+        # Create rotated polygons wider than their eight-cell spacing so neighboring features overlap
+        # Sixteen features make the spatial tree split them into branches with a different ordering
+        polygons = []
+        for row in range(4):
+            for column in range(4):
+                center_x, center_y = column * 8 + 4.17, row * 8 + 4.31
+                polygon = box(center_x - 5.28, center_y - 5.28, center_x + 5.28, center_y + 5.28)
+                polygons.append(rotate(polygon, 13))
+        vector = gu.Vector(gpd.GeoDataFrame(geometry=polygons, crs=32633))
+        options: dict[str, Any] = {
+            "res": 1,
+            "bounds": (0, 0, 32, 32),
+            "crs": 32633,
+            "in_value": list(range(1, 17)),
+            "all_touched": all_touched,
+            "out_dtype": np.uint8,
+        }
+
+        # Rasterize the complete feature sequence before splitting rows/columns into chunks of 13/11
+        expected = vector.rasterize(**options)
+        chunks = (13, 11)
+        if execution == "dask":
+            result = vector.rasterize(**options, dask=True, chunksizes=chunks)
+            assert isinstance(result.data, da.Array)
+            assert not result.rst.is_loaded
+            actual = result.data.compute(scheduler="synchronous")
+            assert not result.rst.is_loaded
+        else:
+            config = MultiprocConfig(chunks=chunks, outfile=str(tmp_path / "ordered.tif"), driver="GTiff")
+            try:
+                result = vector.rasterize(**options, mp_config=config)
+                assert not result.is_loaded
+                actual = result.data
+                assert result.is_loaded
+            finally:
+                config.cluster.close()
+
+        # Chunk boundaries and spatial query order must not change the winning feature at any cell
+        np.testing.assert_array_equal(actual, expected.data)
+
+        # The last feature covers cell center (27.5, 27.5)
+        assert actual[4, 27] == 16

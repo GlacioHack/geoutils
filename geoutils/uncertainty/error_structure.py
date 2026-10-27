@@ -834,7 +834,7 @@ class ErrorStructure:
         :param mp_config: Worker and output file settings for multiprocessing fields.
         :param backend: Library used to draw correlated components.
         :param gpytorch_inducing_points: Target grid size for approximate GPyTorch fields. "auto" uses 256 points
-            for spatial inputs and an exact draw for plain coordinates; None requests an exact eager draw.
+            for spatial inputs and an exact draw for plain coordinates; None requests an exact in-memory draw.
         :returns: One field when n_fields is one, otherwise a list or stacked array of fields.
         """
 
@@ -862,6 +862,8 @@ class ErrorStructure:
         *,
         other: Any | None = None,
         other_precision: Literal["same", "negligible"] = "same",
+        at: Literal["self", "other"] | None = "self",
+        align: Literal["raise", "reproject"] = "raise",
         predictors: Mapping[str, Any] | None = None,
         components: Mapping[str, Mapping[str, Any]] | None = None,
         mask: Any | None = None,
@@ -869,7 +871,7 @@ class ErrorStructure:
         spread_estimator: Callable[[Any], Any] | None = None,
         min_count: int = 100,
         subsample_magnitude: int | float = 1_000_000,
-        variogram_estimator: str | Callable[[Any], float] = "dowd",
+        variogram_estimator: str | Callable[[Any], float] = "matheron",
         n_pairs: int = 1_000_000,
         pair_sampling: Literal["loglag", "random_xy"] = "loglag",
         n_lags: int = 24,
@@ -885,7 +887,7 @@ class ErrorStructure:
         """
         Estimate error structure from an error proxy or differences between two measurements.
 
-        This function works on eager, Dask, or multiprocessing inputs.
+        This function works on in-memory, Dask, or multiprocessing inputs.
 
         An error proxy consists of a variable that can be used to represent errors, for instance the difference of two
         coincident measurements that should normally have the same values, whether from the same sensor, or between a
@@ -963,6 +965,8 @@ class ErrorStructure:
         :param source: Raster or point cloud of measurements, or an error proxy when other is None.
         :param other: Second raster or point cloud to compare with source. None treats source as an error proxy.
         :param other_precision: Precision of the second input relative to the first. Only used with two inputs.
+        :param at: Comparison locations: "self", "other", or None to prefer point locations when present.
+        :param align: Whether mismatched grids or coordinate systems raise an error or are reprojected for comparison.
         :param predictors: Named continuous variables controlling a heteroscedastic magnitude.
         :param components: Ordered named component specifications with ``magnitude`` and ``correlation`` entries.
         :param mask: Spatial or Boolean mask identifying values used for estimation.
@@ -970,7 +974,7 @@ class ErrorStructure:
         :param spread_estimator: Spread estimator used for the error magnitude (default nmad).
         :param min_count: Smallest grouped sample retained in the magnitude model.
         :param subsample_magnitude: Maximum observations used to fit the magnitude.
-        :param variogram_estimator: Empirical variogram estimator name or callable.
+        :param variogram_estimator: Empirical variogram estimator name or callable (default "matheron").
         :param n_pairs: Target spatial pairs per variogram run.
         :param pair_sampling: Pair sampling scheme exposed by GeoUtils spatial objects.
         :param n_lags: Number of empirical lag classes.
@@ -992,6 +996,8 @@ class ErrorStructure:
             source,
             other=other,
             other_precision=other_precision,
+            at=at,
+            align=align,
             predictors=predictors,
             components=components,
             mask=mask,
@@ -1240,22 +1246,30 @@ def _source_covariance_matrix(
     source_coordinates: NDArray[np.float64] | None,
     component_data: tuple[tuple[ErrorComponent, NDArray[np.float64]], ...],
     indexes: ArrayLike,
+    columns: ArrayLike | None = None,
 ) -> NDArray[np.float64]:
-    """Calculate covariance among the observations used by one output."""
+    """
+    Calculate covariance among the observations used by one output.
+
+    Supply columns to calculate a rectangular block between two observation groups.
+    """
 
     size = len(source_ids)
 
     # Select source observations for this output
     selected = np.asarray(indexes, dtype=np.int64).reshape(-1)
+    selected_columns = selected if columns is None else np.asarray(columns, dtype=np.int64).reshape(-1)
     if np.any(selected < 0) or np.any(selected >= size):
+        raise ValueError("Covariance indexes are outside the selected source observations.")
+    if np.any(selected_columns < 0) or np.any(selected_columns >= size):
         raise ValueError("Covariance indexes are outside the selected source observations.")
     # For independent errors, only the same source ID is correlated with itself
     # Two observations at identical coordinates still have independent errors if their IDs differ
-    covariance = np.zeros((len(selected), len(selected)), dtype=float)
+    covariance = np.zeros((len(selected), len(selected_columns)), dtype=float)
     distances_by_dimensions: dict[tuple[int, ...] | None, NDArray[np.float64]] = {}
     for component, magnitude in component_data:
         if component.correlation is None:
-            correlation = source_ids[selected, None] == source_ids[selected][None, :]
+            correlation = source_ids[selected, None] == source_ids[selected_columns][None, :]
         else:
             correlation_model = component.correlation
             if not isinstance(correlation_model, VariogramModel):
@@ -1266,18 +1280,20 @@ def _source_covariance_matrix(
             # Some models use only selected coordinates (e.g. horizontal distance without elevation)
             active_dims = correlation_model.active_dims
             selected_coordinates = source_coordinates[selected]
+            column_coordinates = source_coordinates[selected_columns]
             if active_dims is not None:
                 selected_coordinates = selected_coordinates[:, active_dims]
+                column_coordinates = column_coordinates[:, active_dims]
 
             # Components using the same coordinates can reuse their pairwise distances
             distances = distances_by_dimensions.get(active_dims)
             if distances is None:
-                distances = cdist(selected_coordinates, selected_coordinates)
+                distances = cdist(selected_coordinates, column_coordinates)
                 distances_by_dimensions[active_dims] = distances
             correlation = component.predict_correlation(distances)
 
         # Covariance = first error magnitude × second error magnitude × correlation; independent components add up
-        covariance += magnitude[selected, None] * magnitude[selected][None, :] * correlation
+        covariance += magnitude[selected, None] * magnitude[selected_columns][None, :] * correlation
     return covariance
 
 

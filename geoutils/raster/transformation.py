@@ -1120,7 +1120,7 @@ def _gcp_rpc_block_footprints(
             finite = np.isfinite(x) & np.isfinite(y)
             # Fail-safe, should normally not happen
             if not np.all(finite):
-                raise ValueError("GCP/RPC transformation failed to locate a source chunk; use eager reprojection.")
+                raise ValueError("GCP/RPC transformation failed to locate a source chunk; use in-memory reprojection.")
             boxes.append(box(x.min(), y.min(), x.max(), y.max()))
     return boxes
 
@@ -1287,7 +1287,7 @@ def _dask_reproject(
     # To raise appropriate error on missing optional dependency
     import_optional("dask")
 
-    # Warp GCP/RPC bands together so GDAL uses the same unified nodata mask as eager reprojection
+    # Warp GCP/RPC bands together so GDAL uses the same unified nodata mask as in-memory reprojection
     if darr.ndim == 3 and (kwargs.get("gcps") or kwargs.get("rpcs")):
         darr = darr.rechunk({0: -1})
 
@@ -1980,11 +1980,11 @@ def _clip(
     mp_config: MultiprocConfig | None = None,
 ) -> Any:
     """
-    Clip raster cells outside a geometry using eager, Dask or multiprocessing execution.
+    Clip raster cells outside a geometry using in-memory, Dask or multiprocessing execution.
 
     _clip_geodataframe() normalizes mask features in the raster CRS without dissolving them. create_mask() partitions
-    those features for eager or Dask masking, while _multiproc_clip() selects the matching features before dispatching
-    each raster block.
+    those features for in-memory or Dask masking, while _multiproc_clip() selects the matching features before
+    dispatching each raster block.
     """
 
     # Rasterization uses an affine grid, so check before reading values or scheduling workers
@@ -2019,7 +2019,7 @@ def _clip(
             mp_config,
         )
 
-    # Match the source grid and let create_mask() choose eager or Dask execution from the reference
+    # Match the source grid and let create_mask() choose in-memory or Dask execution from the reference
     inside = clipping_vector.create_mask(ref=source_raster, all_touched=all_touched, as_array=True)
 
     if source_raster._is_xr:

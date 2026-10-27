@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Testing helpers for eager and Dask-backed point-cloud dataframes."""
+"""Testing helpers for in-memory and Dask-backed point-cloud dataframes."""
 
 from __future__ import annotations
 
@@ -33,8 +33,8 @@ from geoutils.vector.testing import (
 )
 
 
-def _point_coords_equal_eager(left: gpd.GeoDataFrame, right: gpd.GeoDataFrame) -> bool:
-    """Compare ordered X/Y coordinates in two eager point partitions."""
+def _point_coords_equal(left: gpd.GeoDataFrame, right: gpd.GeoDataFrame) -> bool:
+    """Compare ordered X/Y coordinates in two in-memory point partitions."""
 
     if len(left) != len(right):
         return False
@@ -82,7 +82,7 @@ def _georeferenced_coords_equal(left_obj: Any, right_obj: Any, warn_3d_crs: bool
             equal = np.all(left_axis == right_axis)
             same_coordinates &= bool(equal.compute() if hasattr(equal, "compute") else equal)
     else:
-        same_coordinates = _compare_dataframes_partitionwise(left, right, comparator=_point_coords_equal_eager)
+        same_coordinates = _compare_dataframes_partitionwise(left, right, comparator=_point_coords_equal)
 
     # Report a vertical difference without treating it as different horizontal coordinates
     if same_coordinates and left_crs is not None and right_crs is not None and left_crs != right_crs and warn_3d_crs:

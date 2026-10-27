@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Literal
@@ -60,7 +60,7 @@ def _raster(data: NDArrayNum, *, x_origin: float = 0) -> gu.Raster:
 
 class TestCosample:
     """
-    Checks cosample() calls that combine raster and point data, with eager inputs.
+    Checks cosample() calls that combine raster and point data, with in-memory inputs.
 
     See TestCosampleChunked further below for Dask/Multiprocessing tests.
 
@@ -636,7 +636,10 @@ class TestPointCosampleSupport:
 
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestCosampleChunked:
-    """Test module for cosample() with Dask and Multiproc backends: loading behavior and exact equality with eager."""
+    """
+    Test module for cosample() with Dask and Multiproc backends: loading behavior and exact equality
+    with in-memory results.
+    """
 
     @pytest.mark.parametrize("auxiliary_type", ["numpy", "dask", "column"])
     @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
@@ -680,7 +683,7 @@ class TestCosampleChunked:
             target, auxiliary={"extra": auxiliary}, auxiliary_at="self", at=target, grid_method="nearest"
         )
 
-        # Calculate the same result from the eager point cloud and raster
+        # Calculate the same result from the in-memory point cloud and raster
         eager_auxiliary: Any = (points, "weight") if auxiliary_type == "column" else auxiliary_values
         expected = points.cosample(
             raster,
@@ -703,7 +706,7 @@ class TestCosampleChunked:
     def test_cosample__dask_gridding_chunks(
         self, as_object_type: Literal["dataarray", "geodataframe"], chunks: tuple[int, int], caller: str, tmp_path: Path
     ) -> None:
-        """Checks that Dask point gridding returns the same seeded sample as eager gridding for each chunk size."""
+        """Checks that Dask point gridding returns the same seeded sample as in-memory gridding for each chunk size."""
 
         # Place one point at each grid pixel so the nearest-neighbor gridding is exact
         # The small grid covers nine tiles, four tiles and one tile, with shorter edge tiles
@@ -733,7 +736,7 @@ class TestCosampleChunked:
         )
         expected = raster.cosample(raster, subsample=200, random_state=42, strategy="topk")
 
-        # Check that all runs stay lazy and select the same pixels and values as the eager call
+        # Check that all runs stay lazy and select the same pixels and values as the in-memory call
         assert result.data.chunks is not None
         assert not lazy_raster.rst.is_loaded
         assert not lazy_points.pc.is_loaded
@@ -775,7 +778,7 @@ class TestCosampleChunked:
             mp_config=MultiprocConfig(chunks=(2, 3), outfile=str(outfile)),
         )
 
-        # Check that the original active column is unchanged, loading behaviour and that the result matches eager
+        # Check that the original active column is unchanged, loading behaviour and equality with the in-memory result
         assert not unloaded.is_loaded
         assert unloaded.data_name == points.data_name
         assert not result.is_loaded
@@ -797,7 +800,8 @@ class TestCosampleChunked:
         # Pass rectangular chunks and a raster output path to check point output leaves both options unchanged
         config = MultiprocConfig(chunks=(2, 3), outfile=str(tmp_path / "unused-output.tif"))
 
-        # Compare eager and Multiproc alignment of unloaded point values and two arrays at reprojected point locations
+        # Compare in-memory and Multiproc alignment of unloaded point values and two arrays
+        # at reprojected point locations
         expected = points.cosample(
             2 * positions,
             auxiliary={"offset": positions + 10},
@@ -824,7 +828,7 @@ class TestCosampleChunked:
 
     def test_cosample__multiproc_distinct_tempfiles(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """
-        Checks that point gridding and shifted raster inputs use separate temporary files and preserve eager values.
+        Checks that point gridding and shifted raster inputs use separate temporary files and preserve in-memory values.
         """
 
         # 1/ Prepare distinguishable values on a target grid and two shifted auxiliary grids
@@ -898,7 +902,7 @@ class TestCosampleChunked:
             first, auxiliary={"aux": auxiliary}, auxiliary_at="self", mask=selected_mask
         ).data.filled(np.nan)
 
-        # Cosample eager or Dask rasters with the user mask supplied as an array or raster
+        # Cosample in-memory or Dask rasters with the user mask supplied as an array or raster
         source = first
         if lazy:
             import dask.array as da
@@ -914,7 +918,7 @@ class TestCosampleChunked:
         result = source.cosample(source, auxiliary={"aux": auxiliary}, auxiliary_at="self", mask=selected_mask)
         output = result.to_numpy() if lazy else result.data.filled(np.nan)
 
-        # Compare every output value with eager and check the common validity mask directly
+        # Compare every output value with in-memory results and check the common validity mask directly
         if lazy:
             assert result.chunks is not None
         assert np.array_equal(output, expected_output, equal_nan=True)
@@ -944,7 +948,7 @@ class TestCosampleChunked:
         assert isinstance(result.data, da.Array)
         assert isinstance(first.data, da.Array)
 
-        # Check that the result remains Dask-backed and matches eager selected pixels and values
+        # Check that the result remains Dask-backed and matches in-memory selected pixels and values
         eager = _raster(array).cosample(_raster(2 * array), subsample=subsample, random_state=42, strategy="topk")
         output = result.compute().to_numpy()
         assert np.array_equal(output, changed.to_numpy(), equal_nan=True)
@@ -957,14 +961,12 @@ class TestCosampleChunked:
         "mask_type,chunks,workers",
         [("array", (4, 5), False), ("raster", (5, 4), False), ("vector", (4, 5), True)],
     )
-    def test_cosample__multiproc_raster_matches_eager_and_dask(
-        self, mask_type: str, chunks: tuple[int, int], workers: bool, tmp_path: Path
+    def test_cosample__multiproc_raster_matches_in_memory_and_dask(
+        self, mask_type: str, chunks: tuple[int, int], workers: bool, tmp_path: Path, request: pytest.FixtureRequest
     ) -> None:
         """
-        Checks that Multiproc does not load raster inputs and matches eager and Dask results for each mask.
+        Checks that Multiproc does not load raster inputs and matches in-memory and Dask results for each mask.
         """
-
-        from geoutils.multiproc.cluster import MpCluster
 
         # 1/ Create selected bands, auxiliary values, and masks with nodata at different locations
         # Add unused first bands with large offsets so the result reveals if a worker reads the wrong band
@@ -996,7 +998,7 @@ class TestCosampleChunked:
             "strategy": "topk",
         }
 
-        # 2/ Calculate eager and differently chunked Dask references through the public method
+        # 2/ Calculate in-memory and differently chunked Dask references through the public method
         eager = first.cosample(second, auxiliary={"scaled": (auxiliary, 2), "raw": raw_auxiliary}, mask=mask, **options)
         expected = eager.data.filled(np.nan)
         for rows, columns in ((4, 5), (5, 4)):
@@ -1015,7 +1017,7 @@ class TestCosampleChunked:
             assert lazy.data.chunks is not None
             assert np.array_equal(lazy.compute().values, expected, equal_nan=True)
 
-        # Write three raster files to disk with the selected bands and nodata patterns used by the eager reference
+        # Write three raster files to disk with the selected bands and nodata patterns used by the in-memory reference
         unloaded = []
         for name, raster in (("first", first), ("second", second), ("auxiliary", auxiliary)):
             filename = tmp_path / f"{name}.tif"
@@ -1030,15 +1032,15 @@ class TestCosampleChunked:
 
         # 3/ Write the cosampled raster to disk by tile, using worker processes for the vector-mask case
         outfile = tmp_path / "cosampled.tif"
-        with MpCluster({"nb_workers": 2}) if workers else nullcontext(None) as cluster:
-            configuration = MultiprocConfig(chunks=chunks, outfile=str(outfile), cluster=cluster)
-            result = unloaded[0].cosample(
-                unloaded[1],
-                auxiliary={"scaled": (unloaded[2], 2), "raw": raw_auxiliary},
-                mask=mp_mask,
-                mp_config=configuration,
-                **options,
-            )
+        cluster = request.getfixturevalue("mp_cluster") if workers else None
+        configuration = MultiprocConfig(chunks=chunks, outfile=str(outfile), cluster=cluster)
+        result = unloaded[0].cosample(
+            unloaded[1],
+            auxiliary={"scaled": (unloaded[2], 2), "raw": raw_auxiliary},
+            mask=mp_mask,
+            mp_config=configuration,
+            **options,
+        )
         assert outfile.exists()
         assert not result.is_loaded
         assert all(not source.is_loaded for source in unloaded)
@@ -1119,7 +1121,7 @@ class TestCosampleChunked:
 
     @pytest.mark.parametrize("method", ["nearest", "linear"])
     def test_cosample__multiproc_raster_inputs_not_loaded(self, method: str, tmp_path: Path) -> None:
-        """Checks that Multiproc point output matches eager while raster inputs stay unloaded."""
+        """Checks that Multiproc point output matches in-memory results while raster inputs stay unloaded."""
 
         # 1/ Prepare an affine raster, a boolean raster mask, and irregular point observations
         # Fractional pixel locations make nearest and linear interpolation produce distinct, predictable values
@@ -1137,7 +1139,7 @@ class TestCosampleChunked:
         auxiliary = 3 * positions.astype(float)
         auxiliary[3] = np.nan
 
-        # 2/ Calculate the eager reference from loaded inputs
+        # 2/ Calculate the in-memory reference from loaded inputs
         options: dict[str, Any] = {
             "other_band": 2,
             "auxiliary": {"scaled": auxiliary},
@@ -1179,7 +1181,7 @@ class TestCosampleChunked:
         subsample: int | float,
         mask_type: str,
     ) -> None:
-        """Checks that values, labels and 3D geometry match eager across Dask point partitions."""
+        """Checks that values, labels and 3D geometry match in-memory results across Dask point partitions."""
 
         import dask.array as da
         import dask_geopandas as dgpd
@@ -1208,7 +1210,7 @@ class TestCosampleChunked:
         elif mask_type == "vector":
             mask = gu.Vector(gpd.GeoDataFrame(geometry=[box(0, 0, 8, 10)], crs=raster.crs))
 
-        # 2/ Calculate an eager reference, then vary each Dask input's partitions or chunks
+        # 2/ Calculate an in-memory reference, then vary each Dask input's partitions or chunks
         options: dict[str, Any] = {
             "auxiliary_at": {"scaled": "self"},
             "resample_method": "nearest",
@@ -1221,52 +1223,53 @@ class TestCosampleChunked:
         expected = first.pc.cosample(
             second, auxiliary={"grid": raster.to_xarray(), "scaled": auxiliary}, mask=eager_mask, **options
         )
-        for partitions in (2, 5):
-            lazy_first_filename, lazy_first_chunks, lazy_first_column = pointcloud_file(first, partitions)
-            lazy_first = gu.open_pointcloud(
-                lazy_first_filename,
-                data_name=lazy_first_column,
-                columns="all",
-                chunks=lazy_first_chunks,
-                as_object_type=as_object_type,
-            )
-            lazy_second_filename, lazy_second_chunks, lazy_second_column = pointcloud_file(second, partitions + 1)
-            lazy_second = gu.open_pointcloud(
-                lazy_second_filename,
-                data_name=lazy_second_column,
-                columns="all",
-                chunks=lazy_second_chunks,
-                as_object_type=as_object_type,
-            )
-            lazy_raster = raster.to_xarray().chunk({"y": partitions + 1, "x": 4})
-            lazy_auxiliary = da.from_array(auxiliary, chunks=7)
-            # Give an array mask independent Dask chunks, or apply the spatial mask to each Dask point partition
-            lazy_mask = mask
-            if mask_type == "array":
-                lazy_mask = da.from_array(mask, chunks=9)
-            elif mask_type == "raster":
-                lazy_mask = _raster(keep.astype(float)).to_xarray().astype(bool).chunk({"y": 3, "x": 5})
-            result = lazy_first.pc.cosample(
-                lazy_second,
-                auxiliary={"grid": lazy_raster, "scaled": lazy_auxiliary},
-                mask=lazy_mask,
-                **options,
-            )
+        # Cover both partition layouts across the existing full, fixed and fractional samples
+        partitions = 2 if subsample == 1 else 5
+        lazy_first_filename, lazy_first_chunks, lazy_first_column = pointcloud_file(first, partitions)
+        lazy_first = gu.open_pointcloud(
+            lazy_first_filename,
+            data_name=lazy_first_column,
+            columns="all",
+            chunks=lazy_first_chunks,
+            as_object_type=as_object_type,
+        )
+        lazy_second_filename, lazy_second_chunks, lazy_second_column = pointcloud_file(second, partitions + 1)
+        lazy_second = gu.open_pointcloud(
+            lazy_second_filename,
+            data_name=lazy_second_column,
+            columns="all",
+            chunks=lazy_second_chunks,
+            as_object_type=as_object_type,
+        )
+        lazy_raster = raster.to_xarray().chunk({"y": partitions + 1, "x": 4})
+        lazy_auxiliary = da.from_array(auxiliary, chunks=7)
+        # Give an array mask independent Dask chunks, or apply the spatial mask to each Dask point partition
+        lazy_mask = mask
+        if mask_type == "array":
+            lazy_mask = da.from_array(mask, chunks=9)
+        elif mask_type == "raster":
+            lazy_mask = _raster(keep.astype(float)).to_xarray().astype(bool).chunk({"y": 3, "x": 5})
+        result = lazy_first.pc.cosample(
+            lazy_second,
+            auxiliary={"grid": lazy_raster, "scaled": lazy_auxiliary},
+            mask=lazy_mask,
+            **options,
+        )
 
-            # 3/ Check that the output remains partitioned and its metadata is unchanged before comparing values
-            assert isinstance(result, xr.DataArray if as_object_type == "dataarray" else dgpd.GeoDataFrame)
-            assert not result.pc.is_loaded
-            assert result.pc.data_name == "self"
-            assert not lazy_first.pc.is_loaded
-            output = result.compute()
-            if as_object_type == "dataarray":
-                output = output.pc.to_geoutils().gdf
-            assert list(output.columns) == ["self", "other", "grid", "scaled", "geometry"]
-            assert np.array_equal(output.index.to_numpy(), expected.index.to_numpy())
-            assert np.array_equal(output.geometry.to_numpy(), expected.geometry.to_numpy())
-            assert np.array_equal(output.geometry.z.to_numpy(), expected.geometry.z.to_numpy())
-            assert np.array_equal(output.drop(columns="geometry").to_numpy(), expected.drop(columns="geometry"))
-            assert output.crs == expected.crs
+        # 3/ Check that the output remains partitioned and its metadata is unchanged before comparing values
+        assert isinstance(result, xr.DataArray if as_object_type == "dataarray" else dgpd.GeoDataFrame)
+        assert not result.pc.is_loaded
+        assert result.pc.data_name == "self"
+        assert not lazy_first.pc.is_loaded
+        output = result.compute()
+        if as_object_type == "dataarray":
+            output = output.pc.to_geoutils().gdf
+        assert list(output.columns) == ["self", "other", "grid", "scaled", "geometry"]
+        assert np.array_equal(output.index.to_numpy(), expected.index.to_numpy())
+        assert np.array_equal(output.geometry.to_numpy(), expected.geometry.to_numpy())
+        assert np.array_equal(output.geometry.z.to_numpy(), expected.geometry.z.to_numpy())
+        assert np.array_equal(output.drop(columns="geometry").to_numpy(), expected.drop(columns="geometry"))
+        assert output.crs == expected.crs
 
     @pytest.mark.parametrize("subsample", [1, 8])
     @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
@@ -1326,7 +1329,7 @@ class TestCosampleChunked:
         assert lazy_points.pc.data_name == points.pc.data_name
         assert calls and all(calls)
 
-        # 3/ Compute values only on request, preserving the eager labels, coordinates and selected values
+        # 3/ Compute values only on request, preserving the in-memory labels, coordinates and selected values
         output = result.compute()
         if as_object_type == "dataarray":
             output = output.pc.to_geoutils().gdf
@@ -1342,10 +1345,10 @@ class TestCosampleChunked:
     @pytest.mark.parametrize("lazy_input", ["raster", "points"])
     @pytest.mark.parametrize("caller", ["raster", "points"])
     @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
-    def test_cosample__mixed_eager_and_dask_inputs(
+    def test_cosample__mixed_in_memory_and_dask_inputs(
         self, as_object_type: Literal["dataarray", "geodataframe"], pointcloud_file: Any, lazy_input: str, caller: str
     ) -> None:
-        """Checks that eager and Dask raster and point inputs can be used together."""
+        """Checks that in-memory and Dask raster and point inputs can be used together."""
 
         from geoutils.pointcloud.pd_accessor import _register_dask_pointcloud_accessor
 
@@ -1374,12 +1377,12 @@ class TestCosampleChunked:
         source, other = (raster_input.rst, point_input) if caller == "raster" else (point_input.pc, raster_input)
         result = source.cosample(other, resample_method="nearest")
 
-        # Calculate the same caller order from eager accessor inputs
+        # Calculate the same caller order from in-memory accessor inputs
         eager_raster = raster.to_xarray()
         eager_source, eager_other = (eager_raster.rst, points) if caller == "raster" else (points.pc, eager_raster)
         expected = eager_source.cosample(eager_other, resample_method="nearest")
 
-        # Check input and output loading before comparing every row with eager
+        # Check input and output loading before comparing every row with the in-memory result
         if lazy_input == "raster":
             import dask.array as da
 
@@ -1585,7 +1588,7 @@ class TestCosampleErrors:
     def test_cosample__error_multiproc_with_dask_inputs(self, lazy_input: str, tmp_path: Path) -> None:
         """Checks that Dask inputs cannot be combined with Multiproc output."""
 
-        # Pass a Dask input in each input position while the other arguments are eager
+        # Pass a Dask input in each input position while the other arguments are in memory
         pytest.importorskip("dask")
         raster = _raster(np.arange(30, dtype=float).reshape(5, 6))
         eager = raster.to_xarray()

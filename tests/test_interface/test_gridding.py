@@ -829,7 +829,7 @@ class TestKrigingPoints:
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestGridChunked:
     """
-    Test module for gridding outputs and loading across eager, Dask and Multiprocessing backends.
+    Test module for gridding outputs and loading across in-memory, Dask and Multiprocessing backends.
 
     Method accuracy and numerical engines are covered in test_operators/test_interpolator.py
     and test_operators/test_reducer.py.
@@ -960,7 +960,7 @@ class TestGridChunked:
         raster_file = tmp_path / "reference.tif"
         reference.to_file(raster_file)
 
-        # Select each input independently to cover all four eager and Dask combinations
+        # Select each input independently to cover all four in-memory and Dask combinations
         points = (
             gu.open_pointcloud(str(point_file), data_name="z", chunks=3, as_object_type=as_object_type)
             if point_dask
@@ -973,7 +973,7 @@ class TestGridChunked:
             dist_nodata_pixel=2,
         )
 
-        # Either lazy input selects Dask output, while two eager inputs return an eager raster
+        # Either lazy input selects Dask output, while two in-memory inputs return an in-memory raster
         output = (
             points.pc.grid(ref=raster, resampling="nearest", dist_nodata_pixel=2)
             if point_dask
@@ -1011,7 +1011,7 @@ class TestGridChunked:
     def test_grid__numba_chunked_backends(
         self, as_object_type: Literal["dataarray", "geodataframe"], resampling: GriddingMethod, tmp_path: Path
     ) -> None:
-        """Ensure the Numba calculation engine is identical across eager, Dask and Multiprocessing backends."""
+        """Ensure the Numba calculation engine is identical across in-memory, Dask and Multiprocessing backends."""
 
         pytest.importorskip("numba")
 
@@ -1025,7 +1025,7 @@ class TestGridChunked:
             "engine": "numba",
         }
 
-        # Compare both chunked outputs with one complete eager calculation
+        # Compare both chunked outputs with one complete in-memory calculation
         expected = PointCloud(self.points, data_name="z").grid(**kwargs)
         dask_points = gu.open_pointcloud(str(point_file), data_name="z", chunks=3, as_object_type=as_object_type)
         dask_output = dask_points.pc.grid(**kwargs, chunksizes=(2, 1))
@@ -1128,7 +1128,7 @@ class TestGridChunked:
 
     def test_grid__error_dask_reference_with_multiprocessing(self, tmp_path: Path) -> None:
         """
-        Checks that an eager point source with a Dask raster reference rejects multiprocessing before computing.
+        Checks that an in-memory point source with a Dask raster reference rejects multiprocessing before computing.
         """
 
         # Place source points at the requested grid coordinates and open the reference with spatial chunks
@@ -1151,10 +1151,10 @@ class TestGridChunked:
 
 @pytest.mark.skipif(find_spec("dask") is None, reason="Requires Dask")
 class TestGriddingOperatorsChunked:
-    """Test module for eager and lazy agreement when gridding operator neighborhoods."""
+    """Test module for in-memory and lazy agreement when gridding operator neighborhoods."""
 
     def test_grid__automatic_point_neighbours_chunk_invariance(self) -> None:
-        """Checks that automatic point searches give the same eager and lazy grid values."""
+        """Checks that automatic point searches give the same in-memory and lazy grid values."""
 
         # Four points feed a four by four output grid split into 2 x 3 cell chunks
         points = gu.PointCloud.from_xyz([0, 1, 3, 6], [0, 0, 0, 0], [1, 3, 7, 11], crs=32631)
@@ -1172,14 +1172,14 @@ class TestGriddingOperatorsChunked:
         assert hasattr(lazy_reference.data, "compute")
         assert hasattr(lazy_result.data, "compute")
 
-        # Computing the grid must agree with the complete eager point search
+        # Computing the grid must agree with the complete in-memory point search
         np.testing.assert_array_equal(np.asarray(lazy_result.compute()), expected.to_nanarray())
 
     @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_grid__custom_reducer_chunk_invariance(
         self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path
     ) -> None:
-        """Checks that a custom reducer receives the same neighbors with eager, Dask and multiprocessing grids."""
+        """Checks that a custom reducer receives the same neighbors with in-memory, Dask and multiprocessing grids."""
 
         pytest.importorskip("dask_geopandas")
 
@@ -1268,7 +1268,7 @@ class TestKrigingPointsChunked:
     """Test module for lazy and multiprocessing kriging across chunk boundaries."""
 
     def test_krige__point_chunk_invariance(self) -> None:
-        """Checks that eager and Dask kriging use the same neighbors within the requested radius."""
+        """Checks that in-memory and Dask kriging use the same neighbors within the requested radius."""
 
         # Place a regular set of known points around a four by four destination grid
         x, y = np.meshgrid(np.arange(5, dtype=float), np.arange(5, dtype=float))

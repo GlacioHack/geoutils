@@ -289,7 +289,7 @@ class TestPlot:
 
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask_geopandas is installed.")
 class TestPlotChunked:
-    """Test module for lazy point plotting, bounded row loading, and eager result equivalence."""
+    """Test module for lazy point plotting, bounded row loading, and in-memory result equivalence."""
 
     @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_plot__loading_laziness(
@@ -313,7 +313,7 @@ class TestPlotChunked:
         eager_offsets = np.asarray(plt.gca().collections[0].get_offsets())
         eager_values = np.asarray(plt.gca().collections[0].get_array())
 
-        # The input remains partitioned and produces exactly the eager sample
+        # The input remains partitioned and produces exactly the in-memory sample
         assert lazy.pc._is_dask
         np.testing.assert_array_equal(lazy_offsets, eager_offsets)
         np.testing.assert_array_equal(lazy_values, eager_values)

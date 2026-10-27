@@ -508,7 +508,7 @@ class DataArrayRasterAccessor(RasterBase):
 
         :param new_array: New array to use in the copied raster.
         :param cast_nodata: Allow the storage dtype to change if it cannot represent nodata; otherwise raise an error.
-        :param deep: Whether to copy eager values as well as metadata. Dask values stay lazy.
+        :param deep: Whether to copy in-memory values as well as metadata. Dask values stay lazy.
         :returns: A DataArray with copied metadata and optional replacement values.
         """
 
@@ -847,7 +847,7 @@ class DatasetRasterAccessor:
                 labels = variable.coords.get("band", xr.IndexVariable("band", np.arange(variable.sizes["band"])))
                 result = xr.concat(slices, dim=labels)
 
-            # GDAL needs the complete grid, defer that eager DataArray call to one task
+            # GDAL needs the complete grid, defer that DataArray call to one task
             elif variable.chunks and operation in ("fill_nodata", "sieve"):
                 dask = import_optional("dask")
                 import dask.array as da
@@ -1035,7 +1035,7 @@ class DatasetRasterAccessor:
                     raise ValueError("Convert lazy GeoDataFrame points explicitly with to_xarray() before sampling.")
                 points = interface.to_xarray().rename({"x": "x_point", "y": "y_point"})
             else:
-                # Read Dask X/Y directly so eager coordinate validation does not compute them
+                # Read Dask X/Y directly so coordinate validation does not compute them
                 if isinstance(points, tuple) and len(points) == 2 and any(is_dask_array(axis) for axis in points):
                     x, y = points
                 else:
@@ -1172,7 +1172,7 @@ class DatasetRasterAccessor:
         Estimate an empirical variogram for each selected raster variable.
 
         Each variable is sampled independently after excluding its missing values. Dask rasters are read in chunks;
-        the returned variograms contain eager NumPy arrays. An integer random_state is reused for each variable,
+        the returned variograms contain NumPy arrays. An integer random_state is reused for each variable,
         while a supplied generator advances in the selected variable order.
 
         See :meth:`DataArray.rst.variogram() <geoutils.DataArrayRasterAccessor.variogram>` for shared arguments.

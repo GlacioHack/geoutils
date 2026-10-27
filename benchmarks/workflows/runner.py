@@ -177,14 +177,14 @@ class BenchmarkRunner:
         dask = import_optional("dask", extra_name="benchmark")
         distributed = import_optional("distributed", extra_name="benchmark")
 
-        # Spill early enough to avoid pausing or replacing the constrained worker
+        # Spill arrays early and let the large data tests enforce the measured memory bound
         self._dask_config_context = dask.config.set(
             {
                 "temporary-directory": self.directory,
                 "distributed.worker.memory.target": 0.45,
                 "distributed.worker.memory.spill": 0.60,
-                # Leave room for native task workspaces before Dask pauses the worker
-                "distributed.worker.memory.pause": 1.20,
+                # Native imports and task metadata can prevent a paused worker from resuming
+                "distributed.worker.memory.pause": False,
                 # Peak memory and stable PIDs are asserted directly by the large data test
                 "distributed.worker.memory.terminate": False,
             }

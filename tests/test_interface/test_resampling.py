@@ -24,6 +24,7 @@ from geoutils.interface.resampling import (
     _interpolate_array,
 )
 from geoutils.multiproc import MultiprocConfig
+from geoutils.multiproc.cluster import MpCluster
 from geoutils.operators import GridNeighbours, Interpolator, LocalData, PointNeighbours, Reducer
 from geoutils.operators.interpolator import (
     InverseDistance,
@@ -876,7 +877,7 @@ class TestKrigingRaster:
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestInterpPointsChunked:
     """
-    Test module for point interpolation across eager, Dask and Multiprocessing backends.
+    Test module for point interpolation across in-memory, Dask and Multiprocessing backends.
 
     Numerical accuracy and SciPy comparisons are covered in test_operators/test_interpolator.py.
     """
@@ -979,13 +980,11 @@ class TestInterpPointsChunked:
 
     @pytest.mark.parametrize("validity_only", [False, True])
     def test_interp_points__validity_does_not_load_multiprocessing_source(
-        self, validity_only: bool, tmp_path: Path
+        self, validity_only: bool, tmp_path: Path, mp_cluster: MpCluster
     ) -> None:
         """
         Checks that real workers interpolate selected values or validity while the complete raster stays unloaded.
         """
-
-        from geoutils.multiproc.cluster import MpCluster
 
         # Store a raster whose nodata center is distinguishable from finite and out-of-bounds points
         data = np.arange(240, dtype=np.float64).reshape(2, 10, 12)
@@ -999,15 +998,14 @@ class TestInterpPointsChunked:
 
         # Let worker tiles read the file and build only their local one/NaN arrays
         assert not unloaded.is_loaded
-        with MpCluster({"nb_workers": 2}) as cluster:
-            result = unloaded.interp_at_points(
-                points,
-                method="nearest",
-                band=2,
-                as_array=True,
-                _validity_only=validity_only,
-                mp_config=MultiprocConfig(chunks=(5, 6), cluster=cluster),
-            )
+        result = unloaded.interp_at_points(
+            points,
+            method="nearest",
+            band=2,
+            as_array=True,
+            _validity_only=validity_only,
+            mp_config=MultiprocConfig(chunks=(5, 6), cluster=mp_cluster),
+        )
 
         # Preserve the original storage and report validity at the sampled locations as floating values
         assert not unloaded.is_loaded
@@ -1092,7 +1090,7 @@ class TestInterpPointsChunked:
         # Convert through integers because Raster.to_xarray() uses GDAL, which cannot store booleans
         lazy = raster.astype("uint8").to_xarray().astype(bool).chunk({"x": 3, "y": 2})
 
-        # Interpolate the same boolean raster with eager, Dask and multiprocessing inputs
+        # Interpolate the same boolean raster with in-memory, Dask and multiprocessing inputs
         options = {"points": (x, y), "method": "nearest", "as_array": True}
         results = [
             raster.interp_at_points(**options),
@@ -1149,7 +1147,7 @@ class TestInterpPointsChunked:
         # The first four points remain inside the pixel footprint; the last two fall outside it
         expected = np.array([0 if method == "nearest" else 0.25, 0, 17, 29, np.nan, np.nan])
 
-        # Interpolate the same points with eager, Dask and multiprocessing inputs
+        # Interpolate the same points with in-memory, Dask and multiprocessing inputs
         lazy = raster.to_xarray().chunk({"x": 3, "y": 2})
         results = [
             raster.interp_at_points((x, y), method=method, as_array=True),
@@ -1184,7 +1182,7 @@ class TestInterpPointsChunked:
          - In-memory base function through Raster (NumPy backend),
          - In-memory base function through Xarray DataArray (NumPy backend),
          - Dask backend through Xarray accessor (lazy input and output),
-         - Multiprocessing backend through Raster class (lazy input and eager output).
+         - Multiprocessing backend through Raster class (lazy input and in-memory output).
 
         Notes:
          - Dask returns one delayed array while the other backends return NumPy arrays directly,
@@ -1266,7 +1264,7 @@ class TestInterpPointsChunked:
         # Dask output remains lazy until the comparison below
         out_dask = ds_dask.rst.interp_at_points(points=(x, y), method=method, as_array=as_array)
 
-        # Multiprocessing output (output is eager)
+        # Multiprocessing output is in memory
         out_mp = raster_mp.interp_at_points(points=(x, y), method=method, as_array=as_array, mp_config=mp_config)
 
         # 4/ Laziness checks (inputs remain lazy)
@@ -1303,7 +1301,7 @@ class TestInterpPointsChunked:
         nodata_handling: NodataChoice,
         tmp_path: Path,
     ) -> None:
-        """Keep each nodata policy identical across eager, Dask and Multiprocessing interpolation."""
+        """Keep each nodata policy identical across in-memory, Dask and Multiprocessing interpolation."""
 
         # Store one invalid central cell so every backend reads the same source metadata
         source = np.arange(81, dtype=np.float32).reshape(9, 9)
@@ -1359,7 +1357,7 @@ class TestInterpPointsChunked:
         method: Literal["nearest", "linear"],
         tmp_path: Path,
     ) -> None:
-        """Interpolate every combination of eager and Dask raster and point-cloud inputs."""
+        """Interpolate every combination of in-memory and Dask raster and point-cloud inputs."""
 
         import dask.array as da
 
@@ -1402,7 +1400,7 @@ class TestInterpPointsChunked:
             else raster_input.interp_at_points(points=point_input, method=method, as_array=True)
         )
 
-        # Either Dask input must produce a lazy array while two eager inputs return NumPy directly
+        # Either Dask input must produce a lazy array while two in-memory inputs return NumPy directly
         if raster_dask or point_dask:
             assert isinstance(output, da.Array)
             computed_output = output.compute()
@@ -1481,7 +1479,7 @@ class TestInterpPointsChunked:
         points.to_file(temp_file)
         dask_points = gu.open_pointcloud(temp_file, data_name="id", chunks=2, as_object_type=as_object_type)
 
-        # Compute the eager values once as the expected result
+        # Compute the in-memory values once as the expected result
         expected = raster.interp_at_points(points=points, method="nearest", as_array=True)
 
         # Check warning calls directly so a temporary filter cannot hide a warning from the outside partition
@@ -1551,7 +1549,7 @@ class TestInterpPointsChunked:
     def test_raster_sampling__point_loading_laziness(
         self, as_object_type: Literal["dataarray", "geodataframe"], tmp_path: Path, raster_chunks: bool, operation: str
     ) -> None:
-        """Checks that raw point blocks sample raster values lazily and agree exactly with eager coordinates."""
+        """Checks that raw point blocks sample raster values lazily and agree exactly with in-memory coordinates."""
         import_optional("dask")
         # Point blocks end at uneven row positions and include a location outside the raster
         raster = gu.Raster.from_array(np.arange(12, dtype=np.float32).reshape(3, 4), from_origin(0, 3, 1, 1), 32633)
@@ -1571,7 +1569,7 @@ class TestInterpPointsChunked:
             {"method": "nearest"} if operation == "interp_at_points" else {"reducer_function": np.mean}
         )
 
-        # Call the same public operation with eager coordinates and lazy point support
+        # Call the same public operation with in-memory coordinates and lazy point support
         expected = getattr(raster, operation)(points, **options)
         result = getattr(source, operation)(lazy_points, **options)
         assert not lazy_points.pc.is_loaded
@@ -1588,10 +1586,10 @@ class TestInterpPointsChunked:
 
 @pytest.mark.skipif(find_spec("dask") is None, reason="Requires Dask")
 class TestSamplingOperatorsChunked:
-    """Test module for eager, Dask and multiprocessing agreement when sampling raster neighborhoods."""
+    """Test module for in-memory, Dask and multiprocessing agreement when sampling raster neighborhoods."""
 
     def test_interp_points__custom_grid_neighbours_chunk_invariance(self) -> None:
-        """Checks that selected source cells and values stay exact across eager, Dask and multiprocessing tiles."""
+        """Checks that selected source cells and values stay exact across in-memory, Dask and multiprocessing tiles."""
 
         # Place missing values across rectangular chunk boundaries and sample cell centers on either side
         values = np.arange(72, dtype=np.float64).reshape(8, 9)
@@ -1619,7 +1617,7 @@ class TestSamplingOperatorsChunked:
         np.testing.assert_array_equal(multiproc_result, expected)
 
     def test_interp_points__automatic_grid_neighbours_chunk_invariance(self) -> None:
-        """Checks that automatic raster windows give the same values across eager and chunked calculations."""
+        """Checks that automatic raster windows give the same values across in-memory and chunked calculations."""
 
         # Split an eight by nine raster into 3 x 4 cells, with targets on both sides of chunk edges
         values = np.arange(72, dtype=float).reshape(8, 9)
@@ -1651,7 +1649,9 @@ class TestRegularInterpolationNeighboursChunked:
 
     @pytest.mark.parametrize("method", ["nearest", "linear", "slinear", "pchip"])
     def test_resample_at_points__natural_stencil_chunk_invariance(self, method: ScipyInterpolationMethod) -> None:
-        """Checks that explicit natural stencils remain lazy and match eager values across raster chunk boundaries."""
+        """
+        Checks that explicit natural stencils remain lazy and match in-memory values across raster chunk boundaries.
+        """
 
         # Uneven 5 x 6 chunks split a nonlinear surface near several requested points
         rows, cols = np.indices((13, 14), dtype=float)
@@ -1690,7 +1690,7 @@ class TestReductionChunked:
     def test_resample_at_points__reducer_chunk_overlap(
         self, window: int, shape: Literal["square", "circular"], fractional: bool, tmp_path: Path
     ) -> None:
-        """Checks that overlapping reducer windows give the eager result across Dask/MP tiles and raster edges."""
+        """Checks that overlapping reducer windows give the in-memory result across Dask/MP tiles and raster edges."""
 
         # Distinct bands, missing cells near chunk boundaries, and windows larger than some raster axes
         values = np.arange(63, dtype=float).reshape(7, 9) ** 2
@@ -1734,10 +1734,10 @@ class TestReductionChunked:
 
     @pytest.mark.parametrize("masked", [False, True])
     @pytest.mark.parametrize("boundless", [False, True])
-    def test_reduce_at_points__callable_workers(self, masked: bool, boundless: bool, tmp_path: Path) -> None:
-        """Checks that callable reducers receive missing cells consistently in eager, Dask and MP windows."""
-
-        from geoutils.multiproc.cluster import MpCluster
+    def test_reduce_at_points__callable_workers(
+        self, masked: bool, boundless: bool, tmp_path: Path, mp_cluster: MpCluster
+    ) -> None:
+        """Checks that callable reducers receive missing cells consistently in in-memory, Dask and MP windows."""
 
         # Missing cell shared by neighboring windows; median differs from the containing cell
         values = np.arange(63, dtype=float).reshape(7, 9) ** 2
@@ -1760,12 +1760,11 @@ class TestReductionChunked:
         lazy_source = open_raster(str(filename), chunks={"y": 2, "x": 4})
         unloaded = gu.Raster(filename, load_data=False)
         lazy_result = lazy_source.rst.reduce_at_points(points, **options)
-        with MpCluster({"nb_workers": 2}) as cluster:
-            mp_result = unloaded.reduce_at_points(
-                points, **options, mp_config=MultiprocConfig(chunks=(3, 2), cluster=cluster)
-            )
+        mp_result = unloaded.reduce_at_points(
+            points, **options, mp_config=MultiprocConfig(chunks=(3, 2), cluster=mp_cluster)
+        )
 
-        # Eager values, masks and original loading state
+        # In-memory values, masks and original loading state
         assert not lazy_source._in_memory
         assert hasattr(lazy_result, "compute")
         assert not unloaded.is_loaded
@@ -1822,7 +1821,7 @@ class TestReductionChunked:
         assert not source._in_memory
         assert hasattr(result, "compute")
 
-        # Computed values match the eager call; point output preserves target geometry and labels
+        # Computed values match the in-memory call; point output preserves target geometry and labels
         computed = result.compute()
         if lazy_points:
             assert not targets.pc.is_loaded
@@ -1858,7 +1857,7 @@ class TestKrigingRasterChunked:
         variogram = gu.Variogram.from_model("gaussian", effective_range=3, partial_sill=1)
         operator = Kriging(variogram, max_overlap=2.2)
 
-        # Compare the eager values with a lazy raster split into 2 x 3 cells and worker tiles of 3 x 4 cells
+        # Compare the in-memory values with a lazy raster split into 2 x 3 cells and worker tiles of 3 x 4 cells
         expected = raster.interp_at_points(points, method=operator, as_array=True, nodata_handling="ignore")
         lazy_source = raster.to_xarray().chunk({"y": 2, "x": 3})
         lazy_result = lazy_source.rst.interp_at_points(points, method=operator, as_array=True, nodata_handling="ignore")
@@ -1872,7 +1871,7 @@ class TestKrigingRasterChunked:
             mp_config=MultiprocConfig(chunks=(3, 4)),
         )
 
-        # Both chunk layouts give the eager predictions
+        # Both chunk layouts give the in-memory predictions
         assert np.allclose(lazy_result.compute(), expected, equal_nan=True)
         assert np.allclose(multiproc_result, expected, equal_nan=True)
 
@@ -1901,7 +1900,7 @@ class TestKrigingRasterChunked:
             mp_config=MultiprocConfig(chunks=(3, 4), outfile=str(tmp_path / "kriging.tif")),
         )
 
-        # Lazy input and output remain unloaded until compute(), and both chunked results equal the eager raster
+        # Lazy input and output remain unloaded until compute(), and both chunked results equal the in-memory raster
         assert not lazy_source._in_memory
         assert hasattr(lazy.data, "compute")
         assert np.allclose(np.asarray(lazy.compute()).squeeze(), expected.to_nanarray(), equal_nan=True)

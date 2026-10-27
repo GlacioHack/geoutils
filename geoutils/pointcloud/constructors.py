@@ -82,7 +82,7 @@ def _point_geometry_partition(frame: pd.DataFrame, data_name: str, crs: Any, use
     """Construct point geometries and attach auxiliary values from one array partition."""
     from geoutils.pointcloud.pd_accessor import GeoDataFramePointCloudAccessor
 
-    # Use the established geometry constructor for both eager data and Dask partitions
+    # Use the established geometry constructor for both in-memory data and Dask partitions
     points = GeoDataFramePointCloudAccessor.from_xyz(
         frame["x"].to_numpy(), frame["y"].to_numpy(), frame[data_name].to_numpy(), crs, data_name, use_z
     )

@@ -62,7 +62,7 @@ class TestVector:
     def test_lazy_load_from_file(self) -> None:
         """Check that file-backed vectors only load their GeoDataFrame when data are requested."""
 
-        # Read an eager reference separately from the lazy Vector constructor
+        # Read an in-memory reference separately from the lazy Vector constructor
         vector = gu.Vector(self.aster_outlines_path)
         eager = gpd.read_file(self.aster_outlines_path)
 

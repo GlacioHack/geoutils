@@ -62,6 +62,9 @@ def _prepare_proxy_inputs(
     other: Any | None,
     other_precision: Literal["same", "negligible"],
     temporary_files: ExitStack,
+    *,
+    at: Literal["self", "other"] | None,
+    align: Literal["raise", "reproject"],
 ) -> tuple[Any, dict[str, str]]:
     """
     Prepare error proxy and predictors on their common finite support using ``cosample()``, which supports
@@ -99,7 +102,8 @@ def _prepare_proxy_inputs(
         source if other is None else other,
         auxiliary=auxiliary or None,
         auxiliary_at=auxiliary_at or None,
-        at="self",
+        at=at,
+        align=align,
         mask=mask,
         mp_config=mp_config,
     )
@@ -141,7 +145,7 @@ def _difference_point_partition(dataframe: Any, scale: float) -> Any:
 
 
 def _difference_proxy(sampled: Any, scale: float, mp_config: MultiprocConfig | None, files: ExitStack) -> Any:
-    """Build a difference proxy while preserving eager, Dask, or multiprocessing execution."""
+    """Build a difference proxy while preserving in-memory, Dask, or multiprocessing execution."""
 
     raster = _get_raster_interface(sampled)
     points = _get_pointcloud_interface(sampled) if raster is None else None
@@ -184,7 +188,7 @@ def _difference_proxy(sampled: Any, scale: float, mp_config: MultiprocConfig | N
         result = dataframe.map_partitions(_difference_point_partition, scale, meta=dataframe._meta)
         return points._cast_pointcloud_output(result)
 
-    # Eager: update a copy of the sampled raster or point cloud
+    # In-memory: update a copy of the sampled raster or point cloud
     if raster is not None:
         values = _difference_raster_values(sampled.data, scale)
         if isinstance(sampled, xr.DataArray):
@@ -424,7 +428,7 @@ def _standardize_proxy(
             output_config = temporary_files.enter_context(mp_config.temporary())
             return map_overlap(_wrapper_standardize_raster_multiproc, sampled, output_config, output_names, magnitude)
 
-        # Point cosampling already selected eager rows; a Dask point input stays lazy
+        # Point cosampling already selected in-memory rows; a Dask point input stays lazy
         dataframe = point_sample._dataset
         if not hasattr(dataframe, "map_partitions"):
             standardized_values = _standardized_point_values(dataframe, output_names, magnitude)
@@ -459,7 +463,7 @@ def _standardize_proxy(
             )
             return point_sample._cast_pointcloud_output(standardized)
 
-    # Eager: return a copy with standardized raster cells or point values
+    # In-memory: return a copy with standardized raster cells or point values
     if raster:
         values = _standardized_raster_values(data, output_names, magnitude)
         if isinstance(sampled, xr.DataArray):
@@ -728,6 +732,8 @@ def _estimate_error_structure(
     *,
     other: Any | None,
     other_precision: Literal["same", "negligible"],
+    at: Literal["self", "other"] | None,
+    align: Literal["raise", "reproject"],
     predictors: Mapping[str, Any] | None,
     components: Mapping[str, Mapping[str, Any]] | None,
     mask: Any | None,
@@ -794,7 +800,15 @@ def _estimate_error_structure(
     with ExitStack() as temporary_files:
         cosample_config = temporary_files.enter_context(mp_config.temporary()) if mp_config is not None else None
         sampled, output_names = _prepare_proxy_inputs(
-            source, predictor_mapping, mask, cosample_config, other, other_precision, temporary_files
+            source,
+            predictor_mapping,
+            mask,
+            cosample_config,
+            other,
+            other_precision,
+            temporary_files,
+            at=at,
+            align=align,
         )
 
         # 2.1/ Estimate error magnitude from the error proxy

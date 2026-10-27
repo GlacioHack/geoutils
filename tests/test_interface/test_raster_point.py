@@ -29,8 +29,8 @@ class TestRasterPoint:
     """
     Test module for exact raster and regular point cloud conversions.
 
-    These tests cover core eager calls to to_pointcloud() and from_pointcloud_regular(). TestRasterPointChunked covers
-    representative Dask and multiprocessing conversions.
+    These tests cover core in-memory calls to to_pointcloud() and from_pointcloud_regular().
+    TestRasterPointChunked covers representative Dask and multiprocessing conversions.
 
     More extensive tests are available in test_sampling/test_subsampling.py, as subsampling contains most of the core
     logic for to_pointcloud(), even for a full-array conversion (as this case is also relevant to subsample()).
@@ -391,20 +391,20 @@ class TestRasterPointArrayChunked:
 @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
 class TestRasterPointChunked:
     """
-    Test module for to_pointcloud() across eager, Dask, and multiprocessing backends.
+    Test module for to_pointcloud() across in-memory, Dask, and multiprocessing backends.
 
     Dask outputs must stay lazy until explicitly computed. Multiprocessing inputs and point outputs must stay unloaded,
-    and both chunked backends must return the same values as an eager conversion. More extensive chunked sampling tests
-    are available in test_sampling/test_subsampling.py.
+    and both chunked backends must return the same values as an in-memory conversion. More extensive chunked
+    sampling tests are available in test_sampling/test_subsampling.py.
     """
 
     @pytest.mark.parametrize("subsample", [1, 11, 17])
     @pytest.mark.parametrize("skip_nodata", [True, False])
     @pytest.mark.parametrize("as_array", [False, True])
     def test_to_pointcloud__chunked_backends_equal(
-        self, subsample: int, skip_nodata: bool, as_array: bool, tmp_path: Path
+        self, subsample: int, skip_nodata: bool, as_array: bool, tmp_path: Path, mp_cluster: MpCluster
     ) -> None:
-        """Checks that eager, Dask and Multiprocessing conversions return the same point rows."""
+        """Checks that in-memory, Dask and Multiprocessing conversions return the same point rows."""
 
         import dask.array as da
 
@@ -436,11 +436,10 @@ class TestRasterPointChunked:
         # Choose GeoPandas output for the geometry comparisons below
         dask_output = dask_source.rst.to_pointcloud(**options, pointcloud_return_type="geodataframe")
         point_output = tmp_path / f"points-{subsample}-{skip_nodata}.gpkg"
-        with MpCluster({"nb_workers": 2}) as cluster:
-            multiprocessing_output = multiprocessing_source.to_pointcloud(
-                **options,
-                mp_config=MultiprocConfig(chunks=(3, 4), outfile=str(point_output), cluster=cluster),
-            )
+        multiprocessing_output = multiprocessing_source.to_pointcloud(
+            **options,
+            mp_config=MultiprocConfig(chunks=(3, 4), outfile=str(point_output), cluster=mp_cluster),
+        )
 
         # 4/ Check that the Dask source and output stay lazy until the result is computed explicitly
         assert dask_source.data is dask_source_array
@@ -571,7 +570,7 @@ class TestRasterPointChunked:
     def test_to_pointcloud__error_xarray_with_multiproc(self) -> None:
         """Checks that to_pointcloud() rejects multiprocessing for a non-Dask Xarray accessor."""
 
-        # Build an eager Xarray raster without a Dask chunk layout
+        # Build an in-memory Xarray raster without a Dask chunk layout
         values = np.arange(20).reshape((4, 5))
         source = gu.DataArrayRasterAccessor.from_array(values, rio.transform.from_origin(0, 4, 1, 1), 4326)
 
@@ -581,7 +580,9 @@ class TestRasterPointChunked:
 
     @pytest.mark.parametrize("subsample", [1, 5, 15])
     def test_to_pointcloud__raster_loading_and_order(self, subsample: int) -> None:
-        """Checks that raster conversion and subsampling preserve eager point order and values in lazy array output."""
+        """
+        Checks that raster conversion and subsampling preserve in-memory point order and values in lazy array output.
+        """
         import_optional("dask")
 
         # Uneven raster chunks distinguish source cell order from tile order
@@ -602,7 +603,7 @@ class TestRasterPointChunked:
 
     @pytest.mark.parametrize("offset", ["center", "ul", "lr"])
     def test_to_pointcloud__complete_valid_raster(self, offset: str) -> None:
-        """Checks that complete valid rasters yield lazy coordinates and values in exact eager row order."""
+        """Checks that complete valid rasters yield lazy coordinates and values in exact in-memory row order."""
         import_optional("dask")
         # A rotated affine and uneven blocks check both coordinate conventions and flattening order
         from affine import Affine

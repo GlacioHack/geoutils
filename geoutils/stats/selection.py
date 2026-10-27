@@ -74,7 +74,7 @@ class _SelectionCounts:
 def _coordinates_at_support(
     support: RasterBase | PointCloudBase | None,
 ) -> NDArray[Any] | None:
-    """Return one coordinate per value in an eager raster or point cloud."""
+    """Return one coordinate per value in an in-memory raster or point cloud."""
 
     if support is None:
         return None
@@ -86,7 +86,7 @@ def _coordinates_at_support(
     pointcloud = cast("PointCloudBase", support)
     dataframe = pointcloud._dataset
     if is_dask_dataframe(dataframe):
-        raise ValueError("Statistics uncertainty propagation currently requires eager point coordinates.")
+        raise ValueError("Statistics uncertainty propagation currently requires in-memory point coordinates.")
     return np.column_stack((dataframe.geometry.x.to_numpy(), dataframe.geometry.y.to_numpy()))
 
 
@@ -379,7 +379,8 @@ def _mask_global_values(
     Apply an eligible-location mask and retain counts before and after that selection.
 
     Boolean mask validation belongs to _normalize_mask_array(). Here, missing values remain excluded independently of
-    the user mask. An eager array stays eager unless its mask is lazy; in that case, selection must wait for Dask too.
+    the user mask. An in-memory array stays in memory unless its mask is lazy; in that case, selection must wait
+    for Dask too.
     The original array is never changed, and its dimensions are kept for user-defined statistics.
 
     :param array: One selected value array, already aligned to the mask.

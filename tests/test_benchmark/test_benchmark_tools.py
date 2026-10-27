@@ -107,11 +107,29 @@ class TestComparisonReport:
             if benchmark.parameter_name is not None
             if benchmark.id != "reproject-operator-raster-size"
             for case in benchmark.cases
+            if "read_strategy" not in case.options
         )
         digest = hashlib.sha256("\n".join(class_names).encode()).hexdigest()
 
         # A changed name would split ASV history even when the underlying operation remained the same
-        assert digest == "198e9302e6fa8b814dbd8003021cd6b64779378ab61fe2cdb1e55afbbdea8751"
+        assert digest == "7bf237dba4a181ffa896576926f31dd969315c270849b41511636fbf327fef9c"
+
+    def test_benchmark_registry__flox_execution_modes(self) -> None:
+        """Checks that Flox benchmarks use supported execution modes."""
+
+        # Collect Flox benchmark cases
+        cases = [
+            case
+            for benchmark in BENCHMARKS
+            for case in benchmark.cases
+            if case.implementation == "flox"
+            or (case.engine is not None and case.engine.startswith("flox"))
+            or case.options.get("reduction_backend") == "flox"
+        ]
+
+        # Check supported execution modes
+        assert cases
+        assert {case.execution for case in cases} == {"inmem", "dask"}
 
     def test_operation_discovery__deterministic_modules(self) -> None:
         """Checks that operation discovery returns the same modules in their stable report order."""
@@ -215,7 +233,7 @@ class TestComparisonReport:
         empty_summary = _headline_summary_table(records)
         assert set(re.findall(r"<td>(.*?)</td>", empty_summary)) == {"—"}
 
-        # Add distinct Dask and eager results at 10,000 × 10,000 so a wrong choice is easy to see
+        # Add distinct Dask and in-memory results at 10,000 × 10,000 so a wrong choice is easy to see
         source = next(
             record
             for record in records
@@ -225,7 +243,7 @@ class TestComparisonReport:
         eager = replace(dask, series_label="In memory", execution_mode="inmem", end_to_end_time_s=999)
         summary = _headline_summary_table([*records, dask, eager])
 
-        # Check the displayed measurements and exclude the eager timing
+        # Check the displayed measurements and exclude the in-memory timing
         assert "<td>482</td><td>7.25</td>" in summary
         assert "<td>999</td>" not in summary
 
@@ -340,7 +358,7 @@ class TestBenchmarkScenarios:
             ("polygonize_rasterio_labelstitch_dask__rastersize", ".polygonize(strategy='label_stitch')"),
             (
                 "stats_moments_numpy_dense_dask__rastersize",
-                "stats(statistics=['mean', 'std', 'min', 'max'], strategy='dense')",
+                "stats(statistics=['mean', 'std', 'min', 'max'], method='map-reduce', reindex=True)",
             ),
         ),
     )
@@ -414,10 +432,10 @@ class TestBenchmarkOutputsChunked:
 
     @pytest.mark.parametrize("dtype", ["float32", "bool"])
     def test_to_file__raster_chunks(self, dtype: str, tmp_path: Path) -> None:
-        """Checks that Dask benchmark files match eager raster writes without loading the original arrays."""
+        """Checks that Dask benchmark files match in-memory raster writes without loading the original arrays."""
 
         pytest.importorskip("distributed")
-        import dask.array as da
+        da = pytest.importorskip("dask.array")
 
         # Uneven edge chunks reveal missing windows; two workers share the destination file
         config = RuntimeConfig(shape=(35, 49), chunks=(16, 32), n_workers=2, directory=str(tmp_path))
@@ -458,7 +476,7 @@ class TestBenchmarkOutputsChunked:
     @pytest.mark.parametrize("operation_name", ["subsample", "to_pointcloud"])
     @pytest.mark.parametrize("driver", ["GPKG", "LAS", "LAZ"])
     def test_to_file__point_outputs(self, operation_name: str, driver: str, tmp_path: Path) -> None:
-        """Checks that Dask point benchmarks save every expected point and match eager file output."""
+        """Checks that Dask point benchmarks save every expected point and match in-memory file output."""
 
         pytest.importorskip("distributed")
         if driver in ("LAS", "LAZ"):
@@ -481,7 +499,7 @@ class TestBenchmarkOutputsChunked:
             options["pointcloud_return_type"] = "dataarray" if case.variant == "xarray" else "geodataframe"
             eager_points = getattr(eager_source.rst, operation_name)(**options)
 
-            # Run the benchmark and save the same public call on eager inputs for comparison
+            # Run the benchmark and save the same public call on in-memory inputs for comparison
             assert eager_points.pc.is_loaded
             result = runner.run(profile=False)
             expected_file = str(tmp_path / f"expected.{driver.lower()}")
