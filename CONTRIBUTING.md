@@ -68,6 +68,21 @@ To run the entire test suite from the repository root:
 python -m pytest
 ```
 
+### Documentation
+
+Update pages in `doc/source/` when your PR affects the documentation.
+
+These pages are written in [MyST Markdown](https://myst-nb.readthedocs.io/en/latest/authoring/text-notebooks.html), 
+with executable code cells. Gallery examples are Python scripts in `examples/`.
+
+With the dev environment activated, you can test locally the HTML documentation build, for example from the repo root:
+
+```bash
+sphinx-build -T -b html doc/source doc/build
+```
+
+Then, open `doc/build/index.html` to review the generated pages!
+
 ### Formatting and linting
 
 Install and run `pre-commit` (see [pre-commit documentation](https://pre-commit.com/)), which will use `.pre-commit-config.yaml` to verify spelling errors,
