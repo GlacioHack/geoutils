@@ -2996,8 +2996,8 @@ class RasterBase(ABC):
         """
         Polygonize the raster into a vector of polygon geometries delineating target values.
 
-        :param target_values: Value or range of values of the raster from which to
-          create geometries (defaults to "all", for which all unique pixel values of the raster are used).
+        :param target_values: A number, a list or one-dimensional array of discrete values, a two-number tuple
+            for an inclusive (minimum, maximum) range, or "all" (the default) for every valid value.
         :param data_name: Data attribute name to be associated with target values in the output vector
             (defaults to "id").
         :param strategy: Strategy used to reconcile polygons across chunk boundaries. Defaults to ``"label_stitch"``

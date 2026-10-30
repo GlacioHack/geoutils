@@ -249,7 +249,7 @@ def _polygonize_prepare(
     This function performs metadata-level normalization without touching the array (safe for Dask).
 
     Preparation includes:
-      1. Normalize `target_values` for mask rasters (force True, warn on non-boolean).
+      1. Check user inputs, then normalize `target_values` for mask rasters (force True, warn on non-boolean).
       2. Decide labeling mode:
          - boolean labeling (fast) when selection is a single class,
          - per-value labeling (exact) when selection is a set of discrete values.
@@ -259,12 +259,30 @@ def _polygonize_prepare(
       6. Store floating tolerance.
     """
 
-    # 1/ Normalize target spec for mask rasters (cheap)
+    # 1/ Check user inputs
     eff = target_values
+    numeric_types = (int, float, np.integer, np.floating)
+    if isinstance(eff, tuple):
+        if len(eff) != 2 or not all(isinstance(value, numeric_types) for value in eff):
+            raise ValueError(
+                "A target_values range must be a tuple of two numbers. "
+                "Use a list or array for exact value targets. Tuples are only for ranges."
+            )
+        if eff[0] > eff[1]:
+            raise ValueError(
+                "The lower bound of a target_values range must not exceed the upper bound. "
+                "Use a list or array for exact value targets. Tuples are only for ranges."
+            )
+    elif isinstance(eff, (list, np.ndarray)):
+        eff = np.asarray(eff)
+        if eff.ndim != 1 or eff.dtype.kind not in "biuf":
+            raise ValueError("A target_values list or array must contain numbers in one dimension.")
+
+    # Normalize target spec for mask rasters
     is_mask_raster = bool(getattr(source_raster, "is_mask", False))
     if is_mask_raster:
-        if target_values != "all" and (
-            not isinstance(target_values, (int, np.integer, float, np.floating)) or target_values not in [0, 1]
+        if not (isinstance(target_values, str) and target_values == "all") and (
+            not isinstance(target_values, numeric_types) or target_values not in [0, 1]
         ):
             import warnings
 
@@ -275,11 +293,7 @@ def _polygonize_prepare(
         eff = True
 
     # 2/ Decide whether labeling can be boolean-only (faster computations)
-
-    # Fast path is valid whenever all selected pixels are a single “class”:
-    # - mask raster (eff=True)
-    # - scalar target
-    use_boolean_labeling = is_mask_raster or isinstance(eff, (int, float, np.integer, np.floating))
+    use_boolean_labeling = is_mask_raster or isinstance(eff, numeric_types)
 
     # 3/ Choose dtype for polygonize values (GeoPandas compatibility)
     final_dtype = _choose_polygonize_dtype(getattr(source_raster, "dtype", np.float32))
@@ -346,7 +360,7 @@ def _build_selection_mask(
         values_dtype = np.asarray(values).dtype
     v_dtype = np.dtype(values_dtype)
 
-    if eff == "all":
+    if isinstance(eff, str) and eff == "all":
         nodata = prepared.nodata
 
         # If nodata is NaN, treat as "float validity" (not NaN)
@@ -378,6 +392,10 @@ def _build_selection_mask(
     # If range, perform logical comparison
     if isinstance(eff, tuple):
         return ((values >= eff[0]) & (values <= eff[1])).astype(np.uint8)
+
+    # If discrete values, select each requested value
+    if isinstance(eff, (list, np.ndarray)):
+        return xp.isin(values, eff).astype(np.uint8)
 
     raise ValueError("target_values must be a number, a tuple, a sequence, or 'all'.")
 
