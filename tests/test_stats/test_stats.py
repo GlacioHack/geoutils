@@ -878,6 +878,25 @@ class TestStatsUncertainty:
         # Each group mean has variance 4 / 2 from its two independent values
         np.testing.assert_allclose(summary.variance, [2.0, 2.0])
 
+    def test_stats__blocked_mean_uncertainty(self) -> None:
+        """Checks that mean uncertainty across several default covariance blocks matches the dense calculation."""
+
+        # We use more pixels than one covariance block size used during covar propagation (size 512)
+        positions = np.arange(515, dtype=float)
+        transform = rio.transform.from_origin(0, 1, 1, 1)
+        raster = gu.raster.from_array(positions[None, :], transform, 32631)
+        model = gu.Variogram.from_model("gaussian", effective_range=10, partial_sill=1)
+        errors = gu.ErrorStructure([gu.ErrorComponent("spatial", 2, model), gu.ErrorComponent("uncorrelated", 0.5)])
+
+        # A mean has equal weights, so its variance is the average covariance
+        distances = np.abs(positions[:, None] - positions[None, :])
+        covariance = 4 * np.exp(-4 * (distances / 10) ** 2) + 0.25 * np.eye(len(positions))
+        expected_variance = np.mean(covariance)
+        nominal, summary = raster.rst.stats("mean", error_structure=errors)
+
+        assert nominal == np.mean(positions)
+        np.testing.assert_allclose(summary.variance, [expected_variance], rtol=1e-13)
+
     @pytest.mark.parametrize("statistic,reducer", [("mean", Mean()), (" MEAN ", Mean()), ("sum", Sum())])
     @pytest.mark.parametrize("grouped", [False, True])
     @pytest.mark.parametrize("method", ["analytical", "numerical"])

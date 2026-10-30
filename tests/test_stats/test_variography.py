@@ -913,6 +913,62 @@ class TestVariogramConversion:
         assert result.correlation(0) == 1
         assert result.correlation(np.zeros((2, 3))).shape == (2, 3)
 
+    @pytest.mark.parametrize(
+        "model_name,parameters",
+        [
+            ("spherical", {}),
+            ("cubic", {}),
+            ("exponential", {}),
+            ("gaussian", {}),
+            ("stable", {"shape": 0.5}),
+            ("stable", {"shape": 1.5}),
+            ("matern", {"smoothness": 0.5}),
+            ("matern", {"smoothness": 1.5}),
+            ("matern", {"smoothness": 2.5}),
+        ],
+    )
+    @pytest.mark.parametrize("distance_shape", [(), (8,), (2, 4), (2, 2, 2), (0,)])
+    def test_variogram__vectorized_match_skgstat(
+        self,
+        model_name: str,
+        parameters: dict[str, float],
+        distance_shape: tuple[int, ...],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Checks that vectorized model evaluations match SciKit-GStat."""
+
+        skgstat = pytest.importorskip("skgstat")
+
+        # We test several distances: zero, small lags and both sides of the effective range
+        distances = np.array([0.0, 1e-8, 0.5, 6 - 1e-8, 6, 6 + 1e-8, 12, 60])
+        if not distance_shape:
+            distance = np.asarray(0.5)
+        elif distance_shape == (0,):
+            distance = np.empty(0)
+        else:
+            distance = distances.reshape(distance_shape)
+        model = gu.Variogram.from_model(
+            model_name,
+            effective_range=6,
+            partial_sill=2,
+            nugget=0.3,
+            shape=parameters.get("shape"),
+            smoothness=parameters.get("smoothness"),
+        )
+
+        # SciKit-GStat as a reference
+        arguments = [6, 2, *parameters.values()]
+        expected = getattr(skgstat.models, model_name)(np.atleast_1d(distance).ravel(), *arguments)
+        expected = expected.reshape(distance.shape) + np.where(distance > 0, 0.3, 0.0)
+        monkeypatch.setitem(sys.modules, "skgstat", None)
+
+        # Check equality with small rounding
+        actual = model.variogram(distance)
+        assert np.shape(actual) == distance.shape
+        np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-14)
+        np.testing.assert_allclose(model.covariance(distance), 2.3 - expected, rtol=1e-12, atol=1e-14)
+        np.testing.assert_allclose(model.correlation(distance), (2.3 - expected) / 2.3, rtol=1e-12, atol=1e-14)
+
     @pytest.mark.parametrize("model_name,smoothness", [("gaussian", None), ("exponential", None), ("matern", 1.5)])
     def test_to_gpytorch__covar(self, model_name: str, smoothness: float | None) -> None:
         """Checks that converting to GPyTorch kernel works properly to estimate covariance."""

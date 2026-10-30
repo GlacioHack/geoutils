@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any, Literal
+from unittest.mock import Mock
 
 import numpy as np
 import pandas as pd
@@ -13,7 +14,7 @@ import rasterio as rio
 import geoutils as gu
 from geoutils.operators import Interpolator, LinearCoefficients, LocalData, Reducer
 from geoutils.operators.neighbours import GridNeighbours, PointNeighbours
-from geoutils.operators.reducer import Mean
+from geoutils.operators.reducer import Mean, Sum
 from geoutils.stats.variography import VariogramModel
 from geoutils.uncertainty.propagation import simulate
 from tests.operator_helpers import LocalMeanInterpolator, NoSupportReducer
@@ -220,6 +221,61 @@ class TestAnalyticalOperatorPropagation:
         difference = summary.contrast({"second": 1, "first": -1})
         assert difference.estimate == 1
         assert difference.variance == pytest.approx(2 * (1 - correlation))
+
+    @pytest.mark.parametrize("block_size", [2, 3])
+    @pytest.mark.parametrize("correlated", [False, True])
+    def test_propagate__blocked_covariance(
+        self, block_size: int, correlated: bool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Checks that bounded covariance blocks match dense weighted sums."""
+
+        from geoutils.uncertainty import propagation
+
+        # We create coords with repeated IDs, coincident points and different weights
+        coordinates = np.array([[0, 0], [0, 0], [1, 0], [2, 0], [3, 0]], dtype=float)
+        source_groups = [np.array([0, 1, 3, 3, 4]), np.array([1, 2, 4])]
+        weight_groups = [np.array([-1, 0.2, 0.5, 0.3, 2]), np.array([-2, 1, 0.5])]
+        data = [
+            LocalData(
+                values=indexes.astype(float),
+                valid=np.ones(len(indexes), dtype=bool),
+                source_ids=indexes,
+                coordinates=coordinates[indexes],
+                sample_weights=weights,
+            )
+            for indexes, weights in zip(source_groups, weight_groups)
+        ]
+        components = [gu.ErrorComponent("uncorrelated", 0.5)]
+        source_covariance = 0.25 * np.eye(5)
+        if correlated:
+            model = VariogramModel("exponential", effective_range=4, partial_sill=1.4)
+            components.append(gu.ErrorComponent("spatial", 1.2, model))
+            distances = np.linalg.norm(coordinates[:, None] - coordinates[None, :], axis=-1)
+            source_covariance += 1.2**2 * np.exp(-3 * distances / 4)
+
+        # We compute the expected output from the dense ref
+        combined_weights = np.array([[-1, 0.2, 0, 0.8, 2], [0, -2, 1, 0, 0.5]])
+        expected = combined_weights @ source_covariance @ combined_weights.T
+
+        # Then record buffer sizes
+        covariance_blocks = Mock(wraps=propagation._source_covariance_matrix)
+        monkeypatch.setattr(propagation, "_COVARIANCE_BLOCK_SIZE", block_size)
+        monkeypatch.setattr(propagation, "_source_covariance_matrix", covariance_blocks)
+
+        # Propagate fixed sum weights, as stats() does
+        operator = Sum()
+        operator._uses_error_covariance = False
+        summary = gu.uncertainty.propagate(operator, data, gu.ErrorStructure(components), return_covariance=True)
+
+        # Check equality and calls
+        assert summary.covariance is not None
+        np.testing.assert_allclose(summary.variance, np.diag(expected), rtol=1e-13, atol=1e-14)
+        np.testing.assert_allclose(summary.covariance, expected, rtol=1e-13, atol=1e-14)
+        assert covariance_blocks.called
+        for call in covariance_blocks.call_args_list:
+            rows, columns = call.args[-2:]
+            assert len(rows) <= block_size
+            assert len(columns) <= block_size
 
     @pytest.mark.parametrize(
         "options,message",

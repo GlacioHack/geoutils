@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from scipy.optimize import curve_fit
+from scipy.special import gamma, kv
 
 from geoutils._dispatch import _get_raster_interface, is_dask_array
 from geoutils._misc import import_optional
@@ -224,21 +225,41 @@ class VariogramModel:
             output = values + np.where(distances > 0, self.nugget, 0.0)
             return output[0] if scalar_input else output
 
-        # Pass parameters in the order expected by the selected SciKit-GStat model function
-        skgstat = import_optional("skgstat", package_name="scikit-gstat")
-        model_function = getattr(skgstat.models, self.model_name)
-        arguments: list[float] = [self.effective_range, self.partial_sill]
-        if self.model_name == "matern":
-            if self.smoothness is None:
-                raise AssertionError("A Matérn variogram model must define its smoothness.")
-            arguments.append(float(self.smoothness))
+        # Vectorize model evaluations using SciKit-GStat's effective range conventions
+        if self.model_name == "spherical":
+            values = np.full_like(distances, self.partial_sill)
+            within_range = distances <= self.effective_range
+            scaled = distances[within_range] / self.effective_range
+            values[within_range] = self.partial_sill * (1.5 * scaled - 0.5 * scaled**3)
+        elif self.model_name == "cubic":
+            values = np.full_like(distances, self.partial_sill)
+            within_range = distances < self.effective_range
+            scaled = distances[within_range] / self.effective_range
+            values[within_range] = self.partial_sill * (
+                7 * scaled**2 - 8.75 * scaled**3 + 3.5 * scaled**5 - 0.75 * scaled**7
+            )
+        elif self.model_name == "exponential":
+            values = self.partial_sill * (1 - np.exp(-distances / (self.effective_range / 3)))
+        elif self.model_name == "gaussian":
+            values = self.partial_sill * (1 - np.exp(-(distances**2) / (self.effective_range / 2) ** 2))
         elif self.model_name == "stable":
             if self.shape is None:
                 raise AssertionError("A stable variogram model must define its shape.")
-            arguments.append(float(self.shape))
+            values = self.partial_sill * (1 - np.exp(-3 * (distances / self.effective_range) ** self.shape))
 
-        # Calculate the distance-dependent part and add the nugget above zero distance
-        values = np.asarray(model_function(distances.ravel(), *arguments), dtype=float).reshape(distances.shape)
+        elif self.model_name == "matern":
+            if self.smoothness is None:
+                raise AssertionError("A Matérn variogram model must define its smoothness.")
+
+            # The Matern expression has a zero-distance limit of zero semivariance
+            values = np.zeros_like(distances)
+            nonzero = distances != 0
+            scaled = distances[nonzero] * np.sqrt(self.smoothness) / (self.effective_range / 2)
+            values[nonzero] = self.partial_sill * (
+                1 - (2 / gamma(self.smoothness)) * scaled**self.smoothness * kv(self.smoothness, 2 * scaled)
+            )
+
+        # Add the nugget above zero distance
         output = values + np.where(distances > 0, self.nugget, 0.0)
         return output[0] if scalar_input else output
 

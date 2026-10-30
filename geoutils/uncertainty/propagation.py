@@ -503,6 +503,9 @@ def _normalize_output_labels(labels: Sequence[Hashable] | None, count: int, *, s
 # 3/ EXACT PROPAGATION FOR LOCAL OPERATORS
 ############################################
 
+# Each float64 covariance block occupies at most 2 MiB
+_COVARIANCE_BLOCK_SIZE = 512
+
 
 def _affine_rows(
     operator: Interpolator | Reducer,
@@ -551,6 +554,42 @@ def _affine_rows(
     return rows
 
 
+def _weighted_source_covariance(
+    source_ids: NDArray[Any],
+    coordinates: NDArray[np.float64] | None,
+    component_data: tuple[tuple[ErrorComponent, NDArray[np.float64]], ...],
+    first: tuple[NDArray[np.int64], NDArray[np.float64]],
+    second: tuple[NDArray[np.int64], NDArray[np.float64]] | None = None,
+) -> float:
+    """
+    Accumulate covariance between weighted sums in bounded blocks.
+
+    Omit ``second`` input to calculate a variance.
+    The covariance symmetry allows us to evaluate off-diagonal block once and add it twice.
+    """
+
+    first_indexes, first_weights = first
+    second_indexes, second_weights = first if second is None else second
+    total = 0.0
+    for row_start in range(0, len(first_indexes), _COVARIANCE_BLOCK_SIZE):
+        row_slice = slice(row_start, row_start + _COVARIANCE_BLOCK_SIZE)
+
+        # For variances, blocks below the diagonal duplicate those above it
+        first_column = row_start if second is None else 0
+        for column_start in range(first_column, len(second_indexes), _COVARIANCE_BLOCK_SIZE):
+            column_slice = slice(column_start, column_start + _COVARIANCE_BLOCK_SIZE)
+            covariance = _source_covariance_matrix(
+                source_ids, coordinates, component_data, first_indexes[row_slice], second_indexes[column_slice]
+            )
+
+            # Contract weights directly with the block, then discard its pairwise arrays
+            contribution = float(
+                np.einsum("i,ij,j->", first_weights[row_slice], covariance, second_weights[column_slice])
+            )
+            total += 2 * contribution if second is None and column_start != row_start else contribution
+    return total
+
+
 def _propagate_local_operator_analytically(
     *,
     rows: Sequence[tuple[NDArray[np.int64], NDArray[np.float64]] | None],
@@ -571,11 +610,9 @@ def _propagate_local_operator_analytically(
     for position, row in enumerate(rows):
         if row is None:
             continue
-        indexes, weights = row
 
         # For a weighted sum, each pair contributes weight_i × covariance_ij × weight_j to the variance
-        covariance = _source_covariance_matrix(source_ids, coordinates, component_data, indexes)
-        variance[position] = max(float(weights @ covariance @ weights), 0.0)
+        variance[position] = max(_weighted_source_covariance(source_ids, coordinates, component_data, row), 0.0)
 
     # Selected outputs can share source observations or spatially correlated errors
     output_covariance = None
@@ -586,17 +623,12 @@ def _propagate_local_operator_analytically(
             first_row = rows[first_position]
             if first_row is None:
                 continue
-            first_indexes, first_weights = first_row
             matrix[first, first] = variance[first_position]
             for second in range(first + 1, len(selection)):
                 second_row = rows[selected_positions[second]]
                 if second_row is None:
                     continue
-                second_indexes, second_weights = second_row
-                covariance = _source_covariance_matrix(
-                    source_ids, coordinates, component_data, first_indexes, second_indexes
-                )
-                shared = float(first_weights @ covariance @ second_weights)
+                shared = _weighted_source_covariance(source_ids, coordinates, component_data, first_row, second_row)
                 matrix[first, second] = matrix[second, first] = shared
         output_covariance = pd.DataFrame(matrix, index=selection.index, columns=selection.index)
 
@@ -1193,8 +1225,8 @@ def propagate(
     """
     Use observation errors for fitting and propagate them through an operator or spatial operation.
 
-    For a weighted sum, _affine_rows() collects the weights and _propagate_local_operator_analytically() calculates
-    the resulting mean/variance directly. Other methods use _propagate_local_operator_numerically(): we draw source
+    For a weighted sum, _affine_rows() collects the weights and _propagate_local_operator_analytically() accumulates
+    the resulting covariance in blocks. Other methods use _propagate_local_operator_numerically(): we draw source
     errors, add them to the source values and repeat the interpolation/reduction to measure its spread.
 
     A repeated source ID receives the same error everywhere it is used. Different IDs represent separate
