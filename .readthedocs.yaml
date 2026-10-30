@@ -16,6 +16,10 @@ build:
     install:
       - python -m pip install uv
       - uv pip install --python "$READTHEDOCS_VIRTUALENV_PATH/bin/python" --torch-backend=cpu -e ".[doc,opt]"
+    build:
+      html:
+        # Share RTD's default doctrees with the HTML download build
+        - python -m sphinx -T -j 2 -b html -d doc/source/_build/doctrees doc/source "$READTHEDOCS_OUTPUT/html"
 
 # Build documentation in the doc/ directory with Sphinx
 sphinx:

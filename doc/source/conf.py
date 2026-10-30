@@ -6,6 +6,16 @@ import glob
 import os
 import sys
 
+# Share CPUs between documentation workers instead of nested numerical threads
+for thread_env_var in (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "NUMBA_NUM_THREADS",
+):
+    os.environ[thread_env_var] = "1"
+
 # Allow conf.py to find the geoutils module
 source_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(os.path.dirname(source_dir))
@@ -20,6 +30,7 @@ if os.environ.get("PYTHONPATH"):
     python_paths.append(os.environ["PYTHONPATH"])
 os.environ["PYTHONPATH"] = os.pathsep.join(python_paths)
 
+from sphinx.util.parallel import make_chunks
 from sphinx_gallery.sorting import ExampleTitleSortKey, ExplicitOrder
 
 project = "GeoUtils"
@@ -95,6 +106,8 @@ intersphinx_mapping = {
 example_path = os.path.join("../", "../", "examples")
 
 sphinx_gallery_conf = {
+    # Match the two Sphinx workers used by CI and RTD
+    "parallel": 2,
     "examples_dirs": [
         os.path.join(example_path, "io"),
         os.path.join(example_path, "handling"),
@@ -228,12 +241,39 @@ def configure_linkcheck(app):
         app.config.suppress_warnings.append("myst.directive_unknown")
 
 
+def balance_document_reads(app, env, docnames):
+    """Spread large source pages across Sphinx's parallel read batches."""
+
+    if app.parallel < 2 or not docnames:
+        return
+
+    # Match Sphinx's batch sizes and estimate work from source file sizes
+    capacities = [len(chunk) for chunk in make_chunks(docnames, app.parallel)]
+    batches = [[] for _ in capacities]
+    batch_sizes = [0 for _ in capacities]
+    source_sizes = {name: os.path.getsize(env.doc2path(name)) for name in docnames}
+
+    # Place larger pages first, choosing the least loaded batch with room
+    for name in sorted(docnames, key=source_sizes.__getitem__, reverse=True):
+        available = [index for index, batch in enumerate(batches) if len(batch) < capacities[index]]
+        target = min(available, key=batch_sizes.__getitem__)
+        batches[target].append(name)
+        batch_sizes[target] += source_sizes[name]
+
+    # Change execution order without changing the navigation or page contents
+    docnames[:] = [name for batch in batches for name in batch]
+
+
 # To ignore warnings due to having myst-nb reading the .ipynb created by sphinx-gallery
 # Should eventually be fixed, see: https://github.com/executablebooks/MyST-NB/issues/363
 def setup(app):
+    # Download shared data before gallery workers can request it simultaneously
+    geoutils.examples.download_examples()
+
     # Ignore .ipynb files
     app.registry.source_suffix.pop(".ipynb", None)
     app.connect("builder-inited", configure_linkcheck)
+    app.connect("env-before-read-docs", balance_document_reads)
     app.connect("missing-reference", resolve_base_class_reference)
     app.connect("build-finished", clean_gallery_files)
 
