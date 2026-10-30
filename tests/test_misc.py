@@ -73,7 +73,7 @@ class TestMisc:
         requirements = config["options.extras_require"]["dev"].splitlines()
         required_names = {canonicalize_name(Requirement(line).name) for line in requirements if line.strip()}
 
-        # Read Conda and pip declarations without relying on installed packages
+        # Read Conda and pip declarations
         with (project_root / "dev-environment.yml").open() as stream:
             dependencies = yaml.safe_load(stream)["dependencies"]
         declared_names = set()
@@ -83,12 +83,12 @@ class TestMisc:
                 declared_names.add(canonicalize_name(name))
             else:
                 for requirement in dependency["pip"]:
-                    # The editable checkout does not declare an external dependency
+                    # Remove pip editable line
                     if requirement.startswith("-e "):
                         continue
                     declared_names.add(canonicalize_name(Requirement(requirement).name))
 
-        # Compare names because version constraints and extra Conda packages may differ
+        # Compare names
         missing_names = sorted(required_names - declared_names)
         assert not missing_names, f"Development dependencies missing from dev-environment.yml: {missing_names}"
 
