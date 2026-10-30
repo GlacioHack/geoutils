@@ -242,25 +242,23 @@ def configure_linkcheck(app):
 
 
 def balance_document_reads(app, env, docnames):
-    """Spread large source pages across Sphinx's parallel read batches."""
+    """Spread big doc pages evenly during parallel execution."""
 
     if app.parallel < 2 or not docnames:
         return
 
-    # Match Sphinx's batch sizes and estimate work from source file sizes
+    # Estimate work from file sizes
     capacities = [len(chunk) for chunk in make_chunks(docnames, app.parallel)]
     batches = [[] for _ in capacities]
     batch_sizes = [0 for _ in capacities]
     source_sizes = {name: os.path.getsize(env.doc2path(name)) for name in docnames}
 
-    # Place larger pages first, choosing the least loaded batch with room
+    # We order larger pages first, so that workers pick up those initially and can distribute smaller ones later
     for name in sorted(docnames, key=source_sizes.__getitem__, reverse=True):
         available = [index for index, batch in enumerate(batches) if len(batch) < capacities[index]]
         target = min(available, key=batch_sizes.__getitem__)
         batches[target].append(name)
         batch_sizes[target] += source_sizes[name]
-
-    # Change execution order without changing the navigation or page contents
     docnames[:] = [name for batch in batches for name in batch]
 
 
