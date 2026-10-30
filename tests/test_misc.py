@@ -6,12 +6,16 @@ import re
 import subprocess
 import sys
 import warnings
+from configparser import ConfigParser
 from importlib.util import find_spec
+from pathlib import Path
 from typing import Any
 
 import geopandas as gpd
 import pytest
 import yaml  # type: ignore
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 import geoutils
@@ -58,6 +62,35 @@ class TestMisc:
         conda_names_devenv = {re.split(r"[<>=!]", dependency)[0] for dependency in conda_dep_devenv}
         diff_conda_check = list(conda_names_env - conda_names_devenv)
         assert len(diff_conda_check) == 0
+
+    def test_dev_environment__match(self) -> None:
+        """Checks that setup.cfg dev dependencies are declared in dev-environment.yml for conda."""
+
+        # Expand the dev extra, including its referenced extras
+        project_root = Path(__file__).resolve().parents[1]
+        config = ConfigParser()
+        config.read(project_root / "setup.cfg")
+        requirements = config["options.extras_require"]["dev"].splitlines()
+        required_names = {canonicalize_name(Requirement(line).name) for line in requirements if line.strip()}
+
+        # Read Conda and pip declarations
+        with (project_root / "dev-environment.yml").open() as stream:
+            dependencies = yaml.safe_load(stream)["dependencies"]
+        declared_names = set()
+        for dependency in dependencies:
+            if isinstance(dependency, str):
+                name = re.split(r"[<>=!]", dependency, maxsplit=1)[0].strip()
+                declared_names.add(canonicalize_name(name))
+            else:
+                for requirement in dependency["pip"]:
+                    # Remove pip editable line
+                    if requirement.startswith("-e "):
+                        continue
+                    declared_names.add(canonicalize_name(Requirement(requirement).name))
+
+        # Compare names
+        missing_names = sorted(required_names - declared_names)
+        assert not missing_names, f"Development dependencies missing from dev-environment.yml: {missing_names}"
 
     @pytest.mark.parametrize("deprecation_increment", [-1, 0, 1, None])
     @pytest.mark.parametrize("details", [None, "It was completely useless!", "dunnowhy"])

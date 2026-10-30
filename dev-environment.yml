@@ -44,6 +44,7 @@ dependencies:
   # Numerics
   - numba # For filters and point cloud gridding
   - flox # For grouped statistics
+  - crick # For streaming quantile estimators in chunks
   - exactextract>=0.3 # For fast exact polygon-cell coverage
 
   # Plotting
@@ -53,9 +54,12 @@ dependencies:
   - psutil # For profiler
   - plotly # For profiler
 
-  # Test dependencies
+  # Benchmark dependencies
+  - asv
   - gdal<3.13.3  # To benchmark functionalities against GDAL
   - pdal>=2.10  # To benchmark functionalities against PDAL
+
+  # Test dependencies
   - pytest>=8,<10
   - pytest-xdist
   - pytest-lazy-fixtures
