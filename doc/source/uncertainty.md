@@ -9,31 +9,33 @@ kernelspec:
   display_name: geoutils-env
   language: python
   name: geoutils
+mystnb:
+  execution_timeout: 120
 ---
 (uncertainty)=
 # Uncertainty
 
 GeoUtils implements tools to **estimate and propagate uncertainty** for spatial calculations.
 
-We focus on measurement errors whose **magnitudes vary spatially** or that are **spatially correlated**, for either rasters 
-or point clouds.
-Uncertainty analysis in GeoUtils strives to be **composable**, for ease of manipulation.
+We focus on errors whose **magnitudes vary spatially** and/or that are **spatially correlated** for rasters
+or point clouds, with methods to both estimate and propagate these efficiently on large datasets. This is done both 
+by using chunked execution in underlying operation, and by avoiding storing a full error covariance matrix).
 
-Firstly, error structure can be constructed naturally **from {ref}`grouped statistics <stats-grouped>`** 
-for variable error magnitudes and from **{ref}`variograms <stats-spatial>`** for spatial correlations, both described in {ref}`stats`.
-Then, an error structure can be used either **weight** or to **propagate uncertainty** through most of 
-the package's operations, either **numerically** or **analytically**.
+Uncertainty quantification in GeoUtils strives to be **composable**, for ease of use.
+For estimating error structure, we build upon grouped statistics and variography outputs from {ref}`stats`.
+Then, an error structure can be used as input either for **weights** or to **propagate uncertainty** through most of GeoUtils
+operations and beyond, either numerically or analytically.
 
-Below, we first demonstrate how to {ref}`uncertainty-estimation`, then how to {ref}`uncertainty-propagation`, followed by more 
+Below, we first demonstrate how to {ref}`uncertainty-estimation`, then how to {ref}`uncertainty-propagation`, followed by more
 advanced examples.
 
 ```{seealso}
-GeoUtils does not handle errors correlated between different variables, such as multiple bands of the same instruments. 
-For these, see packages such as [ObsArray](https://obsarray.readthedocs.io/en/latest/).
+GeoUtils does not handle errors correlated between different variables, such as multiple bands of the same instruments.
+For these, see packages such as [ObsArray](https://obsarray.readthedocs.io/en/latest/)!
 ```
 
 ```{caution}
-The uncertainty API is new and **experimental**. It may change in future releases.
+The uncertainty API is still **experimental**. It may change in future releases.
 ```
 
 ```{code-cell} ipython3
@@ -47,741 +49,1057 @@ plt.rcParams["savefig.dpi"] = 600
 plt.rcParams["font.size"] = 9
 ```
 
-(uncertainty-estimation)=
-## Estimate error structure
+(uncertainty-quick-use)=
+## Quick use
 
-{meth}`ds.rst.estimate_error_structure() or Raster.estimate_error_structure() <RasterBase.estimate_error_structure>`<br>
-{meth}`gdf.pc.estimate_error_structure() or PointCloud.estimate_error_structure() <PointCloudBase.estimate_error_structure>`
+To estimate an **error structure** (error components of different magnitude and spatial correlation), we rely on an **error proxy**,
+typically the difference to another estimate (measurement or model).
 
-### Finding an error proxy
+In the synthetic example below, we compare a snow depth product to **a precise reference** (e.g. from lidar, could also be ground measurements),
+for which we assume negligible errors.
 
-We briefly summarize a few important concepts for uncertainty analysis directly below. Skip to {ref}`Constant magnitude <uncertainty-constant-magnitude>` to dive
-directly into functionality examples.
+We then estimate the error structure using **viewing angle** and **land cover** as predictors of error variability.
 
-An **error** is the difference between a measured value and its true, generally unknown value. The spread of an
-error distribution, often described by its **standard deviation σ**, measures the **magnitude of random errors**.
-This magnitude is often loosely called "uncertainty", although uncertainty more broadly concerns all sources of
-error. Systematic errors usually need separate assessment and correction.
-
-In GeoUtils, we rely on an **error proxy**, a variable that represent the errors of interest.
-Finding a suitable proxy is often application-specific, but common approaches include:
-
-- **Coincident acquisitions:** Compare two acquisitions at the same locations where the observed quantity has not
-  changed. Their differences reflect the errors of both acquisitions.
-- **Ground measurements or a more precise instrument:** Compare an acquisition with independent reference
-  measurements at shared locations, even if only a few are available.
-- **Reference surfaces:** Compare to another dataset at a known surface. For example, with elevation data, static surfaces 
-  (e.g. bare rock or grasslands) provide reference areas when comparing surveys from different dates.
-- **Spatial block cross-validation:** To assess a predictive model's interpolation or extrapolation errors, one can withhold
-  spatial blocks of data, fit the model to the remaining data, and compare its predictions with the withheld values.
-  These differences represent prediction errors, including any measurement errors in the reference data.
-
-### Correcting systematic errors
-
-Systematic errors often require application-specific methods, but {ref}`grouped statistics <stats-grouped>` provide
-a useful first check. Bin an error proxy by variables such as viewing angle, elevation or acquisition time, and
-calculate its mean in each group. If the proxy should be unbiased within each group, means that consistently
-depart from zero can reveal a bias and how it varies with those variables.
-
-For a proxy defined as measurement minus reference, subtract the estimated bias from the measurements. For example,
-a mean difference of +2 m in a group suggests subtracting 2 m from measurements in that group. Check the corrected
-proxy before estimating the remaining random error magnitude.
-
-(uncertainty-constant-magnitude)=
-### Constant magnitude
-
-Compare two measurements of the same quantity to **estimate their error magnitude**. Here, we measure a constant
-100 m surface with independent errors of **2 m standard deviation**, and compare it with a precise reference.
+```{tip}
+Finding an error proxy or predictors can be application-specific, but often comes down to similar techniques.
+See {ref}`uncertainty-error-proxy` and {ref}`uncertainty-error-predictors` for hints!
+```
 
 ```{code-cell} ipython3
 :tags: [hide-input]
 :mystnb:
-:  code_prompt_show: "Show the code for creating synthetic measurements"
-:  code_prompt_hide: "Hide the code for creating synthetic measurements"
+:  code_prompt_show: "Show the code for creating synthetic snow depth"
+:  code_prompt_hide: "Hide the code for creating synthetic snow depth"
 
 import numpy as np
 from affine import Affine
+from scipy.ndimage import gaussian_filter
 
 import geoutils as gu
 
-# Create repeated measurements of a constant surface with independent 2 m errors
-random = np.random.default_rng(42)
-grid = Affine(10, 0, 0, 0, -10, 640)
-reference_values = np.full((64, 64), 100.0)
-reference = gu.raster.from_array(reference_values, grid, 32631)
-measured = gu.raster.from_array(
-    reference_values + random.normal(0, 2, reference_values.shape),
-    grid,
-    32631,
-)
-```
+# Create snow depth on a 10 m grid
+quick_size = 96
+quick_extent = quick_size * 10
+quick_rows, quick_columns = np.indices((quick_size, quick_size))
+cover_codes = [0, 1, 2]
+cover_names = ["Forest", "Meadow", "Shrubs"]
 
-```{code-cell} ipython3
-import numpy as np
+# Make irregular land cover areas by smoothing random noise
+quick_random = np.random.default_rng(44)
+cover_field = gaussian_filter(quick_random.normal(size=quick_rows.shape), sigma=6)
+cover_thresholds = np.quantile(cover_field, [0.5, 0.8])
+quick_cover = np.digitize(cover_field, cover_thresholds)
 
-# Treat the reference as precise and estimate only independent measurement errors
-estimated_errors = measured.rst.estimate_error_structure(
-    reference,
-    other_precision="negligible",
-    components={"measurement": {"magnitude": "constant", "correlation": None}},
-    spread_estimator=np.std,
-    random_state=42,
+# Create snow depth and viewing angles
+quick_values = (
+    np.take([1.5, 2.4, 2.35], quick_cover)
+    + 0.2 * np.exp(-((quick_columns - 30) ** 2 + (quick_rows - 52) ** 2) / (2 * 24**2))
+    + 0.1 * np.cos(quick_rows / 14)
 )
-round(estimated_errors.predict_magnitude(), 2)
+quick_transform = Affine(10, 0, 0, 0, -10, quick_extent)
+quick_angles = 60 * (quick_columns + 0.5 * quick_rows) / (1.5 * (quick_size - 1))
+ds_ref = gu.raster.from_array(quick_values, quick_transform, 32631)
+
+# Create short and long range error patterns
+quick_short_model = gu.Variogram.from_model("gaussian", effective_range=25, partial_sill=1)
+quick_long_model = gu.Variogram.from_model("gaussian", effective_range=220, partial_sill=1)
+quick_short_structure = gu.ErrorStructure([gu.ErrorComponent("short_range", 1.0, quick_short_model)])
+# Make long range errors smaller to show land cover differences
+quick_long_structure = gu.ErrorStructure([gu.ErrorComponent("long_range", 0.08, quick_long_model)])
+quick_noise = ds_ref.rst.random_field(quick_short_structure, backend="gstools", random_state=42).values
+quick_long_noise = ds_ref.rst.random_field(quick_long_structure, backend="gstools", random_state=43).values
+
+# Let error size depend on land cover and viewing angle
+quick_scales = np.take([1.5, 0.8, 1.15], quick_cover)
+quick_magnitude = quick_scales * (0.15 + 0.004 * quick_angles)
+quick_errors = quick_magnitude * quick_noise + quick_long_noise
+ds = gu.raster.from_array(quick_values + quick_errors, quick_transform, 32631).assign_attrs(units="m")
+view_angle = gu.raster.from_array(quick_angles, quick_transform, 32631).assign_attrs(
+    long_name="Viewing angle", units="degrees",
+)
+land_cover = gu.raster.from_array(quick_cover, quick_transform, 32631).assign_attrs(
+    long_name="Land cover", flag_values=cover_codes, flag_meanings="forest meadow shrubs",
+)
 ```
 
 ```{code-cell} ipython3
 :tags: [hide-input]
 :mystnb:
-:  code_prompt_show: "Show the code for plotting the figure"
-:  code_prompt_hide: "Hide the code for plotting the figure"
+:  code_prompt_show: "Show the code for plotting the inputs"
+:  code_prompt_hide: "Hide the code for plotting the inputs"
 :  image:
-:    alt: "Measurement differences follow a normal distribution with known 2 m and fitted 1.99 m error magnitudes."
+:    width: 800px
+:    alt: "Snow depth differences from a precise reference, viewing angle, and forest, meadow and shrub areas controlling error magnitude."
 
-import numpy as np
-from matplotlib import pyplot as plt
-from scipy.stats import norm
+from matplotlib.colors import ListedColormap
+from matplotlib.patches import Patch
 
-# Compare the error proxy's histogram with the known and estimated normal distributions
-proxy_values = np.asarray(measured - reference).ravel()
-error_values = np.linspace(-7, 7, 300)
-figure, ax = plt.subplots(figsize=(6, 3), layout="constrained")
-ax.hist(
-    proxy_values,
-    bins=35,
-    density=True,
-    color="#3975a7",
-    alpha=0.45,
-    label="Measurement differences",
+cover_colors = ["forestgreen", "khaki", "tan"]
+
+# Show the error proxy and its predictors
+quick_proxy = ds - ds_ref
+proxy_limit = np.nanmax(np.abs(quick_proxy.values))
+figure, axes = plt.subplots(1, 3, figsize=(12, 3.5), sharey=True)
+quick_proxy.rst.plot(
+    ax=axes[0], cmap="RdBu", vmin=-proxy_limit, vmax=proxy_limit,
+    cbar_title="Snow depth difference (m)",
+    title="Error proxy\n(measurement - reference)",
 )
-ax.plot(
-    error_values,
-    norm.pdf(error_values, scale=2),
-    color="0.25",
-    label="Known magnitude: 2.00 m",
+view_angle.rst.plot(
+    ax=axes[1], cmap="viridis", cbar_title="Viewing angle (°)",
+    title="Predictor 1\n(viewing angle)",
 )
-estimated_magnitude = estimated_errors.predict_magnitude()
-ax.plot(
-    error_values,
-    norm.pdf(error_values, scale=estimated_magnitude),
-    "--",
-    color="#e38b35",
-    label=f"Estimated magnitude: {estimated_magnitude:.2f} m",
+land_cover.rst.plot(
+    ax=axes[2], cmap=ListedColormap(cover_colors),
+    vmin=-0.5, vmax=2.5, add_cbar=False, title="Predictor 2\n(land cover)",
 )
-ax.set(
-    xlabel="Error (m)",
-    ylabel="Probability density (1/m)",
-    title="Estimate the spread of measurement errors",
-)
-ax.legend(frameon=False)
+legend_handles = [
+    Patch(facecolor=color, label=label)
+    for color, label in zip(cover_colors, cover_names)
+]
+axes[2].legend(handles=legend_handles, loc="upper right", framealpha=0.9)
+for axis in axes:
+    axis.set(xlabel="X (m)", xlim=(0, quick_extent), ylim=(0, quick_extent))
+axes[0].set_ylabel("Y (m)")
+plt.tight_layout()
 plt.show()
 ```
 
-The fitted magnitude is close to the known **2 m**. The default spread estimator,
-{func}`~geoutils.stats.nmad`, is less sensitive to outliers than `np.std`. The normal curves illustrate the synthetic
-data; a magnitude estimate alone does not establish an error distribution.
+```{code-cell} ipython3
+:mystnb:
+:  image:
+:    width: 800px
+:    alt: "Error magnitudes grouped by viewing angle and land cover, with the fitted spatial autocorrelation."
 
-```{important}
-Choose `other_precision="negligible"` when the reference's uncertainty can be ignored. The default,
-`other_precision="same"`, assumes both measurements have independent errors with the same magnitude and correlation,
-and divides their difference by `sqrt(2)`. These assumptions must be appropriate for your measurements.
+import geoutils as gu
+
+# Estimate and plot the error structure
+predictors = {"view_angle": view_angle, "land_cover": land_cover}
+es = gu.ErrorStructure.estimate(
+    ds,
+    other=ds_ref,
+    predictors=predictors,
+    bins={"view_angle": 6},
+    categories={"land_cover": cover_codes},
+    random_state=42,
+)
+es.plot()
+```
+Note that, by default, variable errors are interpolated linearly along continuous variables (like viewing angle), and spatial correlation keeps the best fit after comparing a sum
+of multiple variogram models.
+
+Then, we can use this error structure to **propagate uncertainty** through any operation, such as {meth}`stats() <RasterBase.stats>` to calculate **mean snow depth per land-cover area**:
+
+```{code-cell} ipython3
+_, region_out = ds.rst.stats(
+    "mean",
+    by={"land_cover": land_cover},
+    categories={"land_cover": cover_codes},
+    error_structure=es,
+    uncertainty_kwargs={"predictors": predictors},
+)
 ```
 
-### Magnitudes that vary with predictors
+And compare means in various land cover accounting for their uncertainties:
 
-Errors can vary with terrain, instrument geometry or other predictors. A **heteroscedastic** component fits the
-spread within predictor groups and interpolates that magnitude at new predictor values.
+```{code-cell} ipython3
+intervals = region_out.interval(0.95).to_numpy()
+for cover, mean, (lower, upper) in zip(cover_names, region_out.estimate, intervals):
+    print(f"{cover}: {mean:.2f} m (95% interval: {lower:.2f}–{upper:.2f} m)")
+```
 
-Here, the known magnitude increases from **1 to 3 m** as the sensor viewing angle increases from 0 to 60°.
-{meth}`~geoutils.ErrorStructure.estimate` accepts a proxy directly, without subtracting a second measurement.
+## Concept definitions
+
+We briefly summarize **important concepts** for uncertainty quantification directly below. Skip to {ref}`uncertainty-estimation` to dive
+directly into functionality examples.
+
+(uncertainty-error-structure)=
+### Error and uncertainty
+
+An **error** is the difference between an **estimate** (measured or modelled) and its true, generally unknown value.
+Errors can follow many distributions. For most applications, it is often useful to separate a
+**systematic component** (bias) from a **random component** (fluctuations around zero).
+Random errors are often **spatially correlated**, with **spatially varying magnitudes**, which is the focus of this module.
+
+**Uncertainty** describes how well the true value is known, considering all types of error. In practice, the term 
+is often used loosely to refer to the **magnitude of random errors**, measured by the spread of their 
+distribution (commonly described by its standard deviation σ).
+
+An **error structure**, short for error covariance structure, describes the random error magnitude at each pixel or
+point, and their **correlation** to the error of every other location. For spatial problems, this structure can often be 
+simplified into a function depending only on separation distance. This description avoids storing a full spatial 
+covariance matrix, which would for instance contain **one trillion entries**
+for a 1000 × 1000 raster.
+
+The diagram below explains those concepts visually:
+
+```{eval-rst}
+.. plot:: diagrams/diagram_error_structure.py
+    :width: 800px
+```
+
+(uncertainty-error-proxy)=
+### Finding an error proxy
+
+Uncertainty quantification often starts by finding a good **error proxy**, that is, a variable that can be used
+to estimate the errors of interest.
+
+Finding a suitable proxy is often application-specific, but common approaches include:
+
+- **Coincident acquisitions:** Compare acquisitions at shared location/time with no expected change, including repeats
+  with the same instrument. Their differences usually suffice to assess random errors, but shared systematic errors
+  can cancel out, making those more difficult to identify.
+- **Reference data:** Compare with independent ground measurements or data from a more precise instrument at shared
+  locations. These differences help assess both systematic and random errors.
+- **Stable surfaces:** Compare surveys from different dates over surfaces that have not changed.
+  For elevation data, bare rock or grasslands can provide these reference areas.
+
+If the error magnitudes and spatial correlations are already known, you can instead
+{ref}`define an error structure from those parameters <uncertainty-model>`.
+
+(uncertainty-error-predictors)=
+### Predictors of error variability
+
+A **predictor of error variability** is a measurement or surface attribute used to explain how errors vary.
+It can help identify potential **systematic errors** or changes in **random error magnitude**. Examples include:
+
+- **Measurement geometry:** Stereo convergence angle (optical), incidence angle (radar) or scan angle (lidar).
+- **Measurement quality:** Image matching correlation (optical), interferometric coherence (radar) or
+  signal-to-noise ratio (lidar).
+- **Surface attributes:** Slope angle, surface roughness or land cover.
+
+Use {ref}`grouped statistics <stats-grouped>` to examine how the mean and spread of the error proxy vary with these predictors.
+
+(uncertainty-structure)=
+## The error structure object
+
+In GeoUtils, uncertainty features are centered around {class}`~geoutils.ErrorStructure`, a **lightweight** object that serves to 
+describe the error structure, without storing neither a full covariance matrix, nor raster/point-cloud predictors that might be associated to it.
+
+An {class}`~geoutils.ErrorStructure` is composed of a sum of multiple **components** to describe errors from 
+different sources that can be assumed independent, such as separating local random noise from large-scale error patterns. 
+Each component has:
+
+- An error **magnitude** model, describing its statistical spread. It can be constant or vary with any predictor, such as
+  viewing angle or land cover type.
+- An error **correlation** model, describing how errors relate across locations. Components can have
+  different correlation ranges, or be spatially uncorrelated.
+
+The figure below illustrates how an error structure **decomposes the total error into its components**, by
+showing one realization of random error fields times their predicted magnitudes:
 
 ```{code-cell} ipython3
 :tags: [hide-input]
 :mystnb:
-:  code_prompt_show: "Show the code for creating a variable error proxy"
-:  code_prompt_hide: "Hide the code for creating a variable error proxy"
+:  code_prompt_show: "Show the plotting code on error components"
+:  code_prompt_hide: "Hide the plotting code on error components"
+:  image:
+:    width: 800px
+:    alt: "The snow depth error proxy combines a short range field scaled by viewing angle and land cover with an independent long range field scaled by a constant magnitude."
 
-import numpy as np
+component_limit = np.nanmax(np.abs(quick_errors))
+long_magnitude = quick_long_structure.predict_magnitude()
 
-import geoutils as gu
-
-# Create an error proxy whose spread increases with a viewing angle
-view_angle_values = np.broadcast_to(np.linspace(0, 60, 64), (64, 64)).copy()
-view_angle = gu.raster.from_array(view_angle_values, grid, 32631)
-proxy = gu.raster.from_array(
-    (1 + view_angle_values / 30) * random.normal(size=view_angle_values.shape),
-    grid,
-    32631,
+# Multiply each pattern by its magnitude, then add them
+figure, axes = plt.subplots(
+    1, 9, figsize=(13.5, 3.2), layout="constrained",
+    gridspec_kw={"width_ratios": [1, 0.12, 1, 0.12, 1, 0.12, 1, 0.12, 1]},
 )
+panels = [
+    (
+        quick_noise, f"Short correlation range\n{quick_short_model.model.effective_range:g} m", "RdBu",
+        -3, 3, "Standardized error",
+    ),
+    (
+        quick_magnitude, "Variable magnitude\nfrom predictors", "YlOrRd",
+        0, quick_magnitude.max(), "Error magnitude (m)",
+    ),
+    (
+        quick_long_noise / long_magnitude, "Long correlation range\n220 m", "RdBu",
+        -3, 3, "Standardized error",
+    ),
+    (
+        np.full_like(quick_long_noise, long_magnitude), "Constant magnitude", "YlOrRd",
+        0, quick_magnitude.max(), "Error magnitude (m)",
+    ),
+    (quick_errors, "Combined errors", "RdBu", -component_limit, component_limit, "Error (m)"),
+]
+for ax, (values, title, cmap, minimum, maximum, label) in zip(axes[::2], panels):
+    image = ax.imshow(values, cmap=cmap, vmin=minimum, vmax=maximum, origin="upper")
+    ax.set(title=title, xticks=[], yticks=[])
+    figure.colorbar(image, ax=ax, orientation="horizontal", shrink=0.9, pad=0.15, label=label)
+
+# Add the signs between maps
+for ax, symbol in zip(axes[1::2], ["×", "+", "×", "="]):
+    ax.set_axis_off()
+    ax.text(0.5, 0.5, symbol, ha="center", va="center", fontsize=22, transform=ax.transAxes)
+plt.show()
+```
+
+Structurally, an {class}`~geoutils.ErrorStructure` contains one or multiple {class}`~geoutils.ErrorComponent`, 
+each combining {class}`~geoutils.ErrorMagnitude` with an optional {class}`~geoutils.Variogram` correlation model. In practice,  
+**users should not need to manipulate those** subclasses during estimation, refitting or propagation, except for advanced use.
+See {ref}`uncertainty-model` for manual construction.
+
+These components can be summarized with {meth}`~geoutils.ErrorStructure.info`, or plotted with {meth}`~geoutils.ErrorStructure.plot` (all), 
+or {meth}`~geoutils.ErrorStructure.plot_magnitude` and {meth}`~geoutils.ErrorStructure.plot_correlation` for each aspect.
+
+```{code-cell} ipython3
+es.info()
+```
+
+An error structure is returned by {meth}`~geoutils.ErrorStructure.estimate` and passed to operations to
+{ref}`uncertainty-propagation` or for {ref}`uncertainty-simulation`, which are both detailed directly below.
+
+(uncertainty-estimation)=
+## Estimate error structure
+
+{meth}`geoutils.ErrorStructure.estimate`<br>
+{meth}`ds.rst.estimate_error_structure() or Raster.estimate_error_structure() <RasterBase.estimate_error_structure>`<br>
+{meth}`gdf.pc.estimate_error_structure() or PointCloud.estimate_error_structure() <PointCloudBase.estimate_error_structure>`<br>
+
+For estimation, use {meth}`~geoutils.ErrorStructure.estimate` from an error structure object or {meth}`~RasterBase.estimate_error_structure` 
+from a raster or point cloud, interchangeably.
+
+The sections below first explain the inputs and workflow to estimate an error structure, then how to choose
+**error components** to refine estimation of their **magnitude** and **correlation**, and iterate until you have
+satisfactorily modelled your error structure!
+
+```{tip}
+By default, error estimation uses the **standard deviation** as an estimator of spread for error magnitude, and
+**Matheron's variogram** as an estimator of spatial correlation. Select the **NMAD** and **Dowd's variogram** instead for median-like estimators robust to outliers!
+```
+
+### Inputs and workflow
+
+Estimating an error structure only strictly requires passing an **error proxy**, or a **reference data** to derive an 
+an error proxy by substraction with the other data. Both can be rasters or point clouds.
+
+The estimation workflow uses the following steps, all **scalable** on large datasets:
+
+- First, {meth}`~RasterBase.cosample` selects valid data at common locations,
+- Then, {meth}`~RasterBase.stats` estimates error magnitude, globally or grouped by predictors,
+- Finally, {meth}`~RasterBase.variogram` estimates error correlation. 
+
+For example, reusing the synthetic snow depth data from the {ref}`uncertainty-quick-use`:
+
+```{note}
+When comparing to reference data, use `other_precision` to either neglect other errors (`"negligible"`, default), or 
+assume them independent with similar magnitude/correlation (`"same"`) which divides the error proxy by √2.
 ```
 
 ```{code-cell} ipython3
-import numpy as np
+default_errors = ds.rst.estimate_error_structure(ds_ref)
+default_errors.plot()
+```
 
-import geoutils as gu
+As we can see, **the fit is not convincing yet**. 
 
-# Fit grouped magnitudes without a spatial correlation component
-variable_errors = gu.ErrorStructure.estimate(
+By default, without defining **components** or **predictors**, GeoUtils uses one component with constant magnitude and a single-range spatial correlation model.
+If **predictors** are passed, GeoUtils uses two components: a short range component with magnitude varying with predictors, plus a long range component with constant magnitude, both 
+with a single-range spatial correlation model.
+
+The next sections explain how to define error **components** and potential **predictors** to reach a satisfactory estimation. 
+
+(uncertainty-constant-magnitude)=
+(uncertainty-variable-magnitude)=
+### Error magnitude
+
+Error magnitude is **inferred by the spread of the error proxy** globally or within predictor groups, 
+directly relying on {ref}`stats-global` and {ref}`stats-grouped`.
+
+By default, GeoUtils uses the **standard deviation** as spread estimator, with linear interpolation as model.
+See {ref}`statistics estimators <stats-estimators>` for alternatives such as NMAD, and {ref}`uncertainty-custom-magnitude` for using any model.
+
+#### Constant magnitude
+
+A **constant magnitude** can be set to estimate the same average error spread everywhere, here we modify the estimator 
+into the **NMAD** (median-like standard deviation):
+
+```{code-cell} ipython3
+proxy = (ds - ds_ref).assign_attrs(units="m")
+
+constant_errors = gu.ErrorStructure.estimate(
+    proxy,
+    components={"uncorrelated": {"magnitude": "constant", "correlation": None}},
+    spread_estimator=gu.stats.nmad,
+)
+print(f"±{constant_errors.predict_magnitude():.2f} m (1σ)")
+```
+
+Here, `correlation=None` skips correlation estimation.
+As shown below, the spread simply corresponds to that of all error proxy values:  
+
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for plotting the proxy and distribution"
+:  code_prompt_hide: "Hide the code for plotting the proxy and distribution"
+:  image:
+:    width: 800px
+:    alt: "The snow depth error proxy and its empirical distribution, with its NMAD and the mean ± NMAD interval."
+
+# Compare the error map and its distribution
+proxy_values = proxy.values.ravel()
+proxy_values = proxy_values[np.isfinite(proxy_values)]
+proxy_mean = np.mean(proxy_values)
+proxy_nmad = constant_errors.predict_magnitude()
+proxy_limit = np.max(np.abs(proxy_values))
+figure, axes = plt.subplots(1, 2, figsize=(9, 3.5))
+proxy.rst.plot(
+    ax=axes[0], cmap="RdBu", vmin=-proxy_limit, vmax=proxy_limit,
+    cbar_title="Error proxy (m)", title="Error proxy",
+)
+axes[0].set(xlabel="X (m)", ylabel="Y (m)")
+
+axes[1].hist(proxy_values, bins=40, density=True, color="steelblue", alpha=0.7)
+axes[1].axvspan(proxy_mean - proxy_nmad, proxy_mean + proxy_nmad, color="darkorange", alpha=0.2, label="Mean ± NMAD")
+axes[1].axvline(proxy_mean, color="dimgray", linestyle="--", label="Mean")
+axes[1].set(
+    title=f"Error distribution\nNMAD = {proxy_nmad:.2f} m",
+    xlabel="Error proxy (m)", ylabel="Probability density (1/m)",
+)
+axes[1].legend(frameon=False)
+figure.tight_layout()
+plt.show()
+```
+
+#### One predictor
+
+To infer **variable magnitudes** (also called **heteroscedasticity**), we bin the error proxy by predictor values to get enough samples to estimate
+its spread (we assume similar predictor values have similar error spread elsewhere).
+
+For example, below we use **viewing angle** to group spread estimates, selecting `"heteroscedastic"` for a variable magnitude, 
+and plotting it with {meth}`~geoutils.ErrorStructure.plot_magnitude`:
+
+```{code-cell} ipython3
+magnitude_components = {"uncorrelated": {"magnitude": "heteroscedastic", "correlation": None}}
+angle_errors = gu.ErrorStructure.estimate(
     proxy,
     predictors={"view_angle": view_angle},
-    components={"measurement": {"magnitude": "heteroscedastic", "correlation": None}},
-    bins=8,
-    min_count=100,
-    spread_estimator=np.std,
-    random_state=42,
+    components=magnitude_components,
+    bins=6,
 )
-magnitude_map = variable_errors.predict_magnitude({"view_angle": view_angle}, like=proxy)
-np.round(variable_errors.predict_magnitude({"view_angle": np.array([15.0, 45.0])}), 2)
+
+```
+
+We can then use {meth}`~geoutils.ErrorStructure.predict_magnitude` to predict the error for any view angle value, typically 
+useful to create a per-pixel/point error map with the shape of the input:
+
+```{code-cell} ipython3
+magnitude_map = angle_errors.predict_magnitude({"view_angle": view_angle}, like=ds)
 ```
 
 ```{code-cell} ipython3
 :tags: [hide-input]
 :mystnb:
-:  code_prompt_show: "Show the code for plotting the figure"
-:  code_prompt_hide: "Hide the code for plotting the figure"
+:  code_prompt_show: "Show the code for plotting the predictor, bins and predictions"
+:  code_prompt_hide: "Hide the code for plotting the predictor, bins and predictions"
 :  image:
-:    alt: "Error spread increases with the viewing angle, and the fitted magnitude follows the known trend."
+:    width: 800px
+:    alt: "Viewing angle, error magnitude and sample counts in six viewing angle bins, and predicted error magnitudes across the snow depth grid."
 
-import numpy as np
-from matplotlib import pyplot as plt
-
-# Show the error spread, the fitted trend and its spatial prediction
-figure, axes = plt.subplots(1, 3, figsize=(10, 3))
-axes[0].scatter(
-    view_angle_values.ravel(),
-    np.asarray(proxy).ravel(),
-    s=2,
-    alpha=0.12,
-    color="#3975a7",
-    rasterized=True,
-)
-axes[0].set(title="Error proxy", xlabel="Viewing angle (°)", ylabel="Error (m)")
-
-predictor_values = np.linspace(5, 55, 100)
-fitted_magnitudes = variable_errors.predict_magnitude({"view_angle": predictor_values})
-axes[1].plot(
-    predictor_values, 1 + predictor_values / 30, color="0.25", label="Known magnitude"
-)
-axes[1].plot(
-    predictor_values, fitted_magnitudes, color="#e38b35", label="Fitted magnitude"
-)
-axes[1].set(
-    title="Known and fitted magnitudes",
-    xlabel="Viewing angle (°)",
-    ylabel="Error magnitude (m)",
-    ylim=(0.8, 3.2),
-)
-axes[1].legend(frameon=False)
+# Show viewing angle, binned magnitudes and predictions
+figure, axes = plt.subplots(1, 3, figsize=(11, 3.8), gridspec_kw={"width_ratios": [1, 1.35, 1]})
+view_angle.rst.plot(ax=axes[0], cmap="viridis", cbar_title="Viewing angle (°)", title="Viewing angle")
 magnitude_map.rst.plot(
-    ax=axes[2], cmap="YlOrRd", vmin=1, vmax=3, cbar_title="Error magnitude (m)"
+    ax=axes[2], cmap="YlOrRd", cbar_title="Error magnitude (m)", title="Predicted error magnitude",
 )
-axes[2].set(title="Predicted error magnitude", xlabel="X (m)", ylabel="Y (m)")
-plt.tight_layout()
+for ax in [axes[0], axes[2]]:
+    ax.set(xlabel="X (m)", ylabel="Y (m)")
+
+# Leave room for the bin counts
+figure.subplots_adjust(left=0.06, right=0.93, bottom=0.2, top=0.85, wspace=0.7)
+angle_errors.plot_magnitude(ax=axes[1], title="Binned error magnitude")
 plt.show()
 ```
 
-`predict_magnitude()` evaluates the model at new predictor values. With `like=proxy`, it returns a raster on the
-proxy's grid. Use `plot_magnitude()` to inspect the fitted groups and their sample counts.
+For a categorical predictor like **land cover** instead of a continuous one, use:
+
+```{code-cell} ipython3
+cover_errors = gu.ErrorStructure.estimate(
+    proxy,
+    predictors={"land_cover": land_cover},
+    components=magnitude_components,
+    categories={"land_cover": cover_codes},
+)
+cover_magnitude_map = cover_errors.predict_magnitude({"land_cover": land_cover}, like=ds)
+```
+
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for plotting the predictor, bins and predictions"
+:  code_prompt_hide: "Hide the code for plotting the predictor, bins and predictions"
+:  image:
+:    width: 800px
+:    alt: "Land cover, error magnitude and sample counts for each category, and predicted error magnitudes across the snow depth grid."
+
+# Show land cover, binned magnitudes and predictions
+figure, axes = plt.subplots(1, 3, figsize=(11, 3.8), gridspec_kw={"width_ratios": [1, 1.35, 1]})
+land_cover.rst.plot(
+    ax=axes[0], cmap=ListedColormap(cover_colors),
+    vmin=-0.5, vmax=2.5, add_cbar=False, title="Land cover",
+)
+axes[0].legend(handles=legend_handles, loc="upper right", framealpha=0.9)
+cover_magnitude_map.rst.plot(
+    ax=axes[2], cmap="YlOrRd", cbar_title="Error magnitude (m)", title="Predicted error magnitude",
+)
+for ax in [axes[0], axes[2]]:
+    ax.set(xlabel="X (m)", ylabel="Y (m)")
+
+# Leave room for the bin counts
+figure.subplots_adjust(left=0.06, right=0.93, bottom=0.2, top=0.85, wspace=0.7)
+cover_errors.plot_magnitude(ax=axes[1], title="Binned error magnitude")
+plt.show()
+```
+
+#### Two predictors
+
+Multiple predictors can be combined at once, grouping bins/categories together as in {meth}`~RasterBase.stats`.
+
+Below, we use the **viewing angle and land cover** simultaneously:
+
+```{code-cell} ipython3
+variable_errors = gu.ErrorStructure.estimate(
+    proxy,
+    predictors={"view_angle": view_angle, "land_cover": land_cover},
+    components=magnitude_components,
+    bins={"view_angle": 6},
+    categories={"land_cover": cover_codes},
+)
+axes = variable_errors.plot_magnitude()
+```
+
+Use {meth}`~geoutils.ErrorStructure.refit_magnitude` to fit **another model** (which default to linear interpolation), 
+using the same binned estimates. Changing bins, categories or estimator requires running {meth}`~geoutils.ErrorStructure.estimate` again.
+
+Parametric models can also be used, as demonstrated in {ref}`uncertainty-custom-magnitude`.
 
 (uncertainty-correlation)=
-### Spatial correlation
+### Error correlation
 
-A magnitude alone does not describe how errors relate across locations. Specify a correlation such as
-`"spherical"` to **fit it from a variogram of the error proxy**. Below, the synthetic proxy has a **2 m magnitude**
-and a **100 m spherical correlation range**.
+Error correlation is **inferred by the spatial correlation of the error proxy**, relying on {ref}`stats-spatial`.
+
+By default, GeoUtils uses the **Matheron** variogram estimator and fits a single-range **Gaussian** model per component.
+See {ref}`variogram estimators <stats-spatial-estimators>` for alternatives, and {ref}`variogram fitting <stats-spatial-fitting>` for using any model form.
+
+#### Estimator and model
+
+We set a model form and variogram estimator, and plot with {meth}`~geoutils.ErrorStructure.plot_correlation`.
 
 ```{code-cell} ipython3
-:tags: [hide-input]
 :mystnb:
-:  code_prompt_show: "Show the code for creating a correlated error proxy"
-:  code_prompt_hide: "Hide the code for creating a correlated error proxy"
+:  image:
+:    width: 600px
 
-import geoutils as gu
-from geoutils.stats.variography import VariogramModel
-
-# Create a proxy with known spatial correlation on the measurement grid
-known_correlation = VariogramModel("spherical", effective_range=100, partial_sill=1)
-known_errors = gu.ErrorStructure(
-    [gu.ErrorComponent("spatial", magnitude=2.0, correlation=known_correlation)]
-)
-spatial_proxy = measured.rst.random_field(
-    known_errors, backend="gstools", random_state=42
-)
-```
-
-```{code-cell} ipython3
-import numpy as np
-
-import geoutils as gu
-
-# Fit the magnitude and correlation using a sample of nearby and distant pairs
-correlated_errors = gu.ErrorStructure.estimate(
-    spatial_proxy,
-    components={"spatial": {"magnitude": "constant", "correlation": "spherical"}},
-    spread_estimator=np.std,
-    variogram_estimator="matheron",
-    n_pairs=20_000,
-    n_lags=12,
-    max_lag=250,
+# Use a spherical model
+single_errors = gu.ErrorStructure.estimate(
+    proxy,
+    components={"correlated": {"magnitude": "constant", "correlation": "spherical"}},
+    variogram_estimator="dowd",
+    n_pairs=100_000,
+    n_runs=3,
+    pair_sampling_kwargs={"strategy": "independent"},
     random_state=42,
 )
-round(correlated_errors.components["spatial"].correlation.effective_range, 1)
+ax = single_errors.plot_correlation(kind="correlation", title="One correlation model")
 ```
 
+Here, a single model **does not fit empirical correlation reliably**, so we need models that can 
+account for multiple correlation ranges, as examplified directly below.
+
+```{note}
+Semivariance increases as correlation decreases, following {math}`\rho(h) = 1 - \gamma(h)/C(0)`, where {math}`C(0)`
+is the variance (sill). Use `kind="semivariance"` to plot semivariance instead.
+```
+
+#### Multiple-range models
+
+It is often useful to fit a **sum of models** to represent both a short and a long correlation range.
+
+For instance: 
 ```{code-cell} ipython3
-:tags: [hide-input]
 :mystnb:
-:  code_prompt_show: "Show the code for plotting the figure"
-:  code_prompt_hide: "Hide the code for plotting the figure"
 :  image:
-:    alt: "A correlated error map and its standardized variogram, comparing sampled pairs with fitted and known models."
+:    width: 600px
 
-import numpy as np
-from matplotlib import pyplot as plt
-
-# Compare the simulated proxy with its empirical variogram and fitted correlation range
-figure, axes = plt.subplots(1, 2, figsize=(7, 3.2))
-spatial_proxy.rst.plot(ax=axes[0], cmap="RdBu", vmin=-6, vmax=6, cbar_title="Error (m)")
-axes[0].set_title("Correlated error proxy")
-axes[0].set(xlabel="X (m)", ylabel="Y (m)")
-correlated_errors.plot_correlation(ax=axes[1], show_counts=False, xscale="linear")
-lag_distances = np.linspace(0, 250, 300)
-axes[1].plot(
-    lag_distances,
-    known_correlation.variogram(lag_distances),
-    "--",
-    color="#e38b35",
-    label="Known normalized model",
+correlated_errors = gu.ErrorStructure.estimate(
+    proxy,
+    components={
+        "short_range": {"magnitude": "constant", "correlation": "gaussian"},
+        "long_range": {"magnitude": "constant", "correlation": "gaussian"},
+    },
+    variogram_estimator="matheron",
+    n_pairs=100_000,
+    n_runs=3,
+    pair_sampling_kwargs={"strategy": "independent"},
+    random_state=42,
 )
-axes[1].set(
-    title="Standardized error variogram",
-    xlabel="Separation (m)",
-    ylabel="Semivariance (unitless)",
-)
-axes[1].legend(frameon=False)
-plt.tight_layout()
-plt.show()
+ax = correlated_errors.plot_correlation(kind="correlation", title="Two correlation models")
 ```
 
-Nearby errors are similar, so their semivariance is small; it rises toward a plateau as separation increases.
-`plot_correlation()` compares the sampled pairs with the fitted model. GeoUtils first divides the proxy by its
-magnitude, so this variogram is **dimensionless**. A single simulated field only approximately recovers the known model.
-
-(uncertainty-model)=
-### Definition from known parameters
-
-The estimates above return an {class}`~geoutils.ErrorStructure`. It combines named
-{class}`~geoutils.ErrorComponent` objects, each with an **error magnitude** and an optional **spatial correlation
-model**. The magnitude represents a standard deviation.
-
-You can also **define an error structure from known parameters**. Here, we combine independent measurement noise
-with spatial errors. Components are mutually independent, so their variances add.
+To **refit spatial correlation**, use {meth}`~geoutils.ErrorStructure.refit_variogram` with different models, which reuses the stored empirical variogram.
+Changing empirical variogram estimation requires running {meth}`~geoutils.ErrorStructure.estimate` again.
 
 ```{code-cell} ipython3
-import geoutils as gu
-from geoutils.stats.variography import VariogramModel
-
-# Combine independent measurement noise with a spatially correlated error
-measurement = gu.ErrorComponent("measurement", magnitude=1.0)
-correlation = VariogramModel("spherical", effective_range=100, partial_sill=1)
-spatial = gu.ErrorComponent("spatial", magnitude=2.0, correlation=correlation)
-errors = gu.ErrorStructure([measurement, spatial])
-round(errors.predict_magnitude(), 2), errors.predict_covariance([0.0, 100.0])
+refitted_errors = correlated_errors.refit_variogram(["gaussian", "exponential"])
 ```
 
-These components have combined variance `1² + 2² = 5 m²`, giving a magnitude of about **2.24 m**. The correlation
-model has unit sill because the component's magnitude supplies its variance.
-
-```{code-cell} ipython3
-:tags: [hide-input]
-:mystnb:
-:  code_prompt_show: "Show the code for plotting the figure"
-:  code_prompt_hide: "Hide the code for plotting the figure"
-:  image:
-:    alt: "Measurement and spatial variances add to 5 m²; spatial covariance falls to zero at 100 m."
-
-import numpy as np
-from matplotlib import pyplot as plt
-
-# Compare component variances and their combined covariance over distance
-figure, axes = plt.subplots(1, 2, figsize=(7, 3), layout="constrained")
-variances = [
-    measurement.predict_magnitude() ** 2,
-    spatial.predict_magnitude() ** 2,
-    errors.predict_variance(),
-]
-bars = axes[0].bar(
-    ["Measurement", "Spatial", "Combined"],
-    variances,
-    color=["#3975a7", "#e38b35", "0.25"],
-)
-axes[0].bar_label(bars, padding=3)
-axes[0].set(title="Component variances", ylabel="Error variance (m²)", ylim=(0, 6))
-
-# Show the independent component's contribution at zero distance separately
-distances = np.linspace(0.5, 150, 300)
-axes[1].plot(
-    distances, errors.predict_covariance(distances), color="0.25", label="Combined"
-)
-axes[1].plot(
-    distances,
-    4 * spatial.predict_correlation(distances),
-    "--",
-    color="#e38b35",
-    label="Spatial",
-)
-axes[1].plot(distances, np.zeros_like(distances), color="#3975a7", label="Measurement")
-axes[1].scatter(
-    [0, 0, 0], [5, 4, 1], color=["0.25", "#e38b35", "#3975a7"], s=20, zorder=3
-)
-axes[1].axvline(100, color="0.65", linestyle=":")
-axes[1].set(
-    title="Covariance over distance",
-    xlabel="Separation (m)",
-    ylabel="Covariance (m²)",
-    xlim=(-3, 150),
-)
-axes[1].legend(frameon=False)
-plt.show()
-```
-
-The independent component contributes only to an observation's own variance. The spatial component's covariance
-falls to zero at **100 m** for this spherical model.
+Custom variogram functions are described in {ref}`uncertainty-custom-variogram`.
 
 (uncertainty-propagation)=
-## Propagate through a spatial operation
+## Propagate uncertainty
 
-{func}`~geoutils.uncertainty.propagate` calculates **how source errors affect a spatial result**.
-Pass the spatial method to run, its arguments through `operation_kwargs`, and the source `error_structure`.
-Supported methods include raster point resampling, reprojection, point gridding and kriging.
+{func}`geoutils.uncertainty.propagate() <geoutils.uncertainty.propagate>`<br>
+
+Once an error structure is estimated, **propagation** computes uncertainty through a given operation.
+
+This can be done either **analytically**, or **numerically**. Both return a {class}`~geoutils.PropagationSummary` object summarizing the propagation. 
+Alternatively, you can directly generate **random fields** from the above error structure, respecting multiple correlations and variable errors, 
+to perform your own simulations.
+
+(uncertainty-propagation-summary)=
+### Propagation summary
+
+A {class}`~geoutils.PropagationSummary` is an object that stores metrics about the output of the uncertainty propagation.
+
+```{important}
+Currently, propagation outputs are not designed to provide an {class}`~geoutils.ErrorStructure` for the output. 
+If you need to keep propagating errors of your output to another step, **bundle all steps at once** during your propagation.
+```
+
+For example, we propagate uncertainty through the **mean snow depth of 8 × 8 cells**.
+The summary stores the original result in {attr}`~geoutils.PropagationSummary.estimate`, its **1σ uncertainty**
+in {attr}`~geoutils.PropagationSummary.std`, and its mean in {attr}`~geoutils.PropagationSummary.mean`:
+
+```{note}
+A propagated {attr}`~geoutils.PropagationSummary.estimate` is the value from the original input, whereas {attr}`~geoutils.PropagationSummary.mean` averages the simulated results. They can differ for nonlinear
+calculations.
+```
 
 ```{code-cell} ipython3
-import numpy as np
-
-import geoutils as gu
-from geoutils.operators import GridNeighbours
-from geoutils.operators.reducer import Mean
-
-# Average the 3 x 3 cells surrounding two locations and propagate the fitted errors
-locations = (np.array([155.0, 205.0]), np.array([165.0, 115.0]))
-mean_operator = Mean(neighborhood=GridNeighbours(size=3))
 summary = gu.uncertainty.propagate(
-    measured.rst.resample_at_points,
-    error_structure=estimated_errors,
-    operation_kwargs={"points": locations, "method": mean_operator, "as_array": True},
+    ds.rst.icrop((0, 0, 8, 8)).rst.reproject,
+    error_structure=correlated_errors,
+    method="analytical",
+    operation_kwargs={"grid_size": (1, 1), "resampling": "average"},
 )
-np.round(summary.estimate, 2), np.round(summary.std, 2)
+summary.estimate.item(), summary.std.item(), summary.mean.item()
 ```
 
-The {class}`~geoutils.uncertainty.propagation.PropagationSummary` returns three results in the operation's output layout:
-
-| Attribute | Meaning |
-| --- | --- |
-| `estimate` | Result calculated from the original measurements |
-| `mean` | Expected result after adding source errors |
-| `std` | Standard deviation of that result |
-
-For a linear calculation with zero-mean errors, `mean` equals `estimate`. Averaging nine independent observations here reduces
-the uncertainty from about 2 m to **2/3 m**.
-
-**Spatial correlation limits that reduction.** Compare the measurement + spatial model defined above with an
-independent model having the same total source magnitude of 2.24 m:
+Use {meth}`~geoutils.PropagationSummary.info` for a summary of the propagation:
 
 ```{code-cell} ipython3
-import numpy as np
-
-import geoutils as gu
-
-# Define independent errors with the same magnitude for a fair comparison
-independent_component = gu.ErrorComponent(
-    "measurement", magnitude=errors.predict_magnitude()
-)
-independent_errors = gu.ErrorStructure([independent_component])
-
-# Propagate both models through the same averages
-comparison = {}
-models = {"Independent": independent_errors, "Measurement + spatial": errors}
-for name, model in models.items():
-    comparison[name] = gu.uncertainty.propagate(
-        measured.rst.resample_at_points,
-        error_structure=model,
-        operation_kwargs={
-            "points": locations,
-            "method": mean_operator,
-            "as_array": True,
-        },
-    )
-(
-    np.round(comparison["Independent"].std, 2),
-    np.round(comparison["Measurement + spatial"].std, 2),
-)
+summary.info()
 ```
+
+And {meth}`~geoutils.PropagationSummary.interval` for estimating **95% uncertainty bounds**:
+
+```{code-cell} ipython3
+summary.interval(0.95)
+```
+
+These attributes have the **same shape as the operation's output**. For a raster or point cloud, they also share the output coordinates, with an uncertainty for each cell or point.
+
+For example, if resample to a **30 m grid**, propagation returns three rasters:
+
+```{code-cell} ipython3
+raster_summary = gu.uncertainty.propagate(
+    ds.rst.reproject,
+    error_structure=correlated_errors,
+    method="analytical",
+    operation_kwargs={"res": 30, "resampling": "average"},
+)
+raster_summary.estimate.shape, raster_summary.mean.shape, raster_summary.std.shape
+```
+
+(uncertainty-analytical)=
+### Analytical propagation
+
+Analytical propagation is only supported for **linear calculations**, using the calculation weights with the error covariance. See {ref}`core-operators` for details on how to 
+define a linear operator in GeoUtils.
+
+For instance, we compute the mean of **8 × 8 cells** and propagate its uncertainty:
+
+```{code-cell} ipython3
+mean_value, mean_summary = proxy.rst.icrop((0, 0, 8, 8)).rst.stats(
+    "mean", error_structure=correlated_errors,
+    uncertainty_kwargs={"method": "analytical"},
+)
+print(f"Mean: {mean_value:.2f} ± {mean_summary.std.item():.2f} m (1σ)")
+```
+
+Then, we can repeat this mean over larger contiguous squares to see how uncertainty decreases with area:
 
 ```{code-cell} ipython3
 :tags: [hide-input]
 :mystnb:
-:  code_prompt_show: "Show the code for plotting the figure"
-:  code_prompt_hide: "Hide the code for plotting the figure"
+:  code_prompt_show: "Show the code for plotting uncertainty against area"
+:  code_prompt_hide: "Hide the code for plotting uncertainty against area"
 :  image:
-:    alt: "Uncertainty falls as averaging windows grow, more slowly for spatially correlated errors than independent errors."
+:    width: 800px
+:    alt: "Nested square averaging areas and their mean uncertainties, which decrease more slowly for correlated errors than for uncorrelated errors of the same magnitude."
 
-from matplotlib import pyplot as plt
+from matplotlib.patches import Rectangle
 
-import geoutils as gu
-from geoutils.operators import GridNeighbours
-from geoutils.operators.reducer import Mean
-
-# Repeat the same average over larger windows to show the effect of spatial correlation
-window_sizes = [1, 3, 5, 9, 15]
-window_uncertainties = {"Independent": [], "Measurement + spatial": []}
+# Average larger squares
+window_sizes = np.array([1, 3, 5, 7, 9, 13, 17, 25, 33])
+center_row = proxy.rst.height // 2
+center_column = proxy.rst.width // 2
+window_uncertainties = []
 for size in window_sizes:
-    operator = Mean(neighborhood=GridNeighbours(size=size))
-    for name, model in models.items():
-        result = gu.uncertainty.propagate(
-            measured.rst.resample_at_points,
-            error_structure=model,
-            operation_kwargs={
-                "points": locations,
-                "method": operator,
-                "as_array": True,
-            },
-        )
-        window_uncertainties[name].append(result.std[0])
+    half_size = size // 2
+    bounds = (
+        center_column - half_size, center_row - half_size,
+        center_column + half_size + 1, center_row + half_size + 1,
+    )
+    window = proxy.rst.icrop(bounds)
+    _, window_summary = window.rst.stats(
+        "mean", error_structure=correlated_errors,
+        uncertainty_kwargs={"method": "analytical"},
+    )
+    window_uncertainties.append(window_summary.std.item())
 
-# Compare output magnitudes at identical source magnitudes and spatial windows
-figure, ax = plt.subplots(figsize=(6, 3), layout="constrained")
-for name, color in [("Independent", "#3975a7"), ("Measurement + spatial", "#e38b35")]:
-    ax.plot(window_sizes, window_uncertainties[name], "o-", color=color, label=name)
-ax.set(
-    xticks=window_sizes,
-    xlabel="Window side length (cells)",
-    ylabel="Uncertainty of the mean (m)",
-    title="Spatial correlation limits uncertainty reduction",
-    ylim=(0, 2.5),
+# Mark a few squares on the map
+pixel_size = abs(proxy.rst.transform.a)
+center_x, center_y = proxy.rst.ij2xy(center_row, center_column)
+context = proxy.rst.icrop((center_column - 19, center_row - 19, center_column + 20, center_row + 20))
+figure, axes = plt.subplots(1, 2, figsize=(10, 3.8))
+context.rst.plot(ax=axes[0], cmap="RdBu", cbar_title="Error proxy (m)")
+for size in [5, 13, 33]:
+    side_length = size * pixel_size
+    lower_left = (center_x - side_length / 2, center_y - side_length / 2)
+    axes[0].add_patch(Rectangle(lower_left, side_length, side_length, fill=False, edgecolor="black"))
+    axes[0].text(
+        center_x, center_y + side_length / 2, f"{size} × {size} cells",
+        ha="center", va="bottom", fontsize=8, bbox={"facecolor": "white", "edgecolor": "none", "pad": 1},
+    )
+axes[0].set(title="Contiguous averaging areas", xlabel="X (m)", ylabel="Y (m)")
+
+# Compare correlated and independent errors
+areas = (window_sizes * pixel_size) ** 2
+source_magnitude = correlated_errors.predict_magnitude()
+axes[1].loglog(areas, window_uncertainties, "o-", color="darkorange", label="Spatially correlated")
+axes[1].loglog(areas, source_magnitude / window_sizes, "--", color="steelblue", label="Uncorrelated: σ / √n")
+axes[1].set(
+    title="Uncertainty of the area mean", xlabel="Averaging area (m²)", ylabel="Mean uncertainty (m)",
 )
-ax.legend(frameon=False)
+axes[1].grid(alpha=0.2)
+axes[1].legend(frameon=False)
+figure.tight_layout()
 plt.show()
 ```
 
-Both curves start with the same single-cell uncertainty. Nearby correlated errors partly move together, so
-averaging them removes less uncertainty.
-
-### Uncertainty of a statistic
-
-Statistics accept an error model when using a single reducer:
-
-```{code-cell} ipython3
-import numpy as np
-
-from geoutils.operators.reducer import Mean
-
-# Return the global mean and its uncertainty from the same selected raster values
-mean_value, mean_uncertainty = measured.rst.stats(Mean(), error_structure=estimated_errors)
-round(mean_value, 2), np.round(mean_uncertainty.std, 3)
+```{tip}
+Spatial correlation makes uncertainty decrease more slowly when averaging cells.
+The familiar standard error {math}`\sigma / \sqrt{n}` rule only works for independent errors with equal magnitudes.
 ```
 
-For these 4096 independent observations, the mean's uncertainty is about `2 / sqrt(4096) = 0.031 m`.
-A spatially correlated model generally gives a larger uncertainty, as in the window comparison above.
+To further examplify this, we propagate uncertainty through {meth}`~RasterBase.reproject` **from a 10 m grid to a 30 m grid**.
+The supplied error covariance both **weights the average resampling**, and calculates uncertainty for each output cell:
+
+```{code-cell} ipython3
+# Match predictor values to source cell IDs in row order
+cell_predictors = {
+    name: dict(enumerate(np.asarray(values).ravel()))
+    for name, values in predictors.items()
+}
+
+summary = gu.uncertainty.propagate(
+    ds.rst.reproject,
+    error_structure=es,
+    predictors=cell_predictors,
+    method="analytical",
+    operation_kwargs={"res": 30, "resampling": "average"},
+)
+source_uncertainty = es.predict_magnitude(predictors, like=ds)
+```
 
 ```{code-cell} ipython3
 :tags: [hide-input]
 :mystnb:
-:  code_prompt_show: "Show the code for plotting the figure"
-:  code_prompt_hide: "Hide the code for plotting the figure"
+:  code_prompt_show: "Show the code for comparing the original and reprojected maps"
+:  code_prompt_hide: "Hide the code for comparing the original and reprojected maps"
 :  image:
-:    alt: "Error bars narrow from one measurement to a local average and the whole-raster mean, with the known 100 m surface shown for comparison."
+:    width: 800px
+:    alt: "Snow depth above its random error magnitude, before and after weighted averaging from a 10 m to a 30 m grid. Plus-minus signs link each estimate to its error magnitude, with a resampling arrow between them."
 
-from matplotlib import pyplot as plt
-
-# Compare a single measurement, a local mean and the whole-raster mean
-single_value = measured.rst.resample_at_points(
-    points=locations, method="nearest", as_array=True
-)[0]
-estimates = [single_value, summary.estimate[0], mean_value]
-uncertainties = [
-    estimated_errors.predict_magnitude(), summary.std[0], mean_uncertainty.std.item()
+# Compare snow depth and error magnitude on shared scales
+snow_limits = (ds.min().item(), ds.max().item())
+uncertainty_limit = source_uncertainty.max().item()
+figure, axes = plt.subplots(
+    3, 3, figsize=(9, 7.5), layout="constrained",
+    gridspec_kw={"width_ratios": [1, 0.24, 1], "height_ratios": [1, 0.12, 1]},
+)
+panels = [
+    (axes[0, 0], ds, "Snow depth before\n10 m grid", "viridis", *snow_limits),
+    (axes[0, 2], summary.estimate, "Snow depth after weighted averaging\n30 m grid", "viridis", *snow_limits),
+    (axes[2, 0], source_uncertainty, "Error magnitude before", "YlOrRd", 0, uncertainty_limit),
+    (axes[2, 2], summary.std, "Propagated error magnitude", "YlOrRd", 0, uncertainty_limit),
 ]
-figure, ax = plt.subplots(figsize=(6, 3), layout="constrained")
-ax.errorbar(
-    estimates, [2, 1, 0], xerr=uncertainties, fmt="o", color="#3975a7", capsize=4,
-    label="Estimate ± standard deviation",
+for ax, values, title, cmap, minimum, maximum in panels:
+    values.rst.plot(ax=ax, cmap=cmap, vmin=minimum, vmax=maximum, add_cbar=False)
+    ax.set(title=title, xlabel="X (m)", ylabel="Y (m)")
+
+# Add colorbars for each row
+for ax in [*axes[1], axes[0, 1], axes[2, 1]]:
+    ax.set_axis_off()
+figure.colorbar(axes[0, 0].images[0], ax=axes[0, [0, 2]], shrink=0.85, label="Snow depth (m)")
+figure.colorbar(axes[2, 0].images[0], ax=axes[2, [0, 2]], shrink=0.85, label="Error magnitude (m, 1σ)")
+
+# Align the signs and arrow after placing the colorbars
+figure.canvas.draw()
+map_centers = [ax.get_position().x0 + ax.get_position().width / 2 for ax in axes[0, [0, 2]]]
+symbol_y = axes[1, 1].get_position().y0 + axes[1, 1].get_position().height / 2
+for center in map_centers:
+    figure.text(center, symbol_y, "±", ha="center", va="center", fontsize=24)
+arrow_left = axes[0, 0].get_position().x1 - 0.015
+arrow_right = axes[0, 2].get_position().x0 + 0.015
+arrow = axes[1, 1].annotate(
+    "", (arrow_right, symbol_y), (arrow_left, symbol_y),
+    xycoords="figure fraction", arrowprops={"arrowstyle": "->", "lw": 1.5},
 )
-ax.axvline(100, color="0.25", linestyle="--", label="Known surface")
-for row, value, uncertainty in zip([2, 1, 0], estimates, uncertainties):
-    ax.annotate(
-        f"{uncertainty:.3f} m", (value, row), xytext=(0, 10),
-        textcoords="offset points", ha="center",
-    )
-ax.set(
-    yticks=[2, 1, 0], yticklabels=["One measurement", "3 × 3 mean", "Whole-raster mean"],
-    xlabel="Measured or averaged value (m)", ylim=(-0.5, 2.6),
-    title="Averaging independent measurements reduces uncertainty",
+arrow.set_in_layout(False)
+figure.text(
+    (arrow_left + arrow_right) / 2, symbol_y + 0.008, "Resampling",
+    ha="center", va="bottom", fontsize=10,
 )
-ax.legend(loc="lower right", frameon=False, fontsize=8)
 plt.show()
+```
+
+(uncertainty-numerical-intervals)=
+### Numerical propagation
+
+Numerical propagation is supported for **any operation**, but computationally intensive as it repeats realizations of the calculation with random errors added to the inputs.
+These realizations are generated through {ref}`uncertainty-simulation`.
+
+```{code-cell} ipython3
+numerical_window = proxy.rst.icrop((4, 4, 12, 12))
+median_value, median_summary = numerical_window.rst.stats(
+    "median", error_structure=constant_errors,
+    uncertainty_kwargs={"method": "numerical", "n_simulations": 500, "return_samples": True, "random_state": 42},
+)
+median_uncertainty = median_summary.std.item()
+print(f"Median: {median_value:.2f} ± {median_uncertainty:.2f} m (1σ)")
+```
+
+The maps below show the integration window and two error realizations. Adding each realization to the same input
+window and calculating its median produces one value in the distribution on the right:
+
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for plotting the numerical simulations"
+:  code_prompt_hide: "Hide the code for plotting the numerical simulations"
+:  image:
+:    width: 800px
+:    alt: "An 8 by 8 integration window, two simulated error fields and their medians, and 500 simulated medians with the original median ± one standard deviation. Black ticks labelled 1 and 2 locate the two draws."
+
+# Repeat the first two simulations
+realizations = numerical_window.rst.random_field(
+    constant_errors, n_fields=2, random_state=42,
+)
+realization_medians = [(numerical_window + realization).rst.stats("median") for realization in realizations]
+figure, axes = plt.subplots(
+    1, 4, figsize=(12, 3.6), layout="constrained", gridspec_kw={"width_ratios": [1, 1, 1, 1.5]},
+)
+
+# Outline the area used for the median
+numerical_context = proxy.rst.icrop((0, 0, 16, 16))
+numerical_context.rst.plot(ax=axes[0], cmap="viridis", add_cbar=False)
+window_x = numerical_window.rst.bbox.left
+window_y = numerical_window.rst.bbox.bottom
+window_side = numerical_window.rst.width * pixel_size
+axes[0].add_patch(
+    Rectangle((window_x, window_y), window_side, window_side, fill=False, edgecolor="white", linewidth=2),
+)
+axes[0].set(title=f"Input values\n8 × 8 cells ({window_side:g} × {window_side:g} m)", xlabel="X (m)", ylabel="Y (m)")
+
+# Plot source errors with a shared scale
+error_limit = 3 * constant_errors.predict_magnitude()
+for number, (ax, realization, value) in enumerate(zip(axes[1:3], realizations, realization_medians), 1):
+    image = ax.imshow(realization, cmap="RdBu", vmin=-error_limit, vmax=error_limit)
+    ax.set(title=f"Error draw {number}\nResulting median: {value:.2f} m", xticks=[], yticks=[])
+figure.colorbar(image, ax=axes[1:3], orientation="horizontal", shrink=0.8, label="Source error (m)")
+
+# Show the spread of the simulated medians
+axes[3].axvspan(
+    median_value - median_uncertainty, median_value + median_uncertainty,
+    color="steelblue", alpha=0.12, label="Median ±1σ",
+)
+axes[3].hist(median_summary.samples.iloc[:, 0], bins=30, density=True, color="steelblue", alpha=0.6)
+axes[3].axvline(median_value, color="dimgray", label="Original median")
+for number, value in enumerate(realization_medians, 1):
+    axes[3].plot(value, 0, "|", color="black", markersize=14, markeredgewidth=2, clip_on=False, zorder=5)
+    axes[3].annotate(
+        str(number), (value, 0), xytext=(0, 12), textcoords="offset points", ha="center",
+        color="black", fontweight="bold", bbox={"facecolor": "white", "edgecolor": "none", "pad": 1},
+    )
+axes[3].set(
+    title=f"500 repeated medians\nUncertainty (1σ): {median_uncertainty:.2f} m",
+    xlabel="Window median (m)", ylabel="Probability density (1/m)",
+)
+axes[3].legend(frameon=False, fontsize=8)
+plt.show()
+```
+
+(uncertainty-simulation)=
+### Random field generation
+
+**Random error fields** are realizations of an error structure, generated with {meth}`~RasterBase.random_field`:
+
+```{code-cell} ipython3
+field = ds.rst.random_field(
+    es, predictors={"view_angle": view_angle, "land_cover": land_cover}, backend="gstools", random_state=42,
+)
+```
+
+```{note}
+Random field generation **relies on [GSTools](https://geostat-framework.readthedocs.io/projects/gstools/en/stable/) or [GPyTorch](https://docs.gpytorch.ai/en/stable/)**. The former supports more correlation forms, with the latter is usually faster.
+
+GeoUtils adds logic to **directly support complex error structure** from multiple-range correlation models and variable magnitude from predictors, applicable on large datasets.
+```
+
+The examples below emphasize variable magnitudes and increasingly long correlation ranges:
+
+```{code-cell} ipython3
+:tags: [hide-input]
+:mystnb:
+:  code_prompt_show: "Show the code for comparing random fields"
+:  code_prompt_hide: "Hide the code for comparing random fields"
+:  image:
+:    width: 1200px
+:    alt: "Five random fields with constant or variable magnitude: uncorrelated errors, short range correlation, and several short and long correlation ranges."
+
+import pandas as pd
+
+# Make errors grow with viewing angle
+field_statistics = pd.DataFrame(
+    {"std": [0.03, 0.6], "count": [100, 100]},
+    index=pd.Index([0.0, 60.0], name="view_angle"),
+)
+variable_magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(field_statistics)
+variable_model = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", variable_magnitude)])
+field_magnitudes = variable_model.predict_magnitude({"view_angle": view_angle}, like=ds)
+field_magnitude = np.sqrt((field_magnitudes ** 2).mean()).item()
+
+# Use the same average error variance in all five examples
+field_short_model = gu.Variogram.from_model("gaussian", effective_range=100, partial_sill=1)
+uncorrelated_model = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", field_magnitude)])
+correlated_model = gu.ErrorStructure([gu.ErrorComponent("correlated", field_magnitude, field_short_model)])
+variable_correlated_model = gu.ErrorStructure([gu.ErrorComponent("correlated", variable_magnitude, field_short_model)])
+range_models = [
+    gu.Variogram.from_model("gaussian", effective_range=distance, partial_sill=variance)
+    for distance, variance in [(25, 0.1), (100, 0.3), (400, 0.6)]
+]
+mixed_correlation = gu.Variogram.combine(*range_models)
+mixed_model = gu.ErrorStructure([gu.ErrorComponent("correlated", variable_magnitude, mixed_correlation)])
+uncorrelated_field = ds.rst.random_field(uncorrelated_model, random_state=42)
+variable_uncorrelated_field = ds.rst.random_field(variable_model, predictors={"view_angle": view_angle}, random_state=42)
+correlated_field = ds.rst.random_field(correlated_model, backend="gstools", random_state=42)
+variable_correlated_field = ds.rst.random_field(
+    variable_correlated_model, predictors={"view_angle": view_angle}, backend="gstools", random_state=42,
+)
+mixed_field = ds.rst.random_field(
+    mixed_model, predictors={"view_angle": view_angle}, backend="gstools", random_state=42,
+)
+
+# Use one color scale for all five maps
+comparison_fields = [uncorrelated_field, variable_uncorrelated_field, correlated_field, variable_correlated_field, mixed_field]
+field_limit = 3 * field_magnitude
+figure, axes = plt.subplots(1, 5, figsize=(17, 3.5), sharex=True, sharey=True, layout="constrained")
+for ax, values, title in zip(
+    axes, comparison_fields,
+    [
+        "Uncorrelated\nConstant magnitude", "Uncorrelated\nVariable magnitude",
+        "Correlated short range\nConstant magnitude", "Correlated short range\nVariable magnitude",
+        "Several short and long ranges\nVariable magnitude",
+    ],
+):
+    values.rst.plot(ax=ax, cmap="RdBu", vmin=-field_limit, vmax=field_limit, add_cbar=False)
+    ax.set(title=title, xlabel="X (m)")
+axes[0].set_ylabel("Y (m)")
+figure.colorbar(axes[0].images[0], ax=axes, orientation="horizontal", shrink=0.65, extend="both", label="Error (m)")
+plt.show()
+```
+
+The field contains **errors only**. Add it to your data to create perturbed inputs for simulations:
+
+```{code-cell} ipython3
+ds_simulated = ds + field
 ```
 
 (uncertainty-advanced)=
 ## Advanced usage
 
-### Numerical propagation and uncertainty intervals
+The following sections present more advanced usage of the uncertainty features, such as **defining your 
+error structure** manually, or **fitting custom models** for magnitude/correlation.
 
-`method="auto"` uses analytical propagation when the operator provides linear coefficients. Use
-`method="numerical"` for repeated random draws (Monte Carlo), including nonlinear calculations.
+(uncertainty-custom-magnitude)=
+### Custom magnitude fit
 
-A median can change which observation supplies the result after errors are added. Here, the three observations
-are **10, 11 and 20 m**, each with the fitted independent errors. We store draws to inspect the resulting distribution.
+One can pass **a custom function** to fit the error magnitude bins, either as 
+`magnitude_model` and `magnitude_fit_kwargs` arguments to {meth}`~geoutils.ErrorStructure.estimate`, or to 
+{meth}`~geoutils.ErrorStructure.refit_magnitude` more directly:
 
 ```{code-cell} ipython3
-import numpy as np
+def angle_spread(angle, offset, quadratic):
+    """Calculate error magnitude as a quadratic function of viewing angle."""
+    return offset + quadratic * angle**2
 
-import geoutils as gu
-from geoutils.operators import LocalData
-from geoutils.operators.reducer import Median
 
-# Use a median to demonstrate numerical propagation for a nonlinear calculation
-observations = LocalData(
-    values=np.array([10.0, 11.0, 20.0]),
-    valid=np.ones(3, dtype=bool),
-    source_ids=np.arange(3),
+angle_model = angle_errors.refit_magnitude(
+    angle_spread,
+    fit_kwargs={"p0": [0.1, 0.001], "bounds": (0, float("inf"))},
 )
-median_summary = gu.uncertainty.propagate(
-    Median(),
-    observations,
-    error_structure=estimated_errors,
-    method="numerical",
-    n_simulations=2000,
-    return_samples=True,
-    random_state=42,
-)
-median_summary.estimate, round(median_summary.mean, 2), round(median_summary.std, 2)
+axes = angle_model.plot_magnitude()
 ```
 
-```{code-cell} ipython3
-# Calculate the central 95% interval from the stored output draws
-median_summary.interval(0.95)
-```
+(uncertainty-custom-variogram)=
+### Custom variogram fit
+
+One can pass **a custom function** to fit the variogram lag bins, either as a component's `correlation` with
+`fit_kwargs` in {meth}`~geoutils.ErrorStructure.estimate`, or to
+{meth}`~geoutils.ErrorStructure.refit_variogram` more directly:
 
 ```{code-cell} ipython3
-:tags: [hide-input]
+def stretched_variogram(distance, effective_range, partial_sill, exponent):
+    """Calculate semivariance with a fitted exponent controlling the correlation decrease."""
+    return partial_sill * (1 - np.exp(-3 * (distance / effective_range)**exponent))
+
+
+custom_correlation = single_errors.refit_variogram(
+    stretched_variogram,
+    fit_kwargs={
+        "p0": [80, 1, 1],
+        "bounds": [(1, 400), (0, float("inf")), (0.2, 2)],
+    },
+)
+ax = custom_correlation.plot_correlation(kind="correlation")
+```
+
+The **exponent bounds** keep the covariance valid.
+
+(uncertainty-model)=
+### Definition from known parameters
+
+An error structure can also be **defined from known parameters** using {class}`~geoutils.ErrorComponent`.
+Each component combines an {class}`~geoutils.ErrorMagnitude` with an optional {class}`~geoutils.Variogram`
+correlation model.
+Here, spatially uncorrelated and correlated components have a **combined variance of 5 m²** (their variances add):
+
+```{code-cell} ipython3
 :mystnb:
-:  code_prompt_show: "Show the code for plotting the figure"
-:  code_prompt_hide: "Hide the code for plotting the figure"
 :  image:
-:    alt: "Simulated median outputs have a mean of 11.74 m compared with the original 11 m median, with a central 95% interval."
+:    width: 800px
 
-from matplotlib import pyplot as plt
+from geoutils.stats.variography import VariogramModel
 
-# Show the median's output distribution and its empirical uncertainty interval
-lower, upper = median_summary.interval(0.95).iloc[0]
-figure, ax = plt.subplots(figsize=(6, 3), layout="constrained")
-ax.axvspan(lower, upper, color="#3975a7", alpha=0.12, label="Central 95% interval")
-ax.hist(
-    median_summary.samples.iloc[:, 0], bins=35, density=True, color="#3975a7", alpha=0.6
-)
-ax.axvline(
-    median_summary.estimate,
-    color="0.25",
-    label=f"Original median: {median_summary.estimate:.2f} m",
-)
-ax.axvline(
-    median_summary.mean,
-    color="#e38b35",
-    linestyle="--",
-    label=f"Mean after adding errors: {median_summary.mean:.2f} m",
-)
-ax.set(
-    xlabel="Median after adding source errors (m)",
-    ylabel="Probability density (1/m)",
-    title="Nonlinear calculations can shift the expected result",
-)
-ax.legend(frameon=False)
-plt.show()
+uncorrelated = gu.ErrorComponent("uncorrelated", magnitude=1.0)
+correlation = VariogramModel("gaussian", effective_range=100, partial_sill=1)
+correlated = gu.ErrorComponent("correlated", magnitude=2.0, correlation=correlation)
+known_errors = gu.ErrorStructure([uncorrelated, correlated])
+known_errors.plot(show_components=True)
 ```
 
-Zero-mean input errors can shift the expected output of a nonlinear calculation. Increase `n_simulations` for more
-stable numerical estimates. `interval()` uses empirical quantiles when draws are stored; analytical intervals
-use the normal output law of the supported linear calculation.
-
-For large outputs, select locations with `at=` before storing draws. Set `quantiles=(0.025, 0.975)` to save only
-those percentiles in the result, without returning every draw. Exact empirical quantiles still require a temporary
-draw buffer, whose size is controlled by `max_sample_bytes`.
-
-(uncertainty-simulation)=
-### Simulating random error fields
-
-{meth}`random_field() <RasterBase.random_field>` uses an existing raster or point cloud to define the output
-locations. It can generate **synthetic errors with a given magnitude and spatial correlation** for repeated
-measurements or numerical experiments.
-
-```{note}
-Correlated fields use GSTools' [SRF()](https://geostat-framework.readthedocs.io/projects/gstools/en/stable/api/gstools.field.SRF.html)
-or GPyTorch's [MultivariateNormal.rsample()](https://docs.gpytorch.ai/en/stable/distributions.html#gpytorch.distributions.MultivariateNormal.rsample).
-GeoUtils adds shared error components and spatially consistent draws across chunks.
-```
-
-```{code-cell} ipython3
-# Draw independent and correlated fields with the same total error magnitude
-independent_field = measured.rst.random_field(
-    independent_errors, backend="gstools", random_state=42
-)
-field = measured.rst.random_field(errors, backend="gstools", random_state=42)
-```
-
-```{code-cell} ipython3
-:tags: [hide-input]
-:mystnb:
-:  code_prompt_show: "Show the code for plotting the figure"
-:  code_prompt_hide: "Hide the code for plotting the figure"
-:  image:
-:    alt: "Simulated errors of equal magnitude vary cell by cell when independent and form patches when spatially correlated."
-
-from matplotlib import pyplot as plt
-
-# Compare independent measurement errors with the simulated correlated field
-figure, axes = plt.subplots(1, 2, figsize=(7, 3.2))
-axes[0].set_title("Independent errors")
-independent_field.rst.plot(ax=axes[0], cmap="RdBu", vmin=-6, vmax=6, cbar_title="Error (m)")
-axes[1].set_title("Measurement + spatial errors")
-field.rst.plot(ax=axes[1], cmap="RdBu", vmin=-6, vmax=6, cbar_title="Error (m)")
-for axis in axes:
-    axis.set(xlabel="X (m)", ylabel="Y (m)")
-plt.tight_layout()
-plt.show()
-```
-
-Both models have a **2.24 m magnitude**, but the spatial component creates coherent patches while independent
-errors vary from cell to cell. Individual fields need not have exactly the model's standard deviation. Add a
-field to `reference` to construct another synthetic elevation measurement; the drawn field contains errors alone.
-
-### Fitting controls
-
-Use `mask=` to select unchanged surfaces when only part of the data provides an error proxy. The magnitude estimate
-uses `spread_estimator`; the variogram uses `variogram_estimator`. The standard deviation and Matheron's estimator
-suit these normal synthetic errors. NMAD and Dowd's estimator are alternatives that are less sensitive to outliers.
-
-`bins` and `min_count` control predictor groups; `subsample_magnitude` limits the observations used for their spread.
-`n_pairs`, `n_lags` and `max_lag` control spatial pair sampling and distance bins. See {ref}`stats-spatial` for
-variogram diagnostics, and {ref}`sampling-pairs` for pair selection.
-
-With predictors, the default components are a **heteroscedastic Gaussian** and a **constant spherical** component.
-Without predictors, the default is one constant Gaussian component. At most one component can be heteroscedastic.
-Use `refit()` to fit new correlation models to the stored diagnostics without sampling the data again.
-
-### Simulation backends and large datasets
-
-{func}`~geoutils.uncertainty.random_field` also accepts an array of coordinates. Use `n_fields=` for several
-independent fields, and the same `random_state` and model settings for repeatable draws.
-
-| Backend | How it draws spatial errors | Main control |
-| --- | --- | --- |
-| `"gstools"` | Shared global random model | Same component seeds across chunks |
-| `"gpytorch"` (default) | Approximation on an inducing grid for spatial inputs | `gpytorch_inducing_points=` (256 by default); `None` requests an exact eager draw |
-
-The inducing approximation can change the represented covariance; choose its size according to the required
-accuracy and available memory. Chunked fields share their random model across chunks, preserving correlation
-across chunk boundaries.
-
-Magnitude prediction, estimation and simulation support Dask and multiprocessing. Marginal propagation can
-remain lazy on supported Dask inputs; selected spatial samples and quantiles currently require eager inputs.
-See {ref}`scalability-support` for execution limits and {ref}`stats-kriging` for predictions from measured values.

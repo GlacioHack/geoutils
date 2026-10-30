@@ -23,7 +23,7 @@ import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 import numpy as np
 import pandas as pd
@@ -51,7 +51,7 @@ def _normalize_correlation_model(model: VariogramModel) -> VariogramModel:
     """Scale a variogram to unit variance without changing its correlation shape."""
 
     if model.nugget != 0:
-        raise ValueError("Component correlations cannot contain a nugget; use an independent component.")
+        raise ValueError("Component correlations cannot contain a nugget; use a spatially uncorrelated component.")
     if model.sill <= 0:
         raise ValueError("Component correlations require a strictly positive sill.")
     if model.components:
@@ -63,6 +63,33 @@ def _normalize_correlation_model(model: VariogramModel) -> VariogramModel:
         )
         return replace(model, partial_sill=1.0, components=components)
     return replace(model, partial_sill=1.0)
+
+
+def _correlation_info(model: VariogramModel, distance_units: str, indent: str = "") -> list[str]:
+    """Describe the functional form and parameters of a correlation model, including sums and products."""
+
+    # Describe base parameters in the same units as the empirical distances
+    lines: list[str] = []
+    if model.effective_range is not None:
+        lines.append(f"{indent}Effective range: {model.effective_range:.4g} {distance_units}")
+    lines.append(f"{indent}Functional form: {model.model_name}")
+    if model.smoothness is not None:
+        lines.append(f"{indent}Smoothness: {model.smoothness:.4g}")
+    if model.shape is not None:
+        lines.append(f"{indent}Shape: {model.shape:.4g}")
+    if model.parameters:
+        values = ", ".join(f"{value:.4g}" for value in model.parameters)
+        lines.append(f"{indent}Additional parameters: {values}")
+    if model.active_dims is not None:
+        lines.append(f"{indent}Coordinate dimensions: {model.active_dims}")
+
+    # Composite models need each constituent's parameters to describe their correlation
+    for number, component in enumerate(model.components, 1):
+        lines.append(f"{indent}Model {number}:")
+        if model.model_name == "sum":
+            lines.append(f"{indent}  Variance fraction: {component.sill / model.sill:.4g}")
+        lines.extend(_correlation_info(component, distance_units, indent + "  "))
+    return lines
 
 
 ############################################
@@ -98,8 +125,8 @@ class ErrorMagnitude:
 
         import geoutils as gu
 
-        measurement = gu.ErrorMagnitude.constant(2.0)
-        measurement.predict()  # 2.0
+        magnitude = gu.ErrorMagnitude.constant(2.0)
+        magnitude.predict()  # 2.0
 
     Another example can use variable error magnitudes increasing from 1 to 3 m between slopes of 0 and 30 degrees.
     Then ``predicts`` interpolates linearly between groups, estimating an error of 2 m for a slope of 15 degrees:
@@ -141,6 +168,10 @@ class ErrorMagnitude:
     :param scale: Factor applied to error magnitudes from grouped statistics.
     :param variance_offset: Variance assigned to other error components, subtracted from the squared error magnitude.
     :param floor: Minimum error magnitude after subtracting the variance offset.
+    :param model: "piecewise_linear" for interpolation, "linear" for an affine fit, or a function model(x, ...),
+        whose remaining arguments are parameters to fit.
+        The function receives a vector for one continuous predictor, or an array shaped (n_predictors, n_groups).
+    :param fit_kwargs: Options passed to scipy.optimize.curve_fit(), such as p0 and bounds.
     """
 
     kind: Literal["constant", "variable"]
@@ -153,6 +184,11 @@ class ErrorMagnitude:
     scale: float = 1.0
     variance_offset: float = 0.0
     floor: float = 0.0
+    model: Literal["piecewise_linear", "linear"] | Callable[..., Any] = "piecewise_linear"
+    fit_kwargs: Mapping[str, Any] | None = field(default=None, repr=False, compare=False)
+    _fit_parameters: dict[tuple[Any, ...], NDArray[np.float64]] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
     _interpolator: Callable[[Mapping[str, Any]], NDArray[np.float64]] | None = field(
         default=None, init=False, repr=False, compare=False
     )
@@ -162,6 +198,8 @@ class ErrorMagnitude:
 
         # Convert shared numeric options to floats and check their ranges
         object.__setattr__(self, "predictor_names", tuple(self.predictor_names))
+        if self.fit_kwargs is not None:
+            object.__setattr__(self, "fit_kwargs", dict(self.fit_kwargs))
         for name in ("scale", "variance_offset", "floor"):
             object.__setattr__(self, name, float(getattr(self, name)))
         if not np.isfinite(self.scale) or self.scale <= 0:
@@ -221,7 +259,15 @@ class ErrorMagnitude:
             object.__setattr__(
                 self,
                 "_interpolator",
-                _grouped_interpolator(table, value_name=self.value_name, statistic=statistic, min_count=self.min_count),
+                _grouped_interpolator(
+                    table,
+                    value_name=self.value_name,
+                    statistic=statistic,
+                    min_count=self.min_count,
+                    model=self.model,
+                    fit_kwargs=self.fit_kwargs,
+                    fit_parameters=self._fit_parameters,
+                ),
             )
         else:
             raise ValueError("Magnitude kind must be 'constant' or 'variable'.")
@@ -240,6 +286,8 @@ class ErrorMagnitude:
             "scale": self.scale,
             "variance_offset": self.variance_offset,
             "floor": self.floor,
+            "model": self.model,
+            "fit_kwargs": self.fit_kwargs,
         }
 
     def __setstate__(self, state: dict[str, Any]) -> None:
@@ -271,6 +319,8 @@ class ErrorMagnitude:
         scale: float = 1.0,
         variance_offset: float = 0.0,
         floor: float = 0.0,
+        model: Literal["piecewise_linear", "linear"] | Callable[..., Any] = "piecewise_linear",
+        fit_kwargs: Mapping[str, Any] | None = None,
     ) -> ErrorMagnitude:
         """
         Create an error magnitude that varies with observations, as described by grouped stats with predictor values.
@@ -280,6 +330,14 @@ class ErrorMagnitude:
 
         To create a model from grouped statistics, values between groups are interpolated linearly between groups,
         and extrapolated with nearest outside groups. Groups with too few observations are excluded using ``min_count``.
+        Categorical index levels select separate models, with interpolation only along continuous predictors.
+
+        The interpolation described above is the default. Set model="linear" for an affine fit, or pass a function
+        model(x, ...) to fit another form with scipy.optimize.curve_fit(), with parameters as separate arguments.
+        For one continuous predictor, x is a vector of group centers. For N predictors, x has shape (N, n_groups),
+        in predictor_names order.
+        Fits use finite groups meeting min_count, separately within each categorical combination. Fitted functions
+        extrapolate outside the group centers. Negative or non-finite predictions give NaN.
 
         :param statistics: Grouped statistics indexed by named predictors, with statistic and "count" columns.
             Two-level (variable, statistic) columns from stats() are also accepted.
@@ -290,6 +348,8 @@ class ErrorMagnitude:
         :param scale: Factor multiplying the interpolated error magnitude.
         :param variance_offset: Variance to subtract after scaling (e.g. already assigned to another component).
         :param floor: Minimum error magnitude after subtracting that variance.
+        :param model: "piecewise_linear", "linear", or a callable as described above.
+        :param fit_kwargs: Options passed to curve_fit(), including initial parameters p0 and bounds.
 
         :returns: An ErrorMagnitude evaluated with predict().
         """
@@ -307,7 +367,17 @@ class ErrorMagnitude:
             scale=scale,
             variance_offset=variance_offset,
             floor=floor,
+            model=model,
+            fit_kwargs=fit_kwargs,
         )
+
+    @property
+    def model_name(self) -> str:
+        """Return the interpolation name or the fitted function's name."""
+
+        if isinstance(self.model, str):
+            return self.model
+        return str(getattr(self.model, "__name__", type(self.model).__name__))
 
     def predict(self, predictors: Mapping[str, Any] | None = None) -> float | NDArray[np.float64]:
         """
@@ -355,6 +425,204 @@ class ErrorMagnitude:
         return float(np.median(finite))
 
 
+def _plot_label(name: str, attributes: Mapping[str, Any]) -> str:
+    """Format a descriptive variable name and any supplied units for a plot label."""
+
+    fallback = name.replace("_", " ")
+    label = attributes.get("long_name") or fallback[:1].upper() + fallback[1:]
+    unit = attributes.get("units")
+    if unit:
+        # Use familiar symbols for common unit names
+        unit = {"degree": "°", "degrees": "°", "metre": "m", "meter": "m"}.get(unit, unit)
+        label = f"{label} ({unit})"
+    return str(label)
+
+
+def _plot_magnitude_fit(
+    magnitude: ErrorMagnitude, table: pd.DataFrame, axes: Mapping[str, Any], empirical_label: str, model_label: str
+) -> None:
+    """Overlay an interpolated magnitude model and label the empirical groups and fitted model."""
+
+    from matplotlib.lines import Line2D
+
+    from geoutils.stats.grouping import _plot_axis
+
+    if magnitude.grouped_statistics is None:
+        raise AssertionError("A variable magnitude must contain statistics.")
+
+    # Match predictor values to the displayed bin centers, including numeric group labels
+    levels = [table.index] if table.index.nlevels == 1 else list(table.index.levels)
+    statistic_axis = axes["statistic"]
+    if len(levels) == 2 and "colorbar" not in axes:
+        # Evaluate a separate curve for each category or second predictor bin
+        level_x, level_y = levels
+        _, centers, _ = _plot_axis(level_x)
+        predictor_values = level_x.mid if isinstance(level_x, pd.IntervalIndex) else level_x
+        if isinstance(level_x, pd.CategoricalIndex):
+            displayed, coordinates = centers, np.asarray(predictor_values)
+        else:
+            displayed = np.linspace(centers[0], centers[-1], 100)
+            coordinates = np.interp(displayed, centers, np.asarray(predictor_values, dtype=float))
+        empirical_lines = list(statistic_axis.lines)
+        for category, empirical in zip(level_y, empirical_lines):
+            fixed_value = category.mid if isinstance(category, pd.Interval) else category
+            predictors = {table.index.names[0]: coordinates, table.index.names[1]: fixed_value}
+            fitted = magnitude.predict(predictors)
+            color = empirical.get_color()
+            empirical.set(linestyle="none", markerfacecolor="white", markeredgecolor=color, zorder=3)
+            statistic_axis.plot(displayed, fitted, color=color, linewidth=1.5)
+
+        # Category colors are identified above, while line styles distinguish observations from the model
+        empirical_handle = Line2D([], [], marker="o", linestyle="none", markerfacecolor="white", color="0.35")
+        model_handle = Line2D([], [], color="0.35")
+        statistic_axis.legend(
+            handles=[empirical_handle, model_handle], labels=[empirical_label, model_label], frameon=False
+        )
+        return
+    if any(isinstance(level, pd.CategoricalIndex) for level in levels):
+        # Show category estimates without connecting separate classes
+        statistic_axis = axes["statistic"]
+        if len(levels) == 1:
+            if statistic_axis.containers:
+                bars = statistic_axis.containers[0]
+                bars.set_label(empirical_label)
+                statistic_axis.legend(handles=[bars], framealpha=0.9)
+            else:
+                statistic_axis.lines[0].set(linestyle="none", label=empirical_label)
+                statistic_axis.legend(framealpha=0.9)
+        else:
+            empirical = Line2D([], [], marker="s", linestyle="none", color="0.5", label=empirical_label)
+            statistic_axis.legend(handles=[empirical], framealpha=0.8)
+        return
+    display_coordinates = []
+    predictor_coordinates = []
+    for level in levels:
+        _, centers, _ = _plot_axis(level)
+        predictor_values = level.mid if isinstance(level, pd.IntervalIndex) else level
+        displayed = np.linspace(centers[0], centers[-1], 100)
+        display_coordinates.append(displayed)
+        predictor_coordinates.append(np.interp(displayed, centers, np.asarray(predictor_values, dtype=float)))
+
+    # Evaluate the same interpolator used for magnitude predictions
+    predictor_grids = np.meshgrid(*predictor_coordinates, indexing="xy")
+    predictors = dict(zip(table.index.names, predictor_grids))
+    fitted = magnitude.predict(predictors)
+    statistic_axis = axes["statistic"]
+
+    if len(levels) == 1:
+        if statistic_axis.containers:
+            empirical = statistic_axis.containers[0]
+            empirical.set_label(empirical_label)
+        else:
+            empirical = statistic_axis.lines[0]
+            empirical.set(linestyle="none", color="0.35", markerfacecolor="white", label=empirical_label, zorder=3)
+        model_line = statistic_axis.plot(
+            display_coordinates[0], fitted, color="0.15", linewidth=1.5, label=model_label
+        )[0]
+        statistic_axis.grid(axis="y", color="0.9", linewidth=0.6)
+        statistic_axis.set_axisbelow(True)
+        statistic_axis.legend(handles=[empirical, model_line], frameon=False)
+    else:
+        # Contours show the interpolated fit over the empirical magnitude grid
+        finite = np.asarray(fitted)[np.isfinite(fitted)]
+        if finite.size and np.ptp(finite) > 0 and all(len(np.unique(values)) > 1 for values in display_coordinates):
+            statistic_axis.contour(*display_coordinates, fitted, levels=5, colors="0.15", linewidths=0.8)
+        empirical_handle = Line2D([], [], marker="s", linestyle="none", color="0.5", label=empirical_label)
+        model_handle = Line2D([], [], color="0.15", label=model_label)
+        statistic_axis.legend(handles=[empirical_handle, model_handle], framealpha=0.8)
+
+
+def _plot_constant_variances(structure: ErrorStructure, ax: Any) -> None:
+    """Show how mutually independent components contribute to the combined error variance."""
+
+    # Compare variances because independent components add in squared units
+    names = list(structure.components)
+    variances = [float(structure.predict_variance(component=name)) for name in names]
+    if len(names) > 1:
+        names.append("Combined")
+        variances.append(sum(variances))
+    positions = np.arange(len(names))
+    bars = ax.bar(positions, variances, color="0.5")
+    labels = [name[:1].upper() + name[1:] for name in names]
+    ax.set_xticks(positions, labels)
+    if len(structure.components) > 1:
+        bars[-1].set_facecolor("0.2")
+    ax.bar_label(bars, fmt="%.3g", padding=3)
+
+    # Use squared measurement units when estimation recorded them
+    units = structure.metadata.get("plot_attrs", {}).get("value", {}).get("units")
+    label = "Error variance" if not units else f"Error variance ({units}²)"
+    ax.set(title="Component variances", ylabel=label)
+    ax.margins(y=0.15)
+    ax.grid(axis="y", color="0.9", linewidth=0.6)
+    ax.set_axisbelow(True)
+
+
+def _plot_model_correlation(
+    structure: ErrorStructure,
+    ax: Any,
+    *,
+    kind: str = "correlation",
+    xscale: str = "log",
+    title: str | None = None,
+    show_counts: bool = True,
+    show_error: bool = True,
+    **kwargs: Any,
+) -> Any:
+    """Plot combined model correlation when no empirical variogram is available."""
+
+    if kind not in {"semivariance", "correlation"}:
+        raise ValueError("Argument 'kind' must be 'semivariance' or 'correlation'.")
+    if xscale not in {"log", "linear"}:
+        raise ValueError("Argument 'xscale' must be 'log' or 'linear'.")
+
+    # Include every base range when a component combines several correlation models
+    models = [
+        cast(VariogramModel, component.correlation)
+        for component in structure.components.values()
+        if component.correlation is not None
+    ]
+    ranges = []
+    while models:
+        model = models.pop()
+        if model.components:
+            models.extend(model.components)
+        elif model.effective_range is not None:
+            ranges.append(model.effective_range)
+    maximum_distance = 1.5 * max(ranges)
+    if xscale == "log":
+        # Show the approach to the shortest range without a long flat section near zero
+        distances = np.geomspace(min(ranges) / 100, maximum_distance, 500)
+    else:
+        distances = np.linspace(maximum_distance / 500, maximum_distance, 500)
+
+    # Start the curve above zero to separate uncorrelated variance from spatial covariance
+    correlation = np.asarray(structure.predict_correlation(distances))
+    values = correlation if kind == "correlation" else 1 - correlation
+    options = {"color": "0.15", "label": "Combined model"}
+    options.update(kwargs)
+    ax.plot(distances, values, **options)
+    if xscale == "linear":
+        ax.scatter([0], [1 if kind == "correlation" else 0], color="0.15", s=20)
+
+    # Match the labels and grid of the empirical correlation plot
+    label = "Error correlation" if kind == "correlation" else "Error semivariance"
+    ax.set(
+        title="Spatial error autocorrelation" if title is None else title,
+        xlabel="Spatial lag (coordinate units)",
+        ylabel=label,
+        xscale=xscale,
+    )
+    if xscale == "log" and ax.get_autoscalex_on():
+        ax.set_xlim(left=distances[0])
+    if kind == "correlation":
+        ax.set_ylim(-0.05, 1)
+    ax.grid(axis="y", color="0.9", linewidth=0.6)
+    ax.set_axisbelow(True)
+    ax.legend(frameon=False)
+    return ax
+
+
 ############################################
 # 3/ INDIVIDUAL ERROR COMPONENTS
 ############################################
@@ -373,17 +641,17 @@ class ErrorComponent:
     Otherwise, to create it manually, define the ``magnitude`` and ``correlation`` manually using an ErrorMagnitude
     and a Variogram object, as demonstrated below.
 
-    As an example, defining independent measurement errors with a constant standard deviation of 2 m needs only a name
+    As an example, defining spatially uncorrelated errors with a constant standard deviation of 2 m needs only a name
     and magnitude:
 
     .. code-block:: python
 
         import geoutils as gu
 
-        measurement = gu.ErrorComponent("measurement", magnitude=2.0)
-        measurement.predict_magnitude()  # 2.0
+        uncorrelated = gu.ErrorComponent("uncorrelated", magnitude=2.0)
+        uncorrelated.predict_magnitude()  # 2.0
 
-    Independent errors can also have magnitudes that vary with any predictor, for instance slope:
+    Spatially uncorrelated errors can also have magnitudes that vary with any predictor, for instance slope:
 
     .. code-block:: python
 
@@ -405,8 +673,8 @@ class ErrorComponent:
         from geoutils.stats.variography import VariogramModel
 
         correlation = VariogramModel("spherical", effective_range=100, partial_sill=1)
-        spatial = gu.ErrorComponent("spatial", magnitude=2.0, correlation=correlation)
-        spatial.predict_correlation([0.0, 100.0])  # array([1., 0.])
+        correlated = gu.ErrorComponent("correlated", magnitude=2.0, correlation=correlation)
+        correlated.predict_correlation([0.0, 100.0])  # array([1., 0.])
 
     The same correlation model can also be combined with the slope-dependent error magnitude above:
 
@@ -418,7 +686,7 @@ class ErrorComponent:
 
     :param name: Unique component name.
     :param magnitude: Constant or variable error magnitude.
-    :param correlation: Spatial variogram scaled to unit variance, or None for independent observations.
+    :param correlation: Spatial variogram scaled to unit variance, or None for spatially uncorrelated errors.
     :param metadata: Additional details about estimation or diagnostics.
     """
 
@@ -485,7 +753,7 @@ class ErrorComponent:
         Calculate correlation from this component at the given distances.
 
         :param distance: Pairwise distances, in the variogram model's distance units.
-        :returns: Correlation values with the same shape as distance. An independent component gives 1 at
+        :returns: Correlation values with the same shape as distance. A spatially uncorrelated component gives 1 at
             distance zero and 0 elsewhere.
         """
 
@@ -504,7 +772,7 @@ class ErrorComponent:
 
 class ErrorStructure:
     """
-    Error structure, a sum of independent error components of varying magnitude and autocorrelation.
+    Error structure, a sum of mutually independent components of varying magnitude and autocorrelation.
 
     The ErrorStructure class combines ErrorComponent objects, each with an error magnitude and spatial
     correlation, stored in ``components``.
@@ -516,25 +784,25 @@ class ErrorStructure:
     Pass this object to an interpolation/reduction with uncertainty, or use generate_random_field() to draw errors
     over a raster or point cloud.
 
-    For example, to draw independent measurement errors with standard deviation 2 over a raster:
+    For example, to draw spatially uncorrelated errors with standard deviation 2 over a raster:
 
     .. code-block:: python
 
-        errors = ErrorStructure([ErrorComponent("measurement", magnitude=2.0)])
+        errors = ErrorStructure([ErrorComponent("uncorrelated", magnitude=2.0)])
         field = errors.generate_random_field(like=raster, random_state=42)
 
-    Combine measurement noise of 3 m with a spatial component of 4 m. Their variances add (9 m² + 16 m²), giving a total
-    magnitude of 5 m (i.e. 25 m²):
+    Combine spatially uncorrelated errors of 3 m with spatially correlated errors of 4 m.
+    Their variances add (9 m² + 16 m²), giving a total magnitude of 5 m (i.e. 25 m²):
 
     .. code-block:: python
 
         import geoutils as gu
         from geoutils.stats.variography import VariogramModel
 
-        measurement = gu.ErrorComponent("measurement", magnitude=3.0)
+        uncorrelated = gu.ErrorComponent("uncorrelated", magnitude=3.0)
         correlation = VariogramModel("spherical", effective_range=100, partial_sill=1)
-        spatial = gu.ErrorComponent("spatial", magnitude=4.0, correlation=correlation)
-        errors = gu.ErrorStructure([measurement, spatial])
+        correlated = gu.ErrorComponent("correlated", magnitude=4.0, correlation=correlation)
+        errors = gu.ErrorStructure([uncorrelated, correlated])
         errors.predict_magnitude()  # 5.0
         errors.predict_covariance([0.0, 100.0])  # array([25., 0.])
     """
@@ -758,7 +1026,7 @@ class ErrorStructure:
                 "to calculate it in blocks."
             )
 
-        # Observation indexes serve as IDs, so independent errors only contribute to the diagonal
+        # Observation indexes serve as IDs, so uncorrelated errors only contribute to the diagonal
         source_ids = np.arange(len(coordinate_array))
         locations, component_data = _prepare_source_errors(self, len(source_ids), coordinate_array, predictors)
         return _source_covariance_matrix(source_ids, locations, component_data, source_ids)
@@ -861,16 +1129,19 @@ class ErrorStructure:
         source: Any,
         *,
         other: Any | None = None,
-        other_precision: Literal["same", "negligible"] = "same",
+        other_precision: Literal["same", "negligible"] = "negligible",
         at: Literal["self", "other"] | None = "self",
         align: Literal["raise", "reproject"] = "raise",
         predictors: Mapping[str, Any] | None = None,
         components: Mapping[str, Mapping[str, Any]] | None = None,
         mask: Any | None = None,
         bins: Mapping[str, Any] | int | None = None,
+        categories: Mapping[str, Sequence[Any]] | None = None,
         spread_estimator: Callable[[Any], Any] | None = None,
         min_count: int = 100,
         subsample_magnitude: int | float = 1_000_000,
+        magnitude_model: Literal["piecewise_linear", "linear"] | Callable[..., Any] = "piecewise_linear",
+        magnitude_fit_kwargs: Mapping[str, Any] | None = None,
         variogram_estimator: str | Callable[[Any], float] = "matheron",
         n_pairs: int = 1_000_000,
         pair_sampling: Literal["loglag", "random_xy"] = "loglag",
@@ -901,6 +1172,8 @@ class ErrorStructure:
         At most one component can have variable error magnitude, i.e. ``magnitude="heteroscedastic"``. Remaining
         components have constant magnitudes. Their variance fractions come from a nested standardized variogram.
 
+        Range warnings consider components contributing at least 3% of the fitted variance.
+
         The error magnitude is estimated from the error proxy's statistical spread (e.g. STD, NMAD), optionally
         grouped by predictors to account for variability (e.g., with terrain slope, landcover type).
         The error correlation is estimated by variography, after optional standardization by the variable magnitude.
@@ -914,7 +1187,7 @@ class ErrorStructure:
         This error structure estimation was refactored from that of xDEM (which was method-based, and thus more
         volatile with inputs and outputs).
 
-        For independent point errors, estimate a constant magnitude without fitting a variogram:
+        For spatially uncorrelated point errors, estimate a constant magnitude without fitting a variogram:
 
         .. code-block:: python
 
@@ -927,8 +1200,7 @@ class ErrorStructure:
             )
             errors = gu.ErrorStructure.estimate(
                 points,
-                components={"measurement": {"magnitude": "constant", "correlation": None}},
-                spread_estimator=np.std,
+                components={"uncorrelated": {"magnitude": "constant", "correlation": None}},
             )
             round(errors.predict_magnitude(), 2)  # 1.58
 
@@ -950,11 +1222,10 @@ class ErrorStructure:
             errors = gu.ErrorStructure.estimate(
                 proxy,
                 predictors={"quality": predictor},
-                components={"spatial": {"magnitude": "heteroscedastic", "correlation": "spherical"}},
+                components={"correlated": {"magnitude": "heteroscedastic", "correlation": "spherical"}},
                 bins=3,
                 min_count=10,
-                spread_estimator=np.std,
-                n_pairs=300,
+                n_pairs=3_000,
                 n_lags=5,
                 pair_sampling="random_xy",
                 random_state=4,
@@ -964,32 +1235,43 @@ class ErrorStructure:
 
         :param source: Raster or point cloud of measurements, or an error proxy when other is None.
         :param other: Second raster or point cloud to compare with source. None treats source as an error proxy.
-        :param other_precision: Precision of the second input relative to the first. Only used with two inputs.
+        :param other_precision: Precision of the second input relative to the first (default "negligible").
+            Only used with two inputs.
         :param at: Comparison locations: "self", "other", or None to prefer point locations when present.
         :param align: Whether mismatched grids or coordinate systems raise an error or are reprojected for comparison.
-        :param predictors: Named continuous variables controlling a heteroscedastic magnitude.
+        :param predictors: Named variables controlling a heteroscedastic magnitude.
         :param components: Ordered named component specifications with ``magnitude`` and ``correlation`` entries.
+            A correlation can be a model name, a custom variogram callable, or None.
         :param mask: Spatial or Boolean mask identifying values used for estimation.
-        :param bins: Group definitions by predictor, or one bin count applied to every predictor.
-        :param spread_estimator: Spread estimator used for the error magnitude (default nmad).
+        :param bins: Continuous group definitions, or one bin count applied to every continuous predictor.
+        :param categories: Declared values for categorical predictors, using numeric codes for spatial inputs.
+            Continuous predictors are interpolated separately within each category.
+        :param spread_estimator: Spread estimator used for the error magnitude (default numpy.std()).
         :param min_count: Smallest grouped sample retained in the magnitude model.
         :param subsample_magnitude: Maximum observations used to fit the magnitude.
+        :param magnitude_model: "piecewise_linear" for interpolation (default), "linear" for an affine fit,
+            or a callable model(x, ...) with parameters as separate arguments, fitted to grouped spreads.
+            With one continuous predictor x is a vector; with N predictors its shape is (N, n_groups), in predictor
+            order. Fits are separate for each
+            categorical combination. Fitted functions extrapolate and return NaN for negative or non-finite spreads.
+        :param magnitude_fit_kwargs: Options passed to scipy.optimize.curve_fit(), including p0 and bounds.
         :param variogram_estimator: Empirical variogram estimator name or callable (default "matheron").
         :param n_pairs: Target spatial pairs per variogram run.
         :param pair_sampling: Pair sampling scheme exposed by GeoUtils spatial objects.
         :param n_lags: Number of empirical lag classes.
         :param min_lag: Smallest sampled spatial distance.
-        :param max_lag: Largest sampled spatial distance.
+        :param max_lag: Largest sampled spatial distance. Defaults to half the raster diagonal or the point cloud
+            diagonal, as in variogram().
         :param n_runs: Independent variogram samples used to estimate empirical sampling error.
         :param fit_method: Fitting backend, currently ``"variogram"``.
         :param fit_kwargs: Options passed to Variogram.fit().
+            min_count defaults to 100 sampled pairs per lag bin for error structure fitting.
         :param pair_sampling_kwargs: Advanced options passed to pairsample() and variogram().
         :param mp_config: Worker and tile settings for multiprocessing estimation.
         :param random_state: Random generator or seed used throughout estimation.
         :returns: Fitted error structure with compact diagnostics.
         """
 
-        from geoutils import stats
         from geoutils.uncertainty.estimation import _estimate_error_structure
 
         return _estimate_error_structure(
@@ -1002,9 +1284,12 @@ class ErrorStructure:
             components=components,
             mask=mask,
             bins=bins,
-            spread_estimator=stats.nmad if spread_estimator is None else spread_estimator,
+            categories=categories,
+            spread_estimator=np.std if spread_estimator is None else spread_estimator,
             min_count=min_count,
             subsample_magnitude=subsample_magnitude,
+            magnitude_model=magnitude_model,
+            magnitude_fit_kwargs=magnitude_fit_kwargs,
             variogram_estimator=variogram_estimator,
             n_pairs=n_pairs,
             pair_sampling=pair_sampling,
@@ -1021,7 +1306,7 @@ class ErrorStructure:
 
     def refit(
         self,
-        correlation_models: str | Sequence[str] | None = None,
+        correlation_models: str | Callable[..., Any] | Sequence[str | Callable[..., Any]] | None = None,
         *,
         fit_kwargs: Mapping[str, Any] | None = None,
     ) -> ErrorStructure:
@@ -1032,37 +1317,114 @@ class ErrorStructure:
 
         :param correlation_models: Ordered variogram models, defaulting to the current correlated components.
         :param fit_kwargs: Options passed to Variogram.fit().
+            min_count defaults to the minimum pair count recorded by the previous fit.
         :returns: New error structure fitted from the retained compact diagnostics.
         """
 
-        from geoutils.uncertainty.estimation import _refit_error_structure
+        return self.refit_variogram(correlation_models, fit_kwargs=fit_kwargs)
 
-        return _refit_error_structure(self, correlation_models=correlation_models, fit_kwargs=fit_kwargs)
+    def refit_magnitude(
+        self,
+        model: Literal["piecewise_linear", "linear"] | Callable[..., Any] | None = None,
+        *,
+        min_count: int | None = None,
+        fit_kwargs: Mapping[str, Any] | None = None,
+    ) -> ErrorStructure:
+        """
+        Fit a magnitude model to the stored grouped spread estimates without reading the source data again.
+
+        Correlation shapes and their variance fractions are reused. The stored empirical variogram still describes
+        the original standardization. Use estimate() again to change the groups or recompute spatial correlation
+        after changing the magnitude model.
+
+        :param model: "piecewise_linear", "linear", or a callable model(x, ...) with parameters as separate arguments.
+            None refits the current model. See estimate() for predictor dimensions and categorical groups.
+        :param min_count: Minimum observations per magnitude group, defaulting to the previous threshold.
+        :param fit_kwargs: Options passed to scipy.optimize.curve_fit(). Previous options are reused when model
+            and fit_kwargs are both None.
+        :returns: New error structure fitted from the stored magnitude table.
+        """
+
+        from geoutils.uncertainty.estimation import _refit_error_structure_magnitude
+
+        return _refit_error_structure_magnitude(self, model=model, min_count=min_count, fit_kwargs=fit_kwargs)
+
+    def refit_variogram(
+        self,
+        correlation_models: str | Callable[..., Any] | Sequence[str | Callable[..., Any]] | None = None,
+        *,
+        fit_kwargs: Mapping[str, Any] | None = None,
+    ) -> ErrorStructure:
+        """
+        Fit correlation models to the stored empirical variogram without drawing new pair samples.
+
+        Component magnitudes are updated using the refitted variance fractions and the stored total magnitude model.
+
+        :param correlation_models: Ordered model names or callables, defaulting to the current correlated components.
+            Custom functions receive distance, effective range, partial sill and any additional fitted parameters.
+        :param fit_kwargs: Options passed to Variogram.fit(). The previous minimum pair count is reused by default.
+        :returns: New error structure fitted from the stored variogram statistics.
+        """
+
+        from geoutils.uncertainty.estimation import _refit_error_structure_correlation
+
+        return _refit_error_structure_correlation(self, correlation_models=correlation_models, fit_kwargs=fit_kwargs)
 
     def plot_correlation(self, ax: Any | None = None, *, show_error: bool = True, **kwargs: Any) -> Any:
         """Plot the empirical and combined fitted variogram.
 
         :param ax: Existing Matplotlib axes, or None to create one.
         :param show_error: Whether to draw finite empirical sampling errors.
-        :param kwargs: Keyword arguments passed to the empirical point plot.
+        :param kwargs: Keyword arguments passed to Variogram.plot().
         :returns: Axes containing the variogram diagnostics.
         """
 
         if self.empirical_variogram is None:
             raise ValueError("No empirical variogram is stored on this error structure.")
-        return self.empirical_variogram.plot(ax=ax, show_error=show_error, **kwargs)
+
+        # Name the error quantity separately from the estimator shown in the legend
+        kwargs.setdefault("title", "Spatial error autocorrelation")
+        axis = self.empirical_variogram.plot(ax=ax, show_error=show_error, **kwargs)
+        label = "Error correlation" if kwargs.get("kind") == "correlation" else "Error semivariance"
+        axis.set_ylabel(label)
+        if kwargs.get("kind") == "correlation":
+            axis.set_ylim(-0.05, 1)
+        return axis
 
     def plot_magnitude(
         self,
         *,
         component: str | None = None,
         min_count: int | None = None,
+        show_model: bool = True,
+        plot_kind: Literal["auto", "line", "bar", "heatmap"] = "auto",
+        title: str = "Error variability",
+        xlabel: str | None = None,
+        ylabel: str | None = None,
+        cbar_title: str | None = None,
+        count_label: str = "Count",
+        empirical_label: str | None = None,
+        model_label: str | None = None,
         **kwargs: Any,
     ) -> Mapping[str, Any]:
         """Plot grouped magnitude statistics and sample counts.
 
+        Labels use the input long_name and units metadata saved during estimation.
+        Pass label arguments to override them.
+
         :param component: Variable component to plot, inferred when there is only one.
         :param min_count: Smallest count shown, defaulting to the fitted threshold.
+        :param show_model: Whether to overlay the fitted magnitude model on the empirical groups.
+        :param plot_kind: "auto" draws bars for one categorical predictor, curves for continuous predictors or a
+            categorical/continuous pair, and a heatmap for two continuous predictors. Use "line", "bar", or "heatmap"
+            to select the layout explicitly. Bars require one predictor and heatmaps require two.
+        :param title: Title above the plot and its count histograms.
+        :param xlabel: Horizontal predictor label, inferred from its name and units when omitted.
+        :param ylabel: Magnitude label for bars and curves, or the second predictor's label for a heatmap.
+        :param cbar_title: Heatmap colorbar label, inferred from the value units when omitted.
+        :param count_label: Sample count label on each histogram.
+        :param empirical_label: Legend label for the empirical groups, defaulting to their spread estimator.
+        :param model_label: Legend label for the fitted magnitude model.
         :param kwargs: Keyword arguments passed to plot_grouped_stats().
         :returns: Named plotting axes.
         """
@@ -1088,6 +1450,9 @@ class ErrorStructure:
 
         # Apply the fitted component's scale and allocated variance to its observed bins
         magnitude = selected.magnitude
+        if model_label is None:
+            name = "linear interpolation" if magnitude.model == "piecewise_linear" else magnitude.model_name
+            model_label = f"Model ({name})"
         if magnitude.grouped_statistics is None:
             raise AssertionError("A variable magnitude must contain statistics.")
         table = magnitude.grouped_statistics.copy(deep=True)
@@ -1095,53 +1460,375 @@ class ErrorStructure:
         values = magnitude.scale * table[column].to_numpy(dtype=float)
         table[column] = np.sqrt(np.maximum(values**2 - magnitude.variance_offset, magnitude.floor**2))
         from geoutils import stats
+        from geoutils.stats.grouping import _prepare_grouped_plot
 
-        return stats.plot_grouped_stats(
+        # Apply the error labels before saving the completed figure
+        table, layout = _prepare_grouped_plot(table, plot_kind)
+        savefig_fname = kwargs.pop("savefig_fname", None)
+        axes = stats.plot_grouped_stats(
             table,
             value=magnitude.value_name,
             statistic=cast(str, magnitude.statistic),
             min_count=magnitude.min_count if min_count is None else min_count,
+            plot_kind=layout,
             **kwargs,
         )
+        estimator = cast(str, magnitude.statistic)
+        estimator_label = {"nmad": "NMAD", "std": "STD"}.get(estimator, estimator)
 
-    def plot(self, **kwargs: Any) -> Mapping[str, Any]:
-        """Plot every available magnitude and correlation diagnostic.
+        # Label magnitudes and predictors from the original input metadata
+        plot_attrs = self.metadata.get("plot_attrs", {})
+        predictor_attrs = plot_attrs.get("predictors", {})
+        statistic_axis = axes["statistic"]
+        magnitude_label = _plot_label("Error magnitude", {"units": plot_attrs.get("value", {}).get("units")})
+        if "colorbar" in axes:
+            axes["colorbar"].set_xlabel(magnitude_label)
+        else:
+            statistic_axis.set_ylabel(magnitude_label)
+        first_predictor = table.index.names[0]
+        statistic_axis.set_xlabel(_plot_label(first_predictor, predictor_attrs.get(first_predictor, {})))
+        if table.index.nlevels == 2:
+            second_predictor = table.index.names[1]
+            second_label = _plot_label(second_predictor, predictor_attrs.get(second_predictor, {}))
+            if "colorbar" in axes:
+                statistic_axis.set_ylabel(second_label)
+            else:
+                axes["count_x"].get_legend().set_title(second_label)
 
-        :param kwargs: Keyword arguments passed to the correlation plot.
-        :returns: Mapping containing the created plotting axes.
-        """
+        # Apply supplied labels after deriving defaults from the input metadata
+        if xlabel is not None:
+            statistic_axis.set_xlabel(xlabel)
+        if ylabel is not None:
+            statistic_axis.set_ylabel(ylabel)
+        if cbar_title is not None and "colorbar" in axes:
+            axes["colorbar"].set_xlabel(cbar_title)
 
-        axes: dict[str, Any] = {}
-        for component in self.components.values():
-            if isinstance(component.magnitude, ErrorMagnitude) and component.magnitude.kind == "variable":
-                axes[f"magnitude:{component.name}"] = self.plot_magnitude(component=component.name)
-        if self.empirical_variogram is not None:
-            axes["correlation"] = self.plot_correlation(**kwargs)
-        if not axes:
-            warnings.warn("This error structure contains no empirical diagnostics to plot.", UserWarning)
+        # Label categorical raster codes with their recorded class names
+        levels = [table.index] if table.index.nlevels == 1 else list(table.index.levels)
+        for dimension, (name, level) in enumerate(zip(table.index.names, levels)):
+            attributes = predictor_attrs.get(name, {})
+            if not isinstance(level, pd.CategoricalIndex) or "flag_values" not in attributes:
+                continue
+            meanings = attributes.get("flag_meanings", "").split()
+            labels = dict(zip(attributes["flag_values"], meanings))
+            tick_labels = [labels.get(value, str(value)).replace("_", " ").capitalize() for value in level]
+            positions = np.arange(len(level)) + 0.5
+            if dimension == 0:
+                statistic_axis.set_xticks(positions, tick_labels)
+            elif "colorbar" in axes:
+                statistic_axis.set_yticks(positions, tick_labels)
+            else:
+                axes["count_y"].set_yticks(positions, tick_labels)
+                for text, label in zip(axes["count_x"].get_legend().get_texts(), tick_labels):
+                    text.set_text(label)
+
+        # Add the variability title and fitted magnitude
+        count_axis = axes.get("count", axes.get("count_x"))
+        title_x = 0.5
+        if "count_y" in axes:
+            count_bounds = count_axis.get_position()
+            right_edge = axes["count_y"].get_position().x1
+            title_x = (right_edge - count_bounds.x0) / (2 * count_bounds.width)
+        count_axis.set_title(title, x=title_x)
+        count_axis.set_ylabel(count_label)
+        if "count_y" in axes:
+            axes["count_y"].set_xlabel(count_label)
+        if show_model:
+            if empirical_label is None:
+                empirical_label = f"Empirical ({estimator_label})"
+            _plot_magnitude_fit(magnitude, table, axes, empirical_label, model_label)
+
+        if savefig_fname is not None:
+            statistic_axis.figure.savefig(savefig_fname, bbox_inches="tight")
         return axes
 
+    @overload
+    def plot(
+        self,
+        *,
+        ax: Any | None = None,
+        show_components: bool = False,
+        plot_kind: Literal["auto", "line", "bar", "heatmap"] = "auto",
+        return_axes: Literal[False] = False,
+        **kwargs: Any,
+    ) -> None: ...
+
+    @overload
+    def plot(
+        self,
+        *,
+        ax: Any | None = None,
+        show_components: bool = False,
+        plot_kind: Literal["auto", "line", "bar", "heatmap"] = "auto",
+        return_axes: Literal[True],
+        **kwargs: Any,
+    ) -> Mapping[str, Any]: ...
+
+    @overload
+    def plot(
+        self,
+        *,
+        ax: Any | None = None,
+        show_components: bool = False,
+        plot_kind: Literal["auto", "line", "bar", "heatmap"] = "auto",
+        return_axes: bool,
+        **kwargs: Any,
+    ) -> Mapping[str, Any] | None: ...
+
+    def plot(
+        self,
+        *,
+        ax: Any | None = None,
+        show_components: bool = False,
+        plot_kind: Literal["auto", "line", "bar", "heatmap"] = "auto",
+        return_axes: bool = False,
+        **kwargs: Any,
+    ) -> Mapping[str, Any] | None:
+        """
+        Plot magnitude and correlation diagnostics side by side.
+
+        Correlation is shown by default. Pass kind="semivariance" to show the variogram instead.
+        Magnitude and predictor labels use the input long_name and units metadata saved during estimation.
+        Structures with only constant magnitudes show component variances. If no empirical variogram is stored,
+        a correlation model is plotted directly, with semivariance expressed relative to the combined variance.
+        Its logarithmic distance axis starts at one hundredth of the shortest component range.
+
+        :param ax: Optional Matplotlib axes whose area is divided between the diagnostics.
+        :param show_components: Whether to add each component's variance-weighted contribution to the fitted curve.
+        :param plot_kind: Magnitude layout: "auto", "line", "bar", or "heatmap", as in plot_magnitude().
+        :param return_axes: Whether to return the named plotting axes instead of None.
+        :param kwargs: Keyword arguments passed to plot_correlation(), or to the model curve when no empirical
+            variogram is stored. Both accept kind, xscale and title; counts and sampling errors require empirical data.
+        :returns: None, or a mapping naming the variance, magnitude and correlation axes when return_axes=True.
+        """
+
+        # Collect the available diagnostics before creating their common figure
+        variable_components = [
+            component
+            for component in self.components.values()
+            if isinstance(component.magnitude, ErrorMagnitude) and component.magnitude.kind == "variable"
+        ]
+        constant_magnitudes = not variable_components
+        has_model = any(component.correlation is not None for component in self.components.values())
+        has_variance = any(
+            cast(ErrorMagnitude, component.magnitude).reference_value > 0 for component in self.components.values()
+        )
+        has_correlation = self.empirical_variogram is not None or (has_model and has_variance)
+        panel_count = len(variable_components) + int(constant_magnitudes) + int(has_correlation)
+
+        # Arrange one column per diagnostic, including within a supplied plotting area
+        matplotlib = import_optional("matplotlib")
+        import matplotlib.pyplot as plt
+
+        if ax is None:
+            figure, frames = plt.subplots(1, panel_count, figsize=(6 * panel_count, 4.5), squeeze=False)
+            figure.subplots_adjust(wspace=0.4, bottom=0.15)
+            panel_axes = list(frames[0])
+        elif not isinstance(ax, matplotlib.axes.Axes):
+            raise TypeError("Argument 'ax' must be a Matplotlib Axes or None.")
+        elif panel_count == 1:
+            panel_axes = [ax]
+        else:
+            ax.set_axis_off()
+            width = 1 / (panel_count + 0.4 * (panel_count - 1))
+            panel_axes = [ax.inset_axes((index * 1.4 * width, 0, width, 1)) for index in range(panel_count)]
+
+        # Draw component magnitudes or variances beside the available correlation
+        axes: dict[str, Any] = {}
+        for component, panel in zip(variable_components, panel_axes):
+            axes[f"magnitude:{component.name}"] = self.plot_magnitude(
+                component=component.name, ax=panel, plot_kind=plot_kind
+            )
+        if constant_magnitudes:
+            _plot_constant_variances(self, panel_axes[0])
+            axes["variance"] = panel_axes[0]
+        if has_correlation:
+            kwargs.setdefault("kind", "correlation")
+            if self.empirical_variogram is not None:
+                axes["correlation"] = self.plot_correlation(ax=panel_axes[-1], **kwargs)
+            else:
+                axes["correlation"] = _plot_model_correlation(self, ax=panel_axes[-1], **kwargs)
+
+            # Draw components on the same distance grid as the combined model
+            if show_components and has_model and has_variance:
+                correlation_axis = axes["correlation"]
+                distances = np.asarray(correlation_axis.lines[-1].get_xdata())
+                variances = {
+                    name: cast(ErrorMagnitude, component.magnitude).reference_value ** 2
+                    for name, component in self.components.items()
+                }
+                total_variance = sum(variances.values())
+                fitted_model = self.empirical_variogram.model if self.empirical_variogram is not None else None
+
+                # Use fitted sill shares for empirical diagnostics and magnitude shares for known models
+                for name, component in self.components.items():
+                    fraction = variances[name] / total_variance
+                    if fitted_model is not None:
+                        fraction = component.metadata.get("initial_variance_fraction", fraction)
+                    correlation = component.predict_correlation(distances)
+                    values = fraction * correlation
+                    if kwargs["kind"] == "semivariance":
+                        scale = fitted_model.sill if fitted_model is not None else 1.0
+                        values = fraction * (1 - correlation) * scale
+                    label = name.replace("_", " ").capitalize()
+                    correlation_axis.plot(distances, values, linestyle="--", label=label)
+                correlation_axis.legend(frameon=False)
+        return axes if return_axes else None
+
     def info(self, *, verbose: bool = True) -> str | None:
-        """Summarize the reusable error model and its components.
+        """
+        Summarize component magnitudes, correlation models and estimation diagnostics.
+
+        Variable magnitudes report the minimum, median and maximum across finite bins meeting min_count,
+        after scaling and subtracting variance assigned to other components. Units and sample sizes are included
+        when recorded. Pair counts include contributions from all variogram runs, including any repeated pairs.
 
         :param verbose: Whether to print the summary instead of returning it.
         :returns: Summary string when verbose is False.
         """
 
+        # Read recorded units without accessing the original observations or predictors
+        unit = self.metadata.get("plot_attrs", {}).get("value", {}).get("units", "")
+        unit_suffix = f" {unit}" if unit else ""
+        empirical = self.empirical_variogram
+        distance_units = (
+            "coordinate units" if empirical is None else empirical.attrs.get("distance_units", "coordinate units")
+        )
         lines = [f"ErrorStructure with {len(self.components)} independent component(s)"]
-        for component in self.components.values():
-            # ErrorComponent converts fitted Variogram results to their portable model at construction
-            correlation = cast(VariogramModel | None, component.correlation)
-            model = "independent" if correlation is None else correlation.model_name
-            error_range = None if correlation is None else correlation.effective_range
+        lines.extend(["", "Components:"])
+        magnitude_details: list[str] = []
+        spread_name = self.metadata.get("spread_estimator")
+
+        # Describe each component's magnitude and the bins supporting a variable magnitude
+        for number, component in enumerate(self.components.values(), 1):
+            lines.extend(["", f"Component {number}: {component.name}"])
             magnitude = cast(ErrorMagnitude, component.magnitude)
-            size = (
-                f"constant {magnitude.reference_value:.4g}"
-                if magnitude.kind == "constant"
-                else f"varies with {', '.join(magnitude.predictor_names)}"
-            )
-            range_text = "" if error_range is None else f", range {error_range:.4g}"
-            lines.append(f"  {component.name}: {size}, {model}{range_text}")
+            if magnitude.kind == "constant":
+                lines.extend(
+                    ["  Magnitude: Constant", f"    Error (±1σ): {magnitude.reference_value:.4g}{unit_suffix}"]
+                )
+            else:
+                lines.append("  Magnitude: Variable")
+                table = magnitude.grouped_statistics
+                if table is None:
+                    raise AssertionError("A variable magnitude must contain grouped statistics.")
+                spread = table[(magnitude.value_name, magnitude.statistic)].to_numpy(dtype=float)
+                counts = table[(magnitude.value_name, "count")].to_numpy(dtype=float)
+                valid = np.isfinite(spread) & (counts >= magnitude.min_count)
+
+                # Summarize the fitted error at observed bin centers, including each category
+                predictors = {}
+                for name in magnitude.predictor_names:
+                    coordinates = table.index.get_level_values(name)[valid]
+                    if isinstance(coordinates, pd.IntervalIndex):
+                        coordinates = coordinates.mid
+                    predictors[name] = coordinates.to_numpy()
+
+                # Summarize component magnitudes after allocating variance to the other components
+                values = np.asarray(magnitude.predict(predictors), dtype=float)
+                values = values[np.isfinite(values)]
+                if values.size:
+                    lines.append(
+                        f"    Error range (±1σ): {np.min(values):.4g} to {np.max(values):.4g}{unit_suffix} "
+                        f"(median {np.median(values):.4g}{unit_suffix})"
+                    )
+                else:
+                    lines.append("    Error range (±1σ): No finite values at bin centers")
+
+                # Describe the model after its error range
+                lines.append(f"    Predictors: {', '.join(magnitude.predictor_names)}")
+                lines.append(f"    Functional form: {magnitude.model_name}")
+                for category, parameters in magnitude._fit_parameters.items():
+                    label = f" {category}" if category else ""
+                    values_text = ", ".join(f"{value:.4g}" for value in parameters)
+                    lines.append(f"    Parameters{label}: {values_text}")
+                if magnitude.scale != 1:
+                    lines.append(f"    Scale: {magnitude.scale:.4g}")
+                if magnitude.floor:
+                    lines.append(f"    Floor: {magnitude.floor:.4g}{unit_suffix}")
+                if spread_name is None:
+                    spread_name = magnitude.statistic
+
+                # Combine bin coverage and the sample counts behind the magnitude fit
+                bin_text = (
+                    f"  Magnitude bins: {np.count_nonzero(valid)}/{len(table)} valid "
+                    f"(minimum {magnitude.min_count} samples)"
+                )
+                if np.any(valid):
+                    bin_text += (
+                        f", {np.min(counts[valid]):.4g} to {np.max(counts[valid]):.4g} samples per bin "
+                        f"(median {np.median(counts[valid]):.4g})"
+                    )
+                magnitude_details.append(bin_text)
+
+            # Show the full correlation form, including parameters of composed models
+            correlation = cast(VariogramModel | None, component.correlation)
+            if correlation is None:
+                lines.append("  Correlation: Spatially uncorrelated")
+            else:
+                lines.append("  Correlation:")
+                lines.extend("    " + line for line in _correlation_info(correlation, distance_units))
+
+        # Distinguish the fitted spread sample from all available finite observations
+        diagnostics = self.fit_diagnostics.get("magnitude", {})
+        lines.extend(["", "Estimation:"])
+        if not diagnostics and empirical is None and "spread_estimator" not in self.metadata and not magnitude_details:
+            lines.append("  Not recorded")
+        else:
+            lines.append(f"  Magnitude estimator: {spread_name or 'Not recorded'}")
+            sample_text = "  Magnitude sample size: "
+            sample_count = diagnostics.get("sample_count")
+            valid_count = diagnostics.get("valid_count")
+            if sample_count is not None:
+                if valid_count is not None and sample_count != valid_count:
+                    sample_text += f"{sample_count} of {valid_count}"
+                else:
+                    sample_text += str(sample_count)
+            else:
+                sample_text += "Not recorded"
+                if valid_count is not None:
+                    sample_text += f" ({valid_count} available)"
+            lines.append(sample_text)
+            lines.extend(magnitude_details)
+            estimator = self.metadata.get("variogram_estimator")
+            if estimator is None:
+                estimator = "Not estimated" if empirical is None else empirical.estimator or "Not recorded"
+            lines.append(f"  Variogram estimator: {estimator}")
+
+            # Counts sum the pairs contributing to the stored variogram, across all runs
+            if empirical is not None:
+                runs = empirical.attrs.get("n_runs", self.metadata.get("n_runs", 1))
+                sample_text = f"  Variogram sample size: {int(np.sum(empirical.counts))} pairs"
+                pair_details = []
+                if "sampling" in empirical.attrs:
+                    pair_details.append(str(empirical.attrs["sampling"]))
+                if runs > 1:
+                    pair_details.append(f"across {runs} runs")
+                if pair_details:
+                    sample_text += f" ({', '.join(pair_details)})"
+                lines.append(sample_text)
+
+            # Report valid lag bins with their sampled distance range
+            if empirical is not None:
+                min_pair_count = empirical.fit_result.get("min_count", 1)
+                valid_lags = (
+                    (empirical.counts >= min_pair_count)
+                    & np.isfinite(empirical.lags)
+                    & np.isfinite(empirical.semivariance)
+                )
+                pair_label = "pair" if min_pair_count == 1 else "pairs"
+                lag_text = (
+                    f"  Variogram lag bins: {np.count_nonzero(valid_lags)}/{len(empirical.lags)} valid "
+                    f"(minimum {min_pair_count} {pair_label})"
+                )
+                if empirical.bin_lower_edges is not None and empirical.bin_edges is not None and empirical.lags.size:
+                    lag_text += (
+                        f", {empirical.bin_lower_edges[0]:.4g} to {empirical.bin_edges[-1]:.4g} {distance_units}"
+                    )
+                lines.append(lag_text)
+            for message in self.fit_diagnostics.get("identifiability", []):
+                lines.append(f"  Warning: {message}")
+
         result = "\n".join(lines)
         if verbose:
             print(result)
@@ -1263,8 +1950,8 @@ def _source_covariance_matrix(
         raise ValueError("Covariance indexes are outside the selected source observations.")
     if np.any(selected_columns < 0) or np.any(selected_columns >= size):
         raise ValueError("Covariance indexes are outside the selected source observations.")
-    # For independent errors, only the same source ID is correlated with itself
-    # Two observations at identical coordinates still have independent errors if their IDs differ
+    # For uncorrelated errors, only the same source ID is correlated with itself
+    # Two observations at identical coordinates still have uncorrelated errors if their IDs differ
     covariance = np.zeros((len(selected), len(selected_columns)), dtype=float)
     distances_by_dimensions: dict[tuple[int, ...] | None, NDArray[np.float64]] = {}
     for component, magnitude in component_data:
@@ -1384,7 +2071,7 @@ def _draw_source_errors(
                 coordinate_tensor = torch.as_tensor(coordinates.copy(), dtype=torch.float64)
                 covariance = gpytorch_variogram.kernel(coordinate_tensor)
 
-                # Independent noise adds variance to each observation (the covariance diagonal)
+                # Uncorrelated errors add variance to each observation (the covariance diagonal)
                 if gpytorch_variogram.noise > 0:
                     diagonal = torch.full((size,), gpytorch_variogram.noise, dtype=torch.float64)
                     covariance = covariance.add_diagonal(diagonal)

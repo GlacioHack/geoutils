@@ -70,7 +70,7 @@ class TestAnalyticalOperatorPropagation:
         # We create coincident observations with distinct/repeat IDs to test dependence during propagation
         first = _local([10, 20], ["a", "b"], [[0, 0], [0, 0]])
         second = _local([10, 10], ["a", "a"], [[0, 0], [0, 0]])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
 
         # We propagate uncertainty through a mean operation
         # Distinct IDs have separate variance
@@ -87,7 +87,7 @@ class TestAnalyticalOperatorPropagation:
         columns = pd.MultiIndex.from_tuples([("error", "nmad"), ("error", "count")])
         statistics = pd.DataFrame([[1.0, 10], [2.0, 10]], index=intervals, columns=columns)
         magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", magnitude)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", magnitude)])
         data = _local([10, 20], ["b", "a"], [[0, 0], [1, 0]])
 
         # Inverse-variance weights: 4/5 for B, 1/5 for A
@@ -103,7 +103,7 @@ class TestAnalyticalOperatorPropagation:
         columns = pd.MultiIndex.from_tuples([("error", "nmad"), ("error", "count")])
         statistics = pd.DataFrame([[1.0, 10], [2.0, 10], [3.0, 10]], index=intervals, columns=columns)
         structure = gu.ErrorStructure(
-            [gu.ErrorComponent("measurement", gu.ErrorMagnitude.variable_from_grouped_stats(statistics))]
+            [gu.ErrorComponent("uncorrelated", gu.ErrorMagnitude.variable_from_grouped_stats(statistics))]
         )
         data = LocalData(
             values=np.array([10.0, 20.0, 30.0]),
@@ -126,7 +126,7 @@ class TestAnalyticalOperatorPropagation:
             source_ids=np.array(["used", "unused"]),
             coordinates=np.array([[0.0, 0.0], [1.0, 0.0]]),
         )
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 0.5)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 0.5)])
 
         # Check it does not affect output
         summary = gu.uncertainty.propagate(FirstValue(), data, structure)
@@ -138,7 +138,7 @@ class TestAnalyticalOperatorPropagation:
 
         # Create NaN input
         data = LocalData(values=np.array([np.nan]), valid=np.array([False]), source_ids=np.array(["missing"]))
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Check NaN estimate and moments
         summary = gu.uncertainty.propagate(Mean(), data, structure)
@@ -156,7 +156,7 @@ class TestAnalyticalOperatorPropagation:
         # We create two data that use "b"
         first = _local([1, 2], ["a", "b"], [[0, 0], [1, 0]])
         second = _local([2, 3], ["b", "c"], [[1, 0], [2, 0]])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Propagate
         summary = gu.uncertainty.propagate(
@@ -175,11 +175,84 @@ class TestAnalyticalOperatorPropagation:
         expected_medians = pd.Series([np.mean(first.values), np.mean(second.values)], index=labels)
         np.testing.assert_array_equal(summary.quantiles.loc[0.5, selected], expected_medians.loc[selected])
 
+    def test_propagate__output_covariance(self) -> None:
+        """Checks that a difference of means includes the covariance of a shared observation."""
+
+        # The middle observation contributes to both averages
+        first = _local([1, 2], ["a", "b"], [[0, 0], [1, 0]])
+        second = _local([2, 3], ["b", "c"], [[1, 0], [2, 0]])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
+        summary = gu.uncertainty.propagate(
+            Mean(), [first, second], errors, output_labels=["first", "second"], return_covariance=True
+        )
+
+        # Each mean has variance 1/2, and the shared observation contributes covariance 1/4
+        assert summary.covariance is not None
+        np.testing.assert_allclose(summary.covariance, [[0.5, 0.25], [0.25, 0.5]])
+        difference = summary.contrast({"first": 1, "second": -1})
+        assert difference.estimate == -1
+        assert difference.mean == -1
+        assert difference.variance == pytest.approx(0.5)
+        interval = difference.interval(0.95).iloc[0]
+        assert interval["lower"] < -1 < interval["upper"]
+
+    def test_propagate__spatial_output_covariance(self) -> None:
+        """Checks that differences between separate observations include their spatial covariance."""
+
+        pytest.importorskip("skgstat")
+        model = VariogramModel("gaussian", effective_range=10, partial_sill=1)
+        errors = gu.ErrorStructure([gu.ErrorComponent("spatial", 1, model)])
+        first = _local([1], ["a"], [[0, 0]])
+        second = _local([2], ["b"], [[1, 0]])
+        summary = gu.uncertainty.propagate(
+            Mean(),
+            [first, second],
+            errors,
+            output_labels=["first", "second"],
+            at=["second", "first"],
+            return_covariance=True,
+        )
+
+        # A difference has variance Var(A) + Var(B) - 2 Cov(A, B)
+        correlation = float(model.correlation(1.0))
+        assert summary.covariance is not None
+        np.testing.assert_allclose(summary.covariance, [[1, correlation], [correlation, 1]])
+        difference = summary.contrast({"second": 1, "first": -1})
+        assert difference.estimate == 1
+        assert difference.variance == pytest.approx(2 * (1 - correlation))
+
+    @pytest.mark.parametrize(
+        "options,message",
+        [
+            ({"method": "numerical"}, "requires analytical"),
+            ({"return_samples": True}, "requires analytical"),
+            ({"max_sample_bytes": 1}, "exceeds max_sample_bytes"),
+        ],
+    )
+    def test_propagate__error_output_covariance(self, options: dict[str, Any], message: str) -> None:
+        """Checks an error is raised for unsupported covariance requests or an insufficient memory budget."""
+
+        data = _local([1, 3], ["a", "b"], [[0, 0], [1, 0]])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
+
+        with pytest.raises(ValueError, match=message):
+            gu.uncertainty.propagate(Mean(), data, errors, return_covariance=True, **options)
+
+    def test_contrast__error_missing_covariance(self) -> None:
+        """Checks an error is raised for a contrast without requested output covariance."""
+
+        data = _local([1, 3], ["a", "b"], [[0, 0], [1, 0]])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
+        summary = gu.uncertainty.propagate(Mean(), data, errors)
+
+        with pytest.raises(ValueError, match="return_covariance=True"):
+            summary.contrast({"value": 1})
+
     def test_propagate__error_return_samples(self) -> None:
         """Checks an error is raised when return_samples is used with analytical."""
 
         data = _local([1, 3], ["a", "b"], [[0, 0], [1, 0]])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         with pytest.raises(ValueError, match="return_samples cannot be used with analytical"):
             gu.uncertainty.propagate(Mean(), data, structure, method="analytical", return_samples=True)
 
@@ -188,7 +261,7 @@ class TestAnalyticalOperatorPropagation:
 
         # Two observations in one group (one output)
         data = _local([1, 3], ["a", "b"], [[0, 0], [1, 0]])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Passing 2 nominal estimates should raise an error
         with pytest.raises(ValueError, match="one value per LocalData target"):
@@ -203,7 +276,7 @@ class TestNumericalOperatorPropagation:
 
         # We create small independent errors for a nonlinear mean-square calculation
         data = _local([1, 3], ["a", "b"], [[0, 0], [1, 0]])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 0.2)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 0.2)])
         summary = gu.uncertainty.propagate(
             NonlinearMeanSquare(),
             data,
@@ -222,7 +295,7 @@ class TestNumericalOperatorPropagation:
 
         # Mean with exact coefficients (analytical by default)
         data = _local([1, 3], ["a", "b"], [[0, 0], [1, 0]])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 0.5)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 0.5)])
 
         # Compare automatic/explicit numerical draws with same seed
         automatic = gu.uncertainty.propagate(
@@ -240,7 +313,7 @@ class TestNumericalOperatorPropagation:
 
         # Count operator calls with precomputed mean
         data = _local([1, 3], ["a", "b"], [[0, 0], [1, 0]])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 0.5)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 0.5)])
         operator = CountingMean()
 
         # Should sue the nominal estimate of 2, calling on 3 times
@@ -260,7 +333,7 @@ class TestNumericalOperatorPropagation:
             valid=np.ones(2, dtype=bool),
             source_ids=np.asarray(["used", "masked"]),
         )
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 0)])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 0)])
 
         # We check identical draws with zero error for masked (square of unmasked value = 2)
         summary = gu.uncertainty.propagate(
@@ -276,7 +349,7 @@ class TestNumericalOperatorPropagation:
         # Overlapping inputs passed with reverse order
         first = _local([1, 3], ["a", "b"], [[0, 0], [1, 0]])
         second = _local([3, 5], ["b", "c"], [[1, 0], [2, 0]])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 0.5)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 0.5)])
         forward = gu.uncertainty.propagate(
             NonlinearMeanSquare(),
             [first, second],
@@ -308,7 +381,7 @@ class TestNumericalOperatorPropagation:
 
         # A source with no valid observation to sample
         data = LocalData(values=np.array([np.nan]), valid=np.array([False]), source_ids=np.array(["missing"]))
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         with pytest.raises(ValueError, match="at least one valid source"):
             gu.uncertainty.propagate(Mean(), data, structure, return_samples=True)
 
@@ -322,7 +395,7 @@ class TestSimulation:
         # We define three draws, with the second output missing from the middle draw
         draws = iter((np.array([1.0, 2.0]), np.array([3.0, np.nan]), np.array([5.0, 6.0])))
         selection = pd.DataFrame({"flat_index": [0, 1], "estimate": [0.0, 0.0]}, index=["first", "second"])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Simulate for both outputs
         summary = simulate(
@@ -352,7 +425,7 @@ class TestSimulation:
         # We create to draws with angles 359 and 1 deg (2 deg apart modulo 360)
         draws = iter((359.0, 1.0))
         selection = pd.DataFrame({"flat_index": [0], "estimate": [0.0]}, index=["angle"])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # We simulate a quantile, passing the circularity
         summary = simulate(
@@ -383,7 +456,7 @@ class TestSimulation:
         # We input a negative draw to make the calculation fail between two finite results
         draws = iter((1.0, -1.0, 3.0))
         selection = pd.DataFrame({"flat_index": [0], "estimate": [0.0]}, index=["value"])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         def calculate(draw: float) -> float:
             """We create a calculation that will raise error on the negative draw only."""
@@ -418,7 +491,7 @@ class TestSimulation:
         # We create a second output always with NaN values
         draws = iter((np.array([1.0, np.nan]), np.array([3.0, np.nan])))
         selection = pd.DataFrame({"flat_index": [1], "estimate": [np.nan]}, index=["missing"])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # We simulate
         summary = simulate(
@@ -447,7 +520,7 @@ class TestSpatialPropagation:
             pytest.importorskip("numba")
         points = gu.PointCloud.from_xyz([0.0, 4.0], [1.0, 0.0], [10.0, 20.0], crs=32631)
         reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(-5, 0.5, 10, 1), crs=32631)
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 0.5)])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 0.5)])
         kwargs = {"ref": reference, "resampling": method, "dist_nodata_pixel": 2, "engine": engine}
 
         # We grid
@@ -513,7 +586,7 @@ class TestSpatialPropagation:
             np.array([[2, 4], [6, 8]], dtype=np.int16), rio.transform.from_origin(0, 2, 1, 1), crs=32631, nodata=-9999
         )
         reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(0, 2, 2, 2), crs=32631)
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Average the same four integer values with each spatial API
         if operation == "grid":
@@ -589,7 +662,7 @@ class TestSpatialPropagation:
         values = np.arange(9, dtype=float).reshape(3, 3)
         raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 3, 1, 1), crs=32632)
         reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(0, 3, 3, 3), crs=32632)
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # We define the neighborhoods to use all these values
         if operation == "grid":
@@ -654,12 +727,131 @@ class TestSpatialPropagation:
 class TestPropagationSummary:
     """Test module the PropagationSummary lightweight class to analyze propagation outputs."""
 
+    @pytest.mark.parametrize("verbose", [False, True])
+    def test_info__analytical(self, verbose: bool, capsys: pytest.CaptureFixture[str]) -> None:
+        """Checks that info() prints or returns analytical results and saved covariance."""
+
+        data = _local([1.0, 3.0], ["a", "b"], [[0.0], [1.0]])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
+        summary = gu.uncertainty.propagate(Mean(), data, errors, return_covariance=True)
+
+        result = summary.info(verbose=verbose)
+        printed = capsys.readouterr().out
+        if verbose:
+            assert result is None
+            text = printed
+        else:
+            assert printed == ""
+            assert isinstance(result, str)
+            text = result
+
+        assert "Method: analytical" in text
+        assert "Estimate: 2\nMean: 2" in text
+        assert "Standard deviation (1σ): 1.414" in text
+        assert "Selected outputs: 1" in text
+        assert "Source error components: 1" in text
+        assert "Saved samples: None\nSaved quantiles: None\nOutput covariance: 1 × 1" in text
+        assert "Approximation: exact\nOutput distribution: normal" in text
+        assert "Simulations requested" not in text
+
+    @pytest.mark.parametrize("shape", [(), (1,), (1, 1)])
+    def test_info__scalar_dataarray(self, shape: tuple[int, ...]) -> None:
+        """Checks that info() shows the value of a loaded DataArray containing one result."""
+
+        import xarray as xr
+
+        values = xr.DataArray(np.full(shape, 2.5))
+        summary = gu.PropagationSummary(
+            estimate=values,
+            mean=values,
+            std=values,
+            method="analytical",
+            error_structure=gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)]),
+            selection=pd.DataFrame(columns=["flat_index", "estimate"]),
+        )
+
+        text = summary.info(verbose=False)
+
+        assert isinstance(text, str)
+        assert "2.5" in text
+        assert "DataArray" not in text
+
+    def test_info__numerical(self) -> None:
+        """Checks that info() reports simulation counts, saved samples and requested quantiles."""
+
+        data = _local([1.0, 3.0], ["a", "b"], [[0.0], [1.0]])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 0.5)])
+        summary = gu.uncertainty.propagate(
+            Mean(),
+            data,
+            errors,
+            method="numerical",
+            n_simulations=8,
+            random_state=6,
+            return_samples=True,
+            quantiles=[0.25, 0.75],
+        )
+
+        text = summary.info(verbose=False)
+
+        assert isinstance(text, str)
+        assert "Method: numerical" in text
+        assert "Valid draws per output: 8" in text
+        assert "Simulations requested: 8\nSuccessful simulations: 8\nFailed simulations: 0" in text
+        assert "Saved samples: 8 × 1 (draws × outputs)" in text
+        assert "Saved quantiles: 2 × 1 (probabilities × outputs)\nOutput covariance: None" in text
+
+    def test_info__masked_values(self) -> None:
+        """Checks that info() represents masked values as missing without changing their mask."""
+
+        values = np.ma.array([1, 999, 3], mask=[False, True, False])
+        summary = gu.PropagationSummary(
+            estimate=values,
+            mean=values,
+            std=values,
+            method="analytical",
+            error_structure=gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)]),
+            selection=pd.DataFrame(columns=["flat_index", "estimate"]),
+        )
+
+        text = summary.info(verbose=False)
+
+        assert isinstance(text, str)
+        assert "nan" in text
+        assert "inf" not in text
+        assert "999" not in text
+        np.testing.assert_array_equal(values.data, [1, 999, 3])
+        np.testing.assert_array_equal(values.mask, [False, True, False])
+
+    @pytest.mark.parametrize("size", [0, 100])
+    def test_info__array_preview(self, size: int) -> None:
+        """Checks that info() summarizes empty or large arrays without changing the results."""
+
+        values = np.arange(size, dtype=float)
+        summary = gu.PropagationSummary(
+            estimate=values,
+            mean=values,
+            std=np.full(size, np.nan),
+            method="analytical",
+            error_structure=gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)]),
+            selection=pd.DataFrame(columns=["flat_index", "estimate"]),
+        )
+
+        text = summary.info(verbose=False)
+
+        assert isinstance(text, str)
+        assert "Selected outputs: 0" in text
+        assert len(text) < 500
+        assert ("..." in text) == (size > 0)
+        np.testing.assert_array_equal(summary.estimate, np.arange(size))
+        assert np.all(np.isnan(summary.std))
+
     def test_propagsummary__interval(self) -> None:
         """Checks the confidence interval method of PropagationSummary."""
 
         # Define independent errors, variance of mean = (4 + 4) / 4
         data = LocalData(values=np.array([1.0, 3.0]), valid=np.ones(2, dtype=bool), source_ids=np.array(["a", "b"]))
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
         summary = gu.uncertainty.propagate(Mean(), data, structure)
 
         # Check a normal confidence interval
@@ -674,7 +866,7 @@ class TestPropagationSummary:
 
         # We define seeded draws as reference for marginal and median
         data = LocalData(values=np.array([1.0, 3.0]), valid=np.ones(2, dtype=bool), source_ids=np.array(["a", "b"]))
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 0.5)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 0.5)])
         summary = gu.uncertainty.propagate(
             Mean(), data, structure, method="numerical", n_simulations=4, random_state=6, return_samples=True
         )
@@ -692,7 +884,7 @@ class TestPropagationSummary:
         selection = pd.DataFrame({"flat_index": [0, 1], "estimate": [2.0, 4.0]}, index=labels)
         samples = pd.DataFrame([[1.0, 2.0], [3.0, 6.0]], columns=labels)
         quantiles = pd.DataFrame([[2.0, 4.0]], index=[0.5], columns=labels)
-        error_structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        error_structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Store them in a summary
         summary = gu.PropagationSummary(
@@ -719,7 +911,7 @@ class TestPropagationSummary:
 
         # We define an estimate near 360 degrees and a mean near zero differ by two degrees
         selection = pd.DataFrame({"flat_index": [0], "estimate": [359.0]}, index=["bearing"])
-        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         summary = gu.PropagationSummary(
             estimate=np.array([359.0]),
             mean=np.array([1.0]),
@@ -745,7 +937,7 @@ class TestPropagationSummary:
             estimate=np.array([359.0]),
             mean=np.array([359.0]),
             std=np.array([2.0]),
-            error_structure=gu.ErrorStructure([gu.ErrorComponent("measurement", 1)]),
+            error_structure=gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)]),
             method="numerical",
             selection=selection,
             samples=pd.DataFrame([[357.0], [1.0]], columns=labels),
@@ -764,7 +956,7 @@ class TestPropagationSummary:
 
         # Numerical propagation without saved draws
         data = LocalData(values=np.array([1.0, 3.0]), valid=np.ones(2, dtype=bool), source_ids=np.array(["a", "b"]))
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 0.5)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 0.5)])
         summary = gu.uncertainty.propagate(Mean(), data, structure, method="numerical", n_simulations=4, random_state=6)
         with pytest.raises(ValueError, match="no saved draws or known marginal"):
             summary.marginal("value")
@@ -783,7 +975,7 @@ class TestPropagationSummary:
     def test_summary__error_invalid_selection(self, selection: pd.DataFrame) -> None:
         """Checks an error is raised for duplicate output labels or missing estimates."""
 
-        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         with pytest.raises(ValueError, match="selection must"):
             gu.PropagationSummary(
                 estimate=np.array([2.0, 4.0]),
@@ -814,7 +1006,7 @@ class TestPropagationSummary:
                 estimate=np.array([2.0, 4.0]),
                 mean=np.array([2.0, 4.0]),
                 std=np.array([1.0, 1.0]),
-                error_structure=gu.ErrorStructure([gu.ErrorComponent("measurement", 1)]),
+                error_structure=gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)]),
                 method="numerical",
                 selection=selection,
                 **options,
@@ -841,11 +1033,53 @@ class TestPropagationSummary:
         """Checks an error is raised for an invalid quantile probability or interval coverage."""
 
         data = _local([1.0, 3.0], ["a", "b"], [[0.0], [1.0]])
-        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         summary = gu.uncertainty.propagate(Mean(), data, source_error)
 
         with pytest.raises(error_type, match=message):
             getattr(summary, method)(invalid)
+
+
+class TestPropagationSummaryChunked:
+    """Test module for summaries of lazy results without executing Dask tasks."""
+
+    @pytest.mark.parametrize("shape", [(1, 1), (4, 4)])
+    def test_info__loading_laziness(self, shape: tuple[int, int]) -> None:
+        """Checks that info() describes lazy outputs without loading them, including single values."""
+
+        da = pytest.importorskip("dask.array")
+        callbacks = pytest.importorskip("dask.callbacks")
+        import xarray as xr
+
+        # Use a shorter final row chunk
+        values = np.arange(np.prod(shape), dtype=float).reshape(shape)
+        eager = xr.DataArray(values, dims=("y", "x"))
+        lazy = xr.DataArray(da.from_array(values, chunks=(3, 2)), dims=("y", "x"))
+        options: dict[str, Any] = {
+            "method": "analytical",
+            "error_structure": gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)]),
+            "selection": pd.DataFrame(columns=["flat_index", "estimate"]),
+        }
+        eager_summary = gu.PropagationSummary(estimate=eager, mean=eager, std=eager, **options)
+        lazy_summary = gu.PropagationSummary(estimate=lazy, mean=lazy, std=lazy, **options)
+
+        # Should not trigger any task
+        with callbacks.Callback(pretask=lambda *_: pytest.fail("info() evaluated a Dask task")):
+            text = lazy_summary.info(verbose=False)
+
+        eager_text = eager_summary.info(verbose=False)
+        if values.size == 1:
+            assert eager_text is not None
+            assert "DataArray" not in eager_text
+        else:
+            assert text == eager_text
+        assert isinstance(text, str)
+        assert f"DataArray (shape {shape})" in text
+        assert lazy.chunks is not None
+        for name in ("estimate", "mean", "std"):
+            assert getattr(lazy_summary, name).chunks is not None
+            assert getattr(eager_summary, name).chunks is None
+        np.testing.assert_array_equal(lazy.compute(), eager)
 
 
 class TestPropagationErrors:
@@ -869,7 +1103,7 @@ class TestPropagationErrors:
         """Checks an error is raised for invalid model, method, storage limits, or operator inputs."""
 
         data = _local([1.0, 3.0], ["a", "b"], [[0, 0], [1, 0]])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         defaults: dict[str, Any] = {"operator": Mean(), "data": data, "error_structure": structure}
         with pytest.raises(error_type, match=message):
             gu.uncertainty.propagate(**(defaults | options))
@@ -890,7 +1124,7 @@ class TestPropagationErrors:
 
         first = _local([1.0, 2.0], ["a", "b"], [[0, 0], [1, 0]])
         second = _local([2.0, 3.0], ["b", "c"], [[1, 0], [2, 0]])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         defaults: dict[str, Any] = {"output_labels": ["left", "right"]}
 
         with pytest.raises(error_type, match=message):
@@ -905,7 +1139,7 @@ class TestSimulationErrors:
 
         # Create a calculation that fails and record attempted draws
         selection = pd.DataFrame({"flat_index": [0], "estimate": [0.0]}, index=["value"])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         attempted: list[float] = []
 
         def calculate(draw: float) -> float:
@@ -938,7 +1172,7 @@ class TestSimulationErrors:
 
         # A scalar output cannot accept an array or a missing value
         selection = pd.DataFrame({"flat_index": [0], "estimate": [0.0]}, index=["value"])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         with pytest.raises(ValueError, match=message):
             simulate(
                 estimate=np.array(0.0),
@@ -955,7 +1189,7 @@ class TestSimulationErrors:
         # We define inputs so that the second calculation raises en error after the first returns a finite value
         draws = iter((1.0, np.nan))
         selection = pd.DataFrame({"flat_index": [0], "estimate": [0.0]}, index=["value"])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         with pytest.warns(UserWarning, match="Simulation 2 of 2 failed"):
             with pytest.raises(RuntimeError, match="Only 1 of 2 simulations succeeded"):
                 simulate(
@@ -985,7 +1219,7 @@ class TestSimulationErrors:
         """Checks an error is raised for invalid draw counts, probabilities, or storage limits."""
 
         selection = pd.DataFrame({"flat_index": [0], "estimate": [0.0]}, index=["value"])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         arguments: dict[str, object] = {"n_simulations": 2, "selection": selection}
         arguments.update(options)
         with pytest.raises(ValueError, match=message):
@@ -1011,7 +1245,7 @@ class TestSimulationErrors:
     def test_simulate__error_invalid_selection(self, selection: pd.DataFrame, message: str) -> None:
         """Checks an error is raised for duplicate output labels or positions outside the output."""
 
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         with pytest.raises(ValueError, match=message):
             simulate(
                 estimate=np.array(0.0),

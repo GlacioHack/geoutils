@@ -427,7 +427,7 @@ class TestResampling:
         values = np.arange(25, dtype=float).reshape(5, 5)
         raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 5, 1, 1), crs=32606)
         x, y = raster.ij2xy(np.array([2, 2]), np.array([2, 3]))
-        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
 
         # Request uncertainty through the same public call and compare its first item to the established result
         expected = raster.reduce_at_points((x, y), reducer_function=Mean(), window=3, as_array=True)
@@ -457,7 +457,7 @@ class TestResampling:
         raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 4, 1, 1), crs=32606)
         center_x, center_y = raster.ij2xy(1, 1)
         point = (center_x + 0.25, center_y - 0.25)
-        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
 
         # Compare the first tuple item with the result of interpolation without requesting uncertainty
         expected = raster.interp_at_points(point, method=method, as_array=True)
@@ -802,7 +802,7 @@ class TestKrigingRaster:
             nodata=-9999,
         )
         variogram = gu.Variogram.from_model("gaussian", effective_range=2, partial_sill=1)
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Without observation errors kriging reproduces the plane; with errors it smooths noisy observations
         exact = raster.krige(variogram, max_overlap=1.5)

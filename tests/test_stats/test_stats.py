@@ -816,7 +816,7 @@ class TestStatsUncertainty:
 
         # Create 4 values with fixed error magnitude
         values = np.array([[1.0, 3.0], [6.0, 10.0]])
-        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
 
         # Derive stats, check mean value is equal
         nominal, summary = gu.stats.stats(
@@ -839,7 +839,7 @@ class TestStatsUncertainty:
         first = np.array([1.0, 3.0])
         second = np.array([10.0, 14.0])
         values = {"first": first, "second": second}
-        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
 
         # We propagate the mean for both, and check mean values
         nominal, summary = gu.stats.stats(
@@ -859,7 +859,7 @@ class TestStatsUncertainty:
         # We create 2 groups of 2 values each, with and STD of 2
         values = np.array([[1.0, 3.0], [6.0, 10.0]])
         groups = np.array([[0, 0], [1, 1]])
-        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
         by = {"group": groups}
         categories = {"group": [0, 1]}
 
@@ -878,22 +878,130 @@ class TestStatsUncertainty:
         # Each group mean has variance 4 / 2 from its two independent values
         np.testing.assert_allclose(summary.variance, [2.0, 2.0])
 
+    @pytest.mark.parametrize("statistic,reducer", [("mean", Mean()), (" MEAN ", Mean()), ("sum", Sum())])
+    @pytest.mark.parametrize("grouped", [False, True])
+    @pytest.mark.parametrize("method", ["analytical", "numerical"])
+    def test_stats__statistic_names(self, statistic: str, reducer: Mean | Sum, grouped: bool, method: str) -> None:
+        """Checks that statistic names match Reducer uncertainty and preserve result labels in stats()."""
+
+        # Create two groups of observations
+        values = np.array([[1.0, 3.0], [6.0, 10.0]])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
+        options: dict[str, Any] = (
+            {"by": {"group": np.array([[0, 0], [1, 1]])}, "categories": {"group": [0, 1]}} if grouped else {}
+        )
+        # A few seeded simulations suffice to compare identical draws
+        uncertainty_options = {"method": method, "n_simulations": 16, "random_state": 42}
+
+        # Compare named statistics and Reducers
+        expected_nominal = gu.stats.stats(values, statistic, **options)
+        _, expected_summary = gu.stats.stats(
+            values, reducer, error_structure=errors, uncertainty_kwargs=uncertainty_options, **options
+        )
+        nominal, summary = gu.stats.stats(
+            values, statistic, error_structure=errors, uncertainty_kwargs=uncertainty_options, **options
+        )
+
+        # Check values, labels and uncertainty
+        if grouped:
+            pd.testing.assert_frame_equal(nominal, expected_nominal)
+        else:
+            assert nominal == expected_nominal
+        np.testing.assert_array_equal(summary.estimate, expected_summary.estimate)
+        np.testing.assert_array_equal(summary.std, expected_summary.std)
+
+    @pytest.mark.parametrize("input_type", ["array", "dataarray", "raster", "pointcloud"])
+    @pytest.mark.parametrize("grouped", [False, True])
+    @pytest.mark.parametrize("masked", [False, True])
+    def test_stats__predictor_shape(self, input_type: str, grouped: bool, masked: bool) -> None:
+        """Checks that stats() selects matching predictors for missing values, masks and groups."""
+
+        # Create distinct magnitudes at each location
+        values = np.arange(6, dtype=float).reshape(2, 3)
+        values[0, 1] = np.nan
+        angles = np.arange(6, dtype=float).reshape(2, 3) + 0.5
+        groups = np.array([[0, 0, 1], [0, 0, 1]])
+        mask = np.array([[True, True, True], [True, True, False]])
+        statistics = pd.DataFrame(
+            {"std": np.arange(1, 7, dtype=float), "count": 10},
+            index=pd.IntervalIndex.from_breaks(np.arange(7), name="angle"),
+        )
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics, statistic="std")
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", magnitude)])
+
+        # Use the same locations for spatial inputs
+        source: Any = values
+        predictor: Any = angles
+        if input_type == "pointcloud":
+            values, angles, groups, mask = (array.reshape(-1) for array in (values, angles, groups, mask))
+            x = np.arange(values.size)
+            y = np.zeros(values.size)
+            source = gu.PointCloud.from_xyz(x, y, values, 32631)
+            predictor = gu.pointcloud.from_xyz(x, y, angles, 32631)
+        elif input_type != "array":
+            constructor = gu.Raster.from_array if input_type == "raster" else gu.raster.from_array
+            transform = rio.transform.from_origin(0, 2, 1, 1)
+            source = constructor(values, transform, 32631, nodata=-9999)
+            predictor = constructor(angles, transform, 32631, nodata=-9999)
+
+        _, summary = gu.stats.stats(
+            source,
+            Mean(),
+            by={"region": groups} if grouped else None,
+            categories={"region": [0, 1]} if grouped else None,
+            mask=mask if masked else None,
+            error_structure=errors,
+            uncertainty_kwargs={"predictors": {"angle": predictor}},
+        )
+
+        # Equal area means use the sum of variances divided by the squared cell count
+        valid = np.isfinite(values)
+        if masked:
+            valid &= mask
+        selections = [valid & (groups == group) for group in [0, 1]] if grouped else [valid]
+        magnitudes = angles + 0.5
+        expected_variance = [
+            np.sum(magnitudes[selected] ** 2) / np.count_nonzero(selected) ** 2 for selected in selections
+        ]
+        expected_means = [np.mean(values[selected]) for selected in selections]
+        np.testing.assert_allclose(summary.estimate, expected_means)
+        np.testing.assert_allclose(summary.variance, expected_variance)
+
+    def test_stats__error_predictor_shape(self) -> None:
+        """Checks an error is raised for a predictor grid with a different shape in stats()."""
+
+        statistics = pd.DataFrame({"std": [1.0, 2.0], "count": 10}, index=pd.Index([0, 1], name="angle"))
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics, statistic="std")
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", magnitude)])
+
+        with pytest.raises(ValueError, match="aligned with sorted source_ids"):
+            gu.stats.stats(
+                np.ones((2, 3)),
+                Mean(),
+                error_structure=errors,
+                uncertainty_kwargs={"predictors": {"angle": np.ones((3, 2))}},
+            )
+
     @pytest.mark.parametrize(
         ("statistics", "option", "message", "error"),
         [
-            ("mean", {}, "requires one Reducer", TypeError),
+            ("totalcount", {}, "requires one Reducer", TypeError),
+            ("unknown", {}, "requires one Reducer", TypeError),
+            ("all", {}, "requires one Reducer", TypeError),
+            (None, {}, "requires one Reducer", TypeError),
+            (["mean", "sum"], {}, "requires one Reducer", TypeError),
             (Mean(), {"subsample": 2}, "does not yet support subsampling", ValueError),
             (Mean(), {"backend": "flox"}, "requires backend='geoutils'", ValueError),
         ],
     )
     def test_stats__error_uncertainty(
-        self, statistics: str | Mean, option: dict[str, Any], message: str, error: type[Exception]
+        self, statistics: str | Mean | list[str] | None, option: dict[str, Any], message: str, error: type[Exception]
     ) -> None:
-        """Checks that uncertainty works only with proper reducer/backend/sampling scheme."""
+        """Checks an error is raised for unsupported statistics, backends or subsampling in stats()."""
 
         # We create an array with fixed error
         values = np.array([1.0, 3.0])
-        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # We raise error on options not working with uncertainty
         with pytest.raises(error, match=message):

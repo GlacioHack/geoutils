@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import builtins
 import os
 import re
+import subprocess
+import sys
 import warnings
+from importlib.util import find_spec
+from typing import Any
 
 import geopandas as gpd
 import pytest
@@ -15,6 +20,7 @@ from geoutils._misc import (
     copy_doc,
     deprecate,
     diff_environment_yml,
+    import_optional,
 )
 
 
@@ -206,3 +212,86 @@ class TestMisc:
 
         # Check the worker stays usable
         _trim_process_memory()
+
+
+class TestOptionalImports:
+    """Test module for optional dependency errors and GPyTorch import warnings."""
+
+    @pytest.mark.parametrize(
+        "dependency, warning_module, torch_warning, filtered",
+        [
+            ("gpytorch", "torch.jit._script", True, True),
+            ("gstools", "torch.jit._script", True, False),
+            ("gpytorch", "another_module", True, False),
+            ("gpytorch", "torch.jit._script", False, False),
+        ],
+    )
+    def test_import_optional__scoped_torch_warning(
+        self,
+        dependency: str,
+        warning_module: str,
+        torch_warning: bool,
+        filtered: bool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Checks that only the upstream TorchScript warning is filtered during a GPyTorch import."""
+
+        message = (
+            "`torch.jit.script` is not supported in Python 3.14+ and may break. "
+            "Please switch to `torch.compile` or `torch.export`."
+            if torch_warning
+            else "Another upstream warning"
+        )
+        imported = object()
+        original_import = builtins.__import__
+
+        def import_with_warning(name: str, *args: Any, **kwargs: Any) -> Any:
+            """Simulate an upstream import warning without loading optional packages."""
+
+            if name == dependency:
+                warnings.warn_explicit(message, FutureWarning, filename="upstream.py", lineno=1, module=warning_module)
+                return imported
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", import_with_warning)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            original_filters = warnings.filters.copy()
+            assert import_optional(dependency) is imported
+            assert warnings.filters == original_filters
+            assert len(caught) == int(not filtered)
+
+            # Check warnings after import
+            warnings.warn_explicit(message, FutureWarning, filename="upstream.py", lineno=2, module=warning_module)
+            assert len(caught) == 1 + int(not filtered)
+
+    def test_import_optional__error_missing_dependency(self) -> None:
+        """Checks an error is raised with installation guidance for a missing optional dependency."""
+
+        with pytest.raises(ImportError, match="Optional dependency '_geoutils_missing_dependency_' required"):
+            import_optional("_geoutils_missing_dependency_")
+
+    @pytest.mark.skipif(find_spec("gpytorch") is None, reason="Requires GPyTorch")
+    def test_import_optional__gpytorch_sampling(self) -> None:
+        """Checks that GPyTorch imports and samples reproducibly with the TorchScript warning treated as an error."""
+
+        # Avoid cached optional imports
+        code = r"""
+import warnings
+import numpy as np
+import geoutils as gu
+from geoutils._misc import import_optional
+
+warnings.filterwarnings('error', message=r'.*torch\.jit\.script.*Python 3\.14', category=FutureWarning)
+import_optional('gpytorch')
+model = gu.Variogram.from_model('gaussian', effective_range=2, partial_sill=1)
+errors = gu.ErrorStructure([gu.ErrorComponent('spatial', 1, model)])
+coordinates = np.array([[0, 0], [1, 0], [0, 1], [1, 1]], dtype=float)
+first = gu.uncertainty.random_field(errors, coordinates=coordinates, backend='gpytorch', random_state=42)
+second = gu.uncertainty.random_field(errors, coordinates=coordinates, backend='gpytorch', random_state=42)
+assert first.shape == (4,)
+assert np.isfinite(first).all()
+np.testing.assert_array_equal(first, second)
+"""
+        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr

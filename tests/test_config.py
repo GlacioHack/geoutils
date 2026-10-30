@@ -162,7 +162,7 @@ class TestConfig:
         options["resampling"] = "nearest" if explicit else None
 
         # Propagate measurement errors
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         summary = gu.uncertainty.propagate(operation, error_structure=errors, operation_kwargs=options)
         nearest = explicit or method == "nearest"
 

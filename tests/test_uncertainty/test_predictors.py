@@ -30,7 +30,7 @@ class TestPredictors:
         # Create synthetic raster and error structure
         values = np.ma.array([[1.0, 2.0], [3.0, 4.0]], mask=[[False, True], [False, False]])
         raster = gu.Raster.from_array(values, (1, 0, 0, 0, -1, 2), 32631, nodata=-9999)
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
 
         # Check predicted errors  match shape + nodata of raster input
         result = structure.predict_magnitude(like=raster)
@@ -44,7 +44,7 @@ class TestPredictors:
         # Create synthetic dataarray and error structure
         values = np.array([[1.0, np.nan, 3.0], [4.0, 5.0, 6.0]])
         raster = DataArrayRasterAccessor.from_array(values, transform=from_origin(10, 20, 2, 2), crs=32631)
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
 
         # Check predicted errors  match shape + NaNs of raster input
         result = structure.predict_magnitude(like=raster)
@@ -63,7 +63,7 @@ class TestPredictors:
         quality = np.array([[0.0, 1.0, 2.0], [2.0, 1.0, np.nan]])
         statistics = pd.DataFrame({"std": [1.0, 3.0], "count": [10, 10]}, index=pd.Index([0.0, 2.0], name="quality"))
         magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", magnitude)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", magnitude)])
 
         # Check predicted values, we should have NaNs matching that of predictor + raster,
         # and linear interpolation of the STD (yielding 2 for the 5th value)
@@ -81,7 +81,7 @@ class TestPredictors:
         points.gdf["quality"] = quality
         statistics = pd.DataFrame({"std": [1.0, 3.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="quality"))
         magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", magnitude)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", magnitude)])
 
         # Check both predictions are equal
         from_column = structure.predict_magnitude({"quality": "quality"}, like=points)
@@ -99,7 +99,7 @@ class TestPredictors:
         quality = np.array([[0.0, 0.5, 1.0]])
         statistics = pd.DataFrame({"std": [1.0, 3.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="quality"))
         magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
-        structure = gu.ErrorStructure([gu.ErrorComponent("terrain", magnitude), gu.ErrorComponent("measurement", 4)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("terrain", magnitude), gu.ErrorComponent("uncorrelated", 4)])
 
         # Check the selected component uses its own magnitudes, while the total combines squared errors
         selected = structure.predict_magnitude({"quality": quality}, like=raster, component="terrain")
@@ -110,6 +110,38 @@ class TestPredictors:
 
 class TestPredictorsChunked:
     """Test module for chunked (Dask/MP) error magnitude prediction on raster and point."""
+
+    def test_predict_magnitude__categorical_dask(self) -> None:
+        """Checks that categorical and continuous predictors stay lazy and match eager magnitude maps."""
+
+        pytest.importorskip("dask")
+
+        # Create two category trends on the same grid
+        transform = from_origin(0, 3, 1, 1)
+        source = gu.raster.from_array(np.ones((3, 5)), transform, 32631)
+        angles = gu.raster.from_array(np.broadcast_to(np.linspace(0, 1, 5), (3, 5)).copy(), transform, 32631)
+        cover = gu.raster.from_array(np.broadcast_to([[10], [20], [10]], (3, 5)).copy(), transform, 32631)
+        index = pd.MultiIndex.from_product(
+            [pd.Index([0.0, 1.0], name="angle"), pd.CategoricalIndex([10, 20], name="cover")]
+        )
+        statistics = pd.DataFrame({"std": [1.0, 10.0, 3.0, 30.0], "count": 20}, index=index)
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics, statistic="std")
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", magnitude)])
+        eager = structure.predict_magnitude({"angle": angles, "cover": cover}, like=source)
+
+        # Use shorter final chunks along both dimensions
+        lazy_source = source.chunk({"y": 2, "x": 3})
+        lazy_predictors = {"angle": angles.chunk({"y": 2, "x": 3}), "cover": cover.chunk({"y": 2, "x": 3})}
+        lazy = structure.predict_magnitude(lazy_predictors, like=lazy_source)
+
+        # Check lazniess and equality
+        assert not lazy_source.rst.is_loaded
+        assert all(not value.rst.is_loaded for value in lazy_predictors.values())
+        assert not lazy.rst.is_loaded
+        computed = lazy.compute()
+        np.testing.assert_array_equal(computed, eager)
+        assert computed.rst.is_loaded
+        assert eager.rst.is_loaded
 
     def test_predict_magnitude__raster_dask_mp_equal(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mp_cluster: MpCluster
@@ -126,7 +158,7 @@ class TestPredictorsChunked:
         )
         statistics = pd.DataFrame({"std": [1.0, 2.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="quality"))
         magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", magnitude)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", magnitude)])
 
         # We predict in-memory
         expected = structure.predict_magnitude({"quality": quality}, like=source)
@@ -171,7 +203,7 @@ class TestPredictorsChunked:
         points.gdf["quality"] = np.linspace(0, 1, 7)
         statistics = pd.DataFrame({"std": [1.0, 2.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="quality"))
         magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", magnitude)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", magnitude)])
 
         # Prediction
         expected = structure.predict_magnitude({"quality": "quality"}, like=points)
@@ -209,7 +241,7 @@ class TestPredictorsChunked:
         lazy = DataArrayRasterAccessor.from_array(
             dask.from_array(values, chunks=(2, 3)), transform=transform, crs=32631
         )
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
 
         # Predict in-memory and Dask
         expected = structure.predict_magnitude(like=eager)
@@ -235,7 +267,7 @@ class TestPredictorsChunked:
         quality = np.stack((np.zeros((3, 4)), np.ones((3, 4))))
         statistics = pd.DataFrame({"std": [1.0, 2.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="quality"))
         magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", magnitude)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", magnitude)])
 
         # Run magnitude prediction
         expected = structure.predict_magnitude({"quality": quality}, like=source)
@@ -259,7 +291,7 @@ class TestPredictorsChunked:
         quality = np.linspace(0, 1, 7)
         statistics = pd.DataFrame({"std": [1.0, 2.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="quality"))
         magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", magnitude)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", magnitude)])
         raster = gu.Raster.from_array(np.ones((2, 7)), transform=from_origin(0, 2, 1, 1), crs=32631)
         points = gu.PointCloud.from_xyz(np.arange(7), np.arange(7), np.ones(7), crs=32631)
 
@@ -292,7 +324,7 @@ class TestPredictorsChunked:
         y = np.array([0, 1, 0, 2, 1, 3, 2], dtype=float)
         frame = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x, y, np.arange(7)), crs=32631)
         points = gu.PointCloud(frame, data_name=None)
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
 
         # We check both in-memory and lazy write to Z
         expected = structure.predict_magnitude(like=points)
@@ -313,7 +345,7 @@ class TestPredictorsChunked:
         quality = np.linspace(0.0, 1.0, 7)
         statistics = pd.DataFrame({"std": [1.0, 2.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="quality"))
         magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", magnitude)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", magnitude)])
 
         # Compute lazy/loaded
         expected = structure.predict_magnitude({"quality": quality}, like=points)
@@ -361,21 +393,21 @@ class TestPredictorsErrors:
     def test_predict_magnitude__error_invalid_support(self) -> None:
         """Checks an error is raised when output support is not a raster/pointcloud."""
 
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         with pytest.raises(TypeError, match="like must be a raster or point cloud"):
             structure.predict_magnitude(like=np.ones((2, 2)))
 
     def test_predict_magnitude__error_missing_chunked_support(self) -> None:
         """Checks an error is raised when like support is not passed for chunked execution."""
 
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         with pytest.raises(ValueError, match="like is required for a spatial error magnitude map"):
             structure.predict_magnitude(chunksizes=(1, 1))
 
     def test_predict_magnitude__error_unknown_component(self) -> None:
         """Checks an error is raised when selected component does not exist in the ErrorStructure."""
 
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         raster = gu.Raster.from_array(np.ones((2, 2)), transform=from_origin(0, 2, 1, 1), crs=32631)
         with pytest.raises(KeyError, match="unknown"):
             structure.predict_magnitude(like=raster, component="unknown")
@@ -386,7 +418,7 @@ class TestPredictorsErrors:
         """Checks an error is raised when a predictor has the wrong shape."""
 
         # We build a predictor shorter by one than the spatial support
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         chunksizes: int | tuple[int, int] | None
         if spatial_type == "raster":
             like = gu.Raster.from_array(np.ones((2, 3)), transform=from_origin(0, 2, 1, 1), crs=32631)
@@ -414,7 +446,7 @@ class TestPredictorsErrors:
         if chunked:
             pytest.importorskip("dask_geopandas")
         points = gu.PointCloud.from_xyz([0, 1], [0, 1], [1, 1], crs=32631)
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         with pytest.raises(ValueError, match="Point cloud predictor column 'absent' does not exist"):
             structure.predict_magnitude({"quality": "absent"}, like=points, chunksizes=1 if chunked else None)
@@ -423,7 +455,7 @@ class TestPredictorsErrors:
     def test_predict_magnitude__error_invalid_chunks(self, spatial_type: str, chunksizes: Any) -> None:
         """Checks an error is raised for a chunk size that does not match the spatial input."""
 
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         if spatial_type == "raster":
             like = gu.Raster.from_array(np.ones((2, 2)), transform=from_origin(0, 2, 1, 1), crs=32631)
         else:
@@ -436,7 +468,7 @@ class TestPredictorsErrors:
         """Checks an error is raised when Dask/MP are used together."""
 
         raster = gu.Raster.from_array(np.ones((2, 2)), transform=from_origin(0, 2, 1, 1), crs=32631)
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Check MP+Dask raises an error
         config = MultiprocConfig(chunks=(1, 1), outfile=str(tmp_path / "magnitude.tif"), cluster=mp_cluster)
@@ -451,7 +483,7 @@ class TestPredictorsErrors:
         # We create a Dask input
         values = dask.from_array(np.ones((2, 2)), chunks=(1, 1))
         raster = DataArrayRasterAccessor.from_array(values, transform=from_origin(0, 2, 1, 1), crs=32631)
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Error should be raised here
         config = MultiprocConfig(chunks=(1, 1), outfile=str(tmp_path / "magnitude.tif"), cluster=mp_cluster)

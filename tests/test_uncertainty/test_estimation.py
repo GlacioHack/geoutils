@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import inspect
 import warnings
+from collections.abc import Callable
+from dataclasses import replace
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Literal
@@ -16,6 +19,18 @@ from scipy.ndimage import gaussian_filter
 import geoutils as gu
 from geoutils.multiproc import MultiprocConfig
 from geoutils.stats.variography import VariogramModel
+
+
+def quadratic_magnitude(values: Any, offset: float, coefficient: float) -> Any:
+    """Calculate an error magnitude that increases quadratically with its predictor."""
+
+    return offset + coefficient * np.asarray(values) ** 2
+
+
+def exponential_variogram(distance: Any, effective_range: float, partial_sill: float) -> Any:
+    """Calculate an exponential semivariance reaching about 95% of its sill at the effective range."""
+
+    return partial_sill * (1 - np.exp(-3 * np.asarray(distance) / effective_range))
 
 
 @pytest.fixture
@@ -64,8 +79,7 @@ class TestErrorStructureEstimation:
         # Fit one constant component without a spatial variogram
         structure = gu.ErrorStructure.estimate(
             source=proxy,
-            components={"measurement": {"magnitude": "constant", "correlation": None}},
-            spread_estimator=np.std,
+            components={"uncorrelated": {"magnitude": "constant", "correlation": None}},
             random_state=2,
         )
 
@@ -73,10 +87,96 @@ class TestErrorStructureEstimation:
         assert structure.predict_magnitude() == pytest.approx(np.sqrt(np.mean(values**2)))
         assert structure.empirical_variogram is None
 
+    @pytest.mark.parametrize(
+        "representation", ["raster", "raster_accessor", "pointcloud", "geometry_accessor", "array_accessor"]
+    )
+    def test_estimate_error_structure__proxy(self, representation: str) -> None:
+        """Checks that dataset methods estimate the same error proxy as ErrorStructure.estimate() without other."""
+
+        values = np.array([-2.0, -1.0, 1.0, 2.0])
+        raster = gu.Raster.from_array(values.reshape(2, 2), Affine(1, 0, 0, 0, -1, 2), 32631)
+        points = gu.PointCloud.from_xyz(np.arange(4), np.zeros(4), values, crs=32631)
+        interfaces = {
+            "raster": raster,
+            "raster_accessor": raster.to_xarray().rst,
+            "pointcloud": points,
+            "geometry_accessor": points.gdf.pc,
+            "array_accessor": points.to_xarray().pc,
+        }
+        source = interfaces[representation]
+        components = {"uncorrelated": {"magnitude": "constant", "correlation": None}}
+
+        result = source.estimate_error_structure(components=components)
+        expected = gu.ErrorStructure.estimate(source, components=components)
+
+        assert result.predict_magnitude() == expected.predict_magnitude() == np.std(values)
+        assert result.empirical_variogram is None
+
+    @pytest.mark.parametrize("variable", [False, True])
+    @pytest.mark.parametrize("subsample, expected_count", [(1, 20), (8, 8), (0.5, 10)])
+    def test_estimate__magnitude_sample_size(self, variable: bool, subsample: int | float, expected_count: int) -> None:
+        """Checks that spread diagnostics count the observations used after subsampling."""
+
+        # Twenty finite observations provide samples with known sizes
+        values = np.tile([-2.0, -1.0, 1.0, 2.0], 5)
+        proxy = gu.PointCloud.from_xyz(np.arange(20), np.zeros(20), values, crs=32631)
+        predictors = {"quality": np.linspace(0, 1, 20)} if variable else None
+        components = {"uncorrelated": {"magnitude": "heteroscedastic" if variable else "constant", "correlation": None}}
+
+        structure = gu.ErrorStructure.estimate(
+            proxy,
+            predictors=predictors,
+            components=components,
+            bins=2,
+            min_count=2,
+            subsample_magnitude=subsample,
+            random_state=42,
+        )
+
+        assert structure.fit_diagnostics["magnitude"] == {"valid_count": 20, "sample_count": expected_count}
+        summary = structure.info(verbose=False)
+        assert summary is not None
+        expected_sample = f"{expected_count} of 20" if expected_count < 20 else "20"
+        assert "Magnitude estimator: std" in summary
+        assert f"Magnitude sample size: {expected_sample}" in summary
+        assert "Variogram estimator: Not estimated" in summary
+
+    def test_estimate__magnitude_sample_size_with_excluded_bins(self) -> None:
+        """Checks that spread sample size excludes observations outside the supplied predictor bins."""
+
+        # Predictor bins cover the first half of the twenty observations
+        values = np.tile([-2.0, -1.0, 1.0, 2.0], 5)
+        proxy = gu.PointCloud.from_xyz(np.arange(20), np.zeros(20), values, crs=32631)
+        structure = gu.ErrorStructure.estimate(
+            proxy,
+            predictors={"quality": np.linspace(0, 1, 20)},
+            components={"uncorrelated": {"magnitude": "heteroscedastic", "correlation": None}},
+            bins={"quality": [0, 0.25, 0.5]},
+            min_count=2,
+        )
+
+        assert structure.fit_diagnostics["magnitude"] == {"valid_count": 20, "sample_count": 10}
+
+    def test_estimate__robust_spread(self) -> None:
+        """Checks that an explicit NMAD estimator limits the influence of an outlier."""
+
+        values = np.array([-2.0, -1.0, 0.0, 1.0, 2.0, 100.0])
+        proxy = gu.PointCloud.from_xyz(np.arange(len(values)), np.zeros(len(values)), values, crs=32631)
+        structure = gu.ErrorStructure.estimate(
+            proxy,
+            components={"uncorrelated": {"correlation": None}},
+            spread_estimator=gu.stats.nmad,
+        )
+
+        assert structure.predict_magnitude() == pytest.approx(gu.stats.nmad(values))
+        assert structure.predict_magnitude() < np.std(values)
+
     @pytest.mark.parametrize("kind", ["raster", "point"])
-    @pytest.mark.parametrize("other_precision", ["same", "negligible"])
+    @pytest.mark.parametrize("other_precision", [None, "same", "negligible"])
     @pytest.mark.parametrize("entrypoint", ["class", "method"])
-    def test_estimate_error_structure__two_inputs(self, kind: str, other_precision: str, entrypoint: str) -> None:
+    def test_estimate_error_structure__two_inputs(
+        self, kind: str, other_precision: str | None, entrypoint: str
+    ) -> None:
         """Checks that two aligned inputs yield the expected error magnitude for either precision assumption."""
 
         # Measurements differ by known errors; one reference value is missing
@@ -95,10 +195,11 @@ class TestErrorStructureEstimation:
         # The shared finite support has three errors; equal precision splits their variance in half
         options: dict[str, Any] = {
             "other": other,
-            "other_precision": other_precision,
-            "components": {"measurement": {"magnitude": "constant", "correlation": None}},
+            "components": {"uncorrelated": {"magnitude": "constant", "correlation": None}},
             "spread_estimator": np.std,
         }
+        if other_precision is not None:
+            options["other_precision"] = other_precision
 
         # Estimate through the class with input keywords or the dataset method
         if entrypoint == "class":
@@ -128,7 +229,7 @@ class TestErrorStructureEstimation:
             other=reference,
             other_precision="negligible",
             at=at,
-            components={"measurement": {"magnitude": "constant", "correlation": None}},
+            components={"uncorrelated": {"magnitude": "constant", "correlation": None}},
             spread_estimator=np.std,
         )
 
@@ -150,7 +251,7 @@ class TestErrorStructureEstimation:
             other=reference,
             other_precision="negligible",
             align="reproject",
-            components={"measurement": {"magnitude": "constant", "correlation": None}},
+            components={"uncorrelated": {"magnitude": "constant", "correlation": None}},
             spread_estimator=np.std,
         )
 
@@ -174,7 +275,7 @@ class TestErrorStructureEstimation:
         structure = gu.ErrorStructure.estimate(
             proxy,
             predictors={"quality": predictor_raster},
-            components={"measurement": {"magnitude": "heteroscedastic", "correlation": None}},
+            components={"uncorrelated": {"magnitude": "heteroscedastic", "correlation": None}},
             bins=5,
             min_count=50,
             random_state=4,
@@ -186,6 +287,113 @@ class TestErrorStructureEstimation:
 
         # Check no variogram is fitted for independent errors
         assert structure.empirical_variogram is None
+
+    @pytest.mark.parametrize("dimensions", [1, 2, 3])
+    @pytest.mark.parametrize("custom", [False, True])
+    def test_estimate__magnitude_model(self, dimensions: int, custom: bool) -> None:
+        """Checks that estimate() fits an affine or custom magnitude from grouped predictor spreads."""
+
+        # Balanced errors give each group an exact population standard deviation
+        coordinates = np.asarray(list(np.ndindex(*(3,) * dimensions)), dtype=float).T
+        spread = 1 + np.sum(coordinates**2 if custom else coordinates, axis=0)
+        values = np.column_stack([-spread, spread]).ravel()
+        proxy = gu.PointCloud.from_xyz(np.arange(len(values)), np.zeros(len(values)), values, crs=32631)
+        predictors = {f"predictor_{number}": np.repeat(coordinate, 2) for number, coordinate in enumerate(coordinates)}
+
+        def model(x: Any, offset: float, scale: float) -> Any:
+            """Calculate a quadratic magnitude across all continuous predictors."""
+
+            return offset + scale * np.sum(np.atleast_2d(x) ** 2, axis=0)
+
+        structure = gu.ErrorStructure.estimate(
+            proxy,
+            predictors=predictors,
+            bins=dict.fromkeys(predictors, [-0.5, 0.5, 1.5, 2.5]),
+            components={"uncorrelated": {"magnitude": "heteroscedastic", "correlation": None}},
+            min_count=2,
+            magnitude_model=model if custom else "linear",
+            magnitude_fit_kwargs={"p0": [1] * (2 if custom else dimensions + 1)},
+        )
+
+        np.testing.assert_allclose(structure.predict_magnitude(predictors), np.repeat(spread, 2), rtol=1e-7)
+        magnitude = structure.components["uncorrelated"].magnitude
+        assert isinstance(magnitude, gu.ErrorMagnitude)
+        assert magnitude.model_name == ("model" if custom else "linear")
+        assert structure.fit_diagnostics["magnitude"]["sample_count"] == len(values)
+
+    @pytest.mark.parametrize("object_type", ["raster", "dataarray"])
+    @pytest.mark.parametrize("unit", ["m", "cm"])
+    def test_estimate__plot_labels(self, object_type: str, unit: str) -> None:
+        """Checks that plot() labels estimated magnitudes and predictors using input names and units."""
+
+        pyplot = pytest.importorskip("matplotlib.pyplot")
+
+        # Create errors with varying magnitude
+        angles = np.broadcast_to(np.linspace(0, 60, 8), (8, 8)).copy()
+        values = (1 + angles / 60) * np.tile([-1.0, 1.0], (8, 4))
+        transform = Affine(10, 0, 0, 0, -10, 80)
+        constructor = gu.Raster.from_array if object_type == "raster" else gu.raster.from_array
+        proxy = constructor(values, transform, 32631)
+        predictor = constructor(angles, transform, 32631)
+        proxy_interface = proxy if object_type == "raster" else proxy.rst
+        predictor_interface = predictor if object_type == "raster" else predictor.rst
+        proxy_interface.tags.update(long_name="Snow depth", units=unit)
+        predictor_interface.tags.update(long_name="Viewing angle", units="degrees")
+
+        # Estimate and plot without specifying labels
+        structure = gu.ErrorStructure.estimate(
+            proxy,
+            predictors={"view_angle": predictor},
+            components={"uncorrelated": {"magnitude": "heteroscedastic", "correlation": None}},
+            bins=4,
+            min_count=8,
+            spread_estimator=np.std,
+            random_state=42,
+        )
+        axes = structure.plot(return_axes=True)["magnitude:uncorrelated"]
+
+        assert axes["statistic"].get_xlabel() == "Viewing angle (°)"
+        assert axes["statistic"].get_ylabel() == f"Error magnitude ({unit})"
+        assert axes["count"].get_title() == "Error variability"
+        pyplot.close(axes["statistic"].figure)
+
+    def test_estimate__categorical_and_continuous_predictors(self) -> None:
+        """Checks that estimation fits separate viewing-angle trends for categorical land cover."""
+
+        pyplot = pytest.importorskip("matplotlib.pyplot")
+
+        # Each category has the same angles and balanced positive and negative errors
+        angles = np.broadcast_to(np.linspace(0, 60, 18), (18, 18)).copy()
+        codes = np.repeat([20, 10, 30], 6)
+        cover = np.broadcast_to(codes[:, None], angles.shape).copy()
+        scales = np.repeat([1.0, 2.0, 4.0], 6)[:, None]
+        signs = np.tile([-1.0, 1.0], 9)[:, None]
+        values = scales * (1 + angles / 60) * signs
+        transform = Affine(10, 0, 0, 0, -10, 180)
+        proxy = gu.raster.from_array(values, transform, 32631).assign_attrs(units="m")
+        angle_raster = gu.raster.from_array(angles, transform, 32631)
+        cover_raster = gu.raster.from_array(cover, transform, 32631).assign_attrs(
+            long_name="Land cover", flag_values=[20, 10, 30], flag_meanings="forest meadow shrubs"
+        )
+
+        structure = gu.ErrorStructure.estimate(
+            proxy,
+            predictors={"view_angle": angle_raster, "land_cover": cover_raster},
+            bins={"view_angle": 3},
+            categories={"land_cover": [20, 10, 30]},
+            components={"uncorrelated": {"magnitude": "heteroscedastic", "correlation": None}},
+            spread_estimator=np.std,
+            min_count=10,
+            random_state=42,
+        )
+
+        # The class scales multiply the same viewing-angle trend
+        predicted = structure.predict_magnitude({"view_angle": 30, "land_cover": [20, 10, 30]})
+        np.testing.assert_allclose(predicted / predicted[0], [1, 2, 4])
+        axes = structure.plot(return_axes=True)["magnitude:uncorrelated"]
+        assert [label.get_text() for label in axes["count_y"].get_yticklabels()] == ["Forest", "Meadow", "Shrubs"]
+        assert axes["statistic"].get_ylabel() == "Error magnitude (m)"
+        pyplot.close(axes["statistic"].figure)
 
     def test_estimate_point_predictor_on_masked_common_support(self) -> None:
         """Checks that point predictor columns and a Boolean mask use the same finite observations."""
@@ -205,7 +413,7 @@ class TestErrorStructureEstimation:
         structure = gu.ErrorStructure.estimate(
             proxy,
             predictors={"quality": "quality"},
-            components={"measurement": {"magnitude": "heteroscedastic", "correlation": None}},
+            components={"uncorrelated": {"magnitude": "heteroscedastic", "correlation": None}},
             mask=selected,
             bins=4,
             min_count=30,
@@ -217,6 +425,50 @@ class TestErrorStructureEstimation:
         assert predicted[1] > predicted[0]
 
     @pytest.mark.skipif(find_spec("skgstat") is None, reason="Requires scikit-gstat")
+    @pytest.mark.parametrize("min_count", [None, 1, 200])
+    def test_estimate__minimum_pairs_per_bin(self, min_count: int | None) -> None:
+        """Checks that estimation defaults to 100 pairs per bin and refit() preserves or overrides that threshold."""
+
+        pytest.importorskip("skgstat")
+        rows, columns = np.indices((32, 32))
+        values = np.sin(columns / 4) + 0.5 * np.cos(rows / 8)
+        proxy = gu.Raster.from_array(values, Affine(10, 0, 0, 0, -10, 320), 32631)
+        options = {} if min_count is None else {"min_count": min_count}
+        minimum = 100 if min_count is None else min_count
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            structure = gu.ErrorStructure.estimate(
+                proxy,
+                components={"spatial": {"magnitude": "constant", "correlation": "gaussian"}},
+                n_pairs=5_000,
+                n_lags=10,
+                pair_sampling="random_xy",
+                max_lag=200,
+                random_state=42,
+                fit_kwargs=options,
+            )
+            refitted = structure.refit("spherical")
+            overridden = structure.refit("spherical", fit_kwargs={"min_count": 1})
+
+        empirical = structure.empirical_variogram
+        assert empirical is not None
+        valid = (empirical.counts >= minimum) & np.isfinite(empirical.lags) & np.isfinite(empirical.semivariance)
+        expected = empirical.fit("gaussian", min_count=minimum)
+        np.testing.assert_array_equal(empirical.fit_result["coefficients"], expected.fit_result["coefficients"])
+        assert empirical.fit_result["min_count"] == minimum
+        if minimum >= 100:
+            assert np.any((empirical.counts > 0) & (empirical.counts < minimum))
+        summary = structure.info(verbose=False)
+        assert summary is not None
+        assert f"Variogram lag bins: {np.count_nonzero(valid)}/10 valid (minimum {minimum} pair" in summary
+
+        for result, threshold in ((refitted, minimum), (overridden, 1)):
+            assert result.empirical_variogram is not None
+            assert result.empirical_variogram.fit_result["min_count"] == threshold
+            np.testing.assert_array_equal(result.empirical_variogram.counts, empirical.counts)
+            np.testing.assert_array_equal(result.empirical_variogram.semivariance, empirical.semivariance)
+
     def test_estimate_separates_variable_short_and_fixed_long_components(self) -> None:
         """Checks that estimation separates a variable short range error from a constant long range error."""
 
@@ -257,6 +509,8 @@ class TestErrorStructureEstimation:
         assert isinstance(long.magnitude, gu.ErrorMagnitude)
         assert isinstance(short.correlation, VariogramModel)
         assert isinstance(long.correlation, VariogramModel)
+        assert short.correlation.model_name == "gaussian"
+        assert long.correlation.model_name == "gaussian"
         assert short.correlation.effective_range is not None and long.correlation.effective_range is not None
         assert short.magnitude.kind == "variable"
         assert long.magnitude.kind == "constant"
@@ -281,6 +535,7 @@ class TestErrorStructureEstimation:
             "components": {"spatial": {"magnitude": "constant", "correlation": "spherical"}},
             "spread_estimator": np.std,
             "n_pairs": 300,
+            "fit_kwargs": {"min_count": 1},
             "n_lags": 5,
             "pair_sampling": "random_xy",
             "random_state": 4,
@@ -289,7 +544,7 @@ class TestErrorStructureEstimation:
         # Fit both routes under the same equal-precision assumption
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
-            result = measured.estimate_error_structure(reference, **options)
+            result = measured.estimate_error_structure(reference, other_precision="same", **options)
             expected = gu.ErrorStructure.estimate(scaled_difference, **options)
 
         # Check the fitted component and empirical variogram on the same support
@@ -319,6 +574,7 @@ class TestErrorStructureEstimation:
             "min_count": 10,
             "spread_estimator": np.std,
             "n_pairs": 300,
+            "fit_kwargs": {"min_count": 1},
             "n_lags": 5,
             "pair_sampling": "random_xy",
             "random_state": 4,
@@ -385,6 +641,7 @@ class TestErrorStructureEstimation:
                 components=components,
                 n_pairs=1_000,
                 n_lags=8,
+                fit_kwargs={"min_count": 1},
                 random_state=42,
             )
             if refit:
@@ -438,9 +695,226 @@ class TestErrorStructureEstimation:
         assert isinstance(refitted_model, VariogramModel)
         assert refitted_model.model_name == "spherical"
 
+    @pytest.mark.parametrize("source_kind", ["raster", "pointcloud"])
+    def test_estimate_error_structure__parameters(self, source_kind: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Checks that dataset methods expose matching defaults and forward every estimation argument unchanged."""
+
+        values = np.array([-2.0, -1.0, 1.0, 2.0])
+        source: gu.Raster | gu.PointCloud
+        if source_kind == "raster":
+            source = gu.Raster.from_array(values.reshape(2, 2), Affine(1, 0, 0, 0, -1, 2), 32631)
+        else:
+            source = gu.PointCloud.from_xyz(np.arange(4), np.zeros(4), values, crs=32631)
+
+        # Match parameters and defaults against the shared API
+        expected = dict(inspect.signature(gu.ErrorStructure.estimate).parameters)
+        expected.pop("source")
+        actual = inspect.signature(source.estimate_error_structure).parameters
+        assert list(actual) == list(expected)
+        for name, parameter in expected.items():
+            assert actual[name].default == parameter.default
+            assert actual[name].annotation == parameter.annotation
+            # The dataset method also accepts other positionally for existing calls
+            if name != "other":
+                assert actual[name].kind == parameter.kind
+
+        # Distinct markers expose missing or reordered arguments
+        options = {name: object() for name in expected}
+        received: dict[str, Any] = {}
+        result = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
+
+        def estimate(cls: type[gu.ErrorStructure], /, source: Any, **kwargs: Any) -> gu.ErrorStructure:
+            """Record the source and all options received by the shared estimator."""
+
+            received.update(source=source, options=kwargs)
+            return result
+
+        monkeypatch.setattr(gu.ErrorStructure, "estimate", classmethod(estimate))
+        assert source.estimate_error_structure(**options) is result
+        assert received["source"] is source
+        assert received["options"] == options
+
+
+class TestErrorStructureRefitting:
+    """Test module for refitting stored magnitude groups and variogram bins without sampling the source again."""
+
+    def test_refit_magnitude__manually_grouped(self) -> None:
+        """Checks that refit_magnitude() fits manually supplied groups using a new sample threshold."""
+
+        # Exclude a sparse outlying group
+        statistics = pd.DataFrame(
+            {"std": [1.0, 1.2, 1.8, 100], "count": [20, 20, 20, 2]},
+            index=pd.Index([0.0, 1.0, 2.0, 3.0], name="angle"),
+        )
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
+        structure = gu.ErrorStructure([gu.ErrorComponent("noise", magnitude)])
+
+        fitted = structure.refit_magnitude(quadratic_magnitude, min_count=10)
+
+        assert fitted.predict_magnitude({"angle": 0.5}) == pytest.approx(1.05)
+        updated = fitted.components["noise"].magnitude
+        assert isinstance(updated, gu.ErrorMagnitude)
+        assert updated.min_count == 10
+        pd.testing.assert_frame_equal(updated.grouped_statistics, magnitude.grouped_statistics)
+
+    def test_refit_magnitude__stored_groups(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Checks that refit_magnitude() reuses grouped spreads for a custom fit and preserves the original model."""
+
+        predictor = np.repeat(np.arange(4.0), 2)
+        values = quadratic_magnitude(predictor, 1, 0.2) * np.tile([-1, 1], 4)
+        source = gu.PointCloud.from_xyz(np.arange(8), np.zeros(8), values, crs=32631)
+        structure = gu.ErrorStructure.estimate(
+            source,
+            predictors={"angle": predictor},
+            bins={"angle": [-0.5, 0.5, 1.5, 2.5, 3.5]},
+            components={"uncorrelated": {"magnitude": "heteroscedastic", "correlation": None}},
+            min_count=2,
+        )
+        original = structure.components["uncorrelated"].magnitude
+        assert isinstance(original, gu.ErrorMagnitude)
+
+        def fail_statistics(*args: Any, **kwargs: Any) -> Any:
+            """Fail if refitting tries to estimate statistics from the point cloud again."""
+
+            pytest.fail("Magnitude refitting must use its stored groups")
+
+        monkeypatch.setattr(gu.PointCloud, "stats", fail_statistics)
+        fitted = structure.refit_magnitude(quadratic_magnitude, fit_kwargs={"p0": [1, 0.2], "bounds": (0, np.inf)})
+        repeated = fitted.refit_magnitude()
+        affine = fitted.refit_magnitude("linear")
+
+        for result in (fitted, repeated, affine):
+            magnitude = result.components["uncorrelated"].magnitude
+            assert isinstance(magnitude, gu.ErrorMagnitude)
+            pd.testing.assert_frame_equal(magnitude.grouped_statistics, original.grouped_statistics)
+            assert result.empirical_variogram is None
+        assert original.model_name == "piecewise_linear"
+        assert structure.predict_magnitude({"angle": 0.5}) == pytest.approx(1.1)
+        assert fitted.predict_magnitude({"angle": 0.5}) == pytest.approx(1.05)
+        assert repeated.predict_magnitude({"angle": 0.5}) == fitted.predict_magnitude({"angle": 0.5})
+
+    def test_refit_magnitude__correlation_contributions(self) -> None:
+        """Checks that refit_magnitude() preserves correlations and updates the model reused by refit_variogram()."""
+
+        pytest.importorskip("skgstat")
+        rows, columns = np.indices((24, 24))
+        quality = columns / 23
+        values = (1 + quality**2) * (np.sin(rows / 2) + np.cos(columns / 3))
+        transform = Affine(10, 0, 0, 0, -10, 240)
+        source = gu.Raster.from_array(values, transform, 32631)
+        predictor = gu.Raster.from_array(quality, transform, 32631)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            structure = gu.ErrorStructure.estimate(
+                source,
+                predictors={"quality": predictor},
+                components={
+                    "spatial": {"magnitude": "heteroscedastic", "correlation": "gaussian"},
+                    "noise": {"magnitude": "constant", "correlation": None},
+                },
+                bins=4,
+                min_count=10,
+                n_pairs=1_000,
+                n_lags=8,
+                fit_kwargs={"min_count": 1},
+                random_state=42,
+            )
+            fitted = structure.refit_magnitude("linear")
+            refitted = fitted.refit_variogram("exponential")
+
+        assert fitted.empirical_variogram is structure.empirical_variogram
+        assert fitted.components["noise"].magnitude == structure.components["noise"].magnitude
+        for name in structure.components:
+            assert fitted.components[name].correlation == structure.components[name].correlation
+        magnitude = refitted.components["spatial"].magnitude
+        assert isinstance(magnitude, gu.ErrorMagnitude)
+        assert magnitude.model_name == "linear"
+
+    @pytest.mark.parametrize("initial_model", ["gaussian", exponential_variogram])
+    def test_refit_variogram__custom_callable(
+        self, initial_model: str | Callable[..., Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Checks that refit_variogram() fits and reuses a custom callable without sampling new pairs."""
+
+        pytest.importorskip("skgstat")
+        rows, columns = np.indices((24, 24))
+        source = gu.Raster.from_array(np.sin(columns / 4) + np.cos(rows / 6), Affine(10, 0, 0, 0, -10, 240), 32631)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            structure = gu.ErrorStructure.estimate(
+                source,
+                components={"spatial": {"correlation": initial_model}},
+                n_pairs=3_000,
+                n_lags=8,
+                random_state=42,
+            )
+        empirical = structure.empirical_variogram
+        assert empirical is not None
+
+        def fail_sampling(*args: Any, **kwargs: Any) -> Any:
+            """Fail if refitting tries to draw another variogram sample."""
+
+            pytest.fail("Variogram refitting must use its stored bins")
+
+        monkeypatch.setattr(gu.Raster, "variogram", fail_sampling)
+        fitted = structure.refit_variogram(exponential_variogram)
+        repeated = fitted.refit_variogram()
+
+        for result in (fitted, repeated):
+            updated = result.empirical_variogram
+            assert updated is not None and updated.model is not None
+            assert updated.model.function is exponential_variogram
+            assert updated.fit_result["min_count"] == empirical.fit_result["min_count"]
+            columns = [name for name in empirical.to_dataframe() if name != "fitted_semivariance"]
+            pd.testing.assert_frame_equal(updated.to_dataframe()[columns], empirical.to_dataframe()[columns])
+        assert empirical.model is not None
+        assert empirical.model.function is (None if isinstance(initial_model, str) else initial_model)
+
 
 class TestErrorStructureEstimationChunked:
     """Test module for Dask/MP estimation across input types and error components."""
+
+    def test_estimate__custom_magnitude_stays_lazy(self) -> None:
+        """Checks that a custom magnitude fit preserves lazy inputs and predicts the same values as an eager fit."""
+
+        pytest.importorskip("dask.array")
+        angles = np.broadcast_to(np.tile(np.arange(4, dtype=float), 2), (8, 8)).copy()
+        values = (1 + angles**2) * np.tile([-1.0, 1.0], 4)[:, None]
+        transform = Affine(10, 0, 0, 0, -10, 80)
+        proxy = gu.raster.from_array(values, transform, 32631)
+        predictor = gu.raster.from_array(angles, transform, 32631)
+        # Uneven chunks split both groups and balanced error pairs
+        lazy_proxy = proxy.chunk({"y": 3, "x": 5})
+        lazy_predictor = predictor.chunk({"y": 3, "x": 5})
+
+        def model(x: Any, offset: float, scale: float) -> Any:
+            """Calculate a quadratic spread from viewing angle."""
+
+            return offset + scale * x**2
+
+        options: dict[str, Any] = {
+            "components": {"uncorrelated": {"magnitude": "heteroscedastic", "correlation": None}},
+            "bins": {"angle": [-0.5, 0.5, 1.5, 2.5, 3.5]},
+            "min_count": 8,
+            "magnitude_model": model,
+            "random_state": 42,
+        }
+        assert proxy.rst.is_loaded and predictor.rst.is_loaded
+        assert not lazy_proxy.rst.is_loaded and not lazy_predictor.rst.is_loaded
+
+        eager = gu.ErrorStructure.estimate(proxy, predictors={"angle": predictor}, **options)
+        lazy = gu.ErrorStructure.estimate(lazy_proxy, predictors={"angle": lazy_predictor}, **options)
+        eager_map = eager.predict_magnitude({"angle": predictor}, like=proxy)
+        lazy_map = lazy.predict_magnitude({"angle": lazy_predictor}, like=lazy_proxy)
+
+        assert proxy.rst.is_loaded and predictor.rst.is_loaded
+        assert not lazy_proxy.rst.is_loaded and not lazy_predictor.rst.is_loaded
+        assert eager_map.rst.is_loaded and not lazy_map.rst.is_loaded
+        computed = lazy_map.compute()
+        assert computed.rst.is_loaded
+        np.testing.assert_array_equal(computed.data, eager_map.data)
+        np.testing.assert_array_equal(computed.data, 1 + angles**2)
 
     # Vary point representations only for Dask inputs that actually contain points
     @pytest.mark.parametrize(
@@ -464,8 +938,8 @@ class TestErrorStructureEstimationChunked:
     @pytest.mark.parametrize(
         "components",
         [
-            pytest.param({"measurement": {"magnitude": "constant", "correlation": None}}, id="constant"),
-            pytest.param({"measurement": {"magnitude": "heteroscedastic", "correlation": None}}, id="variable"),
+            pytest.param({"uncorrelated": {"magnitude": "constant", "correlation": None}}, id="constant"),
+            pytest.param({"uncorrelated": {"magnitude": "heteroscedastic", "correlation": None}}, id="variable"),
             pytest.param({"spatial": {"magnitude": "constant", "correlation": "spherical"}}, id="constant-correlation"),
             pytest.param(
                 {"spatial": {"magnitude": "heteroscedastic", "correlation": "spherical"}},
@@ -473,7 +947,7 @@ class TestErrorStructureEstimationChunked:
             ),
             pytest.param(
                 {
-                    "measurement": {"magnitude": "constant", "correlation": None},
+                    "uncorrelated": {"magnitude": "constant", "correlation": None},
                     "spatial": {"magnitude": "heteroscedastic", "correlation": "spherical"},
                 },
                 id="constant-plus-variable-correlation",
@@ -541,6 +1015,7 @@ class TestErrorStructureEstimationChunked:
             "spread_estimator": np.std,
             "subsample_magnitude": 60 if correlated else 1,
             "n_pairs": 300,
+            "fit_kwargs": {"min_count": 1},
             "n_lags": 5,
             "pair_sampling": "random_xy",
             "random_state": 4,
@@ -670,6 +1145,9 @@ class TestErrorStructureEstimationChunked:
         if submitted_chunks:
             assert submitted_chunks == [23] * 6 + [5]
         assert result.fit_diagnostics["magnitude"]["valid_count"] == np.count_nonzero(np.isfinite(errors))
+        assert (
+            result.fit_diagnostics["magnitude"]["sample_count"] == expected.fit_diagnostics["magnitude"]["sample_count"]
+        )
         assert list(result.components) == list(expected.components)
 
         # Compare each component magnitude, including its grouped statistics
@@ -720,8 +1198,171 @@ class TestErrorStructureEstimationChunked:
             )
 
 
+class TestErrorStructureEstimationWarnings:
+    """Test module for range warnings from components contributing at least 3% of the fitted variance."""
+
+    @pytest.mark.parametrize("long_fraction", [0.001, 0.029, 0.03, 0.04])
+    @pytest.mark.parametrize(
+        "ranges,messages",
+        [
+            ((20, 60), []),
+            ((20, 95), ["longest correlation range"]),
+            ((70, 95), ["ranges overlap", "longest correlation range"]),
+            ((60, 20), ["ranges crossed"]),
+        ],
+    )
+    def test_estimate__range_warnings_follow_variance_fraction(
+        self, long_fraction: float, ranges: tuple[int, int], messages: list[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Checks that estimate() warns about ranges only when the components contribute at least 3% of variance."""
+
+        # Set exact fitted shares to check either side of the warning threshold
+        values = np.arange(144, dtype=float).reshape(12, 12)
+        proxy = gu.Raster.from_array(values, Affine(10, 0, 0, 0, -10, 120), 32631)
+        model = VariogramModel(
+            "sum",
+            components=(
+                VariogramModel("gaussian", effective_range=ranges[0], partial_sill=1 - long_fraction),
+                VariogramModel("spherical", effective_range=ranges[1], partial_sill=long_fraction),
+            ),
+        )
+
+        def fit(empirical: gu.Variogram, *args: Any, **kwargs: Any) -> gu.Variogram:
+            """Return controlled fitted parameters with the measured bins."""
+
+            # Supply enough pairs to test range warnings independently of bin filtering
+            return replace(empirical, model=model, counts=np.maximum(empirical.counts, 100))
+
+        monkeypatch.setattr(gu.Variogram, "fit", fit)
+        components = {"short": {"correlation": "gaussian"}, "long": {"correlation": "spherical"}}
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", UserWarning)
+            result = gu.ErrorStructure.estimate(
+                proxy, components=components, n_pairs=100, n_lags=6, max_lag=100, random_state=42
+            )
+
+        # Small components remain in the result without producing range warnings
+        expected_messages = messages if long_fraction >= 0.03 else []
+        assert len(caught) == len(expected_messages)
+        for warning, message in zip(caught, expected_messages):
+            assert warning.category is UserWarning
+            assert message in str(warning.message)
+        fractions = [component.metadata["initial_variance_fraction"] for component in result.components.values()]
+        np.testing.assert_allclose(sorted(fractions), sorted([long_fraction, 1 - long_fraction]))
+
+    @pytest.mark.parametrize("model_name", ["gaussian", "matern"])
+    def test_estimate__identical_model_ranges_reorder_silently(
+        self, model_name: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Checks that exchanging identical model forms preserves correlation without a crossed-range warning."""
+
+        pytest.importorskip("skgstat")
+        proxy = gu.Raster.from_array(np.arange(144).reshape(12, 12), Affine(10, 0, 0, 0, -10, 120), 32631)
+        smoothness = 1.5 if model_name == "matern" else None
+        model = VariogramModel.sum(
+            [
+                VariogramModel(model_name, effective_range=60, partial_sill=0.4, smoothness=smoothness),
+                VariogramModel(model_name, effective_range=20, partial_sill=0.6, smoothness=smoothness),
+            ]
+        )
+
+        def fit(empirical: gu.Variogram, *args: Any, **kwargs: Any) -> gu.Variogram:
+            """Return the same model forms in descending range order."""
+
+            return replace(empirical, model=model)
+
+        monkeypatch.setattr(gu.Variogram, "fit", fit)
+        components = {name: {"correlation": model_name} for name in ["short", "long"]}
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", UserWarning)
+            result = gu.ErrorStructure.estimate(
+                proxy, components=components, n_pairs=100, n_lags=6, max_lag=100, random_state=42
+            )
+
+        assert not caught
+        fitted_ranges = []
+        for component in result.components.values():
+            assert isinstance(component.correlation, VariogramModel)
+            fitted_ranges.append(component.correlation.effective_range)
+        assert fitted_ranges == [20, 60]
+        distances = np.array([0, 10, 20, 40, 60, 100])
+        np.testing.assert_allclose(result.predict_correlation(distances), model.correlation(distances))
+
+    @pytest.mark.parametrize(
+        "effective_range, tail_count, warn",
+        [(90, 100, False), (95, 100, False), (98, 100, True), (100, 100, True), (95, 99, True)],
+    )
+    def test_estimate__range_warning_uses_supported_lags(
+        self, effective_range: float, tail_count: int, warn: bool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Checks that range warnings require the fitted range to reach the supported lag limit."""
+
+        pytest.importorskip("skgstat")
+        proxy = gu.Raster.from_array(np.arange(144).reshape(12, 12), Affine(10, 0, 0, 0, -10, 120), 32631)
+        model = VariogramModel("gaussian", effective_range=effective_range, partial_sill=1)
+        lags = np.array([10, 30, 50, 70, 90, 100])
+
+        def fit(empirical: gu.Variogram, *args: Any, **kwargs: Any) -> gu.Variogram:
+            """Control the supported tail independently of the requested sampling extent."""
+
+            return gu.Variogram(
+                lags=lags,
+                semivariance=model.variogram(lags),
+                counts=np.array([100] * 5 + [tail_count]),
+                model=model,
+                attrs={"max_distance": 100},
+            )
+
+        monkeypatch.setattr(gu.Variogram, "fit", fit)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", UserWarning)
+            gu.ErrorStructure.estimate(proxy, n_pairs=100, n_lags=6, max_lag=100, random_state=42)
+
+        assert len(caught) == int(warn)
+        if warn:
+            assert "usable lag limit" in str(caught[0].message)
+
+
 class TestErrorStructureEstimationErrors:
     """Test module for invalid configurations and statistical controls in ErrorStructure.estimate()."""
+
+    @pytest.mark.parametrize(
+        "method,message",
+        [("refit_magnitude", "stored variable magnitude table"), ("refit_variogram", "retained empirical variogram")],
+    )
+    def test_refit_methods__error_missing_statistics(self, method: str, message: str) -> None:
+        """Checks an error is raised when refitting has no stored magnitude or variogram statistics."""
+
+        structure = gu.ErrorStructure([gu.ErrorComponent("noise", 1)])
+
+        with pytest.raises(ValueError, match=message):
+            getattr(structure, method)()
+
+    @pytest.mark.parametrize(
+        "bins,categories,message",
+        [
+            ({"quality": 2}, {"quality": [0, 1]}, "both bins and categories"),
+            (None, {"unknown": [0, 1]}, "categories must name"),
+        ],
+    )
+    def test_estimate__error_predictor_categories(
+        self, bins: dict[str, int] | None, categories: dict[str, list[int]], message: str
+    ) -> None:
+        """Checks an error is raised for categorical predictors with bins or unknown predictor names."""
+
+        transform = Affine(10, 0, 0, 0, -10, 20)
+        proxy = gu.raster.from_array(np.array([[-1.0, 1.0], [-2.0, 2.0]]), transform, 32631)
+        quality = gu.raster.from_array(np.array([[0, 1], [0, 1]]), transform, 32631)
+
+        with pytest.raises(ValueError, match=message):
+            gu.ErrorStructure.estimate(
+                proxy,
+                predictors={"quality": quality},
+                bins=bins,
+                categories=categories,
+                components={"uncorrelated": {"magnitude": "heteroscedastic", "correlation": None}},
+            )
 
     @pytest.mark.parametrize("kind", ["raster", "point"])
     def test_estimate_error_structure__error_invalid_precision(self, kind: str) -> None:
@@ -744,10 +1385,10 @@ class TestErrorStructureEstimationErrors:
         [
             ({}, ValueError, "at least one named"),
             ({"": {}}, TypeError, "non-empty names"),
-            ({"measurement": {"unknown": 1}}, ValueError, "Unknown configuration"),
-            ({"measurement": {"magnitude": "invalid"}}, ValueError, "magnitude must"),
-            ({"measurement": {"magnitude": "heteroscedastic"}}, ValueError, "requires at least one"),
-            ({"measurement": {"correlation": 2}}, TypeError, "variogram model name"),
+            ({"uncorrelated": {"unknown": 1}}, ValueError, "Unknown configuration"),
+            ({"uncorrelated": {"magnitude": "invalid"}}, ValueError, "magnitude must"),
+            ({"uncorrelated": {"magnitude": "heteroscedastic"}}, ValueError, "requires at least one"),
+            ({"uncorrelated": {"correlation": 2}}, TypeError, "variogram model name"),
         ],
     )
     def test_estimate__error_invalid_components(
@@ -776,7 +1417,7 @@ class TestErrorStructureEstimationErrors:
             (
                 {"components": {"first": {"correlation": None}, "second": {"correlation": None}}},
                 ValueError,
-                "Only one independent component",
+                "Only one spatially uncorrelated component",
             ),
         ],
     )
@@ -791,7 +1432,7 @@ class TestErrorStructureEstimationErrors:
             proxy = gu.Raster.from_array(values.reshape(2, 2), Affine(1, 0, 0, 0, -1, 2), 32631, nodata=-9999)
         else:
             proxy = gu.PointCloud.from_xyz(np.arange(4), np.zeros(4), values, crs=32631)
-        default: dict[str, Any] = {"components": {"measurement": {"correlation": None}}, "spread_estimator": np.std}
+        default: dict[str, Any] = {"components": {"uncorrelated": {"correlation": None}}, "spread_estimator": np.std}
 
         # Check error for each case
         with pytest.raises(error_type, match=message):
@@ -809,5 +1450,5 @@ class TestErrorStructureEstimationErrors:
             gu.ErrorStructure.estimate(
                 proxy,
                 predictors={"quality": "quality"},
-                components={"measurement": {"magnitude": "heteroscedastic", "correlation": None}},
+                components={"uncorrelated": {"magnitude": "heteroscedastic", "correlation": None}},
             )

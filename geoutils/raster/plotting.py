@@ -291,7 +291,9 @@ def _plot_raster(
             cbar.set_label(cbar_title)
 
     plt.sca(ax0)
-    plt.tight_layout()
+    # Apply the default spacing without replacing a selected figure layout
+    if ax0.figure.get_layout_engine() is None:
+        ax0.figure.tight_layout()
     _reduce_tick_label_overlap(ax0)
     if savefig_fname:
         plt.savefig(savefig_fname)

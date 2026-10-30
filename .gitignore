@@ -8,6 +8,7 @@
 .codex
 AGENTS.md
 .agents
+.aiignore
 
 # Default local ASV outputs
 .asv/

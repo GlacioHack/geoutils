@@ -153,7 +153,7 @@ class Interpolator:
                     weights = 1 / data.distances
                 return gu.operators.LinearCoefficients(weights / weights.sum())
 
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 2.0)])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2.0)])
         summary = gu.uncertainty.propagate(
             raster.interp_at_points, error_structure=errors,
             operation_kwargs=dict(points=(x, y), method=SimpleInverseDistance(), as_array=True),

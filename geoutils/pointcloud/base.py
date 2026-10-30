@@ -461,7 +461,7 @@ class PointCloudBase(ABC):
             Cannot be combined with Dask inputs.
         :param fractional: Use the exact area covered by each polygon when grouping values from a raster grid.
         :param overlap_backend: Library used to calculate polygon coverage of raster cells.
-        :param error_structure: Optional source error model for one supplied Reducer.
+        :param error_structure: Optional source error model for one named statistic or Reducer.
         :param uncertainty_kwargs: Options passed to geoutils.uncertainty.propagate().
         :returns: A statistic, summary dictionary, grouped dataframe, or grouped dataframe and mask mapping.
         """
@@ -616,29 +616,79 @@ class PointCloudBase(ABC):
 
     def estimate_error_structure(
         self,
-        other: RasterLike | PointCloudLike | ArrayLike,
+        other: Any | None = None,
         *,
-        other_precision: Literal["same", "negligible"] = "same",
+        other_precision: Literal["same", "negligible"] = "negligible",
+        at: Literal["self", "other"] | None = "self",
+        align: Literal["raise", "reproject"] = "raise",
         predictors: Mapping[str, Any] | None = None,
         components: Mapping[str, Mapping[str, Any]] | None = None,
-        mask: RasterLike | VectorLike | ArrayLike | None = None,
+        mask: Any | None = None,
+        bins: Mapping[str, Any] | int | None = None,
+        categories: Mapping[str, Sequence[Any]] | None = None,
+        spread_estimator: Callable[[Any], Any] | None = None,
+        min_count: int = 100,
+        subsample_magnitude: int | float = 1_000_000,
+        magnitude_model: Literal["piecewise_linear", "linear"] | Callable[..., Any] = "piecewise_linear",
+        magnitude_fit_kwargs: Mapping[str, Any] | None = None,
+        variogram_estimator: str | Callable[[Any], float] = "matheron",
+        n_pairs: int = 1_000_000,
+        pair_sampling: Literal["loglag", "random_xy"] = "loglag",
+        n_lags: int = 24,
+        min_lag: float | None = None,
+        max_lag: float | None = None,
+        n_runs: int = 1,
+        fit_method: Literal["variogram"] = "variogram",
+        fit_kwargs: Mapping[str, Any] | None = None,
+        pair_sampling_kwargs: Mapping[str, Any] | None = None,
         mp_config: MultiprocConfig | None = None,
-        **estimate_kwargs: Any,
+        random_state: int | np.random.Generator | None = None,
     ) -> ErrorStructure:
         """
-        Estimate error structure of this point cloud from its difference with another dataset.
+        Estimate error structure from this point cloud or its difference with another dataset.
+
+        With other=None, this point cloud is treated as an error proxy. The arguments and defaults match
+        ErrorStructure.estimate(), with this point cloud supplying source.
 
         With ``other_precision="same"``, the two dataset errors must be independent and have the same magnitude and
         correlation, and the difference is divided by the square root of two. Use ``"negligible"`` when the other
         dataset errors can be ignored.
 
         :param other: Raster, point cloud, or array of comparable measurements.
-        :param other_precision: Whether the other input has the same precision or negligible error.
+            None uses this point cloud as an error proxy.
+        :param other_precision: Whether the other input has the same precision or negligible error (default).
+        :param at: Comparison locations: "self", "other", or None to prefer point locations when present.
+        :param align: Whether mismatched grids or coordinate systems raise an error or are reprojected for comparison.
         :param predictors: Named variables controlling a magnitude that varies with location.
         :param components: Named magnitude and correlation models to fit.
+            A correlation can be a model name, a custom variogram callable, or None.
         :param mask: Locations used to estimate the error structure.
+        :param bins: Continuous group definitions, or one bin count applied to every continuous predictor.
+        :param categories: Declared values for categorical predictors, using numeric codes for spatial inputs.
+            Continuous predictors are interpolated separately within each category.
+        :param spread_estimator: Spread estimator used for the error magnitude (default numpy.std()).
+        :param min_count: Smallest grouped sample retained in the magnitude model.
+        :param subsample_magnitude: Maximum observations used to fit the magnitude.
+        :param magnitude_model: "piecewise_linear" for interpolation (default), "linear" for an affine fit,
+            or a callable model(x, ...) with parameters as separate arguments, fitted to grouped spreads.
+            With one continuous predictor x is a vector; with N predictors its shape is (N, n_groups), in predictor
+            order. Fits are separate for each categorical combination. Fitted functions extrapolate and return NaN
+            for negative or non-finite spreads.
+        :param magnitude_fit_kwargs: Options passed to scipy.optimize.curve_fit(), including p0 and bounds.
+        :param variogram_estimator: Empirical variogram estimator name or callable (default "matheron").
+        :param n_pairs: Target spatial pairs per variogram run.
+        :param pair_sampling: Pair sampling scheme exposed by GeoUtils spatial objects.
+        :param n_lags: Number of empirical lag classes.
+        :param min_lag: Smallest sampled spatial distance.
+        :param max_lag: Largest sampled spatial distance. Defaults to half the raster diagonal or the point cloud
+            diagonal, as in variogram().
+        :param n_runs: Independent variogram samples used to estimate empirical sampling error.
+        :param fit_method: Fitting backend, currently "variogram".
+        :param fit_kwargs: Options passed to Variogram.fit().
+            min_count defaults to 100 sampled pairs per lag bin for error structure fitting.
+        :param pair_sampling_kwargs: Advanced options passed to pairsample() and variogram().
         :param mp_config: Worker and point partition settings for multiprocessing.
-        :param estimate_kwargs: Additional options accepted by ErrorStructure.estimate().
+        :param random_state: Random generator or seed used throughout estimation.
         :returns: Fitted error structure for this point cloud.
         """
 
@@ -648,11 +698,30 @@ class PointCloudBase(ABC):
             self,
             other=other,
             other_precision=other_precision,
+            at=at,
+            align=align,
             predictors=predictors,
             components=components,
             mask=mask,
+            bins=bins,
+            categories=categories,
+            spread_estimator=spread_estimator,
+            min_count=min_count,
+            subsample_magnitude=subsample_magnitude,
+            magnitude_model=magnitude_model,
+            magnitude_fit_kwargs=magnitude_fit_kwargs,
+            variogram_estimator=variogram_estimator,
+            n_pairs=n_pairs,
+            pair_sampling=pair_sampling,
+            n_lags=n_lags,
+            min_lag=min_lag,
+            max_lag=max_lag,
+            n_runs=n_runs,
+            fit_method=fit_method,
+            fit_kwargs=fit_kwargs,
+            pair_sampling_kwargs=pair_sampling_kwargs,
             mp_config=mp_config,
-            **estimate_kwargs,
+            random_state=random_state,
         )
 
     def cosample(

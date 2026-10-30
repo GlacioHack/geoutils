@@ -359,7 +359,7 @@ class TestPointCloud:
             data_name="z",
         )
         grid_coords = (np.arange(3, dtype=float), np.arange(2, dtype=float))
-        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
 
         # Request uncertainty with the mean method string and compare its raster with the usual gridding result
         expected = points.grid(grid_coords=grid_coords, resampling="mean", dist_nodata_pixel=1.1)
@@ -616,7 +616,7 @@ class TestGriddingOperators:
         points = gu.PointCloud.from_xyz([0, 1, 10, 20], [0, 0, 0, 0], [1, 3, 7, 11], crs=32631)
         reference = gu.Raster.from_array(np.zeros((1, 1)), transform=rio.transform.from_origin(0, 1, 1, 1), crs=32631)
         reducer = Mean(neighborhood=neighborhood)
-        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
 
         # The configured point limits select only the first two observations, despite the larger pixel radius
         usual = points.grid(ref=reference, resampling=Mean(), dist_nodata_pixel=30, nodata_handling="ignore")
@@ -671,7 +671,7 @@ class TestGriddingOperators:
             crs=32631,
         )
         operator = InverseDistance(neighborhood=PointNeighbours(max_points=2, radius=0))
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Both zero-distance values receive half the weight, including in analytical variance
         nominal = points.grid(ref=reference, resampling=operator, nodata_handling="ignore", error_structure=errors)
@@ -799,7 +799,7 @@ class TestKrigingPoints:
             crs=32631,
         )
         variogram = gu.Variogram.from_model("exponential", effective_range=4, partial_sill=2)
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Observation noise adds an identity matrix to the covariance used for the kriging fit
         local = LocalData(

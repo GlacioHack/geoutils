@@ -35,7 +35,7 @@ from geoutils._dispatch import (
     is_dask_dataframe,
 )
 from geoutils._misc import import_optional
-from geoutils._typing import ArrayLike
+from geoutils._typing import ArrayLike, NDArrayNum
 from geoutils.multiproc.chunked import iter_chunk_slices
 from geoutils.multiproc.cluster import _map_bounded
 from geoutils.multiproc.readers import (
@@ -1530,12 +1530,93 @@ def _plot_axis(index: pd.Index) -> tuple[NDArray[Any], NDArray[Any], list[str] |
     return edges, centers, [str(value) for value in index]
 
 
+def _prepare_grouped_plot(
+    table: pd.DataFrame, plot_kind: Literal["auto", "line", "bar", "heatmap"]
+) -> tuple[pd.DataFrame, Literal["line", "bar", "heatmap"]]:
+    """Choose a layout and place continuous groups on the x axis when drawing curves by category."""
+
+    if plot_kind not in {"auto", "line", "bar", "heatmap"}:
+        raise ValueError("plot_kind must be 'auto', 'line', 'bar', or 'heatmap'.")
+    if table.index.nlevels not in {1, 2}:
+        raise ValueError("plot_grouped_stats supports one or two group dimensions.")
+    if table.index.nlevels == 1:
+        if plot_kind == "heatmap":
+            raise ValueError("A heatmap requires two grouping variables.")
+        categorical = (
+            isinstance(table.index, pd.CategoricalIndex)
+            or pd.api.types.is_bool_dtype(table.index.dtype)
+            or not (isinstance(table.index, pd.IntervalIndex) or pd.api.types.is_numeric_dtype(table.index.dtype))
+        )
+        if plot_kind == "auto":
+            return table, "bar" if categorical else "line"
+        return table, plot_kind
+    if plot_kind == "bar":
+        raise ValueError("A bar plot requires one grouping variable.")
+
+    # Numeric intervals and noncategorical numbers define continuous predictor values
+    continuous = []
+    for level in table.index.levels:
+        numeric = pd.api.types.is_numeric_dtype(level.dtype) and not pd.api.types.is_bool_dtype(level.dtype)
+        continuous.append(
+            not isinstance(level, pd.CategoricalIndex) and (isinstance(level, pd.IntervalIndex) or numeric)
+        )
+    if plot_kind == "auto":
+        layout: Literal["line", "heatmap"] = "line" if sum(continuous) == 1 else "heatmap"
+    else:
+        layout = plot_kind
+
+    # Draw curves against the continuous variable regardless of the input index order
+    if layout == "line" and not continuous[0] and continuous[1]:
+        table = table.reorder_levels([1, 0])
+    return table, layout
+
+
+def _plot_count_histogram(
+    ax: Any,
+    lower_edges: NDArrayNum,
+    upper_edges: NDArrayNum,
+    counts: NDArrayNum,
+    *,
+    horizontal: bool = False,
+    label: str = "Count",
+) -> None:
+    """Draw counts over their bin intervals with a shared style for diagnostic plots."""
+
+    from matplotlib.ticker import MaxNLocator
+
+    # Match each bar to its bin and use neutral colors beside the main diagnostic
+    widths = upper_edges - lower_edges
+    bar_options = {"align": "edge", "color": "0.78", "edgecolor": "white", "linewidth": 0.6}
+    if horizontal:
+        ax.barh(lower_edges, counts, height=widths, **bar_options)
+        ax.set_xlabel(label)
+        group_axis, count_axis = "y", "x"
+    else:
+        ax.bar(lower_edges, counts, width=widths, **bar_options)
+        ax.set_ylabel(label)
+        group_axis, count_axis = "x", "y"
+
+    # Omit repeated group labels while showing the histogram baseline
+    ax.tick_params(
+        axis=group_axis, which="both", bottom=not horizontal, left=horizontal, labelbottom=False, labelleft=False
+    )
+    ax.grid(axis=count_axis, color="0.92", linewidth=0.5)
+    ax.set_axisbelow(True)
+
+    # Leave room for the main panel's tick labels across the small gap
+    count_scale = ax.xaxis if horizontal else ax.yaxis
+    count_scale.set_major_locator(MaxNLocator(nbins=3, integer=True, prune="lower"))
+    for spine in ax.spines.values():
+        spine.set_visible(True)
+
+
 def plot_grouped_stats(
     table: pd.DataFrame,
     *,
     value: str | None = None,
     statistic: str = "nmad",
     min_count: int = 0,
+    plot_kind: Literal["auto", "line", "bar", "heatmap"] = "auto",
     cmap: Any = "viridis",
     vmin: float | None = None,
     vmax: float | None = None,
@@ -1545,8 +1626,9 @@ def plot_grouped_stats(
     """
     Plot grouped statistics for one or two grouping variables with their sample counts shown as side histograms.
 
-    One grouping variable produces a curve below its histogram counts.
-    Two grouping variables produce a colored grid, with count histograms above and to the right.
+    One grouping variable produces bars for categories or a curve for continuous bins, below its histogram counts.
+    With two grouping variables, a categorical and a continuous variable produce one curve per category.
+    Two continuous variables produce a colored heatmap. Both layouts show count histograms above and to the right.
 
     Passing ``min_count`` hides estimates without removing observations from the count panels.
 
@@ -1554,6 +1636,9 @@ def plot_grouped_stats(
     :param value: Selected value column. It may be omitted when the table contains one value.
     :param statistic: Statistic column to display.
     :param min_count: Hide statistic cells with fewer finite observations.
+    :param plot_kind: "auto" selects bars for one categorical variable, curves for one continuous variable or mixed
+        categorical/continuous groups, and a heatmap otherwise. Use "line", "bar", or "heatmap" to choose explicitly.
+        Bars require one grouping variable and heatmaps require two.
     :param cmap: Matplotlib colormap used for a two-dimensional statistic grid.
     :param vmin: Lower color limit for a two-dimensional statistic grid.
     :param vmax: Upper color limit for a two-dimensional statistic grid.
@@ -1584,10 +1669,9 @@ def plot_grouped_stats(
     # Every plot needs counts to show how many finite observations support each estimate
     if (value, statistic) not in table.columns or (value, "count") not in table.columns:
         raise ValueError(f"Value {value!r} must contain both {statistic!r} and 'count' statistics.")
-    if table.index.nlevels not in {1, 2}:
-        raise ValueError("plot_grouped_stats supports one or two group dimensions.")
     if min_count < 0:
         raise ValueError("Argument ``min_count`` cannot be negative.")
+    table, layout = _prepare_grouped_plot(table, plot_kind)
 
     # 2/ Prepare a common plotting area for the statistic and its count panels
 
@@ -1602,12 +1686,12 @@ def plot_grouped_stats(
         raise TypeError("Argument ``ax`` must be a Matplotlib Axes or None.")
     frame.set_axis_off()
 
-    # 3/ Draw one-dimensional curves or a two-dimensional grid with matching counts
+    # 3/ Draw statistics with matching counts
 
     # Draw counts above the statistic for one grouping variable
     if table.index.nlevels == 1:
         count_axis = frame.inset_axes((0.0, 0.72, 1.0, 0.28))
-        statistic_axis = frame.inset_axes((0.0, 0.0, 1.0, 0.64))
+        statistic_axis = frame.inset_axes((0.0, 0.0, 1.0, 0.70))
         edges, centers, labels = _plot_axis(table.index)
 
         # Hide unsupported estimates while keeping their counts visible in the panel above
@@ -1615,23 +1699,29 @@ def plot_grouped_stats(
         values = table[(value, statistic)].where(table[(value, "count")] >= min_count).to_numpy(dtype=float)
 
         # Match count-bar widths to the numeric intervals or category positions
-        count_axis.bar(edges[:-1], counts, width=np.diff(edges), align="edge", color="0.7", edgecolor="white")
+        _plot_count_histogram(count_axis, edges[:-1], edges[1:], counts)
         count_axis.set_xlim(edges[0], edges[-1])
-        count_axis.set_ylabel("Count")
-        count_axis.tick_params(axis="x", labelbottom=False)
 
         # Align the statistic with the same group centers and display labels for nonnumeric positions
-        statistic_axis.plot(centers, values, marker="o")
+        if layout == "bar":
+            bars = statistic_axis.bar(centers, values, width=0.7 * np.diff(edges), color="C0")
+            value_labels = [f"{number:.3g}" if np.isfinite(number) else "" for number in values]
+            statistic_axis.bar_label(bars, labels=value_labels, padding=3)
+            statistic_axis.margins(y=0.15)
+            statistic_axis.grid(axis="y", color="0.9", linewidth=0.6)
+            statistic_axis.set_axisbelow(True)
+        else:
+            statistic_axis.plot(centers, values, marker="o")
         statistic_axis.set(xlim=(edges[0], edges[-1]), xlabel=table.index.name, ylabel=statistic)
         if labels is not None:
             statistic_axis.set_xticks(centers, labels, rotation=45, ha="right")
         axes = {"count": count_axis, "statistic": statistic_axis}
 
-    # Draw a two-dimensional statistic grid with totals for each row and column
+    # Draw both grouping variables with their separate count totals
     else:
-        statistic_axis = frame.inset_axes((0.0, 0.0, 0.68, 0.66))
+        statistic_axis = frame.inset_axes((0.0, 0.0, 0.68, 0.70))
         count_x_axis = frame.inset_axes((0.0, 0.72, 0.68, 0.28))
-        count_y_axis = frame.inset_axes((0.74, 0.0, 0.26, 0.66))
+        count_y_axis = frame.inset_axes((0.72, 0.0, 0.28, 0.70))
         level_x, level_y = table.index.levels
         edges_x, centers_x, labels_x = _plot_axis(level_x)
         edges_y, centers_y, labels_y = _plot_axis(level_y)
@@ -1641,48 +1731,78 @@ def plot_grouped_stats(
         counts = table[(value, "count")].reindex(full_index).unstack(level=1)
         plotted = table[(value, statistic)].where(table[(value, "count")] >= min_count)
         plotted = plotted.reindex(full_index).unstack(level=1)
-        mesh = statistic_axis.pcolormesh(
-            edges_x,
-            edges_y,
-            plotted.to_numpy(dtype=float).T,
-            cmap=cmap,
-            vmin=vmin,
-            vmax=vmax,
-            shading="flat",
-        )
+        if layout == "heatmap":
+            mesh = statistic_axis.pcolormesh(
+                edges_x,
+                edges_y,
+                plotted.to_numpy(dtype=float).T,
+                cmap=cmap,
+                vmin=vmin,
+                vmax=vmax,
+                shading="flat",
+            )
+        else:
+            # A shared color identifies each curve and its category count
+            for category in level_y:
+                statistic_axis.plot(centers_x, plotted[category], marker="o", label=str(category))
+            statistic_axis.grid(axis="y", color="0.9", linewidth=0.6)
+            statistic_axis.set_axisbelow(True)
 
         # Draw row and column totals with the same widths as the statistic grid
         counts_x = counts.sum(axis=1, skipna=True).to_numpy(dtype=float)
         counts_y = counts.sum(axis=0, skipna=True).to_numpy(dtype=float)
-        count_x_axis.bar(edges_x[:-1], counts_x, width=np.diff(edges_x), align="edge", color="0.7", edgecolor="white")
-        count_y_axis.barh(edges_y[:-1], counts_y, height=np.diff(edges_y), align="edge", color="0.7", edgecolor="white")
-        count_x_axis.set(xlim=(edges_x[0], edges_x[-1]), ylabel="Count")
-        count_y_axis.set(ylim=(edges_y[0], edges_y[-1]), xlabel="Count")
-        count_x_axis.tick_params(axis="x", labelbottom=False)
-        count_y_axis.tick_params(axis="y", labelleft=False)
+        _plot_count_histogram(count_x_axis, edges_x[:-1], edges_x[1:], counts_x)
+        _plot_count_histogram(count_y_axis, edges_y[:-1], edges_y[1:], counts_y, horizontal=True)
+        count_x_axis.set_xlim(edges_x[0], edges_x[-1])
+        count_y_axis.set_ylim(edges_y[0], edges_y[-1])
 
-        # Give the statistic grid the same extent as both count panels
+        # Align predictor positions with their count panels
         statistic_axis.set(
             xlim=(edges_x[0], edges_x[-1]),
-            ylim=(edges_y[0], edges_y[-1]),
             xlabel=table.index.names[0],
-            ylabel=table.index.names[1],
+            ylabel=table.index.names[1] if layout == "heatmap" else statistic,
         )
+        if layout == "heatmap":
+            statistic_axis.set_ylim(edges_y[0], edges_y[-1])
         if labels_x is not None:
             statistic_axis.set_xticks(centers_x, labels_x, rotation=45, ha="right")
-        if labels_y is not None:
+        if layout == "heatmap" and labels_y is not None:
             statistic_axis.set_yticks(centers_y, labels_y)
 
         # Expose all created axes so callers can adapt the finished figure
-        colorbar = figure.colorbar(mesh, ax=statistic_axis, label=statistic)
         axes = {
             "count_x": count_x_axis,
             "count_y": count_y_axis,
             "statistic": statistic_axis,
-            "colorbar": colorbar.ax,
         }
+        if layout == "heatmap":
+            from matplotlib.ticker import MaxNLocator
+
+            # Place the color scale in the empty corner above the row counts
+            colorbar_axis = frame.inset_axes((0.74, 0.88, 0.24, 0.05))
+            colorbar = figure.colorbar(mesh, cax=colorbar_axis, label=statistic, orientation="horizontal")
+            colorbar.locator = MaxNLocator(nbins=3)
+            colorbar.update_ticks()
+            axes["colorbar"] = colorbar.ax
+        else:
+            # Put category names beside their totals and in the free upper-right corner
+            for bar, line in zip(count_y_axis.patches, statistic_axis.lines):
+                bar.set_facecolor(line.get_color())
+            count_y_axis.set_yticks(centers_y, [str(category) for category in level_y])
+            count_y_axis.yaxis.tick_right()
+            count_y_axis.tick_params(axis="y", labelright=True, labelleft=False)
+            count_x_axis.legend(
+                handles=statistic_axis.lines,
+                title=table.index.names[1],
+                loc="upper left",
+                bbox_to_anchor=(1.04, 1),
+                borderaxespad=0,
+                frameon=False,
+            )
 
     # 4/ Save after every panel and label has been added
+    for spine in statistic_axis.spines.values():
+        spine.set_visible(True)
     if savefig_fname is not None:
         figure.savefig(savefig_fname, bbox_inches="tight")
     return axes

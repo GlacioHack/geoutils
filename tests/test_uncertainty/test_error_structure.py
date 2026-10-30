@@ -11,9 +11,14 @@ import pandas as pd
 import pytest
 
 import geoutils as gu
-from geoutils._misc import import_optional
 from geoutils.stats.variography import VariogramModel
 from geoutils.uncertainty.error_structure import _source_covariance_matrix
+
+
+def quadratic_spread(coordinates: Any, offset: float, scale: float) -> Any:
+    """Calculate a positive quadratic spread from one or more continuous predictors."""
+
+    return offset + scale * np.sum(np.atleast_2d(coordinates) ** 2, axis=0)
 
 
 class TestErrorMagnitude:
@@ -202,23 +207,132 @@ class TestErrorMagnitude:
         assert magnitude.reference_value == pytest.approx((0.5 + np.sqrt(32)) / 2)
         pd.testing.assert_frame_equal(statistics, original)
 
-    def test_pickle__magnitude(self) -> None:
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_predict__categorical_and_continuous(self, reverse: bool) -> None:
+        """Checks that predict() interpolates within categories properly."""
+
+        # We create category codes that are unordered
+        angles = pd.IntervalIndex.from_breaks([0, 10, 20], name="angle")
+        cover = pd.CategoricalIndex([20, 10, 30], categories=[20, 10, 30], ordered=True, name="cover")
+        statistics = pd.DataFrame(
+            {"std": [1.0, 10.0, 100.0, 3.0, 30.0, 100.0], "count": [20, 20, 0, 20, 20, 0]},
+            index=pd.MultiIndex.from_product([angles, cover]),
+        )
+        if reverse:
+            statistics = statistics.reorder_levels(["cover", "angle"])
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics, statistic="std", min_count=10)
+
+        # Check expected output
+        # (each class has its separate linear trend, with nearest values beyond the last bins)
+        inputs = {"angle": [-5, 10, 25, 10, 10, 10], "cover": [20, 20, 20, 10, 15, 30]}
+        expected = [1, 2, 3, 20, np.nan, np.nan]
+        np.testing.assert_allclose(magnitude.predict(inputs), expected, equal_nan=True)
+        restored = pickle.loads(pickle.dumps(magnitude))
+        np.testing.assert_allclose(restored.predict(inputs), expected, equal_nan=True)
+
+    def test_predict__categorical(self) -> None:
+        """Checks that predict() selects categorical magnitudes and leaves unknown categories missing."""
+
+        index = pd.CategoricalIndex(["forest", "meadow"], categories=["forest", "meadow"], name="cover")
+        statistics = pd.DataFrame({"std": [2.0, 0.5], "count": 20}, index=index)
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics, statistic="std")
+
+        np.testing.assert_allclose(magnitude.predict({"cover": ["meadow", "forest", "shrubs"]}), [0.5, 2, np.nan])
+        assert magnitude.predict({"cover": "forest"}) == 2
+
+    @pytest.mark.parametrize("dimensions", [1, 2, 3])
+    @pytest.mark.parametrize("model", ["linear", quadratic_spread])
+    def test_variable_from_grouped_stats__fitted_model(self, dimensions: int, model: Any) -> None:
+        """Checks that affine and custom fits predict known spreads in one or more dimensions."""
+
+        # Create variable errors, with a NaN and a low-count value
+        names = [f"predictor_{number}" for number in range(dimensions)]
+        index = pd.MultiIndex.from_product([[0.0, 1.0, 2.0, 3.0]] * dimensions, names=names)
+        coordinates = np.asarray(index.tolist()).T
+        values = 1 + 2 * np.sum(coordinates, axis=0) if model == "linear" else quadratic_spread(coordinates, 1, 2)
+        if dimensions == 1:
+            index = index.get_level_values(0)
+        statistics = pd.DataFrame({"std": values, "count": 20}, index=index)
+        statistics.iloc[0, 0] = 1000
+        statistics.iloc[0, 1] = 1
+        if dimensions > 1:
+            statistics.iloc[-1, 0] = np.nan
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(
+            statistics, model=model, min_count=10, fit_kwargs={"p0": [1] * (dimensions + 1 if model == "linear" else 2)}
+        )
+
+        # We check the fit extrapolates beyond the groups, and works with scalars
+        predictors: dict[str, Any] = dict.fromkeys(names, 0.5)
+        predictors[names[0]] = np.array([[0.5, 4.0, np.nan]])
+        expected = 1 + 2 * (predictors[names[0]] + (dimensions - 1) * 0.5)
+        if model != "linear":
+            expected = 1 + 2 * (predictors[names[0]] ** 2 + (dimensions - 1) * 0.5**2)
+        np.testing.assert_allclose(magnitude.predict(predictors), expected, rtol=1e-7)
+
+    @pytest.mark.parametrize("model", ["piecewise_linear", "linear", quadratic_spread])
+    def test_variable_from_grouped_stats__model_options(self, model: Any) -> None:
+        """Checks that piecewise linear interpolation is the default, and fitting options work on custom fits."""
+
+        statistics = pd.DataFrame(
+            {"std": [1.0, 3.0, 9.0, 19.0], "count": 20}, index=pd.Index([0.0, 1.0, 2.0, 3.0], name="slope")
+        )
+        options = {"bounds": ([0, 0], [5, 5]), "p0": [1, 1]} if callable(model) else None
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics, model=model, fit_kwargs=options)
+
+        if model == "piecewise_linear":
+            default = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
+            np.testing.assert_array_equal(magnitude.predict({"slope": [0.5, 4]}), default.predict({"slope": [0.5, 4]}))
+            np.testing.assert_array_equal(default.predict({"slope": [0.5, 4]}), [2, 19])
+        elif model == "linear":
+            # Least squares fits a slope of 6 and intercept of -1
+            np.testing.assert_allclose(magnitude.predict({"slope": [0, 0.5, 4]}), [np.nan, 2, 23])
+        else:
+            np.testing.assert_allclose(magnitude.predict({"slope": [0.5, 4]}), [1.5, 33])
+
+    def test_variable_from_grouped_stats__custom_model_by_category(self) -> None:
+        """Checks that custom functions fit each category without mixing their spread estimates."""
+
+        cover = pd.CategoricalIndex(["forest", "meadow"], name="cover")
+        index = pd.MultiIndex.from_product([cover, [0.0, 1.0, 2.0]], names=["cover", "slope"])
+        statistics = pd.DataFrame({"std": [1, 2, 5, 3, 5, 11], "count": 20}, index=index)
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics, model=quadratic_spread)
+
+        np.testing.assert_allclose(
+            magnitude.predict({"cover": ["forest", "meadow", "unknown"], "slope": 0.5}), [1.25, 3.5, np.nan]
+        )
+
+    @pytest.mark.parametrize("model", ["piecewise_linear", "linear", quadratic_spread])
+    def test_pickle__magnitude(self, model: Any) -> None:
         """Checks that an ErrorMagnitude can be pickled."""
 
         # We create a synthetic error magnitude
-        statistics = pd.DataFrame({"std": [1.0, 3.0], "count": [20, 20]}, index=pd.Index([0.0, 30.0], name="slope"))
-        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
+        statistics = pd.DataFrame({"std": [1.0, 3.0, 9.0], "count": 20}, index=pd.Index([0.0, 1.0, 2.0], name="slope"))
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics, model=model)
 
         # Try to restore it from pickled
         restored = pickle.loads(pickle.dumps(magnitude))
 
         # Check equality
         pd.testing.assert_frame_equal(restored.grouped_statistics, magnitude.grouped_statistics)
-        np.testing.assert_array_equal(restored.predict({"slope": [0.0, 15.0, 30.0]}), [1.0, 2.0, 3.0])
+        predictors = {"slope": [0.0, 0.5, 2.0]}
+        np.testing.assert_array_equal(restored.predict(predictors), magnitude.predict(predictors))
+        assert restored.model_name == magnitude.model_name
 
 
 class TestErrorMagnitudeErrors:
     """Test module for errors raised by ErrorMagnitude."""
+
+    @pytest.mark.parametrize(
+        "options,message",
+        [({"model": "unknown"}, "Magnitude model"), ({"fit_kwargs": {"p0": [1]}}, "fit_kwargs require")],
+    )
+    def test_variable_from_grouped_stats__error_invalid_model(self, options: dict[str, Any], message: str) -> None:
+        """Checks an error is raised for an unknown model or fitting options used with interpolation."""
+
+        statistics = pd.DataFrame({"std": [1, 2, 3], "count": 20}, index=pd.Index([0, 1, 2], name="slope"))
+
+        with pytest.raises(ValueError, match=message):
+            gu.ErrorMagnitude.variable_from_grouped_stats(statistics, **options)
 
     @pytest.mark.parametrize("named_columns", [False, True])
     @pytest.mark.parametrize("missing_column", ["nmad", "count"])
@@ -293,10 +407,10 @@ class TestErrorComponent:
         """Checks basic creation without correlation."""
 
         # Name and STD value
-        component = gu.ErrorComponent("measurement", 2)
+        component = gu.ErrorComponent("uncorrelated", 2)
 
         # Check argument
-        assert component.name == "measurement"
+        assert component.name == "uncorrelated"
         assert isinstance(component.magnitude, gu.ErrorMagnitude)
         assert component.predict_magnitude() == 2
         np.testing.assert_array_equal(component.predict_correlation([0, 10]), [1, 0])
@@ -346,7 +460,7 @@ class TestErrorComponentErrors:
         "name, magnitude, correlation, error_type, message",
         [
             ("", 2, None, ValueError, "non-empty string"),
-            ("measurement", "large", None, TypeError, "must be numeric"),
+            ("uncorrelated", "large", None, TypeError, "must be numeric"),
             ("spatial", 2, "spherical", TypeError, "VariogramModel or Variogram"),
         ],
     )
@@ -365,20 +479,20 @@ class TestErrorStructure:
     def test_init__single_component(self) -> None:
         """Checks basic creation with single component."""
 
-        component = gu.ErrorComponent("measurement", 2)
+        component = gu.ErrorComponent("uncorrelated", 2)
         structure = gu.ErrorStructure([component])
 
         # Check attributes
-        assert list(structure.components) == ["measurement"]
+        assert list(structure.components) == ["uncorrelated"]
         assert structure.predict_magnitude() == 2
         assert structure.predict_variance() == 4
 
     def test_to_covariance_matrix__coincident_independence(self) -> None:
-        """Checks that observations at the same coordinates have independent measurement errors."""
+        """Checks that distinct observations at the same coordinates have uncorrelated errors."""
 
         # We create coincident coordinates
         coordinates = np.array([[1.0, 2.0], [1.0, 2.0]])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
 
         # Check diagonal covariance is independent
         covariance = structure.to_covariance_matrix(coordinates)
@@ -477,7 +591,7 @@ class TestErrorStructure:
 
         # Independent unit errors for two named sources
         source_ids = pd.Index(["a", "b"])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         nominal = np.array([10.0, 20.0])
 
         # Check matching error draws and source values plus errors
@@ -492,54 +606,278 @@ class TestErrorStructure:
         assert errors.shape == (2, 2)
         np.testing.assert_array_equal(values, nominal + errors)
 
-    def test_info__variable_magnitude(self) -> None:
-        """Checks that info() describes a variable magnitude by the predictors that control it."""
+    @pytest.mark.parametrize(
+        "case, keywords",
+        [
+            ("constant", ("Constant", "uncorrelated", "gaussian")),
+            ("variable", ("Error range", "slope", "piecewise_linear")),
+            ("linear", ("Error range", "linear")),
+            ("linear_categorical", ("cover", "slope", "linear")),
+            ("custom", ("quadratic_spread", "Parameters")),
+            ("estimation_missing", ("Magnitude sample size", "nmad", "matheron", "Warning")),
+            ("estimation_partial", ("Magnitude sample size", "nmad", "matheron", "Warning")),
+            ("estimation_all", ("Magnitude sample size", "nmad", "matheron", "Warning")),
+            ("valid_bins", ("Variogram lag bins", "valid")),
+            ("sum", ("sum", "matern", "stable")),
+            ("product", ("product", "matern", "stable")),
+        ],
+    )
+    @pytest.mark.parametrize("verbose", [False, True])
+    def test_info__keywords(
+        self, case: str, keywords: tuple[str, ...], verbose: bool, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Checks that info() prints or returns expected component and estimation keywords."""
 
-        # The error magnitude varies with slope, while observations remain independent
-        statistics = pd.DataFrame({"std": [1.0, 3.0], "count": [20, 30]}, index=pd.Index([0.0, 30.0], name="slope"))
-        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
-        structure = gu.ErrorStructure([gu.ErrorComponent("terrain", magnitude)])
+        # Create the requested error structure, depending on input case
+        model = VariogramModel("gaussian", effective_range=100, partial_sill=1)
+        components = [gu.ErrorComponent("uncorrelated", 3), gu.ErrorComponent("spatial", 4, model)]
+        metadata: dict[str, Any] = {"plot_attrs": {"value": {"units": "m"}}}
+        diagnostics: dict[str, Any] = {}
+        empirical: gu.Variogram | None = None
+        if case == "variable":
+            statistics = pd.DataFrame(
+                {"std": [3.0, 5.0, np.nan, 100.0], "count": [20, 40, 80, 2]},
+                index=pd.Index([0.0, 10.0, 20.0, 30.0], name="slope"),
+            )
+            magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(
+                statistics, min_count=10, scale=2, variance_offset=36, floor=1
+            )
+            components = [gu.ErrorComponent("terrain", magnitude)]
+        elif case in {"linear", "linear_categorical", "custom"}:
+            index = pd.Index([0.0, 1.0, 2.0], name="slope")
+            values = np.array([1.0, 3.0, 9.0] if case == "custom" else [2.0, 1.0, 6.0])
+            if case == "linear_categorical":
+                cover = pd.CategoricalIndex(["forest", "meadow"], name="cover")
+                index = pd.MultiIndex.from_product([cover, index])
+                values = np.tile(values, 2)
+            statistics = pd.DataFrame({"std": values, "count": 20}, index=index)
+            magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(
+                statistics, model=quadratic_spread if case == "custom" else "linear"
+            )
+            components = [gu.ErrorComponent("terrain", magnitude)]
+        elif case.startswith("estimation_"):
+            model = VariogramModel("gaussian", effective_range=30, partial_sill=1)
+            components = [gu.ErrorComponent("spatial", 2, model)]
+            empirical = gu.Variogram(
+                lags=np.array([5.0, 15.0, 25.0]),
+                semivariance=np.array([0.1, np.nan, 0.9]),
+                counts=np.array([8, 0, 12]),
+                bin_lower_edges=np.array([0.0, 10.0, 20.0]),
+                bin_edges=np.array([10.0, 20.0, 30.0]),
+                estimator="matheron",
+                attrs={"distance_units": "m", "n_runs": 2, "sampling": "loglag", "requested_pairs": 999},
+            )
+            magnitude_diagnostics = {"valid_count": 100}
+            sample_count = {"estimation_missing": None, "estimation_partial": 40, "estimation_all": 100}[case]
+            if sample_count is not None:
+                magnitude_diagnostics["sample_count"] = sample_count
+            metadata["spread_estimator"] = "nmad"
+            diagnostics = {"magnitude": magnitude_diagnostics, "identifiability": ["Ranges overlap."]}
+        elif case == "valid_bins":
+            components = [gu.ErrorComponent("noise", 2)]
+            empirical = gu.Variogram(
+                lags=np.array([5.0, 15.0, 25.0, np.nan]),
+                semivariance=np.array([np.nan, 0.1, 0.4, 0.8]),
+                counts=np.array([0, 1, 4, 8]),
+                estimator="matheron",
+            )
+        elif case in {"sum", "product"}:
+            models = [
+                VariogramModel("matern", effective_range=10, partial_sill=1, smoothness=1.5),
+                VariogramModel("stable", effective_range=30, partial_sill=3, shape=1.2, active_dims=(0,)),
+            ]
+            correlation = VariogramModel.combine(models, combination=case)
+            components = [gu.ErrorComponent("spatial", 2, correlation)]
+        structure = gu.ErrorStructure(
+            components, empirical_variogram=empirical, metadata=metadata, fit_diagnostics=diagnostics
+        )
 
-        # The summary names the predictor instead of describing the table format
-        summary = structure.info(verbose=False)
-        assert summary is not None
-        assert "terrain: varies with slope, independent" in summary
+        # Check printed and returned summaries
+        result = structure.info(verbose=verbose)
+        printed = capsys.readouterr().out
+        if verbose:
+            assert result is None
+            summary = printed
+        else:
+            assert printed == ""
+            assert isinstance(result, str)
+            summary = result
+        for keyword in keywords:
+            assert keyword in summary
 
-    @pytest.mark.skipif(find_spec("matplotlib") is None, reason="Requires Matplotlib")
-    def test_plot_correlation(self) -> None:
-        """Checks that correlation plot runs and contains the right axes/data."""
+    @pytest.mark.parametrize("return_axes", [None, False, True])
+    def test_plot__return_axes(self, return_axes: bool | None) -> None:
+        """Checks that plot() returns the supplied axes only when requested."""
 
+        plt = pytest.importorskip("matplotlib.pyplot")
+        structure = gu.ErrorStructure([gu.ErrorComponent("noise", 2)])
+        figure, axis = plt.subplots()
+        options: dict[str, Any] = {} if return_axes is None else {"return_axes": return_axes}
+
+        result = structure.plot(ax=axis, **options)
+
+        assert [bar.get_height() for bar in axis.patches] == [4]
+        assert (result is not None) == bool(return_axes)
+        if result is not None:
+            assert result["variance"] is axis
+        plt.close(figure)
+
+    @pytest.mark.parametrize("magnitude", [0.0, 2.0])
+    def test_plot__constant_independent(self, magnitude: float) -> None:
+        """Checks that plot() shows the variance of independent errors without empirical diagnostics."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", magnitude)])
+
+        panels = structure.plot(return_axes=True)
+
+        assert set(panels) == {"variance"}
+        assert [bar.get_height() for bar in panels["variance"].patches] == [magnitude**2]
+        assert panels["variance"].get_ylabel() == "Error variance"
+        plt.close(panels["variance"].figure)
+
+    @pytest.mark.parametrize("kind", ["correlation", "semivariance"])
+    @pytest.mark.parametrize("xscale", ["log", "linear"])
+    @pytest.mark.parametrize("supplied_axis", [False, True])
+    def test_plot__constant_components(self, kind: str, xscale: str, supplied_axis: bool) -> None:
+        """Checks that plot() adds component variances and draws the combined correlation model."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
         pytest.importorskip("skgstat")
-        import_optional("matplotlib")
-        import matplotlib.pyplot as plt
+        model = VariogramModel("spherical", effective_range=100, partial_sill=1)
+        structure = gu.ErrorStructure(
+            [gu.ErrorComponent("uncorrelated", 1), gu.ErrorComponent("correlated", 2, model)],
+            metadata={"plot_attrs": {"value": {"units": "m"}}},
+        )
+        frame = plt.subplots()[1] if supplied_axis else None
 
-        # We create a synthetic error structure
+        panels = structure.plot(ax=frame, kind=kind, xscale=xscale, return_axes=True)
+
+        np.testing.assert_allclose([bar.get_height() for bar in panels["variance"].patches], [1, 4, 5])
+        assert panels["variance"].get_ylabel() == "Error variance (m²)"
+        axis = panels["correlation"]
+        distances = axis.lines[0].get_xdata()
+        expected = 4 / 5 * model.correlation(distances)
+        np.testing.assert_allclose(axis.lines[0].get_ydata(), expected if kind == "correlation" else 1 - expected)
+        assert axis.get_xscale() == xscale
+        assert distances[-1] == 150
+        if kind == "correlation":
+            assert axis.get_ylim() == (-0.05, 1)
+        if xscale == "log":
+            assert distances[0] == axis.get_xlim()[0] == 1
+        else:
+            np.testing.assert_array_equal(axis.collections[0].get_offsets(), [[0, int(kind == "correlation")]])
+        if frame is not None:
+            assert axis.figure is frame.figure
+        plt.close(axis.figure)
+
+    @pytest.mark.parametrize("combined", [False, True])
+    @pytest.mark.parametrize("ranges", [(10.0, 100.0), (0.1, 2.0)])
+    def test_plot__multiple_model_ranges(self, combined: bool, ranges: tuple[float, float]) -> None:
+        """Checks that model plots start at one hundredth of the shortest range, including nested models."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+        pytest.importorskip("skgstat")
+        models = [VariogramModel("gaussian", effective_range=value, partial_sill=1) for value in ranges]
+        components = [gu.ErrorComponent(str(index), 1, model) for index, model in enumerate(models)]
+        if combined:
+            components = [gu.ErrorComponent("spatial", 1, VariogramModel.combine(models, combination="sum"))]
+
+        axis = gu.ErrorStructure(components).plot(show_components=True, return_axes=True)["correlation"]
+
+        assert axis.get_xlim()[0] == pytest.approx(min(ranges) / 100)
+        np.testing.assert_allclose(axis.lines[0].get_xdata()[[0, -1]], [min(ranges) / 100, 1.5 * max(ranges)])
+        plt.close(axis.figure)
+
+    @pytest.mark.parametrize(
+        "show_components,kind,empirical",
+        [
+            (None, "correlation", False),
+            (False, "semivariance", True),
+            (True, "correlation", False),
+            (True, "semivariance", False),
+            (True, "correlation", True),
+            (True, "semivariance", True),
+        ],
+    )
+    def test_plot__component_contributions(self, show_components: bool | None, kind: str, empirical: bool) -> None:
+        """Checks that optional component curves sum to the combined curve and are hidden by default."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+        pytest.importorskip("skgstat")
+        models = [
+            VariogramModel("gaussian", effective_range=10, partial_sill=1),
+            VariogramModel("spherical", effective_range=100, partial_sill=4),
+        ]
+        variogram = None
+        if empirical:
+            variogram = gu.Variogram(
+                lags=np.array([1.0, 10.0]),
+                semivariance=np.array([0.2, 0.6]),
+                counts=np.array([20, 30]),
+                model=VariogramModel.combine(models, combination="sum"),
+            )
+        structure = gu.ErrorStructure(
+            [gu.ErrorComponent("short_range", 1, models[0]), gu.ErrorComponent("long_range", 2, models[1])],
+            empirical_variogram=variogram,
+        )
+        options: dict[str, Any] = {} if show_components is None else {"show_components": show_components}
+
+        axis = structure.plot(kind=kind, return_axes=True, **options)["correlation"]
+
+        curves = [line for line in axis.lines if line.get_label() in {"Short range", "Long range"}]
+        assert len(curves) == (2 if show_components else 0)
+        if show_components:
+            for curve, model, fraction in zip(curves, models, [1 / 5, 4 / 5]):
+                expected = fraction * model.correlation(curve.get_xdata())
+                if kind == "semivariance":
+                    expected = (fraction - expected) * (5 if empirical else 1)
+                np.testing.assert_allclose(curve.get_ydata(), expected)
+            np.testing.assert_allclose(sum(curve.get_ydata() for curve in curves), axis.lines[-3].get_ydata())
+        plt.close(axis.figure)
+
+    @pytest.mark.parametrize(
+        "method,kind",
+        [("plot", None), ("plot", "semivariance"), ("plot_correlation", None), ("plot_correlation", "correlation")],
+    )
+    @pytest.mark.parametrize("show_counts", [False, True])
+    def test_plot_correlation(self, method: str, kind: str | None, show_counts: bool) -> None:
+        """Checks that correlation plots show the requested values and optional counts through either API."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+        pytest.importorskip("skgstat")
         model = VariogramModel("gaussian", effective_range=3, partial_sill=1)
         empirical = gu.Variogram(
-            lags=np.array([1.0, 2.0]), semivariance=np.array([0.2, 0.7]), counts=np.array([8, 9]), model=model
+            lags=np.array([1.0, 2.0]),
+            semivariance=np.array([0.2, 0.7]),
+            counts=np.array([8, 9]),
+            model=model,
+            estimator="dowd",
         )
         structure = gu.ErrorStructure([gu.ErrorComponent("spatial", 1, model)], empirical_variogram=empirical)
+        options: dict[str, Any] = {} if kind is None else {"kind": kind}
+        if method == "plot":
+            options["return_axes"] = True
 
-        # Both panels should contain correlation axes
-        axes = structure.plot_correlation()
-        panels = structure.plot()
-        try:
-            assert set(panels) == {"correlation"}
-            assert axes.get_xlabel() == "Lag distance"
-            assert panels["correlation"].get_ylabel() == "Semivariance"
-        finally:
-            plt.close(axes.figure)
-            plt.close(panels["correlation"].figure)
+        result = getattr(structure, method)(show_counts=show_counts, **options)
+        axis = result["correlation"] if method == "plot" else result
 
-    @pytest.mark.skipif(find_spec("matplotlib") is None, reason="Requires Matplotlib")
+        quantity = kind or ("correlation" if method == "plot" else "semivariance")
+        expected = [0.8, 0.3] if quantity == "correlation" else [0.2, 0.7]
+        np.testing.assert_allclose(axis.lines[0].get_ydata(), expected)
+        assert axis.get_ylabel() == f"Error {quantity}"
+        assert "Empirical (Dowd)" in axis.get_legend_handles_labels()[1]
+        assert any(item.get_ylabel() == "Pair count" for item in axis.figure.axes) == show_counts
+        if quantity == "correlation":
+            assert axis.get_ylim() == (-0.05, 1)
+        plt.close(axis.figure)
+
     @pytest.mark.parametrize("named_columns", [False, True])
     @pytest.mark.parametrize("method", ["plot_magnitude", "plot"])
     def test_plot__variable_magnitude(self, named_columns: bool, method: str) -> None:
-        """Checks plotting for variable error magnitude, through plot() or plot_magnitude()."""
+        """Checks that magnitude plots show bin centers, counts and fitted predictions through either API."""
 
-        import_optional("matplotlib")
-        import matplotlib.pyplot as plt
-
+        plt = pytest.importorskip("matplotlib.pyplot")
         # We define 2 slope bins
         index = pd.IntervalIndex.from_breaks([0.0, 10.0, 20.0], name="slope")
         statistics = pd.DataFrame({"std": [1.0, 3.0], "count": [20, 30]}, index=index)
@@ -551,18 +889,245 @@ class TestErrorStructure:
         # We define a structure with a constant and a variable magnitude component, only the second can be plotted
         magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
         structure = gu.ErrorStructure([gu.ErrorComponent("terrain", magnitude), gu.ErrorComponent("noise", 0.5)])
-        panels = getattr(structure, method)()
+        options = {"return_axes": True} if method == "plot" else {}
+        panels = getattr(structure, method)(**options)
         if method == "plot":
             assert set(panels) == {"magnitude:terrain"}
             panels = panels["magnitude:terrain"]
 
         # We check the curve uses bin centers, and the count bars show the observations behind each estimate
-        try:
-            np.testing.assert_array_equal(panels["statistic"].lines[0].get_xdata(), [5.0, 15.0])
-            np.testing.assert_array_equal(panels["statistic"].lines[0].get_ydata(), [1.0, 3.0])
-            assert [bar.get_height() for bar in panels["count"].patches] == [20, 30]
-        finally:
-            plt.close(panels["statistic"].figure)
+        empirical, fitted = panels["statistic"].lines
+        np.testing.assert_array_equal(empirical.get_xdata(), [5, 15])
+        np.testing.assert_array_equal(empirical.get_ydata(), [1, 3])
+        np.testing.assert_allclose(fitted.get_ydata(), magnitude.predict({"slope": fitted.get_xdata()}))
+        assert [bar.get_height() for bar in panels["count"].patches] == [20, 30]
+        assert panels["statistic"].get_xlabel() == "Slope"
+        assert panels["statistic"].get_ylabel() == "Error magnitude"
+        plt.close(panels["statistic"].figure)
+
+    def test_custom_magnitude__summary_and_plot(self) -> None:
+        """Checks that info() and plot_magnitude() describe and evaluate the fitted custom model."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+        index = pd.IntervalIndex.from_breaks([-0.5, 0.5, 1.5, 2.5], name="slope")
+        statistics = pd.DataFrame({"std": [1.0, 3.0, 9.0], "count": 20}, index=index)
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics, model=quadratic_spread)
+        structure = gu.ErrorStructure([gu.ErrorComponent("terrain", magnitude)])
+
+        summary = structure.info(verbose=False)
+        assert summary is not None
+        components, estimation = summary.split("Estimation:")
+        assert "Functional form: quadratic_spread" in components and "Parameters: 1, 2" in components
+        assert "Magnitude bins:" not in components and "Magnitude bins: 3/3 valid" in estimation
+        axes = structure.plot_magnitude()
+        curve = axes["statistic"].lines[1]
+        np.testing.assert_allclose(curve.get_ydata(), quadratic_spread(curve.get_xdata(), 1, 2))
+        assert curve.get_label() == "Model (quadratic_spread)"
+        plt.close(axes["statistic"].figure)
+
+    @pytest.mark.parametrize("method,show_model", [("plot_magnitude", False), ("plot_magnitude", True), ("plot", True)])
+    @pytest.mark.parametrize("plot_kind", ["auto", "bar", "line"])
+    def test_plot_magnitude__categorical_bars(self, method: str, show_model: bool, plot_kind: str) -> None:
+        """Checks that categorical magnitudes use labelled bars or points and exclude sparse bins."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+        index = pd.CategoricalIndex([20, 10, 30], categories=[20, 10, 30], ordered=True, name="cover")
+        statistics = pd.DataFrame({"std": [0.3, 0.1, 0.2], "count": [120, 50, 140]}, index=index)
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics, min_count=100)
+        attributes = {"flag_values": [20, 10, 30], "flag_meanings": "forest meadow shrubs"}
+        metadata = {"plot_attrs": {"value": {"units": "m"}, "predictors": {"cover": attributes}}}
+        structure = gu.ErrorStructure([gu.ErrorComponent("terrain", magnitude)], metadata=metadata)
+        options = {"return_axes": True} if method == "plot" else {"show_model": show_model}
+
+        axes = getattr(structure, method)(plot_kind=plot_kind, **options)
+        axes = axes["magnitude:terrain"] if method == "plot" else axes
+        axis = axes["statistic"]
+        if plot_kind == "line":
+            values = axis.lines[0].get_ydata()
+        else:
+            values = [bar.get_height() for bar in axis.containers[0]]
+            assert axis.get_ylim()[0] == 0
+            assert [text.get_text() for text in axis.texts] == ["0.3", "", "0.2"]
+        np.testing.assert_allclose(values, [0.3, np.nan, 0.2])
+        assert [bar.get_height() for bar in axes["count"].patches] == [120, 50, 140]
+        assert [text.get_text() for text in axis.get_xticklabels()] == ["Forest", "Meadow", "Shrubs"]
+        assert axis.get_ylabel() == "Error magnitude (m)"
+        assert (axis.get_legend() is not None) == show_model
+        plt.close(axis.figure)
+
+    @pytest.mark.parametrize("show_model", [False, True])
+    def test_plot_magnitude__continuous_bars(self, show_model: bool) -> None:
+        """Checks that an explicit bar plot preserves continuous model predictions."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+        index = pd.IntervalIndex.from_breaks([0.0, 10.0, 20.0, 30.0], name="angle")
+        statistics = pd.DataFrame({"std": [1.0, 3.0, 5.0], "count": 20}, index=index)
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
+
+        axes = gu.ErrorStructure([gu.ErrorComponent("terrain", magnitude)]).plot_magnitude(
+            plot_kind="bar", show_model=show_model
+        )
+
+        axis = axes["statistic"]
+        assert [bar.get_height() for bar in axis.containers[0]] == [1, 3, 5]
+        assert len(axis.lines) == int(show_model)
+        if show_model:
+            curve = axis.lines[0]
+            np.testing.assert_allclose(curve.get_ydata(), magnitude.predict({"angle": curve.get_xdata()}))
+        plt.close(axis.figure)
+
+    @pytest.mark.parametrize("reverse_order", [False, True])
+    @pytest.mark.parametrize("show_model", [False, True])
+    def test_plot_magnitude__category_curves(self, reverse_order: bool, show_model: bool) -> None:
+        """Checks that category curves preserve order, class names, counts and fitted predictions."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+        angles = pd.IntervalIndex.from_breaks(np.arange(5) - 0.5, name="angle")
+        cover = pd.CategoricalIndex([20, 10, 30], categories=[20, 10, 30], ordered=True, name="cover")
+        index = pd.MultiIndex.from_product([angles, cover])
+        values = (1 + 0.25 * np.asarray(angles.mid)[:, None] ** 2) * np.array([1, 2, 4])
+        statistics = pd.DataFrame({"std": values.ravel(), "count": 20}, index=index)
+        statistics.iloc[0, statistics.columns.get_loc("count")] = 1
+        if reverse_order:
+            statistics = statistics.reorder_levels([1, 0])
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics, model=quadratic_spread, min_count=10)
+        attributes = {"flag_values": [20, 10, 30], "flag_meanings": "forest meadow shrubs"}
+        structure = gu.ErrorStructure(
+            [gu.ErrorComponent("terrain", magnitude)], metadata={"plot_attrs": {"predictors": {"cover": attributes}}}
+        )
+
+        axes = structure.plot_magnitude(show_model=show_model)
+
+        lines = axes["statistic"].lines
+        assert "colorbar" not in axes and len(lines) == 3 * (1 + show_model)
+        assert np.isnan(lines[0].get_ydata()[0])
+        # Sparse bins stay in counts but are excluded from fitting
+        assert [bar.get_width() for bar in axes["count_y"].patches] == [61, 80, 80]
+        assert [text.get_text() for text in axes["count_y"].get_yticklabels()] == ["Forest", "Meadow", "Shrubs"]
+        assert [text.get_text() for text in axes["count_x"].get_legend().get_texts()] == ["Forest", "Meadow", "Shrubs"]
+        if show_model:
+            for code, fitted in zip(cover, lines[3:]):
+                np.testing.assert_allclose(
+                    fitted.get_ydata(), magnitude.predict({"angle": fitted.get_xdata(), "cover": code})
+                )
+        plt.close(axes["statistic"].figure)
+
+    @pytest.mark.parametrize(
+        "method,plot_kind,show_model",
+        [
+            ("plot_magnitude", "line", False),
+            ("plot_magnitude", "line", True),
+            ("plot_magnitude", "heatmap", False),
+            ("plot_magnitude", "heatmap", True),
+            ("plot", "line", True),
+            ("plot", "heatmap", True),
+        ],
+    )
+    def test_plot_magnitude__layout_override(self, method: str, plot_kind: str, show_model: bool) -> None:
+        """Checks that line and heatmap layouts preserve magnitudes and optional model overlays through either API."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+        from matplotlib.contour import QuadContourSet
+
+        index = pd.MultiIndex.from_product([[0.0, 1.0], [2.0, 3.0]], names=["angle", "slope"])
+        statistics = pd.DataFrame({"std": [1, 2, 3, 4], "count": 20}, index=index)
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
+        structure = gu.ErrorStructure([gu.ErrorComponent("terrain", magnitude)])
+        options = {"return_axes": True} if method == "plot" else {"show_model": show_model}
+
+        axes = getattr(structure, method)(plot_kind=plot_kind, **options)
+        axes = axes["magnitude:terrain"] if method == "plot" else axes
+
+        assert ("colorbar" in axes) == (plot_kind == "heatmap")
+        if plot_kind == "heatmap":
+            np.testing.assert_array_equal(axes["statistic"].collections[0].get_array(), [[1, 3], [2, 4]])
+            assert any(isinstance(item, QuadContourSet) for item in axes["statistic"].collections) == show_model
+        else:
+            lines = axes["statistic"].lines
+            assert len(lines) == 2 * (1 + show_model)
+            for slope, fitted in zip([2.0, 3.0], lines[2:]):
+                angles = np.interp(fitted.get_xdata(), [0.5, 1.5], [0.0, 1.0])
+                np.testing.assert_allclose(fitted.get_ydata(), magnitude.predict({"angle": angles, "slope": slope}))
+        assert [bar.get_height() for bar in axes["count_x"].patches] == [40, 40]
+        plt.close(axes["statistic"].figure)
+
+    @pytest.mark.parametrize("dimensions", [1, 2])
+    @pytest.mark.parametrize("categorical", [False, True])
+    @pytest.mark.parametrize("empty_labels", [False, True])
+    def test_plot_magnitude__labels(self, dimensions: int, categorical: bool, empty_labels: bool) -> None:
+        """Checks that supplied axis, count and legend labels override metadata, including empty strings."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+        first = (
+            pd.CategoricalIndex(["low", "high"], name="slope") if categorical else pd.Index([0.0, 10.0], name="slope")
+        )
+        index = (
+            first if dimensions == 1 else pd.MultiIndex.from_product([first, [0.0, 1.0]], names=["slope", "curvature"])
+        )
+        statistics = pd.DataFrame({"std": np.arange(1, len(index) + 1), "count": 20}, index=index)
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
+        metadata = {"plot_attrs": {"value": {"units": "m"}, "predictors": {"slope": {"units": "degrees"}}}}
+        structure = gu.ErrorStructure([gu.ErrorComponent("terrain", magnitude)], metadata=metadata)
+        labels: dict[str, Any] = {
+            "title": "Binning",
+            "xlabel": "Viewing angle (°)",
+            "ylabel": "Spread or curvature",
+            "cbar_title": "Error (cm)",
+            "count_label": "Samples",
+        }
+        if empty_labels:
+            labels = dict.fromkeys(labels, "")
+
+        axes = structure.plot_magnitude(**labels, empirical_label="Binned spread", model_label="Inferred magnitude")
+
+        assert axes["statistic"].get_xlabel() == labels["xlabel"]
+        assert axes["statistic"].get_ylabel() == labels["ylabel"]
+        counts = axes["count"] if dimensions == 1 else axes["count_x"]
+        assert counts.get_title() == labels["title"]
+        assert counts.get_ylabel() == labels["count_label"]
+        if "colorbar" in axes:
+            assert axes["colorbar"].get_xlabel() == labels["cbar_title"]
+        if dimensions == 2:
+            assert axes["count_y"].get_xlabel() == labels["count_label"]
+        expected = ["Binned spread"] + (["Inferred magnitude"] if not categorical or dimensions == 2 else [])
+        assert [text.get_text() for text in axes["statistic"].get_legend().get_texts()] == expected
+        plt.close(axes["statistic"].figure)
+
+    @pytest.mark.parametrize("dimensions", [1, 2])
+    @pytest.mark.parametrize("supplied_axis", [False, True])
+    def test_plot__combined_diagnostics(self, dimensions: int, supplied_axis: bool) -> None:
+        """Checks that magnitude and correlation diagnostics share a figure and appear side by side."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+        pytest.importorskip("skgstat")
+        intervals = pd.IntervalIndex.from_breaks([0.0, 10.0, 20.0], name="slope")
+        index = (
+            intervals
+            if dimensions == 1
+            else pd.MultiIndex.from_product([intervals, [0.0, 1.0]], names=["slope", "curvature"])
+        )
+        statistics = pd.DataFrame({"nmad": np.arange(1, len(index) + 1), "count": 20}, index=index)
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
+        model = VariogramModel("gaussian", effective_range=3, partial_sill=1)
+        empirical = gu.Variogram(
+            lags=np.array([1.0, 2.0]), semivariance=np.array([0.2, 0.7]), counts=np.array([8, 9]), model=model
+        )
+        structure = gu.ErrorStructure([gu.ErrorComponent("terrain", magnitude, model)], empirical_variogram=empirical)
+        frame = plt.subplots(figsize=(12, 4.5))[1] if supplied_axis else None
+
+        panels = structure.plot(ax=frame, return_axes=True)
+        magnitude_axes, correlation_axis = panels["magnitude:terrain"], panels["correlation"]
+        figure = correlation_axis.figure
+        figure.canvas.draw()
+
+        assert set(panels) == {"magnitude:terrain", "correlation"}
+        assert all(axis.figure is figure for axis in magnitude_axes.values())
+        assert magnitude_axes["statistic"].get_position().x1 < correlation_axis.get_position().x0
+        assert magnitude_axes["statistic"].get_position().y0 == pytest.approx(correlation_axis.get_position().y0)
+        assert correlation_axis.get_ylabel() == "Error correlation"
+        if frame is not None:
+            assert figure is frame.figure
+        plt.close(figure)
 
 
 class TestSourceCovariance:
@@ -577,7 +1142,7 @@ class TestSourceCovariance:
         source_ids = np.array([10, 11, 12])
         coordinates = np.array([[0.0, 0.0], [0.0, 0.0], [3.0, 4.0]])
         correlation = VariogramModel("spherical", effective_range=10, partial_sill=1)
-        independent = gu.ErrorComponent("measurement", 2.0)
+        independent = gu.ErrorComponent("uncorrelated", 2.0)
         spatial = gu.ErrorComponent("spatial", 1.0, correlation)
         component_data = ((independent, np.full(3, 2.0)), (spatial, np.ones(3)))
 
@@ -595,15 +1160,29 @@ class TestSourceCovariance:
 class TestErrorStructureErrors:
     """Test module for errors/warnings of the ErrorStructure class."""
 
-    def test_plot__warns_without_empirical_diagnostics(self) -> None:
-        """Checks that a plot without empirical variogram warns."""
+    def test_plot_correlation__error_missing_empirical_variogram(self) -> None:
+        """Checks an error is raised for plot_correlation() without an empirical variogram."""
 
-        # Synthetic error structure without empirical vario
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
-        with pytest.warns(UserWarning, match="no empirical diagnostics"):
-            assert structure.plot() == {}
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
+
         with pytest.raises(ValueError, match="No empirical variogram"):
             structure.plot_correlation()
+
+    @pytest.mark.parametrize("options", [{"kind": "unknown"}, {"xscale": "unknown"}])
+    def test_plot__error_invalid_model_options(self, options: dict[str, Any]) -> None:
+        """Checks an error is raised for an invalid plot quantity or distance scale."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+
+        model = VariogramModel("spherical", effective_range=100, partial_sill=1)
+        structure = gu.ErrorStructure([gu.ErrorComponent("spatial", 2, model)])
+        figure, frame = plt.subplots()
+
+        try:
+            with pytest.raises(ValueError, match="Argument"):
+                structure.plot(ax=frame, **options)
+        finally:
+            plt.close(figure)
 
     @pytest.mark.parametrize(
         "options, message",
@@ -616,6 +1195,6 @@ class TestErrorStructureErrors:
     def test_iter_samples__error_invalid_request(self, options: dict[str, object], message: str) -> None:
         """Checks an error is raised for an invalid sample count, kind, or source values."""
 
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         with pytest.raises(ValueError, match=message):
             list(structure.iter_samples(**options))  # type: ignore[arg-type]

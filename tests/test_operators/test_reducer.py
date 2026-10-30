@@ -1092,7 +1092,7 @@ class TestReducerUncertainty:
         values = np.array([[0, 10], [20, 30]], dtype=float)
         raster = gu.Raster.from_array(values, transform=rio.transform.from_origin(0, 2, 1, 1), crs=32631)
         point = (0.75, 1.25)
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
 
         # Covered fractions are 9/16, 3/16, 3/16, 1/16 in row order
         ordinary = raster.reduce_at_points(point, reducer_function=Mean(), window=1, as_array=True)
@@ -1129,7 +1129,7 @@ class TestReducerUncertainty:
         values[2, 2] = np.nan
         raster = gu.Raster.from_array(values, transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326, nodata=-9999)
         x, y = raster.ij2xy(2, 2, force_offset="center")
-        source_errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        source_errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
 
         # Compare the default missing-value rule with one that rejects the whole window
         ignored = raster.resample_at_points(as_array=True, points=(x, y), method=Mean(), error_structure=source_errors)
@@ -1165,7 +1165,7 @@ class TestReducerUncertainty:
         points = gu.PointCloud.from_xyz([0, 1, 4], [0, 0, 0], [2, 6, 100], crs=32631)
         reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(-1, 1.5, 2, 3), crs=32631)
         operator = Mean(neighborhood=neighborhood)
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
 
         # The point radius is in map units even though the output pixels have unequal dimensions
         result = points.grid(
@@ -1211,7 +1211,7 @@ class TestReducerUncertainty:
         points = gu.PointCloud.from_xyz([0, 0.8, 2.1, 3.3], [0, 0.1, 2.2, 0.3], [2, 4, 8, 16], crs=32631)
         operator = operator_type(neighborhood=PointNeighbours(max_points=3))
         grid_coords = (np.array([0.2, 1.2]), np.array([0.3, 1.3]))
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 0)])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 0)])
 
         # Small rounding differences can arise from the compiled weighted sums
         result = points.grid(
@@ -1254,7 +1254,7 @@ class TestReducerUncertainty:
             crs=32632,
             nodata=-9999,
         )
-        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Check that requesting uncertainty returns the same mean values as the ordinary reprojection
         expected = source.reproject(reference, resampling=rio.enums.Resampling.average)

@@ -296,7 +296,7 @@ class TestClassVsAccessorConsistency:
             {
                 "other": "reference",
                 "other_precision": "negligible",
-                "components": {"measurement": {"magnitude": "constant", "correlation": None}},
+                "components": {"uncorrelated": {"magnitude": "constant", "correlation": None}},
                 "spread_estimator": np.std,
                 "subsample_magnitude": 256,
                 "random_state": 42,
@@ -314,7 +314,7 @@ class TestClassVsAccessorConsistency:
         (
             "random_field",
             {
-                "error_structure": ErrorStructure([ErrorComponent("measurement", 1)]),
+                "error_structure": ErrorStructure([ErrorComponent("uncorrelated", 1)]),
                 "random_state": 42,
             },
         ),
@@ -371,6 +371,9 @@ class TestClassVsAccessorConsistency:
         For this test, the integer test file where converted ahead (to preserve loading mechanism and laziness) in the
         fixture "lazy_test_files".
         """
+
+        if method == "plot":
+            pytest.importorskip("matplotlib")
 
         # Get filepath
         path_raster = lazy_test_files[path_index]

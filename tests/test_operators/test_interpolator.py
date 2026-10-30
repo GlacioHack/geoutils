@@ -1349,7 +1349,7 @@ class TestPointInterpolationUncertainty:
         points = gu.PointCloud.from_xyz([0, 0.8, 2.1, 3.3], [0, 0.1, 2.2, 0.3], [2, 4, 8, 16], crs=32631)
         operator = operator_type(neighborhood=PointNeighbours(max_points=3))
         grid_coords = (np.array([0.2, 1.2]), np.array([0.3, 1.3]))
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 0)])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 0)])
 
         # Small rounding differences can arise from the compiled weighted sums
         result = points.grid(
@@ -1388,7 +1388,7 @@ class TestPointInterpolationUncertainty:
         # Only the target at X=0 coincides with the sole observation
         points = gu.PointCloud.from_xyz([0], [0], [7], crs=32631)
         coords = (np.array([0.0, 1.0]), np.array([0.0, 1.0]))
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
         for neighborhood in (None, PointNeighbours(max_points=1, radius=2)):
             result = points.grid(
                 grid_coords=coords,
@@ -1432,7 +1432,7 @@ class TestRegularInterpolationUncertainty:
             crs=4326,
             nodata=-9999,
         )
-        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
 
         # The first tuple item remains the ordinary Rasterio result
         expected = raster.reproject(reference, resampling="bilinear")
@@ -1464,7 +1464,7 @@ class TestRegularInterpolationUncertainty:
         raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 8, 1, 1), crs=32631, nodata=-9999)
         # The final target stays outside the widest nodata mask so every method has a finite result
         targets = (np.array([2.3, 3.7, 5.2, 0.2]), np.array([3.4, 4.6, 5.1, 7.8]))
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 0)])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 0)])
 
         # Numerical propagation must use exactly the method used for the nominal values
         result = raster.resample_at_points(
@@ -1761,7 +1761,7 @@ class TestInterpolatorKriging:
         )
         operator = Kriging(model)
 
-        # The field difference has variance twice its semivariance; independent measurement error adds to it
+        # Uncorrelated error variance adds to twice the field's semivariance
         assert operator.evaluate(data) == 3
         expected_variance = 2 * float(model.variogram(1)) + error_variance
         assert operator.kriging_variance(data) == pytest.approx(expected_variance)

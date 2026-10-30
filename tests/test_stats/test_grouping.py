@@ -512,7 +512,7 @@ class TestGroupedStats:
                 crs=32631,
             )
         )
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # We pass an error to stats()
         nominal, summary = raster.stats(
@@ -603,11 +603,92 @@ class TestGroupedStats:
             categories={"surface": ["a", "b"]},
             statistics="mean",
         )
-        axes_2d = gu.stats.plot_grouped_stats(two_dimensional, statistic="mean")
+        axes_2d = gu.stats.plot_grouped_stats(two_dimensional, statistic="mean", plot_kind="heatmap")
         assert set(axes_2d) == {"count_x", "count_y", "statistic", "colorbar"}
+        colorbar = axes_2d["colorbar"]
+        assert colorbar.get_position().width > colorbar.get_position().height
+        assert colorbar.get_xlabel() == "mean"
+        assert colorbar.xaxis.label.get_rotation() == 0
         plt.close("all")
 
-    def test_plot_grouped_stats__axes_min_count(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("reverse_order", [False, True])
+    @pytest.mark.parametrize("plot_kind", ["auto", "line", "heatmap"])
+    def test_plot_grouped_stats__mixed_predictors(
+        self, reverse_order: bool, plot_kind: Literal["auto", "line", "heatmap"]
+    ) -> None:
+        """Checks that mixed groups use category curves by default and allow a heatmap override."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+
+        table = gu.stats.stats(
+            np.array([2.0, 4.0, 10.0, 20.0, 30.0]),
+            by={"angle": [0, 0, 1, 0, 1], "cover": [20, 20, 20, 10, 10]},
+            bins={"angle": [-0.5, 0.5, 1.5]},
+            categories={"cover": [20, 10]},
+            statistics="mean",
+        )
+        if reverse_order:
+            table = table.reorder_levels([1, 0])
+        original = table.copy(deep=True)
+
+        axes = gu.stats.plot_grouped_stats(table, statistic="mean", plot_kind=plot_kind, min_count=2)
+
+        if plot_kind == "heatmap":
+            assert "colorbar" in axes
+            assert axes["statistic"].get_xlabel() == ("cover" if reverse_order else "angle")
+        else:
+            assert set(axes) == {"count_x", "count_y", "statistic"}
+            assert axes["statistic"].get_xlabel() == "angle"
+            assert axes["statistic"].get_ylabel() == "mean"
+            lines = axes["statistic"].lines
+            assert [line.get_label() for line in lines] == ["20", "10"]
+            np.testing.assert_allclose([line.get_ydata() for line in lines], [[3, np.nan], [np.nan, np.nan]])
+            np.testing.assert_array_equal([bar.get_height() for bar in axes["count_x"].patches], [3, 2])
+            np.testing.assert_array_equal([bar.get_width() for bar in axes["count_y"].patches], [3, 2])
+        pd.testing.assert_frame_equal(table, original)
+        plt.close(axes["statistic"].figure)
+
+    @pytest.mark.parametrize("plot_kind", ["auto", "line", "heatmap"])
+    def test_plot_grouped_stats__continuous_predictors(self, plot_kind: Literal["auto", "line", "heatmap"]) -> None:
+        """Checks that continuous groups default to a heatmap and can be drawn as separate curves."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+        index = pd.MultiIndex.from_product([[0.0, 1.0], [2.0, 3.0]], names=["angle", "slope"])
+        columns = pd.MultiIndex.from_tuples([("error", "mean"), ("error", "count")], names=["value", "statistic"])
+        table = pd.DataFrame([[1, 10], [2, 20], [3, 30], [4, 40]], index=index, columns=columns)
+
+        axes = gu.stats.plot_grouped_stats(table, statistic="mean", plot_kind=plot_kind)
+
+        assert ("colorbar" in axes) == (plot_kind != "line")
+        if plot_kind == "line":
+            np.testing.assert_array_equal([line.get_ydata() for line in axes["statistic"].lines], [[1, 3], [2, 4]])
+        plt.close(axes["statistic"].figure)
+
+    @pytest.mark.parametrize(
+        "plot_kind,dimensions,message",
+        [
+            ("carpet", 1, "plot_kind"),
+            ("heatmap", 1, "two grouping variables"),
+            ("bar", 2, "bar plot requires one grouping variable"),
+        ],
+    )
+    def test_plot_grouped_stats__error_invalid_layout(self, plot_kind: Any, dimensions: int, message: str) -> None:
+        """Checks an error is raised for an unknown layout or an incompatible number of grouping variables."""
+
+        pytest.importorskip("matplotlib")
+        index = pd.Index([0, 1], name="angle")
+        if dimensions == 2:
+            index = pd.MultiIndex.from_product([index, [0, 1]], names=["angle", "cover"])
+        columns = pd.MultiIndex.from_tuples([("error", "mean"), ("error", "count")], names=["value", "statistic"])
+        table = pd.DataFrame(np.ones((len(index), 2)), index=index, columns=columns)
+
+        with pytest.raises(ValueError, match=message):
+            gu.stats.plot_grouped_stats(table, statistic="mean", plot_kind=plot_kind)
+
+    @pytest.mark.parametrize("plot_kind", ["auto", "bar", "line"])
+    def test_plot_grouped_stats__axes_min_count(
+        self, tmp_path: Path, plot_kind: Literal["auto", "bar", "line"]
+    ) -> None:
         """Checks that a figure relies on user axis and removes min_count."""
 
         # Load plotting only for this test
@@ -625,12 +706,16 @@ class TestGroupedStats:
         output = tmp_path / "grouped-means.png"
 
         # Check min_count value was utilized in the plot
-        axes = gu.stats.plot_grouped_stats(table, statistic="mean", min_count=2, ax=frame, savefig_fname=str(output))
+        axes = gu.stats.plot_grouped_stats(
+            table, statistic="mean", min_count=2, plot_kind=plot_kind, ax=frame, savefig_fname=str(output)
+        )
         assert axes["statistic"].figure is figure
         np.testing.assert_array_equal([bar.get_height() for bar in axes["count"].patches], [2, 1])
-        means = np.asarray(axes["statistic"].lines[0].get_ydata(), dtype=float)
-        assert means[0] == 3
-        assert np.isnan(means[1])
+        if plot_kind == "line":
+            means = axes["statistic"].lines[0].get_ydata()
+        else:
+            means = np.array([bar.get_height() for bar in axes["statistic"].containers[0]])
+        np.testing.assert_allclose(means, [3, np.nan])
         assert output.is_file()
         plt.close(figure)
 

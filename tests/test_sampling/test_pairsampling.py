@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import warnings
 from contextlib import ExitStack
 from importlib.util import find_spec
@@ -719,8 +720,10 @@ class TestPairSampleChunked:
                 assert count == 9
                 packed_states.append(count)
 
-        with LocalCluster(n_workers=2, threads_per_worker=1, processes=False, dashboard_address=None) as cluster:
-            with Client(cluster) as client, dask.config.set(scheduler=scheduler):
+        def sample_pairs(client: Any) -> xr.Dataset:
+            """Check scheduler selection and batch sizes during pair sampling."""
+
+            with dask.config.set(scheduler=scheduler):
                 original_compute, original_gather = client.compute, client.gather
 
                 # Record the number of packed chunk tasks/results
@@ -751,7 +754,17 @@ class TestPairSampleChunked:
                     assert packed_states == [9] * 81
                 assert not source.is_loaded and isinstance(source.data, da.Array)
                 assert isinstance(result.value.data, da.Array)
-                computed = result.compute()
+                return result.compute()
+
+        async def run_cluster() -> xr.Dataset:
+            async with LocalCluster(
+                n_workers=2, threads_per_worker=1, processes=False, dashboard_address=None, asynchronous=True
+            ) as cluster:
+                async with Client(cluster, asynchronous=True) as client:
+                    return await asyncio.to_thread(sample_pairs, client)
+
+        # Await graceful cluster shutdown...
+        computed = asyncio.run(run_cluster())
 
         # Check equality
         expected = gu.Raster.from_array(values, source.transform, source.crs).pairsample(

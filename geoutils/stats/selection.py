@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from tempfile import TemporaryDirectory
@@ -41,6 +41,7 @@ from geoutils.multiproc.readers import (
     _reader_from_vector,
     _ValueReader,
 )
+from geoutils.operators.base import LocalData
 from geoutils.raster.array import get_mask_from_array
 from geoutils.sampling.stratified import _stratified_subsample_indices
 from geoutils.sampling.subsampling import _sample_valid_indices, _subsample_numpy
@@ -88,6 +89,42 @@ def _coordinates_at_support(
     if is_dask_dataframe(dataframe):
         raise ValueError("Statistics uncertainty propagation currently requires in-memory point coordinates.")
     return np.column_stack((dataframe.geometry.x.to_numpy(), dataframe.geometry.y.to_numpy()))
+
+
+def _predictors_for_stats(
+    predictors: Mapping[str, Any], values: Any, local_inputs: Sequence[LocalData]
+) -> dict[str, Any]:
+    """
+    Match predictor grids to the original array positions used by statistics.
+
+    Arrays matching the input shape use source IDs so masks and groups select the corresponding predictors.
+    Scalars, source ID mappings and arrays already ordered by selected source IDs pass through unchanged.
+    """
+
+    # Match complete input shapes before selecting any masked values or groups
+    arrays = values.values() if isinstance(values, Mapping) else [values]
+    shapes = {np.shape(array) for array in arrays}
+    aligned: dict[str, Any] = {}
+    for name, predictor in predictors.items():
+        if isinstance(predictor, Mapping):
+            aligned[name] = predictor
+            continue
+
+        # Spatial objects supply their data, including masks on missing predictor values
+        data = predictor.data if _is_raster(predictor) or _is_pointcloud(predictor) else predictor
+        array = np.ma.asarray(_as_array(data), dtype=float).filled(np.nan)
+        if array.ndim == 3 and array.shape[0] == 1 and array.shape not in shapes:
+            array = array[0]
+        if array.ndim == 0 or array.shape not in shapes:
+            aligned[name] = array
+            continue
+
+        # Source IDs contain the value name and its position in the complete input array
+        flat_values = array.reshape(-1)
+        aligned[name] = {
+            source_id: flat_values[source_id[1]] for local in local_inputs for source_id in local.source_ids
+        }
+    return aligned
 
 
 ########################################

@@ -49,9 +49,46 @@ if TYPE_CHECKING:
     from geoutils.raster.base import RasterBase
     from geoutils.raster.raster import Raster
 
+_MIN_RANGE_WARNING_VARIANCE_FRACTION = 0.03
+
 ############################
 # 1/ INPUT AND MASK ALIGNMENT
 ############################
+
+
+def _plot_attributes(source: Any, predictors: Mapping[str, Any]) -> dict[str, Any]:
+    """Copy names and units from the inputs for plot labels."""
+
+    attributes = {}
+    for name, value in [(None, source), *predictors.items()]:
+        if isinstance(value, str):
+            points = _get_pointcloud_interface(source)
+            if points is not None:
+                value = points._dataset[value]
+
+        # Read metadata without loading raster or point values
+        if isinstance(value, xr.DataArray):
+            # Predictor columns need no spatial accessor to read their attributes
+            attrs = value.attrs
+        else:
+            raster = _get_raster_interface(value)
+            points = _get_pointcloud_interface(value) if raster is None else None
+            if raster is not None:
+                attrs = raster.tags
+            elif points is not None:
+                dataset = points._dataset
+                attrs = getattr(dataset, "attrs", None)
+                if attrs is None:
+                    attrs = getattr(getattr(dataset, "_meta", None), "attrs", {})
+            else:
+                attrs = getattr(value, "attrs", {})
+        attributes[name] = {
+            key: attrs[key] for key in ("long_name", "units") if isinstance(attrs.get(key), str) and attrs[key]
+        }
+        if "flag_values" in attrs and isinstance(attrs.get("flag_meanings"), str):
+            attributes[name]["flag_values"] = np.asarray(attrs["flag_values"]).tolist()
+            attributes[name]["flag_meanings"] = attrs["flag_meanings"]
+    return {"value": attributes.pop(None), "predictors": attributes}
 
 
 def _prepare_proxy_inputs(
@@ -225,16 +262,21 @@ def _estimate_total_magnitude(
     output_names: Mapping[str, str],
     *,
     bins: Mapping[str, Any] | int | None,
+    categories: Mapping[str, Sequence[Any]] | None,
     spread_estimator: Callable[[Any], Any],
     min_count: int,
+    model: Literal["piecewise_linear", "linear"] | Callable[..., Any],
+    fit_kwargs: Mapping[str, Any] | None,
     subsample: int | float,
     random_state: int | np.random.Generator | None,
     mp_config: MultiprocConfig | None,
-) -> tuple[ErrorMagnitude, int]:
+) -> tuple[ErrorMagnitude, int, int]:
     """
     Estimate error magnitude from the statistical spread of error proxy array, optionally grouped by predictors.
 
     This step supports Dask/MP through ``stats()``.
+
+    :returns: Error magnitude, available finite observation count and observation count used for the spread.
     """
 
     # Check inputs
@@ -255,28 +297,31 @@ def _estimate_total_magnitude(
 
     # Use the direct spread when no variable magnitude was requested
     if not output_names:
-        constant_spread = float(
-            sampled_interface.stats(
-                finite_spread,
-                values=value_selector,
-                subsample=grouped_subsample,
-                random_state=random_state,
-                mp_config=mp_config,
-            )
+        statistics = sampled_interface.stats(
+            [finite_spread, "validcount"],
+            values=value_selector,
+            subsample=grouped_subsample,
+            random_state=random_state,
+            mp_config=mp_config,
         )
+        constant_spread = float(statistics[statistic])
         if not np.isfinite(constant_spread) or constant_spread <= 0:
             raise ValueError("spread_estimator returned a non-positive or non-finite magnitude.")
-        return ErrorMagnitude.constant(constant_spread), valid_count
+        return ErrorMagnitude.constant(constant_spread), valid_count, int(statistics["validcount"])
 
-    # Expand one shared bin count or the default across all named predictors
+    # Bin continuous predictors and select categorical predictors by their declared values
+    grouped_categories = dict(categories or {})
+    continuous_names = [name for name in output_names if name not in grouped_categories]
     if bins is None:
-        grouped_bins = dict.fromkeys(output_names, 10)
+        grouped_bins = dict.fromkeys(continuous_names, 10)
     elif isinstance(bins, (int, np.integer)):
-        grouped_bins = {name: int(bins) for name in output_names}
+        grouped_bins = {name: int(bins) for name in continuous_names}
     else:
         grouped_bins = dict(bins)
-    if set(grouped_bins) != set(output_names):
-        raise ValueError("bins must define every magnitude predictor and no unknown names.")
+    if set(grouped_bins).intersection(grouped_categories):
+        raise ValueError("A magnitude predictor cannot define both bins and categories.")
+    if set(grouped_bins).union(grouped_categories) != set(output_names):
+        raise ValueError("bins and categories must define every magnitude predictor and no unknown names.")
 
     # Keep unobserved predictor combinations so the fitted magnitude grid can fill their gaps
     predictor_specs = {
@@ -288,6 +333,7 @@ def _estimate_total_magnitude(
         values={"error": value_selector},
         by=predictor_specs,
         bins=grouped_bins,
+        categories=grouped_categories,
         subsample=grouped_subsample,
         random_state=random_state,
         observed=False,
@@ -301,9 +347,13 @@ def _estimate_total_magnitude(
         grouped_statistics=table,
         statistic=statistic,
         min_count=min_count,
+        model=model,
+        fit_kwargs=fit_kwargs,
     )
 
-    return magnitude, valid_count
+    # Count observations within the supplied predictor groups
+    sample_count = int(table[(magnitude.value_name, "count")].sum())
+    return magnitude, valid_count, sample_count
 
 
 #################################
@@ -491,7 +541,7 @@ def _normalize_component_configuration(
         if has_predictors:
             components = {
                 "short_range": {"magnitude": "heteroscedastic", "correlation": "gaussian"},
-                "long_range": {"magnitude": "constant", "correlation": "spherical"},
+                "long_range": {"magnitude": "constant", "correlation": "gaussian"},
             }
         else:
             components = {"short_range": {"magnitude": "constant", "correlation": "gaussian"}}
@@ -519,10 +569,10 @@ def _normalize_component_configuration(
             if not has_predictors:
                 raise ValueError("A heteroscedastic component requires at least one magnitude predictor.")
 
-        # We keep "independent" (no correlation) errors distinct from components with a variogram model name
+        # Distinguish spatially uncorrelated errors from components with a variogram model
         correlation = configuration.get("correlation")
-        if correlation is not None and not isinstance(correlation, str):
-            raise TypeError("Estimated component correlation must be a variogram model name or None.")
+        if correlation is not None and not isinstance(correlation, str) and not callable(correlation):
+            raise TypeError("Estimated component correlation must be a variogram model name, callable, or None.")
         normalized.append({"name": name, "magnitude": magnitude, "correlation": correlation})
 
     # For now, we only support one heteroscedastic component
@@ -552,26 +602,37 @@ def _build_error_components(
     fitted_model = fitted_variogram.model
     structured_models = list(fitted_model.components) if fitted_model.model_name == "sum" else [fitted_model]
     correlated = [item for item in configuration if item["correlation"] is not None]
-    independent = [item for item in configuration if item["correlation"] is None]
+    uncorrelated = [item for item in configuration if item["correlation"] is None]
     if len(structured_models) != len(correlated):
         raise RuntimeError("The fitted variogram does not match the requested correlated components.")
-    if len(independent) > 1:
-        raise ValueError("Only one independent component can be identified from a shared variogram nugget.")
+    if len(uncorrelated) > 1:
+        raise ValueError("Only one spatially uncorrelated component can be identified from a shared variogram nugget.")
 
     # Sort ranges with their sills; requested model forms follow short-to-long order
     if any(model.effective_range is None for model in structured_models):
         raise ValueError("Each fitted correlation model needs a finite effective range.")
     fitted_ranges = np.array([float(cast(float, model.effective_range)) for model in structured_models])
+    fitted_sills = np.array([float(model.partial_sill or 0.0) for model in structured_models])
     fitted_order = np.argsort(fitted_ranges)
-    if not np.array_equal(fitted_order, np.arange(len(structured_models))):
+
+    # Warn about crossed ranges only when both components contribute at least 3%
+    include_in_warnings = fitted_sills >= _MIN_RANGE_WARNING_VARIANCE_FRACTION * fitted_model.sill
+    # Identical model forms can exchange their order without changing the fitted sum
+    significant_positions = np.flatnonzero(include_in_warnings)
+    model_forms = [replace(model, effective_range=1.0, partial_sill=1.0, nugget=0.0) for model in structured_models]
+    crossed_forms = any(
+        fitted_ranges[first] > fitted_ranges[second] and model_forms[first] != model_forms[second]
+        for first, second in zip(significant_positions[:-1], significant_positions[1:])
+    )
+    if crossed_forms:
         warnings.warn(
             "Fitted nested variogram ranges crossed; assigning their contributions from short to long range.",
             UserWarning,
         )
     ordered_ranges = fitted_ranges[fitted_order]
-    ordered_sills = np.array([float(model.partial_sill or 0.0) for model in structured_models])[fitted_order]
+    ordered_sills = fitted_sills[fitted_order]
 
-    # Assign each ordered term to a correlated component and the nugget to independent noise
+    # Assign each ordered term to a correlated component and the nugget to uncorrelated errors
     model_by_name: dict[str, VariogramModel | None] = {}
     sill_by_name: dict[str, float] = {}
     model_position = 0
@@ -587,7 +648,7 @@ def _build_error_components(
             )
             model_position += 1
 
-            # Correlated components exclude the shared independent nugget
+            # Correlated components exclude the shared nugget
             model_by_name[item["name"]] = replace(model, nugget=0.0)
             sill_by_name[item["name"]] = float(model.partial_sill or 0.0)
 
@@ -653,7 +714,7 @@ def _estimate_correlation(
     total_magnitude: ErrorMagnitude,
     valid_count: int,
     *,
-    correlated_models: list[str],
+    correlated_models: list[str | Callable[..., Any]],
     variogram_estimator: str | Callable[[Any], float],
     n_pairs: int,
     pair_sampling: Literal["loglag", "random_xy"],
@@ -670,8 +731,9 @@ def _estimate_correlation(
 
     # We fit the requested (potentially nested) models through GeoUtils lightweight variography
     fit_options = dict(fit_kwargs or {})
-    independent_count = sum(item["correlation"] is None for item in configuration)
-    if independent_count:
+    fit_options.setdefault("min_count", 100)
+    uncorrelated_count = sum(item["correlation"] is None for item in configuration)
+    if uncorrelated_count:
         fit_options.setdefault("use_nugget", True)
 
     # We know valid count ahead, so we can limit it to avoid raising the underlying warning
@@ -701,21 +763,29 @@ def _estimate_correlation(
     # Now, we inspect output components to warn if something looks fishy
     fitted_components = _build_error_components(configuration, total_magnitude, empirical)
 
-    # We report weak range separation and domain limited long range estimates explicitly
+    # Assess range separation only for components with at least 3% of the fitted variance
     messages: list[str] = []
     ranges = [
         float(cast(float, cast(VariogramModel, component.correlation).effective_range))
         for component in fitted_components
         if component.correlation is not None
+        and component.metadata["initial_variance_fraction"] >= _MIN_RANGE_WARNING_VARIANCE_FRACTION
     ]
     if len(ranges) > 1 and any(second / first < 1.5 for first, second in zip(ranges[:-1], ranges[1:])):
         messages.append("Some fitted correlation ranges overlap and their contributions may be weakly identified.")
 
     # Finally, we flag a long correlation range near the sampled extent, where it may be difficult to distinguish from
     # an actual trend in the data
-    sampled_maximum = float(empirical.attrs.get("max_distance", np.nanmax(empirical.lags)))
-    if ranges and np.isfinite(sampled_maximum) and ranges[-1] >= 0.9 * sampled_maximum:
-        messages.append("The longest correlation range approaches the sampled extent and may represent a trend.")
+    # Use the bins that entered fitting, excluding sparse or missing tail bins
+    valid = np.isfinite(empirical.lags) & np.isfinite(empirical.semivariance)
+    valid &= empirical.counts >= fit_options["min_count"]
+    sampled_maximum = float(np.max(empirical.lags[valid])) if np.any(valid) else np.nan
+    # Warn within 2% of the usable limit to detect ranges pinned at the fit boundary
+    if ranges and np.isfinite(sampled_maximum) and ranges[-1] >= 0.98 * sampled_maximum:
+        messages.append(
+            "The longest correlation range reaches the usable lag limit; "
+            "sample longer distances to distinguish correlation from a trend."
+        )
     for message in messages:
         warnings.warn(message, UserWarning)
 
@@ -738,9 +808,12 @@ def _estimate_error_structure(
     components: Mapping[str, Mapping[str, Any]] | None,
     mask: Any | None,
     bins: Mapping[str, Any] | int | None,
+    categories: Mapping[str, Sequence[Any]] | None,
     spread_estimator: Callable[[Any], Any],
     min_count: int,
     subsample_magnitude: int | float,
+    magnitude_model: Literal["piecewise_linear", "linear"] | Callable[..., Any],
+    magnitude_fit_kwargs: Mapping[str, Any] | None,
     variogram_estimator: str | Callable[[Any], float],
     n_pairs: int,
     pair_sampling: Literal["loglag", "random_xy"],
@@ -782,6 +855,9 @@ def _estimate_error_structure(
     # Normalize component configuration before sampling the inputs
     predictor_mapping = {} if predictors is None else dict(predictors)
     configuration = _normalize_component_configuration(components, has_predictors=bool(predictor_mapping))
+    if categories is not None and not set(categories).issubset(predictor_mapping):
+        raise ValueError("categories must name magnitude predictors.")
+    plot_attributes = _plot_attributes(source, predictor_mapping)
 
     # Draw separate RNG seeds so magnitude estimation and variography are both reproducible
     rng = random_state if isinstance(random_state, np.random.Generator) else np.random.default_rng(random_state)
@@ -812,31 +888,37 @@ def _estimate_error_structure(
         )
 
         # 2.1/ Estimate error magnitude from the error proxy
-        total_magnitude, valid_count = _estimate_total_magnitude(
+        total_magnitude, valid_count, sample_count = _estimate_total_magnitude(
             sampled,
             output_names,
             bins=bins,
+            categories=categories,
             spread_estimator=spread_estimator,
             min_count=min_count,
             subsample=subsample_magnitude,
+            model=magnitude_model,
+            fit_kwargs=magnitude_fit_kwargs,
             random_state=magnitude_seed,
             mp_config=mp_config,
         )
 
-        # If no correlation analysis was requested (assumed independent), return error structure immediately
+        # Return spatially uncorrelated errors when no correlation analysis was requested
         # Otherwise, we continue with correlation estimation below
         correlated_models = [item["correlation"] for item in configuration if item["correlation"] is not None]
         if not correlated_models:
             if len(configuration) != 1:
-                raise ValueError("Only one independent component can be estimated without a spatial correlation model.")
-            independent_component = ErrorComponent(configuration[0]["name"], total_magnitude, None)
+                raise ValueError(
+                    "Only one spatially uncorrelated component can be estimated without a spatial correlation model."
+                )
+            uncorrelated_component = ErrorComponent(configuration[0]["name"], total_magnitude, None)
             return ErrorStructure(
-                [independent_component],
+                [uncorrelated_component],
                 fit_diagnostics={
-                    "magnitude": {"valid_count": valid_count},
+                    "magnitude": {"valid_count": valid_count, "sample_count": sample_count},
                     "identifiability": [],
                 },
                 metadata={
+                    "plot_attrs": plot_attributes,
                     "fit_method": fit_method,
                     "spread_estimator": getattr(spread_estimator, "__name__", "callable"),
                     "variogram_estimator": None,
@@ -880,10 +962,11 @@ def _estimate_error_structure(
         fitted_components,
         empirical_variogram=empirical,
         fit_diagnostics={
-            "magnitude": {"valid_count": valid_count},
+            "magnitude": {"valid_count": valid_count, "sample_count": sample_count},
             "identifiability": messages,
         },
         metadata={
+            "plot_attrs": plot_attributes,
             "fit_method": fit_method,
             "spread_estimator": getattr(spread_estimator, "__name__", "callable"),
             "variogram_estimator": (
@@ -898,10 +981,71 @@ def _estimate_error_structure(
     )
 
 
-def _refit_error_structure(
+def _refit_error_structure_magnitude(
     structure: ErrorStructure,
     *,
-    correlation_models: str | Sequence[str] | None,
+    model: Literal["piecewise_linear", "linear"] | Callable[..., Any] | None,
+    min_count: int | None,
+    fit_kwargs: Mapping[str, Any] | None,
+) -> ErrorStructure:
+    """
+    Fit a new magnitude function to the stored groups and reuse the fitted correlation contributions.
+
+    replace() rebuilds the magnitude from its grouped_statistics. _build_error_components() applies the stored
+    variogram's variance fractions when refitting an estimated error structure.
+    """
+
+    # Prefer the total spread table so a component's allocated variance is not fitted twice
+    total = structure.metadata.get("total_magnitude")
+    estimated_total = isinstance(total, ErrorMagnitude)
+    variable = [
+        item for item in structure.components.values() if cast(ErrorMagnitude, item.magnitude).kind == "variable"
+    ]
+    if not estimated_total:
+        if len(variable) != 1:
+            raise ValueError("Refitting magnitude requires one stored variable magnitude table.")
+        total = variable[0].magnitude
+    if not isinstance(total, ErrorMagnitude) or total.kind != "variable":
+        raise ValueError("Refitting magnitude requires stored grouped magnitude statistics.")
+    if min_count is not None and (
+        isinstance(min_count, (bool, np.bool_)) or not isinstance(min_count, (int, np.integer)) or min_count < 1
+    ):
+        raise ValueError("min_count must be a positive integer.")
+
+    # Preserve the current fit options only when the same model is being refitted
+    options = total.fit_kwargs if model is None and fit_kwargs is None else fit_kwargs
+    fitted = replace(
+        total,
+        model=total.model if model is None else model,
+        min_count=total.min_count if min_count is None else min_count,
+        fit_kwargs=options,
+    )
+
+    # Reuse the correlation variance fractions while rebuilding the dependent magnitudes
+    configuration = structure.metadata.get("component_configuration")
+    metadata = dict(structure.metadata)
+    if estimated_total and isinstance(configuration, list) and structure.empirical_variogram is not None:
+        components = _build_error_components(configuration, fitted, structure.empirical_variogram)
+    else:
+        components = []
+        for item in structure.components.values():
+            if cast(ErrorMagnitude, item.magnitude).kind == "variable":
+                item = replace(item, magnitude=fitted)
+            components.append(item)
+    if estimated_total:
+        metadata["total_magnitude"] = fitted
+    return ErrorStructure(
+        components,
+        empirical_variogram=structure.empirical_variogram,
+        fit_diagnostics=dict(structure.fit_diagnostics),
+        metadata=metadata,
+    )
+
+
+def _refit_error_structure_correlation(
+    structure: ErrorStructure,
+    *,
+    correlation_models: str | Callable[..., Any] | Sequence[str | Callable[..., Any]] | None,
     fit_kwargs: Mapping[str, Any] | None,
 ) -> ErrorStructure:
     """Refit variogram model only for the ErrorStructure."""
@@ -917,22 +1061,33 @@ def _refit_error_structure(
 
     # We default to current models, and ensure short to long correlation order
     correlated = [component for component in structure.components.values() if component.correlation is not None]
-    models: str | list[str]
+    models: str | Callable[..., Any] | list[str | Callable[..., Any]]
     if correlation_models is None:
-        models = [cast(VariogramModel, component.correlation).model_name for component in correlated]
-    elif isinstance(correlation_models, str):
+        models = []
+        for component in correlated:
+            correlation = cast(VariogramModel, component.correlation)
+            models.append(correlation.function or correlation.model_name)
+    elif isinstance(correlation_models, str) or callable(correlation_models):
         models = correlation_models
     else:
         models = list(correlation_models)
 
     # The replacement model should describe the same number of correlated components
     expected = sum(item["correlation"] is not None for item in configuration)
-    model_count = len(models.split("+")) if isinstance(models, str) else len(models)
+    requested: list[str | Callable[..., Any]]
+    if isinstance(models, str):
+        requested = list(models.split("+"))
+    elif callable(models):
+        requested = [models]
+    else:
+        requested = models
+    model_count = len(requested)
     if model_count != expected:
         raise ValueError(f"correlation_models must contain {expected} model(s).")
 
-    # Preserve nugget fitting when the structure contains an independent component
+    # Fit a nugget when the structure contains a spatially uncorrelated component
     options = dict(fit_kwargs or {})
+    options.setdefault("min_count", structure.empirical_variogram.fit_result.get("min_count", 100))
     if any(item["correlation"] is None for item in configuration):
         options.setdefault("use_nugget", True)
     empirical = structure.empirical_variogram.fit(models, **options)
@@ -940,7 +1095,7 @@ def _refit_error_structure(
     # We finally update component definitions before reallocating their magnitudes from the refitted variogram
     for item, model_name in zip(
         [item for item in configuration if item["correlation"] is not None],
-        models.split("+") if isinstance(models, str) else models,
+        requested,
     ):
         item["correlation"] = model_name
     components = _build_error_components(configuration, total_magnitude, empirical)

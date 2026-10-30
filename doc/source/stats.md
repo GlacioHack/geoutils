@@ -386,12 +386,10 @@ variables. `min_count` hides estimates based on too few observations.
 # Display the mean red value and the number of observations supporting it
 fig, ax = plt.subplots(figsize=(7, 4))
 fig.subplots_adjust(right=0.78)
-axes = gu.stats.plot_grouped_stats(joint_stats, value="red", statistic="mean", min_count=100, ax=ax)
+axes = gu.stats.plot_grouped_stats(joint_stats, value="red", statistic="mean", min_count=100, plot_kind="heatmap", ax=ax)
 axes["statistic"].set(xlabel="Elevation (m)", ylabel="Inside glacier")
 
-# Place the color scale beyond the count panels so every elevation interval stays visible
-axes["colorbar"].set_position((0.84, 0.11, 0.025, 0.5))
-_ = axes["colorbar"].set_ylabel("Mean red value")
+_ = axes["colorbar"].set_xlabel("Mean red value")
 ```
 
 To summarize only one variable, make a separate grouping call. Statistics such as medians cannot generally be
@@ -424,6 +422,9 @@ GeoUtils performs the **pair sampling and lag-bin reduction efficiently**, then 
 [SciKit-GStat's semivariance estimators](https://scikit-gstat.readthedocs.io/en/latest/reference/estimator.html) to
 derive estimators and fit models. Models can then be passed to other GeoUtils functions or exported to covariance
 formats such as GSTools or GPyTorch for kriging, random field generation and other analyses.
+
+For rasters, `variogram()` samples distances up to **half the raster diagonal** by default. Set `max_lag=` or supply
+explicit distance bins to use a different extent.
 
 (stats-spatial-estimators)=
 ### Estimators
@@ -484,6 +485,7 @@ plt.tight_layout()
 **Distance uses coordinate units; semivariance uses squared value units.** This example describes variability in
 terrain elevation. To estimate an error variogram, use error measurements or elevation differences on stable terrain.
 
+(stats-spatial-fitting)=
 #### Sampling and fitting
 
 **Logarithmic distance sampling represents short and long separations efficiently.** `n_pairs` sets the sample size

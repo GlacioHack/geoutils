@@ -23,6 +23,7 @@ from __future__ import annotations
 import warnings
 from collections.abc import Callable, Hashable, Iterable, Mapping
 from contextlib import ExitStack
+from copy import copy
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
@@ -39,11 +40,14 @@ from geoutils.stats.reduction import (
     _check_input_flox_engine,
     _check_input_reduction_method,
     _check_input_tdigest,
+    _get_stat_common_alias,
     _normalize_statistics,
     _reduce_global_values,
+    _reducer_from_statistic,
 )
 from geoutils.stats.selection import (
     _coordinates_at_support,
+    _predictors_for_stats,
     _sample_and_mask_global_values,
     _select_values_and_mask_at_support,
 )
@@ -350,9 +354,10 @@ def stats(
         groups are calculated independently.
     :param overlap_backend: Library used to calculate polygon coverage of raster cells. Auto uses ExactExtract when it
         is installed and the grid is compatible, and otherwise uses Shapely.
-    :param error_structure: Optional source error model for one supplied Reducer. When supplied, return the statistic
-        result and a PropagationSummary calculated from the same selected values.
-    :param uncertainty_kwargs: Options passed to geoutils.uncertainty.propagate().
+    :param error_structure: Source error model for a Reducer or its statistic name. When supplied, return the statistic
+        result and a PropagationSummary calculated from the same selected values and weights.
+    :param uncertainty_kwargs: Options passed to geoutils.uncertainty.propagate(). Predictors can be rasters,
+        point clouds or arrays matching the selected input shape. Masks and groups select their values together.
     :returns: A statistic, summary dictionary, grouped dataframe, or grouped dataframe and mask mapping.
     """
 
@@ -383,9 +388,20 @@ def stats(
             raise ValueError("Fractional statistics do not support subsampling.")
         if return_masks:
             raise ValueError("Fractional statistics require return_masks=False.")
+
+    # Resolve named statistics to their Reducers for uncertainty propagation
+    uncertainty_reducer: Reducer | None = None
     if error_structure is not None:
-        if not isinstance(statistics, Reducer):
-            raise TypeError("Statistics uncertainty propagation requires one Reducer as statistics.")
+        if isinstance(statistics, str):
+            alias = _get_stat_common_alias(statistics)
+            if alias is not None:
+                uncertainty_reducer = _reducer_from_statistic(alias, fractional=fractional)
+        elif isinstance(statistics, Reducer):
+            uncertainty_reducer = statistics
+        if uncertainty_reducer is None:
+            raise TypeError(
+                "Statistics uncertainty propagation requires one Reducer or a statistic name with a Reducer."
+            )
         if subsample != 1:
             raise ValueError("Statistics uncertainty propagation does not yet support subsampling.")
         if backend != "geoutils":
@@ -533,10 +549,15 @@ def stats(
     for reserved in ("nominal_estimate", "output_labels"):
         if reserved in options:
             raise ValueError(f"uncertainty_kwargs cannot override {reserved}.")
+    if options.get("predictors") is not None:
+        options["predictors"] = _predictors_for_stats(options["predictors"], values_at_support, local_inputs)
     from geoutils.uncertainty import propagate
 
+    # Propagate the statistic's existing weights without replacing them with precision weights
+    propagation_operator = copy(cast(Reducer, uncertainty_reducer))
+    propagation_operator._uses_error_covariance = False
     summary: PropagationSummary = propagate(
-        cast(Reducer, statistics),
+        propagation_operator,
         local_inputs,
         error_structure,
         nominal_estimate=nominal_values,
