@@ -472,6 +472,8 @@ class TestErrorStructureEstimation:
     def test_estimate_separates_variable_short_and_fixed_long_components(self) -> None:
         """Checks that estimation separates a variable short range error from a constant long range error."""
 
+        pytest.importorskip("skgstat")
+
         # Random fields with short/long smoothing lengths
         rng = np.random.default_rng(9)
         predictor = np.broadcast_to(np.linspace(0, 1, 48), (48, 48))

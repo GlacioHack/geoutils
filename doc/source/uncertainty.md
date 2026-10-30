@@ -19,7 +19,7 @@ GeoUtils implements tools to **estimate and propagate uncertainty** for spatial 
 
 We focus on errors whose **magnitudes vary spatially** and/or that are **spatially correlated** for rasters
 or point clouds, with methods to both estimate and propagate these efficiently on large datasets. This is done both 
-by using chunked execution in underlying operation, and by avoiding storing a full error covariance matrix).
+by using chunked execution in underlying operations, and by avoiding storing a full error covariance matrix.
 
 Uncertainty quantification in GeoUtils strives to be **composable**, for ease of use.
 For estimating error structure, we build upon grouped statistics and variography outputs from {ref}`stats`.
@@ -969,7 +969,7 @@ The examples below emphasize variable magnitudes and increasingly long correlati
 :  code_prompt_show: "Show the code for comparing random fields"
 :  code_prompt_hide: "Hide the code for comparing random fields"
 :  image:
-:    width: 1200px
+:    width: 1000px
 :    alt: "Five random fields with constant or variable magnitude: uncorrelated errors, short range correlation, and several short and long correlation ranges."
 
 import pandas as pd
@@ -1008,7 +1008,8 @@ mixed_field = ds.rst.random_field(
 # Use one color scale for all five maps
 comparison_fields = [uncorrelated_field, variable_uncorrelated_field, correlated_field, variable_correlated_field, mixed_field]
 field_limit = 3 * field_magnitude
-figure, axes = plt.subplots(1, 5, figsize=(17, 3.5), sharex=True, sharey=True, layout="constrained")
+figure, axes = plt.subplots(1, 5, figsize=(12, 4), sharex=True, sharey=True, layout="compressed")
+figure.get_layout_engine().set(w_pad=0.03, h_pad=0.03, wspace=0.02)
 for ax, values, title in zip(
     axes, comparison_fields,
     [
@@ -1020,7 +1021,10 @@ for ax, values, title in zip(
     values.rst.plot(ax=ax, cmap="RdBu", vmin=-field_limit, vmax=field_limit, add_cbar=False)
     ax.set(title=title, xlabel="X (m)")
 axes[0].set_ylabel("Y (m)")
-figure.colorbar(axes[0].images[0], ax=axes, orientation="horizontal", shrink=0.65, extend="both", label="Error (m)")
+figure.colorbar(
+    axes[0].images[0], ax=axes, orientation="horizontal", shrink=0.7, aspect=40,
+    fraction=0.06, pad=0.08, extend="both", label="Error (m)",
+)
 plt.show()
 ```
 

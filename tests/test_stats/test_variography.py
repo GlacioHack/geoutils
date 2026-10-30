@@ -858,6 +858,8 @@ class TestVariogramReduction:
     def test_from_pairs__approximate_estimators(self, estimator: str, percentile: float | None) -> None:
         """Checks that t-digest estimators approximate exact results."""
 
+        pytest.importorskip("skgstat")
+
         # Create lognormal values and an exact reference
         pytest.importorskip("crick")
         pytest.importorskip("flox")
@@ -1642,6 +1644,7 @@ class TestVariogramErrors:
     def test_fit__error_insufficient_pairs(self) -> None:
         """Checks an error is raised when fewer than two finite bins meet the minimum pair count."""
 
+        pytest.importorskip("skgstat")
         empirical = gu.Variogram(lags=np.arange(3.0), semivariance=np.arange(3.0), counts=np.array([99, 100, 99]))
 
         with pytest.raises(ValueError, match="At least two finite empirical lag classes with at least 100 pairs"):
