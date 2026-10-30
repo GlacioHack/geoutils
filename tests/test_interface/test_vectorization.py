@@ -291,7 +291,8 @@ class TestPolygonize:
         "geometry_stitch",
     )
 
-    def test_polygonize__dask_selection_mask_stays_lazy(self) -> None:
+    @pytest.mark.parametrize("target_values", [1, [1, 2], np.array([1, 2]), (1, 2), "all", []])
+    def test_polygonize__dask_selection_mask_stays_lazy(self, target_values: Any) -> None:
         """Building a polygon selection mask must use Dask dtype metadata without reading values."""
 
         pytest.importorskip("dask")
@@ -306,7 +307,7 @@ class TestPolygonize:
         # Dask knows the dtype and shape without running the delayed source task
         values = da.from_delayed(unread_source(), shape=(2, 2), dtype=np.float32)
         prepared = _PolygonizePrepared(
-            target_values=1,
+            target_values=target_values,
             use_boolean_labeling=True,
             final_dtype="float32",
             nodata=None,
@@ -365,6 +366,40 @@ class TestPolygonize:
         expected_values = {1, 2} if nodata == 0 else {0, 1, 2}
         assert set(result.gdf["raster_value"]) == expected_values
 
+    @pytest.mark.parametrize(
+        "target_values, expected_counts",
+        [
+            ([2], {2: 4}),
+            ([1, 3], {1: 3, 3: 4}),
+            (np.array([1, 3]), {1: 3, 3: 4}),
+            ((1, 3), {1: 3, 2: 4, 3: 4}),
+            ((2, 2), {2: 4}),
+            ("all", {1: 3, 2: 4, 3: 4, 4: 5}),
+            ([], {}),
+            (np.array([], dtype=int), {}),
+            ([9], {}),
+            ([1, 1, 3], {1: 3, 3: 4}),
+        ],
+    )
+    @pytest.mark.parametrize("dtype", ["uint8", "float32"])
+    def test_polygonize__target_values(self, target_values: Any, expected_counts: dict[int, int], dtype: str) -> None:
+        """Checks that polygonize() with different inputs: list of discrete values, tuple ranges."""
+
+        # Create target values, for which we'll be able to check the counts (through output area)
+        values = np.array([[0, 1, 1, 2, 2], [0, 1, 2, 2, 3], [0, 3, 3, 3, 4], [0, 4, 4, 4, 4]], dtype=dtype)
+        masked_values = np.ma.array(values, mask=values == 0)
+        raster = gu.Raster.from_array(masked_values, rio.transform.from_origin(0, 4, 1, 1), 32631, nodata=0)
+
+        # Polygonize
+        result = raster.polygonize(target_values=target_values)
+
+        # Compare areas with pixel counts
+        areas = result.gdf.geometry.area.groupby(result.gdf["raster_value"]).sum().to_dict()
+        assert areas == expected_counts
+        # Check output columns and CRS
+        assert set(result.gdf.columns) == {"id", "raster_value", "geometry"}
+        assert result.crs == raster.crs
+
     @pytest.mark.parametrize("dtype", ["uint8", "int8", "uint16", "int16", "uint32", "int32", "float32", "float64"])
     def test_polygonize__dtype_support(self, dtype: str) -> None:
         """Polygonize should work on a wide range of dtypes (GeoPandas dtype constraints handled internally)."""
@@ -404,6 +439,17 @@ class TestPolygonize:
             match="ignoring target values input",
         ):
             mask.polygonize(target_values=2)
+
+    @pytest.mark.parametrize("target_values", [(), (1,), (1, 2, 3), (3, 1), (1, "2"), [1, "2"], [[1, 2]]])
+    def test_polygonize__error_invalid_target_values(self, target_values: Any) -> None:
+        """Checks an error is raised for invalid ranges or lists of target values in polygonize()."""
+
+        raster = gu.Raster.from_array(np.ones((2, 2), dtype="uint8"), rio.transform.from_origin(0, 2, 1, 1), 32631)
+
+        with pytest.raises(ValueError, match="target_values") as error:
+            raster.polygonize(target_values=target_values)
+        if isinstance(target_values, tuple):
+            assert "Use a list or array for exact value targets. Tuples are only for ranges." in str(error.value)
 
     @pytest.mark.parametrize("strategy", chunked_strategies)
     def test_polygonize__connectivity_across_chunks(
@@ -465,7 +511,7 @@ class TestPolygonize:
     @pytest.mark.parametrize("path_index", [0, 2])
     @pytest.mark.parametrize("connectivity", [4, 8])
     @pytest.mark.parametrize("strategy", chunked_strategies)
-    @pytest.mark.parametrize("target_mode", ["scalar", "range", "all"])
+    @pytest.mark.parametrize("target_mode", ["scalar", "list", "array", "range", "all"])
     def test_polygonize__chunked_backends_equal(
         self,
         path_index: int,
@@ -509,6 +555,10 @@ class TestPolygonize:
         nan = raster_base.to_nanarray()
         if target_mode == "scalar":
             target_values = np.unique(nan[~np.isnan(nan)])[0]  # First unique value we find for scalars
+        elif target_mode in ("list", "array"):
+            target_values = np.unique(nan[~np.isnan(nan)])[:3]
+            if target_mode == "list":
+                target_values = target_values.tolist()
         elif target_mode == "range":
             med = float(np.nanmedian(nan))
             std = float(np.nanstd(nan))
