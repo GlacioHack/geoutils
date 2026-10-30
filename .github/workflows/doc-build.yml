@@ -12,9 +12,10 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Update .readthedocs.yaml when changing OS, Python or dependencies
   doc:
     if: github.event_name != 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -24,7 +25,7 @@ jobs:
         with:
           enable-cache: true
       - name: Install project with documentation dependencies
-        run: uv pip install --system -e ".[doc,opt]"
+        run: uv pip install --system --torch-backend=cpu -e ".[doc,opt]"
       - name: Sphinx build
         run: |
           cd doc
@@ -32,7 +33,7 @@ jobs:
 
   linkcheck:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -42,7 +43,7 @@ jobs:
         with:
           enable-cache: true
       - name: Install project with documentation dependencies
-        run: uv pip install --system -e ".[doc,opt]"
+        run: uv pip install --system --torch-backend=cpu -e ".[doc,opt]"
       - name: Check external links
         run: |
           cd doc
