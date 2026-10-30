@@ -29,7 +29,7 @@ operations and some vector operations<sup>3</sup>. Operations rely directly on t
 with **composable** methods and backends that can be easily
 customized while GeoUtils handles georeferencing and chunked execution.
 Finally, GeoUtils strives to make these tools **accessible** through a shared interface across rasters, point clouds and
-vectors, with a structure following the principle of least astonishment for software development.
+vectors, with a structure following [the principle of least astonishment](https://en.wikipedia.org/wiki/Principle_of_least_astonishment) for software development.
 
 ```{margin}
 <sup>3</sup> Check {ref}`scalability-support` with Dask, and **visualize chunked implementations** through their

@@ -556,12 +556,12 @@ class TestRasterInterpolationAccuracy:
         raster = gu.Raster.from_array(values, transform, crs=32631, area_or_point="Area")
         rows = np.array([0.25, 1.3, 2.65])
         columns = np.array([0.4, 2.1, 1.2])
-        x = transform.c + columns * transform.a
-        y = transform.f + rows * transform.e
+        x = transform.c + (columns + 0.5) * transform.a
+        y = transform.f + (rows + 0.5) * transform.e
 
         # Compare map_coords/interpn/interp_at_points
-        y_axis = transform.f + np.arange(values.shape[0]) * transform.e
-        x_axis = transform.c + np.arange(values.shape[1]) * transform.a
+        y_axis = transform.f + (np.arange(values.shape[0]) + 0.5) * transform.e
+        x_axis = transform.c + (np.arange(values.shape[1]) + 0.5) * transform.a
         from_indices = map_coordinates(values, (rows, columns), order=order, mode="nearest", prefilter=False)
         from_coordinates = interpn((y_axis, x_axis), values, np.column_stack((y, x)), method=method)
         sampled = raster.interp_at_points((x, y), method=method, as_array=True)
@@ -571,13 +571,12 @@ class TestRasterInterpolationAccuracy:
         assert np.allclose(sampled, from_coordinates, equal_nan=True)
 
     @pytest.mark.parametrize("tag_aop", [None, "Area", "Point"])
-    @pytest.mark.parametrize("shift_aop", [True, False])
-    def test_interp_points__synthetic(self, tag_aop: Literal["Area", "Point"] | None, shift_aop: bool) -> None:
+    def test_interp_points__synthetic(self, tag_aop: Literal["Area", "Point"] | None) -> None:
         """
         Checks that interp_points() matches known values and SciPy methods on synthetic data.
 
         We select known points and compare to the expected interpolation results across all methods, and all pixel
-        interpretations (area_or_point, with or without shift).
+        interpretations (area_or_point).
 
         The synthetic data is a 3x3 array of values, which we interpolate at different synthetic points:
         1/ Points falling right on grid coordinates are compared to their value in the grid,
@@ -595,37 +594,31 @@ class TestRasterInterpolationAccuracy:
         raster = gu.Raster.from_array(data=arr, transform=transform, crs=None, nodata=-9999)
 
         # Define the AREA_OR_POINT attribute without re-transforming
-        raster.set_area_or_point(tag_aop, shift_area_or_point=False)
+        raster.set_area_or_point(tag_aop, shift_half_pixel=False)
 
         # Check interpolation falls right on values for points (1, 1), (1, 2) etc...
         index_x = [0, 1, 2, 0, 1, 2, 0, 1, 2]
         index_y = [0, 0, 0, 1, 1, 1, 2, 2, 2]
 
-        # The actual X/Y coords will be offset by one because Y axis is inverted and pixel coords is upper-left corner
-        points_x, points_y = raster.ij2xy(i=index_x, j=index_y, shift_area_or_point=shift_aop)
+        # Convert array positions to pixel centers
+        points_x, points_y = raster.ij2xy(i=index_x, j=index_y)
 
         # The following 4 methods should yield the same result because:
         # Nearest = Linear interpolation at the location of a data point
         # Regular grid = Equal grid interpolation at the location of a data point
 
-        raster_points = raster.interp_at_points(
-            (points_x, points_y), method="nearest", shift_area_or_point=shift_aop, as_array=True
-        )
-        raster_points_lin = raster.interp_at_points(
-            (points_x, points_y), method="linear", shift_area_or_point=shift_aop, as_array=True
-        )
+        raster_points = raster.interp_at_points((points_x, points_y), method="nearest", as_array=True)
+        raster_points_lin = raster.interp_at_points((points_x, points_y), method="linear", as_array=True)
         raster_points_interpn = raster.interp_at_points(
             (points_x, points_y),
             method="nearest",
             force_scipy_function="interpn",
-            shift_area_or_point=shift_aop,
             as_array=True,
         )
         raster_points_interpn_lin = raster.interp_at_points(
             (points_x, points_y),
             method="linear",
             force_scipy_function="interpn",
-            shift_area_or_point=shift_aop,
             as_array=True,
         )
 
@@ -642,17 +635,14 @@ class TestRasterInterpolationAccuracy:
         index_x_in = [0.5, 0.5, 1.5, 1.5]
         index_y_in = [0.5, 1.5, 0.5, 1.5]
 
-        points_x_in, points_y_in = raster.ij2xy(i=index_x_in, j=index_y_in, shift_area_or_point=shift_aop)
+        points_x_in, points_y_in = raster.ij2xy(i=index_x_in, j=index_y_in)
 
         # Here again compare methods
-        raster_points_in = raster.interp_at_points(
-            (points_x_in, points_y_in), method="linear", shift_area_or_point=shift_aop, as_array=True
-        )
+        raster_points_in = raster.interp_at_points((points_x_in, points_y_in), method="linear", as_array=True)
         raster_points_in_interpn = raster.interp_at_points(
             (points_x_in, points_y_in),
             method="linear",
             force_scipy_function="interpn",
-            shift_area_or_point=shift_aop,
             as_array=True,
         )
 
@@ -668,36 +658,34 @@ class TestRasterInterpolationAccuracy:
             assert raster_points_in[i] == np.mean([arr[xlow, ylow], arr[xupp, ylow], arr[xupp, yupp], arr[xlow, yupp]])
 
         # Select points beyond the outer half pixels for every pixel interpretation
-        points_out_xy = raster.ij2xy([-2, 1, 4, 1], [1, -2, 1, 4], shift_area_or_point=shift_aop)
+        points_out_xy = raster.ij2xy([-2, 1, 4, 1], [1, -2, 1, 4])
         with pytest.warns(UserWarning, match="All provided points were outside of raster bounds"):
-            raster_points_out = raster.interp_at_points(points_out_xy, shift_area_or_point=shift_aop, as_array=True)
+            raster_points_out = raster.interp_at_points(points_out_xy, as_array=True)
         assert all(~np.isfinite(raster_points_out))
 
         # To use cubic or quintic, we need a larger grid (minimum 6x6, but let's aim bigger with 50x50)
         arr = np.flipud(np.arange(1, 2501).reshape((50, 50)))
         transform = rio.transform.from_bounds(0, 0, 50, 50, 50, 50)
         raster = gu.Raster.from_array(data=arr, transform=transform, crs=None, nodata=-9999)
-        raster.set_area_or_point(tag_aop, shift_area_or_point=False)
+        raster.set_area_or_point(tag_aop, shift_half_pixel=False)
 
         # For this, get random points
         rng = np.random.default_rng(42)
         index_x_in_rand = rng.integers(low=8, high=42, size=(10,)) + rng.normal(scale=0.3)
         index_y_in_rand = rng.integers(low=8, high=42, size=(10,)) + rng.normal(scale=0.3)
-        points_x_rand, points_y_rand = raster.ij2xy(i=index_x_in_rand, j=index_y_in_rand, shift_area_or_point=shift_aop)
+        points_x_rand, points_y_rand = raster.ij2xy(i=index_x_in_rand, j=index_y_in_rand)
 
         for method in ["nearest", "linear"]:
             raster_points_mapcoords = raster.interp_at_points(
                 (points_x_rand, points_y_rand),
                 method=method,
                 force_scipy_function="map_coordinates",
-                shift_area_or_point=shift_aop,
                 as_array=True,
             )
             raster_points_interpn = raster.interp_at_points(
                 (points_x_rand, points_y_rand),
                 method=method,
                 force_scipy_function="interpn",
-                shift_area_or_point=shift_aop,
                 as_array=True,
             )
 
@@ -709,9 +697,7 @@ class TestRasterInterpolationAccuracy:
         index_x_edge_rand = [-0.5, -0.5, -0.5, 25, 25, 49.5, 49.5, 49.5]
         index_y_edge_rand = [-0.5, 25, 49.5, -0.5, 49.5, -0.5, 25, 49.5]
 
-        points_x_rand, points_y_rand = raster.ij2xy(
-            i=index_x_edge_rand, j=index_y_edge_rand, shift_area_or_point=shift_aop
-        )
+        points_x_rand, points_y_rand = raster.ij2xy(i=index_x_edge_rand, j=index_y_edge_rand)
 
         # Test across all methods
         for method in ["nearest", "linear", "cubic", "quintic"]:
@@ -719,14 +705,12 @@ class TestRasterInterpolationAccuracy:
                 (points_x_rand, points_y_rand),
                 method=method,
                 force_scipy_function="map_coordinates",
-                shift_area_or_point=shift_aop,
                 as_array=True,
             )
             raster_points_interpn_edge = raster.interp_at_points(
                 (points_x_rand, points_y_rand),
                 method=method,
                 force_scipy_function="interpn",
-                shift_area_or_point=shift_aop,
                 as_array=True,
             )
 
@@ -756,7 +740,7 @@ class TestRasterInterpolationAccuracy:
         # Open and crop for speed
         r = gu.Raster(example)
         r = r.crop((r.bounds.left, r.bounds.bottom, r.bounds.left + r.res[0] * 50, r.bounds.bottom + r.res[1] * 50))
-        r.set_area_or_point("Area", shift_area_or_point=False)
+        r.set_area_or_point("Area", shift_half_pixel=False)
 
         # 1/ Test for an individual point (shape can be tricky in 1 dimension)
         itest = 10
@@ -1365,7 +1349,7 @@ class TestPointInterpolationUncertainty:
         points = gu.PointCloud.from_xyz([0, 0.8, 2.1, 3.3], [0, 0.1, 2.2, 0.3], [2, 4, 8, 16], crs=32631)
         operator = operator_type(neighborhood=PointNeighbours(max_points=3))
         grid_coords = (np.array([0.2, 1.2]), np.array([0.3, 1.3]))
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 0)])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 0)])
 
         # Small rounding differences can arise from the compiled weighted sums
         result = points.grid(
@@ -1385,7 +1369,7 @@ class TestPointInterpolationUncertainty:
                 "nodata_handling": "ignore",
             },
             method="numerical",
-            n_samples=2,
+            n_simulations=2,
             random_state=4,
         )
         assert np.allclose(summary.mean.to_nanarray().reshape(-1), result.to_nanarray().reshape(-1), equal_nan=True)
@@ -1404,7 +1388,7 @@ class TestPointInterpolationUncertainty:
         # Only the target at X=0 coincides with the sole observation
         points = gu.PointCloud.from_xyz([0], [0], [7], crs=32631)
         coords = (np.array([0.0, 1.0]), np.array([0.0, 1.0]))
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
         for neighborhood in (None, PointNeighbours(max_points=1, radius=2)):
             result = points.grid(
                 grid_coords=coords,
@@ -1448,7 +1432,7 @@ class TestRegularInterpolationUncertainty:
             crs=4326,
             nodata=-9999,
         )
-        source_error = gu.ErrorStructure([gu.ErrorComponent("measurement", 2)])
+        source_error = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
 
         # The first tuple item remains the ordinary Rasterio result
         expected = raster.reproject(reference, resampling="bilinear")
@@ -1480,7 +1464,7 @@ class TestRegularInterpolationUncertainty:
         raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 8, 1, 1), crs=32631, nodata=-9999)
         # The final target stays outside the widest nodata mask so every method has a finite result
         targets = (np.array([2.3, 3.7, 5.2, 0.2]), np.array([3.4, 4.6, 5.1, 7.8]))
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 0)])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 0)])
 
         # Numerical propagation must use exactly the method used for the nominal values
         result = raster.resample_at_points(
@@ -1500,7 +1484,7 @@ class TestRegularInterpolationUncertainty:
                 "method": ScipyInterpolator(method),
             },
             method="numerical",
-            n_samples=2,
+            n_simulations=2,
             random_state=4,
         )
         # Allow for larger residual errors when comparing independent iterative spline fits
@@ -1777,7 +1761,7 @@ class TestInterpolatorKriging:
         )
         operator = Kriging(model)
 
-        # The field difference has variance twice its semivariance; independent measurement error adds to it
+        # Uncorrelated error variance adds to twice the field's semivariance
         assert operator.evaluate(data) == 3
         expected_variance = 2 * float(model.variogram(1)) + error_variance
         assert operator.kriging_variance(data) == pytest.approx(expected_variance)

@@ -47,6 +47,7 @@ from geoutils.operators.interpolator import (
     _regular_interpolation_method,
     _resolve_interpolator,
 )
+from geoutils.operators.methods import _resampling_operator
 from geoutils.operators.neighbours import (
     GridCoverage,
     GridNeighbours,
@@ -193,10 +194,8 @@ def _interp_points_base(
     array: NDArrayNum,
     transform: rio.transform.Affine,
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum],
-    area_or_point: Literal["Area", "Point"] | None = None,
-    method: InterpolationMethodLike | None = None,
+    method: InterpolationMethodLike = "linear",
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
-    shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     nodata_propagation: NodataPropagation = "nearest",
     *,
@@ -215,10 +214,8 @@ def _interp_points_base(
     array: NDArrayNum,
     transform: rio.transform.Affine,
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | None,
-    area_or_point: Literal["Area", "Point"] | None = None,
-    method: InterpolationMethodLike | None = None,
+    method: InterpolationMethodLike = "linear",
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
-    shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     nodata_propagation: NodataPropagation = "nearest",
     *,
@@ -237,10 +234,8 @@ def _interp_points_base(
     array: NDArrayNum,
     transform: rio.transform.Affine,
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | None,
-    area_or_point: Literal["Area", "Point"] | None = None,
-    method: InterpolationMethodLike | None = None,
+    method: InterpolationMethodLike = "linear",
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
-    shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     nodata_propagation: NodataPropagation = "nearest",
     *,
@@ -258,10 +253,8 @@ def _interp_points_base(
     array: NDArrayNum,
     transform: rio.transform.Affine,
     points: tuple[Number, Number] | tuple[NDArrayNum, NDArrayNum] | None,
-    area_or_point: Literal["Area", "Point"] | None = None,
-    method: InterpolationMethodLike | None = None,
+    method: InterpolationMethodLike = "linear",
     dist_nodata_spread: Literal["half_order_up", "half_order_down"] | int | None = None,
-    shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     nodata_propagation: NodataPropagation = "nearest",
     return_interpolator: bool = False,
@@ -279,9 +272,6 @@ def _interp_points_base(
     The private validity-only option follows _resample_at_points(); its conversion happens within this loaded array.
     """
 
-    # If interpolation method undefined, default to the global system config
-    if method is None:
-        method = config["interpolation_method"]
     method = _resolve_interpolator(method)
 
     # Convert availability within the current block, preserving masked cells without copying the source values
@@ -311,11 +301,8 @@ def _interp_points_base(
                     x,
                     y,
                     transform=transform,
-                    area_or_point=area_or_point,
-                    shift_area_or_point=shift_area_or_point,
                     op=np.float64,
                 )
-                rows, columns = rows - 0.5, columns - 0.5
             else:
                 rows, columns = array_indices
             return method._interpolate_grid(array, rows, columns, propagation)
@@ -345,8 +332,6 @@ def _interp_points_base(
             transform,
             points,
             method,
-            area_or_point=area_or_point,
-            shift_area_or_point=shift_area_or_point,
             nodata_propagation=propagation,
             array_indices=array_indices,
             band=source_band,
@@ -361,9 +346,7 @@ def _interp_points_base(
             array,
             transform,
             points,
-            area_or_point=area_or_point,
             method=method._wrapped_operator,
-            shift_area_or_point=shift_area_or_point,
             nodata_propagation=propagation,
             dist_nodata_spread=dist_nodata_spread,
             array_indices=array_indices,
@@ -382,8 +365,6 @@ def _interp_points_base(
             transform=transform,
             points=points,
             operator=method,
-            area_or_point=area_or_point,
-            shift_area_or_point=shift_area_or_point,
             nodata_propagation=propagation,
             dist_nodata_spread=dist_nodata_spread,
             band=source_band,
@@ -404,8 +385,6 @@ def _interp_points_base(
                     x,
                     y,
                     transform=transform,
-                    area_or_point=area_or_point,
-                    shift_area_or_point=shift_area_or_point,
                     op=_point_index_type(x, y),
                 )
             else:
@@ -433,13 +412,11 @@ def _interp_points_base(
         assert points is not None
         x, y = points
 
-    # Get lower-left corner coordinates
+    # Get pixel center coordinates along both axes
     xycoords = _coords(
         transform=transform,
         shape=(array.shape[0], array.shape[1]),
-        area_or_point=area_or_point,
         grid=False,
-        shift_area_or_point=shift_area_or_point,
     )
 
     # Let interpolation outside the bounds not raise any error by default
@@ -486,8 +463,6 @@ def _resample_points_base(
         transform,
         points,
         method,
-        area_or_point=kwargs["area_or_point"],
-        shift_area_or_point=False,
         nodata_propagation=kwargs["nodata_propagation"],
         dist_nodata_spread=kwargs["dist_nodata_spread"],
         neighborhood=cast(GridNeighbours, method.default_neighborhood),
@@ -619,10 +594,10 @@ def _dask_resample_points(
         points[0],
         points[1],
         transform=transform,
-        area_or_point=kwargs["area_or_point"],
-        shift_area_or_point=kwargs["shift_area_or_point"],
         op=_point_index_type(*points),
     )
+    if isinstance(kwargs["method"], Reducer):
+        src_rows, src_cols = src_rows + 0.5, src_cols + 0.5
 
     # Overlap for the neighborhood and nodata mask
     depth = max(_compute_resampling_overlap(kwargs["method"]), kwargs.get("dist_nodata_spread") or 0)
@@ -791,13 +766,13 @@ def _resample_points_partition(
         x,
         y,
         transform=source_raster.transform,
-        area_or_point=source_raster.area_or_point,
-        shift_area_or_point=interp_options["shift_area_or_point"],
         op=_point_index_type(x, y),
     )
     # Detect partitions with no raster overlap before constructing interpolation work
     # Include outer half pixels accepted by nearest and linear interpolation when selecting partitions
     operator = interp_options["method"]
+    if isinstance(operator, Reducer):
+        i, j = i + 0.5, j + 0.5
     method_name = None if isinstance(operator, Reducer) else _regular_interpolation_method(operator)
     margin = 0.5 if method_name in {"nearest", "linear"} else 0
     ind_outofbounds: NDArrayBool = (i < -margin) | (j < -margin)
@@ -835,7 +810,6 @@ def _resample_points_dask_pointcloud(
     input_latlon: bool,
     as_array: bool,
     nodata_handling: NodataChoice | None,
-    shift_area_or_point: bool | None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None,
     return_interpolator: bool,
     extra_kwargs: dict[str, Any],
@@ -868,7 +842,6 @@ def _resample_points_dask_pointcloud(
         "band": band,
         "input_latlon": False,
         "nodata_handling": nodata_handling,
-        "shift_area_or_point": shift_area_or_point,
         "force_scipy_function": force_scipy_function,
         "return_interpolator": False,
     }
@@ -1023,8 +996,6 @@ def _multiproc_resample_points(
             points[0],
             points[1],
             transform=rst.transform,
-            area_or_point=kwargs["area_or_point"],
-            shift_area_or_point=kwargs["shift_area_or_point"],
             op=_point_index_type(*points),
         )
 
@@ -1134,7 +1105,6 @@ def _prepare_resampling_options(
     coverage: GridCoverage | None,
     masked: bool,
     nodata_handling: NodataChoice | None,
-    shift_area_or_point: bool | None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None,
     return_interpolator: bool,
     _validity_only: bool,
@@ -1167,7 +1137,7 @@ def _prepare_resampling_options(
         else:
             operator = _CallableReducer(method, masked=masked)
     else:
-        operator = _resolve_interpolator(config["interpolation_method"] if method is None else method)
+        operator = _resampling_operator(config["raster_resampling_method"] if method is None else method)
     if error_structure is not None:
         operator = _with_error_structure(operator, error_structure)
 
@@ -1206,7 +1176,6 @@ def _prepare_resampling_options(
             if fractional_shape is None or offsets != set(GridNeighbours(size=size, shape=fractional_shape).offsets):
                 raise ValueError("Area coverage requires a square or circular GridNeighbours window.")
             fractional_window = size
-        shift_area_or_point = False
         order = None
         if nodata_handling is None:
             nodata_handling = "ignore"
@@ -1232,11 +1201,9 @@ def _prepare_resampling_options(
 
     # Common options for loaded arrays and worker tiles
     return {
-        "area_or_point": source_raster.area_or_point,
         "method": operator,
         "dist_nodata_spread": spread_distance,
         "nodata_propagation": propagation,
-        "shift_area_or_point": shift_area_or_point,
         "force_scipy_function": force_scipy_function,
         "return_interpolator": return_interpolator,
         "source_band": band,
@@ -1263,11 +1230,9 @@ def _prepare_resampling_points(
 
     # Extract raster metadata for later checks and conversions
     transform = source_raster.transform
-    area_or_point = source_raster.area_or_point
     shape = source_raster.shape
     operator = options["method"]
     fractional_window = options["fractional_window"]
-    shift_area_or_point = options["shift_area_or_point"]
 
     # Convert from latlon if necessary
     pts = pts_xy
@@ -1292,8 +1257,6 @@ def _prepare_resampling_points(
                 x,
                 y,
                 transform=transform,
-                area_or_point=area_or_point,
-                shift_area_or_point=shift_area_or_point,
                 op=_point_index_type(x, y),
             )
 
@@ -1400,7 +1363,6 @@ def _resample_at_points(
     input_latlon: bool = False,
     as_array: bool = False,
     nodata_handling: NodataChoice | None = None,
-    shift_area_or_point: bool | None = None,
     force_scipy_function: Literal["map_coordinates", "interpn"] | None = None,
     return_interpolator: bool = False,
     mp_config: MultiprocConfig | None = None,
@@ -1443,7 +1405,6 @@ def _resample_at_points(
         coverage=coverage,
         masked=masked,
         nodata_handling=nodata_handling,
-        shift_area_or_point=shift_area_or_point,
         force_scipy_function=force_scipy_function,
         return_interpolator=return_interpolator,
         _validity_only=_validity_only,
@@ -1479,7 +1440,6 @@ def _resample_at_points(
                 "band": band,
                 "input_latlon": input_latlon,
                 "nodata_handling": nodata_handling,
-                "shift_area_or_point": options["shift_area_or_point"],
                 "force_scipy_function": force_scipy_function,
                 "return_interpolator": return_interpolator,
                 "coverage": coverage,
@@ -1505,7 +1465,6 @@ def _resample_at_points(
             input_latlon=input_latlon,
             as_array=as_array,
             nodata_handling=nodata_handling,
-            shift_area_or_point=options["shift_area_or_point"],
             force_scipy_function=force_scipy_function,
             return_interpolator=return_interpolator,
             extra_kwargs={

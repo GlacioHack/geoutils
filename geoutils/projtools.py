@@ -36,6 +36,7 @@ from rasterio.crs import CRS
 from shapely.geometry.base import BaseGeometry
 from shapely.geometry.polygon import Polygon
 
+from geoutils._config import config
 from geoutils._typing import NDArrayNum, Number
 
 
@@ -407,7 +408,7 @@ def compare_proj(proj1: CRS, proj2: CRS) -> bool:
 
 
 def _get_bounds_projected(
-    bounds: rio.coords.BoundingBox, in_crs: CRS, out_crs: CRS, densify_points: int = 5000
+    bounds: rio.coords.BoundingBox, in_crs: CRS, out_crs: CRS, densify_points: int | None = None
 ) -> rio.coords.BoundingBox:
     """
     Get bounds projected in a specified CRS.
@@ -415,8 +416,13 @@ def _get_bounds_projected(
     :param in_crs: Input CRS.
     :param out_crs: Output CRS.
     :param densify_points: Maximum points to be added between image corners to account for nonlinear edges.
-    Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+        Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+        Defaults to 5000. Can be configured globally with geoutils.config["densify_points"].
     """
+
+    # Resolve the current default before projecting the bounding box edges
+    if densify_points is None:
+        densify_points = config["densify_points"]
 
     # Calculate new bounds
     left, bottom, right, top = bounds
@@ -427,7 +433,7 @@ def _get_bounds_projected(
 
 
 def _densify_geometry(
-    line_geometry: shapely.geometry.LineString, densify_points: int = 5000
+    line_geometry: shapely.geometry.LineString, densify_points: int | None = None
 ) -> shapely.geometry.LineString:
     """
     Densify a linestring geometry.
@@ -436,9 +442,14 @@ def _densify_geometry(
 
     :param line_geometry: Linestring.
     :param densify_points: Number of points to densify each line.
+        Defaults to 5000. Can be configured globally with geoutils.config["densify_points"].
 
     :return: Densified linestring.
     """
+
+    # Resolve the current default before splitting each line segment
+    if densify_points is None:
+        densify_points = config["densify_points"]
 
     # Get the segments (list of linestrings)
     segments = list(map(shapely.geometry.LineString, zip(line_geometry.coords[:-1], line_geometry.coords[1:])))
@@ -472,7 +483,7 @@ def _densify_geometry(
 
 
 def _get_footprint_projected(
-    bounds: rio.coords.BoundingBox, in_crs: CRS, out_crs: CRS, densify_points: int = 5000
+    bounds: rio.coords.BoundingBox, in_crs: CRS, out_crs: CRS, densify_points: int | None = None
 ) -> gpd.GeoDataFrame:
     """
     Get bounding box footprint projected in a specified CRS.
@@ -483,7 +494,8 @@ def _get_footprint_projected(
     :param in_crs: Input CRS.
     :param out_crs: Output CRS.
     :param densify_points: Maximum points to be added between image corners to account for non linear edges.
-     Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+        Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+        Defaults to 5000. Can be configured globally with geoutils.config["densify_points"].
     """
 
     # Get bounds

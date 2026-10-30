@@ -35,20 +35,10 @@ pc.pc.plot(ax="new", cmap="terrain", marker="x", cbar_title="Elevation (m)")
 
 # %%
 # .. important::
-#       The interpretation of where raster values are located can differ. The parameter ``shift_area_or_point`` (off by default) can be turned on to ensure
-#       that the pixel interpretation of your dataset is correct.
+#       Interpolation uses pixel centers independently of the raster's "Area" or "Point" interpretation.
 
 # %%
-# Let's look and redefine our pixel interpretation into ``"Point"``. This will shift interpolation by half a pixel.
+# We can choose a different interpolation method. The default is "linear".
 
-rast.rst.area_or_point
-rast.rst.area_or_point = "Point"
-
-# %%
-# We can interpolate again by shifting according to our interpretation, and changing the resampling algorithm (default to "linear").
-
-pc_shifted = rast.rst.interp_at_points(points=(x_coords, y_coords), shift_area_or_point=True, method="quintic")
-np.nanmean(pc.pc.data - pc_shifted.pc.data)
-
-# %%
-# The mean difference in interpolated values is quite significant, with a 2-meter bias!
+pc_quintic = rast.rst.interp_at_points(points=(x_coords, y_coords), method="quintic")
+np.nanmean(pc.pc.data - pc_quintic.pc.data)

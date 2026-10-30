@@ -29,11 +29,13 @@ import geopandas as gpd
 import numpy as np
 import pandas as pd
 import rasterio as rio
+import xarray as xr
 from packaging.version import Version
 from pyproj import CRS
 from shapely.geometry.base import BaseGeometry
 
 from geoutils import profiler
+from geoutils._config import config
 from geoutils._dispatch import (
     _check_match_bbox,
     get_geo_attr,
@@ -107,21 +109,28 @@ class VectorBase(ABC):
 
         if not self._is_pd:
             return raster
-        if hasattr(raster, "rst"):
-            return raster
 
         from geoutils.raster.xr_accessor import DataArrayRasterAccessor, open_raster
 
-        if raster.name is not None and not raster.is_loaded:
+        # Preserve existing arrays and open file results without loading them
+        if hasattr(raster, "rst"):
+            result = raster
+        elif raster.name is not None and not raster.is_loaded:
             return open_raster(raster.name, is_mask=raster.is_mask)
-        return DataArrayRasterAccessor.from_array(
-            data=raster.data,
-            transform=raster.transform,
-            crs=raster.crs,
-            nodata=raster.nodata,
-            area_or_point=raster.area_or_point,
-            tags=raster.tags,
-        )
+        else:
+            result = DataArrayRasterAccessor.from_array(
+                data=raster.data,
+                transform=raster.transform,
+                crs=raster.crs,
+                nodata=raster.nodata,
+                area_or_point=raster.area_or_point,
+                tags=raster.tags,
+            )
+
+        # Apply the configured representation to the new raster
+        if config["raster_return_type"] == "dataset" and isinstance(result, xr.DataArray):
+            return result.to_dataset(name=result.name or "raster")
+        return result
 
     def _cast_pointcloud_output(self, pointcloud: Any) -> Any:
         """Return an accessor-backed point cloud when this vector is accessor-backed."""
@@ -863,7 +872,7 @@ class VectorBase(ABC):
 
     @classmethod
     def from_bounds_projected(
-        cls, raster_or_vector: RasterType | VectorLike, out_crs: CRS | None = None, densify_points: int = 5000
+        cls, raster_or_vector: RasterType | VectorLike, out_crs: CRS | None = None, densify_points: int | None = None
     ) -> VectorBaseType | gpd.GeoDataFrame:
         """Create a vector polygon from projected bounds of a raster or vector.
 
@@ -871,6 +880,7 @@ class VectorBase(ABC):
         :param out_crs: In which CRS to compute the bounds
         :param densify_points: Maximum points to be added between image corners to account for nonlinear edges.
             Reduce if time computation is really critical (ms) or increase if extent is not accurate enough.
+            Defaults to 5000. Can be configured globally with geoutils.config["densify_points"].
         """
 
         if out_crs is None:
@@ -948,15 +958,29 @@ class VectorBase(ABC):
         new_ds = _buffer_metric(gdf=_as_geodataframe(self), buffer_size=buffer_size)
         return self._override_gdf_output(new_ds)
 
-    def get_bbox_projected(self, out_crs: CRS, densify_points: int = 5000) -> rio.coords.BoundingBox:
-        """Get the vector bounding box projected in a specified CRS."""
+    def get_bbox_projected(self, out_crs: CRS, densify_points: int | None = None) -> rio.coords.BoundingBox:
+        """
+        Get the vector bounding box projected in a specified CRS.
+
+        :param out_crs: Output CRS.
+        :param densify_points: Points added along each edge to account for curved edges in the output CRS.
+            Defaults to 5000. Can be configured globally with geoutils.config["densify_points"].
+        :returns: Bounding box containing the projected edges.
+        """
 
         return _get_bounds_projected(self.bbox, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points)
 
     def get_footprint_projected(
-        self: VectorBaseType, out_crs: CRS, densify_points: int = 5000
+        self: VectorBaseType, out_crs: CRS, densify_points: int | None = None
     ) -> VectorBaseType | gpd.GeoDataFrame:
-        """Get vector footprint projected in a specified CRS."""
+        """
+        Get vector footprint projected in a specified CRS.
+
+        :param out_crs: Output CRS.
+        :param densify_points: Number of segments used for each footprint edge before projection.
+            Defaults to 5000. Can be configured globally with geoutils.config["densify_points"].
+        :returns: Vector or GeoDataFrame containing the projected footprint polygon.
+        """
 
         new_ds = _get_footprint_projected(
             bounds=self.bbox, in_crs=self.crs, out_crs=out_crs, densify_points=densify_points

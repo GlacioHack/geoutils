@@ -3054,8 +3054,6 @@ def _subsample_raster_from_indices(
         i=rows,
         j=columns,
         transform=source_raster.transform,
-        area_or_point=source_raster.area_or_point,
-        shift_area_or_point=False,
         force_offset=force_pixel_offset,
     )
 
@@ -3131,12 +3129,10 @@ def _subsample_raster_from_indices(
 ##########################
 
 
-def _raster_point_coordinate_block(
-    indexes: Any, *, width: int, transform: affine.Affine, area_or_point: Literal["Area", "Point"] | None, offset: str
-) -> Any:
-    """Calculate X/Y for a flat row block with the same pixel convention as in-memory raster conversion."""
+def _raster_point_coordinate_block(indexes: Any, *, width: int, transform: affine.Affine, offset: str) -> Any:
+    """Calculate X/Y for a flat row block with the same pixel convention as eager raster conversion."""
     rows, columns = np.divmod(indexes, width)
-    coordinates = _ij2xy(rows, columns, transform, area_or_point, shift_area_or_point=False, force_offset=offset)
+    coordinates = _ij2xy(rows, columns, transform, force_offset=offset)
     return np.stack(coordinates)
 
 
@@ -3145,7 +3141,6 @@ def _raster_values_to_point_partition(
     selected_indices: NDArray[np.int64],
     raster_shape: tuple[int, int],
     transform: affine.Affine,
-    area_or_point: Literal["Area", "Point"] | None,
     crs: CRS | None,
     nodata: int | float | None,
     column_names: list[str],
@@ -3190,14 +3185,12 @@ def _raster_values_to_point_partition(
         if nodata is not None:
             band_values[band_values == nodata] = np.nan
 
-    # Derive point coordinates from the geotransform and pixel interpretation
+    # Derive point coordinates from the geotransform and pixel offset
     rows, columns = np.unravel_index(selected_indices, raster_shape)
     x_coords, y_coords = _ij2xy(
         i=rows,
         j=columns,
         transform=transform,
-        area_or_point=area_or_point,
-        shift_area_or_point=False,
         force_offset=force_pixel_offset,
     )
 
@@ -3276,7 +3269,6 @@ def _wrapper_subsample_raster_partition_dask(
     tile_idx: NDArrayNum,
     raster_shape: tuple[int, int],
     transform: affine.Affine,
-    area_or_point: Literal["Area", "Point"] | None,
     crs: CRS | None,
     nodata: int | float | None,
     column_names: list[str],
@@ -3303,7 +3295,6 @@ def _wrapper_subsample_raster_partition_dask(
         selected_indices,
         raster_shape,
         transform,
-        area_or_point,
         crs,
         nodata,
         column_names,
@@ -3503,7 +3494,6 @@ def _dask_subsample_raster(
             tile,
             source_raster.shape,
             source_raster.transform,
-            source_raster.area_or_point,
             source_raster.crs,
             source_raster.nodata,
             column_names,
@@ -3532,7 +3522,6 @@ def _dask_subsample_raster(
                 indexes,
                 width=source_raster.shape[1],
                 transform=source_raster.transform,
-                area_or_point=source_raster.area_or_point,
                 offset=force_pixel_offset,
                 new_axis=0,
                 chunks=((2,), indexes.chunks[0]),
@@ -3663,7 +3652,6 @@ def _wrapper_subsample_raster_partition_mp(
             selected_indices,
             source_raster.shape,
             source_raster.transform,
-            source_raster.area_or_point,
             source_raster.crs,
             source_raster.nodata,
             column_names,
@@ -3895,7 +3883,7 @@ def _subsample_raster(
     skip_nodata: bool = True,
     as_array: bool | Literal["xarray"] = False,
     random_state: int | np.random.Generator | None = None,
-    force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+    force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "center",
     mp_config: MultiprocConfig | None = None,
     force_output_to_memory: bool = False,
     rename_default_data_name: bool = True,

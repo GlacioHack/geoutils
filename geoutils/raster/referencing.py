@@ -71,25 +71,9 @@ def _ij2xy(
     i: ArrayLike,
     j: ArrayLike,
     transform: rio.transform.Affine,
-    area_or_point: Literal["Area", "Point"] | None,
-    shift_area_or_point: bool | None = None,
-    force_offset: str | None = None,
+    force_offset: str = "center",
 ) -> tuple[NDArrayNum, NDArrayNum]:
     """See description of Raster.ij2xy."""
-
-    # If undefined, default to the global system config
-    if shift_area_or_point is None:
-        shift_area_or_point = config["shift_area_or_point"]
-
-    # Shift by half a pixel back for "Point" interpretation
-    if shift_area_or_point and force_offset is None:
-        if area_or_point is not None and area_or_point == "Point":
-            i = np.asarray(i) - 0.5
-            j = np.asarray(j) - 0.5
-
-    # Default offset is upper-left for raster coordinates
-    if force_offset is None:
-        force_offset = "ul"
 
     x, y = rio.transform.xy(transform, i, j, offset=force_offset)
 
@@ -100,16 +84,10 @@ def _xy2ij(
     x: ArrayLike,
     y: ArrayLike,
     transform: rio.transform.Affine,
-    area_or_point: Literal["Area", "Point"] | None,
     op: type = np.float32,
     precision: float | None = None,
-    shift_area_or_point: bool | None = None,
 ) -> tuple[NDArrayNum, NDArrayNum]:
     """See description of Raster.xy2ij."""
-
-    # If undefined, default to the global system config
-    if shift_area_or_point is None:
-        shift_area_or_point = config["shift_area_or_point"]
 
     # Input checks
     if op not in [np.float32, np.float64, float]:
@@ -136,20 +114,9 @@ def _xy2ij(
     else:
         i, j = (np.asarray(i), np.asarray(j))
 
-    # AREA_OR_POINT GDAL attribute, i.e. does the value refer to the upper left corner "Area" or
-    # the center of pixel "Point". This normally has no influence on georeferencing, it's only
-    # about the interpretation of the raster values, and thus can affect sub-pixel interpolation,
-    # for more details see: https://gdal.org/user/raster_data_model.html#metadata
-
-    # If the user wants to shift according to the interpretation
-    if shift_area_or_point:
-        # Shift by half a pixel if the AREA_OR_POINT attribute is "Point", otherwise leave as is
-        if area_or_point is not None and area_or_point == "Point":
-            if not isinstance(i.flat[0], (np.floating, float)):
-                raise ValueError("Operator must return np.floating values to perform pixel interpretation shifting.")
-
-            i += 0.5
-            j += 0.5
+    # GDAL pixel coordinates start at cell corners, while integer array indices locate cell centers
+    i = i - 0.5
+    j = j - 0.5
 
     # Convert output indexes to integer if they are all whole numbers
     if np.all(np.mod(i, 1) == 0) and np.all(np.mod(j, 1) == 0):
@@ -162,10 +129,8 @@ def _xy2ij(
 def _coords(
     transform: rio.transform.Affine,
     shape: tuple[int, int],
-    area_or_point: Literal["Area", "Point"] | None,
     grid: bool = True,
-    shift_area_or_point: bool | None = None,
-    force_offset: str | None = None,
+    force_offset: str = "center",
 ) -> tuple[NDArrayNum, NDArrayNum]:
     """See description of Raster.coords."""
 
@@ -178,8 +143,6 @@ def _coords(
             i=rows.ravel(),
             j=columns.ravel(),
             transform=transform,
-            area_or_point=area_or_point,
-            shift_area_or_point=shift_area_or_point,
             force_offset=force_offset,
         )
         return np.asarray(xx).reshape(shape), np.asarray(yy).reshape(shape)
@@ -189,16 +152,12 @@ def _coords(
         i=np.arange(shape[0] - 1, -1, -1),
         j=0,
         transform=transform,
-        area_or_point=area_or_point,
-        shift_area_or_point=shift_area_or_point,
         force_offset=force_offset,
     )
     xx, _ = _ij2xy(
         i=0,
         j=np.arange(shape[1]),
         transform=transform,
-        area_or_point=area_or_point,
-        shift_area_or_point=shift_area_or_point,
         force_offset=force_offset,
     )
 
@@ -215,16 +174,16 @@ def _outside_bounds(
     yj: ArrayLike,
     transform: rio.transform.Affine,
     shape: tuple[int, int],
-    area_or_point: Literal["Area", "Point"] | None,
     index: bool = True,
 ) -> bool:
     """See description of Raster.outside_image."""
 
     # If not passed as X/Y index, convert from coordinates
     if not index:
-        row, col = _xy2ij(xi, yj, transform=transform, area_or_point=area_or_point)
+        row, col = _xy2ij(xi, yj, transform=transform)
     else:
-        row, col = xi, yj  # type: ignore
+        row, col = np.asarray(xi), np.asarray(yj)
+    row, col = row + 0.5, col + 0.5
 
     # Row and columns can't be negative
     if np.any(np.array((col, row)) < 0):
@@ -252,13 +211,13 @@ def _cast_pixel_interpretation(
     area_or_point1: Literal["Area", "Point"] | None, area_or_point2: Literal["Area", "Point"] | None
 ) -> Literal["Area", "Point"] | None:
     """
-    Cast two pixel interpretations and warn if not castable.
+    Cast two pixel interpretations and optionally warn if they differ.
 
     Casts to:
      - "Area" if both are "Area",
      - "Point" if both are "Point",
      - None if any of the interpretation is None, or
-     - None if one is "Area" and the other "Point" (and raises a warning).
+     - None if one is "Area" and the other "Point" (and warns if configured).
     """
 
     # If one is None, cast to None

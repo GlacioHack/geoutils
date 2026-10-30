@@ -399,8 +399,6 @@ class TestGridNeighbourSelection:
             transform,
             (0.5, 2.5),
             operator,
-            area_or_point=None,
-            shift_area_or_point=False,
             nodata_propagation="ignore",
             band=2,
         )
@@ -432,8 +430,6 @@ class TestGridNeighbourSelection:
             transform,
             (-0.5, 1.5),
             operator,
-            area_or_point=None,
-            shift_area_or_point=False,
             nodata_propagation="ignore",
             neighborhood=GridNeighbours(size=3),
         )
@@ -461,7 +457,6 @@ class TestFractionalWindowData:
             values,
             transform,
             points,
-            area_or_point=None,
             fractional_window=1,
             fractional_shape="square",
             band=2,
@@ -494,10 +489,8 @@ class TestRegularInterpolationData:
         _, inputs, handling = _prepare_regular_interpolation_data(
             values,
             transform,
-            (0.25, 1.75),
+            (0.75, 1.25),
             "linear",
-            area_or_point=None,
-            shift_area_or_point=False,
             nodata_propagation="ignore",
             band=2,
         )
@@ -683,7 +676,7 @@ class TestRadiusGridding:
 
         # A 129-row grid leaves one row in the final search block, with observations on both sides of its boundary
         points = gu.PointCloud.from_xyz([0, 0, 0], [0, 127, 128], [2.0, 4.0, 8.0], crs=32631)
-        reference = gu.Raster.from_array(np.zeros((129, 2)), rio.transform.from_origin(0, 128, 1, 1), crs=32631)
+        reference = gu.Raster.from_array(np.zeros((129, 2)), rio.transform.from_origin(-0.5, 128.5, 1, 1), crs=32631)
         result = points.grid(
             ref=reference,
             resampling=method,

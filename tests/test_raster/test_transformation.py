@@ -89,7 +89,7 @@ class TestTransformation:
 
     @pytest.mark.parametrize("data", test_data)
     @pytest.mark.filterwarnings("ignore:Argument 'inplace' is deprecated:DeprecationWarning")
-    def test_crop(self, data: list[str]) -> None:
+    def test_crop(self, data: list[str], monkeypatch: pytest.MonkeyPatch) -> None:
         """Test for crop method, also called by square brackets through __getitem__"""
 
         raster_path, outlines_path = data
@@ -257,9 +257,10 @@ class TestTransformation:
         # - Check related to pixel interpretation -
 
         # Check warning for a different area_or_point for the match-reference geometry works
-        r.set_area_or_point("Area", shift_area_or_point=False)
+        monkeypatch.setitem(gu.config, "warn_area_or_point", True)
+        r.set_area_or_point("Area", shift_half_pixel=False)
         r2 = r.copy()
-        r2.set_area_or_point("Point", shift_area_or_point=False)
+        r2.set_area_or_point("Point", shift_half_pixel=False)
 
         with pytest.warns(UserWarning, match='One raster has a pixel interpretation "Area" and the other "Point".*'):
             r.crop(r2)
@@ -411,7 +412,7 @@ class TestTransformation:
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
     @pytest.mark.filterwarnings("ignore:Argument 'inplace' is deprecated:DeprecationWarning")
-    def test_reproject(self, example: str) -> None:
+    def test_reproject(self, example: str, monkeypatch: pytest.MonkeyPatch) -> None:
 
         # Reference raster to be used
         r = gu.Raster(example)
@@ -672,9 +673,10 @@ class TestTransformation:
         assert r_crs.raster_equal(r_tmp_crs)
 
         # -- Check warning for area_or_point works -- #
-        r.set_area_or_point("Area", shift_area_or_point=False)
+        monkeypatch.setitem(gu.config, "warn_area_or_point", True)
+        r.set_area_or_point("Area", shift_half_pixel=False)
         r2 = r.copy()
-        r2.set_area_or_point("Point", shift_area_or_point=False)
+        r2.set_area_or_point("Point", shift_half_pixel=False)
 
         with pytest.warns(UserWarning) as raised:
             r.reproject(r2)

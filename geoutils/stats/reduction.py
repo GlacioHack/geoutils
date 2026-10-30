@@ -1053,29 +1053,8 @@ def _merge_block_tasks(
 ) -> tuple[NDArray[Any], NDArray[Any], dict[str, NDArray[Any]]]:
     """Schedule and merge bounded block summaries for one statistics or NMAD pass."""
 
-    if use_dask:
-        submit = import_optional("dask").delayed
-        tasks = [
-            submit(_reduce_block)(
-                [blocks[index] for blocks in value_blocks],
-                block,
-                total_groups,
-                reindex,
-                reduction_statistics,
-                tdigest_compression,
-                centers,
-            )
-            for index, block in enumerate(id_blocks)
-        ]
-
-        # Merge groups of split_every tasks at each level so no single task receives every block summary
-        while len(tasks) > 1:
-            tasks = [
-                submit(_merge_blocks)(tasks[start : start + split_every]) for start in range(0, len(tasks), split_every)
-            ]
-        summary = tasks[0].compute()
-    elif mp_config is None:
-        summary = _reduce_block(
+    if not use_dask and mp_config is None:
+        return _reduce_block(
             [blocks[0] for blocks in value_blocks],
             id_blocks[0],
             total_groups,
@@ -1084,10 +1063,29 @@ def _merge_block_tasks(
             tdigest_compression,
             centers,
         )
-    else:
-        # Combine worker results in small groups so finished summaries do not keep piling up in memory
-        levels: list[Any] = []
-        for start in range(0, len(id_blocks), split_every):
+
+    if use_dask:
+        submit = import_optional("dask").delayed
+
+    # Limit submitted blocks so Dask cannot retain inputs from the whole raster while waiting for reductions
+    levels: list[Any] = []
+    for start in range(0, len(id_blocks), split_every):
+        if use_dask:
+            tasks = [
+                submit(_reduce_block)(
+                    [blocks[index] for blocks in value_blocks],
+                    id_blocks[index],
+                    total_groups,
+                    reindex,
+                    reduction_statistics,
+                    tdigest_compression,
+                    centers,
+                )
+                for index in range(start, min(start + split_every, len(id_blocks)))
+            ]
+            summary = submit(_merge_blocks)(tasks).compute()
+        else:
+            assert mp_config is not None
             handles = [
                 mp_config.cluster.submit(
                     _reduce_block,
@@ -1102,24 +1100,24 @@ def _merge_block_tasks(
                 for index in range(start, min(start + split_every, len(id_blocks)))
             ]
             summary = _merge_blocks(mp_config.cluster.gather(handles))
-            depth = 0
+        depth = 0
 
-            # Keep at most one accumulated summary per level, merging equally sized batches in submission order
-            while depth < len(levels) and levels[depth] is not None:
-                summary = _merge_blocks([levels[depth], summary])
-                levels[depth] = None
-                depth += 1
-            if depth == len(levels):
-                # Add a level when this batch has combined with every earlier level
-                levels.append(summary)
-            else:
-                levels[depth] = summary
+        # Keep at most one accumulated summary per level, merging equally sized batches in submission order
+        while depth < len(levels) and levels[depth] is not None:
+            summary = _merge_blocks([levels[depth], summary])
+            levels[depth] = None
+            depth += 1
+        if depth == len(levels):
+            # Add a level when this batch has combined with every earlier level
+            levels.append(summary)
+        else:
+            levels[depth] = summary
 
-        # Combine the remaining occupied levels once all worker batches have finished
-        remaining = [level for level in levels if level is not None]
-        summary = remaining[0]
-        for level in remaining[1:]:
-            summary = _merge_blocks([summary, level])
+    # Combine the remaining occupied levels once all worker batches have finished
+    remaining = [level for level in levels if level is not None]
+    summary = remaining[0]
+    for level in remaining[1:]:
+        summary = _merge_blocks([summary, level])
     return summary
 
 

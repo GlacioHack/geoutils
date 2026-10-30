@@ -80,7 +80,8 @@ created = gu.raster.from_array(np.ones((3, 3)), Affine(10, 0, 0, 0, -10, 30), 32
 ```
 
 Both {func}`~geoutils.open_raster` and {func}`~geoutils.raster.from_array` accept `as_object_type="dataset"` to return
-a {class}`~xarray.Dataset`. See {ref}`core-datasets` for working with several rasters at once.
+a {class}`~xarray.Dataset`. Set `gu.config["raster_return_type"]` to choose the session default; see {ref}`config`.
+See {ref}`core-datasets` for working with several rasters at once.
 
 ## The {class}`~geoutils.Raster` object
 

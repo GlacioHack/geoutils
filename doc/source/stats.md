@@ -386,12 +386,10 @@ variables. `min_count` hides estimates based on too few observations.
 # Display the mean red value and the number of observations supporting it
 fig, ax = plt.subplots(figsize=(7, 4))
 fig.subplots_adjust(right=0.78)
-axes = gu.stats.plot_grouped_stats(joint_stats, value="red", statistic="mean", min_count=100, ax=ax)
+axes = gu.stats.plot_grouped_stats(joint_stats, value="red", statistic="mean", min_count=100, plot_kind="heatmap", ax=ax)
 axes["statistic"].set(xlabel="Elevation (m)", ylabel="Inside glacier")
 
-# Place the color scale beyond the count panels so every elevation interval stays visible
-axes["colorbar"].set_position((0.84, 0.11, 0.025, 0.5))
-_ = axes["colorbar"].set_ylabel("Mean red value")
+_ = axes["colorbar"].set_xlabel("Mean red value")
 ```
 
 To summarize only one variable, make a separate grouping call. Statistics such as medians cannot generally be
@@ -424,6 +422,9 @@ GeoUtils performs the **pair sampling and lag-bin reduction efficiently**, then 
 [SciKit-GStat's semivariance estimators](https://scikit-gstat.readthedocs.io/en/latest/reference/estimator.html) to
 derive estimators and fit models. Models can then be passed to other GeoUtils functions or exported to covariance
 formats such as GSTools or GPyTorch for kriging, random field generation and other analyses.
+
+For rasters, `variogram()` samples distances up to **half the raster diagonal** by default. Set `max_lag=` or supply
+explicit distance bins to use a different extent.
 
 (stats-spatial-estimators)=
 ### Estimators
@@ -484,6 +485,7 @@ plt.tight_layout()
 **Distance uses coordinate units; semivariance uses squared value units.** This example describes variability in
 terrain elevation. To estimate an error variogram, use error measurements or elevation differences on stable terrain.
 
+(stats-spatial-fitting)=
 #### Sampling and fitting
 
 **Logarithmic distance sampling represents short and long separations efficiently.** `n_pairs` sets the sample size
@@ -564,4 +566,23 @@ For simulations from an error model instead of predictions from measurements, se
 (stats-chunked-strategies)=
 ## Chunked strategies
 
-In construction
+This section covers advanced controls for grouped statistics on chunked data. `strategy` changes how partial group
+results are combined; it does not change group membership or the requested estimator.
+
+| Strategy | How chunks are combined | Best suited to |
+| --- | --- | --- |
+| `"dense"` | Keep a summary slot for every declared group | Mergeable estimators with a moderate number of groups |
+| `"sparse"` | Keep summaries only for groups present in each chunk | Mergeable estimators with many or sparsely populated groups |
+| `"groupwise"` | Gather the observations belonging to complete groups | Median, NMAD, quantiles and custom estimators |
+
+The default, `strategy="auto"`, uses `groupwise` for non-mergeable estimators. For mergeable estimators, it uses
+`dense` for at most 4096 declared group combinations and `sparse` above that. A complete group must still fit in
+memory for a non-mergeable estimator, and `observed=False` can produce a large in-memory result table.
+
+Dask follows the input chunks and scheduler. Eager arrays and GeoUtils objects can instead use a
+{class}`~geoutils.multiproc.MultiprocConfig` to distribute tiles across workers. The numerical reductions are shared.
+
+Sampling is independent of the reduction strategy. `subsampling_strategy="topk"` keeps sampled locations stable
+across chunk layouts for a fixed seed, while `"sequential"` follows traversal order. With grouped statistics,
+`subsample_per_group=True` applies the requested sample limit independently to every combined group. See
+{ref}`sampling-reproducibility` for details.

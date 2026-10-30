@@ -11,6 +11,7 @@ import tempfile
 import warnings
 from pathlib import Path
 from tempfile import TemporaryFile
+from typing import Literal
 
 import numpy as np
 import pytest
@@ -850,12 +851,18 @@ class TestRaster:
 
         # 2.5/ Setter shift and using set_area_or_point() with options
         old_transform = raster_point.transform
-        # Setting "Area" from "Point" will shift the transform by default
+        # Setting "Area" from "Point" leaves the transform unchanged by default
         raster_point.area_or_point = "Area"
         assert raster_point.area_or_point == "Area"
-        assert raster_point.transform != old_transform
+        assert raster_point.transform == old_transform
 
-        # Setting "Point" should give back the original transform
+        # Opting into shifting moves the transform when changing interpretation
+        raster_point.set_area_or_point("Point", shift_half_pixel=True)
+        assert raster_point.transform != old_transform
+        raster_point.set_area_or_point("Area", shift_half_pixel=True)
+        assert raster_point.transform == old_transform
+
+        # Setting "Point" also leaves the transform unchanged
         raster_point.area_or_point = "Point"
         assert raster_point.area_or_point == "Point"
         assert raster_point.transform == old_transform
@@ -869,17 +876,14 @@ class TestRaster:
         assert raster_point.transform == old_transform
 
         # Setting "Area" passing a shift argument of False also shouldn't
-        raster_point.set_area_or_point("Area", shift_area_or_point=False)
+        raster_point.set_area_or_point("Area", shift_half_pixel=False)
         assert raster_point.area_or_point == "Area"
         assert raster_point.transform == old_transform
 
-        # Setting "Area" with a globally False argument of shift_area_or_point also shouldn't
-        gu.config["shift_area_or_point"] = False
+        # Changing to "Point" with default arguments also leaves the transform unchanged
         raster_point.set_area_or_point("Point")
         assert raster_point.area_or_point == "Point"
         assert raster_point.transform == old_transform
-        # We reset the config argument
-        gu.config["shift_area_or_point"] = True
 
         # 3/ With function creating a single Raster
 
@@ -896,79 +900,45 @@ class TestRaster:
         raster_point_copy = raster_point.copy()
         assert raster_point.area_or_point == raster_point_copy.area_or_point
 
-    def test_consistency_shift_area_or_point(self) -> None:
-        """
-        Check that the pixel interpration shifts for rasters (in set_area_or_point) and for points (xy2ij and
-        interp_points) are consistent.
-        """
+    @pytest.mark.parametrize(
+        "old_interpretation, new_interpretation, direction", [("Area", "Point", 1), ("Point", "Area", -1)]
+    )
+    @pytest.mark.parametrize("as_accessor", [False, True])
+    def test_set_area_or_point__shift_half_pixel(
+        self,
+        old_interpretation: Literal["Area", "Point"],
+        new_interpretation: Literal["Area", "Point"],
+        direction: int,
+        as_accessor: bool,
+    ) -> None:
+        """Checks that passing shift_half_pixel to set_area_or_point is the only case where it updates the transform."""
 
-        # Create a small raster to test on
-        rst_arr = np.arange(25, dtype="int32").reshape(5, 5)
-        rst = gu.Raster.from_array(rst_arr, transform=rio.transform.from_origin(0, 5, 1, 1), crs=4326)
+        # Create raster object and Xarray equiv
+        values = np.arange(25, dtype="int32").reshape(5, 5)
+        transform = rio.transform.from_origin(0, 5, 1, 1)
+        original = gu.Raster.from_array(values, transform=transform, crs=4326)
+        raster = original.to_xarray().rst if as_accessor else original
+        raster.set_area_or_point(old_interpretation, shift_half_pixel=False)
 
-        # Below, we compare the coordinates of shifted raster and shifted points
+        # We check attribute assignment updates metadata without changing transform
+        raster.area_or_point = new_interpretation
+        assert raster.transform == transform
+        raster.area_or_point = old_interpretation
+        assert raster.transform == transform
 
-        # 0/ Without shift, should always be the same for "Area", as nothing happens
+        # Read first value before changing the interpretation
+        x, y = raster.ij2xy(0, 0)
+        np.testing.assert_array_equal((x, y), (0.5, 4.5))
+        np.testing.assert_array_equal(np.asarray(raster.xy2ij(x, y)).ravel(), (0, 0))
+        assert raster.interp_at_points((x, y), as_array=True) == values[0, 0]
 
-        # For "Area", all the same
-        rst01 = rst.copy()
-        rst01.set_area_or_point("Area", shift_area_or_point=False)
-        ul1 = (rst01.bounds.left, rst01.bounds.top)
-        ul2 = rst01.ij2xy(0, 0)
-        # We can simply check that the upper left corner is at the same coordinates
-        assert ul1 == ul2
-
-        # For "Point", 0.5/0.5 index shift should match the upper left corner
-        rst02 = rst.copy()
-        rst02.set_area_or_point("Point", shift_area_or_point=False)
-        ul1 = (rst02.bounds.left, rst02.bounds.top)
-        ul2 = rst02.ij2xy(0.5, 0.5)
-        # We can simply check that the upper left corner is at the same coordinates
-        assert ul1 == ul2
-
-        # 1/ Shifting from "Point" to "Area"
-
-        # As a raster: set to "Point" without shift, then shift to "Area"
-        rst1 = rst.copy()
-        rst1.set_area_or_point("Point", shift_area_or_point=False)
-        rst1.set_area_or_point("Area")  # This shifts the transform and thus upper-left coordinates
-        ul1 = (rst1.bounds.left, rst1.bounds.top)
-
-        # As point: set to "Point" and simply extract the coordinates which already includes shifting in ij2xy
-        rst2 = rst.copy()
-        rst2.set_area_or_point("Point", shift_area_or_point=False)
-        # Upper left coordinates should match the 0/0 pixel
-        ul2 = rst2.ij2xy(0, 0)
-
-        assert ul1 == ul2
-
-        # An "Area" raster with the same georeferencing as a "Point" raster is shifted left
-        # and upwards by half a pixel (according to gdalinfo,
-        # e.g. https://github.com/opengeospatial/ogcapi-coverages/issues/92)
-        assert rst1.bounds.left == rst.bounds.left - rst.res[0] / 2
-        assert rst1.bounds.top == rst.bounds.top + rst.res[1] / 2
-
-        # 2/ From "Area" to "Point"
-
-        # As a raster: set to "Area" without shift, then shift to "Point"
-        rst1 = rst.copy()
-        rst1.set_area_or_point("Area", shift_area_or_point=False)
-        rst1.set_area_or_point("Point")  # This shifts the transform and thus upper-left coordinates
-        ul1 = (rst1.bounds.left, rst1.bounds.top)
-
-        # As point: set to "Point" and simply extract the coordinates
-        rst2 = rst.copy()
-        rst2.set_area_or_point("Area", shift_area_or_point=False)
-        # Upper left coordinates should match 0.5/0.5 pixel
-        ul2 = rst2.ij2xy(0.5, 0.5)
-
-        assert ul1 == ul2
-
-        # A "Point" raster with the same georeferencing as an "Area" raster is shifted right
-        # and downwards by half a pixel (according to gdalinfo,
-        # e.g. https://github.com/opengeospatial/ogcapi-coverages/issues/92)
-        assert rst1.bounds.left == rst.bounds.left + rst.res[0] / 2
-        assert rst1.bounds.top == rst.bounds.top - rst.res[1] / 2
+        # We pass argument for half-pixel shift, then read the transformed center
+        raster.set_area_or_point(new_interpretation, shift_half_pixel=True)
+        moved_x, moved_y = raster.ij2xy(0, 0)
+        np.testing.assert_array_equal((moved_x, moved_y), (x + direction * 0.5, y - direction * 0.5))
+        np.testing.assert_array_equal(np.asarray(raster.xy2ij(moved_x, moved_y)).ravel(), (0, 0))
+        assert raster.interp_at_points((moved_x, moved_y), as_array=True) == values[0, 0]
+        np.testing.assert_array_equal(np.asarray(raster.data).squeeze(), values)
 
     @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])
     def test_to_nanarray(self, example: str) -> None:
@@ -1068,27 +1038,21 @@ class TestRaster:
 
             # - Test that xy2ij are consistent with new image -
             # Upper left
-            assert rst_down.xy2ij(rst_down.bounds.left, rst_down.bounds.top, shift_area_or_point=False) == (0, 0)
+            assert rst_down.xy2ij(rst_down.bounds.left, rst_down.bounds.top) == (-0.5, -0.5)
             # Upper right
-            assert rst_down.xy2ij(
-                rst_down.bounds.right + rst_down.res[0], rst_down.bounds.top, shift_area_or_point=False
-            ) == (
-                0,
-                rst_down.width + 1,
+            assert rst_down.xy2ij(rst_down.bounds.right + rst_down.res[0], rst_down.bounds.top) == (
+                -0.5,
+                rst_down.width + 0.5,
             )
             # Bottom right
-            assert rst_down.xy2ij(
-                rst_down.bounds.right + rst_down.res[0], rst_down.bounds.bottom, shift_area_or_point=False
-            ) == (
-                rst_down.height,
-                rst_down.width + 1,
+            assert rst_down.xy2ij(rst_down.bounds.right + rst_down.res[0], rst_down.bounds.bottom) == (
+                rst_down.height - 0.5,
+                rst_down.width + 0.5,
             )
             # One pixel right and down
-            assert rst_down.xy2ij(
-                rst_down.bounds.left + rst_down.res[0], rst_down.bounds.top - rst_down.res[1], shift_area_or_point=False
-            ) == (
-                1,
-                1,
+            assert rst_down.xy2ij(rst_down.bounds.left + rst_down.res[0], rst_down.bounds.top - rst_down.res[1]) == (
+                0.5,
+                0.5,
             )
 
         # -- Check that error is raised when downsampling value is not valid --
@@ -3035,7 +2999,7 @@ class TestArithmetic:
         assert (~m1).raster_equal(self.from_array(~m1.data, rst_ref=r1))
 
     @pytest.mark.parametrize("op", ops_2args)
-    def test_raise_errors(self, op: str) -> None:
+    def test_raise_errors(self, op: str, monkeypatch: pytest.MonkeyPatch) -> None:
         """
         Test that errors are properly raised in certain situations.
 
@@ -3082,6 +3046,7 @@ class TestArithmetic:
             getattr(self.r1, op)("some_string")
 
         # Different area or point interpretation for two-raster input
+        monkeypatch.setitem(gu.config, "warn_area_or_point", True)
         with pytest.warns(UserWarning, match='One raster has a pixel interpretation "Area" and the other "Point".*'):
             getattr(self.r2, op)(self.r1_wrong_aop)
 
@@ -3618,7 +3583,7 @@ class TestArrayInterface:
             np.logical_and.reduce(rst1)
 
     @pytest.mark.parametrize("np_func_name", ufuncs_str_2nin_1nout + ufuncs_str_2nin_2nout + handled_functions_2in)  # type: ignore
-    def test_raise_errors_2nin(self, np_func_name: str) -> None:
+    def test_raise_errors_2nin(self, np_func_name: str, monkeypatch: pytest.MonkeyPatch) -> None:
         """Check that proper errors are raised when input raster/array don't match (only 2-input functions)."""
 
         # Create Rasters
@@ -3682,5 +3647,6 @@ class TestArrayInterface:
             np_func(rst, ma_wrong_shape.filled(np.nan))
 
         aop_message = 'One raster has a pixel interpretation "Area" and the other "Point".*'
+        monkeypatch.setitem(gu.config, "warn_area_or_point", True)
         with pytest.raises(UserWarning, match=aop_message):
             np_func(rst, rst_wrong_aop)

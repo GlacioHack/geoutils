@@ -426,6 +426,44 @@ class TestReductionChunked:
             assert all(isinstance(value, da.Array) for value in values)
             assert isinstance(group_ids, da.Array)
 
+    @pytest.mark.parametrize("split_every", [2, 3, 8])
+    @pytest.mark.parametrize("with_quantiles", [False, True])
+    def test_reduce_values__bounded_dask_batches(self, split_every: int, with_quantiles: bool) -> None:
+        """Checks that Dask reads at most split_every chunks per batch and matches in-memory reductions."""
+
+        dask = pytest.importorskip("dask")
+        da = pytest.importorskip("dask.array")
+        if with_quantiles:
+            pytest.importorskip("crick")
+        from dask.callbacks import Callback
+
+        # Use enough chunks for several batches and a shorter final chunk
+        values = np.arange(35, dtype=float)
+        statistics = _normalize_statistics(["sum", "mean", "median", "nmad"] if with_quantiles else ["sum", "mean"])
+        expected, _ = _reduce_values([values], statistics, method="map-reduce")
+        reads: list[Any] = []
+        batch_starts: list[int] = []
+
+        def read_chunk(block: Any, block_id: Any = None) -> Any:
+            """Record each source chunk read without changing its values."""
+
+            if block.size:
+                reads.append(block_id)
+            return block
+
+        # Record source reads within each scheduled batch
+        source = da.from_array(values, chunks=2).map_blocks(read_chunk, dtype=float)
+        assert isinstance(source, da.Array) and not reads
+        with dask.config.set(scheduler="synchronous"), Callback(start=lambda graph: batch_starts.append(len(reads))):
+            result, _ = _reduce_values([source], statistics, method="map-reduce", split_every=split_every)
+
+        # Both NMAD passes must respect the batch size
+        batch_reads = np.diff([*batch_starts, len(reads)])
+        assert len(batch_reads) > 1 and np.all(batch_reads <= split_every)
+        assert len(reads) == source.npartitions * (2 if with_quantiles else 1)
+        assert isinstance(source, da.Array)
+        pd.testing.assert_frame_equal(result, expected)
+
     @pytest.mark.parametrize("backend,execution", [("geoutils", "dask"), ("geoutils", "lazy_mp"), ("flox", "dask")])
     def test_groupby_reduce__shared_source_reads(self, backend: str, execution: str) -> None:
         """Checks that batched reductions share source reads."""

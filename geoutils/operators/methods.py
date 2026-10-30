@@ -23,6 +23,7 @@ from collections import OrderedDict
 from copy import copy
 from typing import Any, Callable, Literal, cast, get_args
 
+from geoutils._typing import ResamplingMethod
 from geoutils.operators.interpolator import (
     Interpolator,
     InverseDistance,
@@ -42,44 +43,6 @@ from geoutils.operators.reducer import (
     Sum,
 )
 
-ResamplingMethod = Literal[
-    "nearest",
-    "linear",
-    "bilinear",
-    "cubic",
-    "cubic_convolution",
-    "cubic_spline",
-    "lanczos",
-    "quintic",
-    "slinear",
-    "pchip",
-    "splinef2d",
-    "idw",
-    "inv_dist",
-    "kriging",
-    "mean",
-    "average",
-    "sum",
-    "median",
-    "med",
-    "quantile",
-    "q1",
-    "q3",
-    "mode",
-    "minimum",
-    "min",
-    "maximum",
-    "max",
-    "range",
-    "count",
-    "stdev",
-    "std",
-    "standard_deviation",
-    "rms",
-    "rmse",
-    "average_distance",
-    "average_distance_pts",
-]
 ResamplingBackend = Literal["auto", "gdal", "scipy", "numba", "gstools", "gpytorch"]
 FilterMethod = ResamplingMethod | Literal["gaussian", "distance"]
 
@@ -90,6 +53,14 @@ _METHOD_ALIASES = {
     "std": "stdev",
     "standard_deviation": "stdev",
     "rmse": "rms",
+}
+_GDAL_RESAMPLING_ALIASES = {
+    "linear": "bilinear",
+    "cubic_convolution": "cubic",
+    "mean": "average",
+    "median": "med",
+    "minimum": "min",
+    "maximum": "max",
 }
 _REDUCER_TYPES: dict[str, type[Reducer]] = dict(_IRREGULAR_REDUCER_TYPES.items())
 _REDUCER_TYPES.update(

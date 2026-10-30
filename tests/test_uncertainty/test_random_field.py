@@ -67,7 +67,7 @@ class TestRandomField:
         mask[0, 1] = True
         values = np.ma.masked_array(np.ones((2, 3)), mask=mask)
         raster = gu.Raster.from_array(values, transform=from_origin(10, 20, 2, 2), crs=32606)
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Check equal shapes/coords/nodata through all three APIs
         first = gu.uncertainty.random_field(structure, like=raster, random_state=5)
@@ -84,7 +84,7 @@ class TestRandomField:
 
         # A synthetic point cloud and error structure
         points = gu.PointCloud.from_xyz([0, 2, 1, 4], [1, 0, 3, 2], [10, 11, 12, 13], crs=32631)
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Check they match
         result = points.random_field(structure, random_state=8)
@@ -110,7 +110,7 @@ class TestRandomField:
             "geodataframe": points.gdf,
         }
         source = sources[support]
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Check one field and every member of a multi-field result through like=
         result = gu.uncertainty.random_field(structure, like=source, n_fields=n_fields, random_state=5)
@@ -151,7 +151,7 @@ class TestRandomField:
         # We create a point cloud with twice the same point
         points = gu.PointCloud.from_xyz([0, 1], [0, 1], [10, 20], crs=32631)
         points.gdf.index = pd.Index(["same", "same"])
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Check errors are independent
         result = points.random_field(structure, random_state=4)
@@ -169,8 +169,8 @@ class TestRandomField:
         slope = gu.Raster.from_array(np.array([[0.0, 0.5], [1.0, 0.5]]), transform=transform, crs=32606)
         statistics = pd.DataFrame({"nmad": [1.0, 2.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="slope"))
         magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
-        variable = gu.ErrorStructure([gu.ErrorComponent("measurement", magnitude)])
-        unit = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        variable = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", magnitude)])
+        unit = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # With the same seed, slopes 0, 0.5, and 1 scale each unit-error draw by 1, 1.5, and 2
         result = raster.random_field(variable, predictors={"slope": slope}, random_state=5)
@@ -185,8 +185,8 @@ class TestRandomField:
         raster = gu.Raster.from_array(np.ones((2, 3)), transform=from_origin(0, 2, 1, 1), crs=32606)
         statistics = pd.DataFrame({"nmad": [1.0, 2.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="slope"))
         magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
-        variable = gu.ErrorStructure([gu.ErrorComponent("measurement", magnitude)])
-        unit = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        variable = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", magnitude)])
+        unit = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Same seeded normal field scaled by the interpolated magnitude 1.5
         result = raster.random_field(variable, predictors={"slope": 0.5}, random_state=5)
@@ -201,8 +201,8 @@ class TestRandomField:
         points.gdf["slope"] = [0.0, 1.0]
         statistics = pd.DataFrame({"nmad": [1.0, 2.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="slope"))
         magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
-        variable = gu.ErrorStructure([gu.ErrorComponent("measurement", magnitude)])
-        unit = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        variable = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", magnitude)])
+        unit = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # We check the scaling of the error is properly applied with predictors
         result = points.random_field(variable, predictors={"slope": "slope"}, random_state=5)
@@ -317,7 +317,7 @@ class TestRandomFieldChunked:
         magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
         correlation = VariogramModel("gaussian", effective_range=4, partial_sill=1)
         structure = gu.ErrorStructure(
-            [gu.ErrorComponent("measurement", 0.5), gu.ErrorComponent("spatial", magnitude, correlation)]
+            [gu.ErrorComponent("uncorrelated", 0.5), gu.ErrorComponent("spatial", magnitude, correlation)]
         )
         inducing_points = 64 if backend == "gpytorch" else None
         expected = source.random_field(
@@ -582,7 +582,7 @@ class TestRandomFieldChunked:
         y = np.array([0, 1, 0, 2, 1, 3, 2], dtype=float)
         frame = gpd.GeoDataFrame(geometry=gpd.points_from_xy(x, y, np.arange(7)), crs=32631)
         points = gu.PointCloud(frame, data_name=None)
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         # Get in-memory random field
         expected = points.random_field(structure, random_state=3)
 
@@ -609,7 +609,7 @@ class TestRandomFieldErrors:
     def test_random_field__error_invalid_backend(self) -> None:
         """Checks an invalid backend name."""
 
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         with pytest.raises(ValueError, match="backend"):
             gu.uncertainty.random_field(structure, coordinates=np.zeros((1, 2)), backend="unknown")  # type: ignore[arg-type]
 
@@ -617,7 +617,7 @@ class TestRandomFieldErrors:
     def test_random_field__error_invalid_nfields(self, n_fields: object) -> None:
         """Checks a valid number of realizations/fields is passed."""
 
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         with pytest.raises(ValueError, match="n_fields must be a positive integer"):
             gu.uncertainty.random_field(structure, coordinates=np.zeros((1, 2)), n_fields=n_fields)  # type: ignore[arg-type]
 
@@ -626,7 +626,7 @@ class TestRandomFieldErrors:
 
         # Synthetic raster
         raster = gu.Raster.from_array(np.ones((2, 2)), transform=from_origin(0, 2, 1, 1), crs=32606)
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Error on raster + coords at once
         with pytest.raises(ValueError, match="coordinates must be omitted"):
@@ -643,7 +643,7 @@ class TestRandomFieldErrors:
 
         points = gu.PointCloud.from_xyz([0, 1], [0, 1], [10, 20], crs=32631)
         raster = gu.Raster.from_array(np.ones((2, 2)), transform=from_origin(0, 2, 1, 1), crs=32606)
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Error on non-existing predicgtor
         with pytest.raises(ValueError, match="predictor column 'slope' does not exist"):
@@ -657,7 +657,7 @@ class TestRandomFieldErrors:
 
         points = gu.PointCloud.from_xyz([0, 1], [0, 1], [10, 20], crs=32631)
         raster = gu.Raster.from_array(np.ones((2, 2)), transform=from_origin(0, 2, 1, 1), crs=32606)
-        component = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        component = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Error on 2D chunks for points
         with pytest.raises(ValueError, match="Point cloud chunk size"):
@@ -671,7 +671,7 @@ class TestRandomFieldErrors:
 
         # In-memory objects cannot return a Dask/MP object
         points = gu.PointCloud.from_xyz([0, 1], [0, 1], [10, 20], crs=32631)
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
 
         # Error on a wrong point input, from PointCloud or in-memory DataFrame
         with pytest.raises(ValueError, match="Dask point chunks require a Dask GeoDataFrame input"):
@@ -687,7 +687,7 @@ class TestRandomFieldErrors:
         raster_path = tmp_path / "source.tif"
         raster.to_file(raster_path)
         source = open_raster(str(raster_path))
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         config = MultiprocConfig(chunks=(1, 1), outfile=str(tmp_path / "field.tif"))
 
         # Error raised
@@ -715,7 +715,7 @@ class TestRandomFieldErrors:
             as_object_type=as_object_type,
         )
 
-        structure = gu.ErrorStructure([gu.ErrorComponent("measurement", 1)])
+        structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)])
         config = MultiprocConfig(chunks=1, outfile=str(tmp_path / "field.gpkg"))
 
         # Error when passing MP config

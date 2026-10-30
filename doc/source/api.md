@@ -712,7 +712,7 @@ See {ref}`sampling` for sampling values and locations from point clouds.
 Most statistical functions are available directly from the objects and accessors, as shown above.
 
 Below, we list functions defining additional estimators, variogram objects, and that can help plot.
-### GeoUtils estimators
+### Estimators
 
 ```{eval-rst}
 .. autosummary::
@@ -809,7 +809,33 @@ estimation and propagation workflows.
     ErrorComponent
     ErrorStructure
     ErrorStructure.estimate
+    ErrorStructure.refit_magnitude
+    ErrorStructure.refit_variogram
+    ErrorStructure.refit
+    ErrorStructure.predict_magnitude
+    ErrorStructure.info
+    ErrorStructure.plot
+    ErrorStructure.plot_magnitude
+    ErrorStructure.plot_correlation
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+    :template: propagation_summary.rst
+
     PropagationSummary
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: gen_modules/
+
+    PropagationSummary.info
+    PropagationSummary.contrast
+    PropagationSummary.interval
+    PropagationSummary.quantile
+    PropagationSummary.marginal
     uncertainty.propagate
     uncertainty.random_field
 ```

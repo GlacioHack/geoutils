@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import pickle
 import subprocess
 import sys
 from contextlib import nullcontext
@@ -23,6 +24,12 @@ from geoutils.multiproc import MultiprocConfig
 from geoutils.multiproc.cluster import MpCluster
 from geoutils.sampling.pairsampling import _RasterPairSource
 from geoutils.stats.variography import VariogramModel
+
+
+def stretched_variogram(distance: Any, effective_range: float, partial_sill: float, exponent: float) -> Any:
+    """Calculate a stable semivariance whose range contains about 95% of the partial sill."""
+
+    return partial_sill * (1 - np.exp(-3 * (np.asarray(distance) / effective_range) ** exponent))
 
 
 @pytest.fixture(autouse=True)
@@ -64,11 +71,13 @@ class TestVariogramStorage:
             fitted_semivariance=np.array([0.25, 0.45]),
             model=VariogramModel("gaussian", effective_range=4, partial_sill=0.8, nugget=0.1),
             estimator="matheron",
+            attrs={"crs": "EPSG:32633", "distance_units": "m"},
         )
 
         # Convert through JSON and check the restored model and optional error values
         restored = gu.Variogram.from_dict(json.loads(json.dumps(result.to_dict())))
         assert restored.model == result.model
+        assert restored.attrs == result.attrs
         assert restored.semivariance_error is not None and result.semivariance_error is not None
         assert np.array_equal(restored.semivariance_error, result.semivariance_error)
         # Check that Xarray contains every per-distance value
@@ -135,6 +144,7 @@ class TestVariogramStorage:
             {"value": (("pair", "endpoint"), values), "distance": ("pair", np.linspace(1, 20, 20))},
             coords={"pair": np.arange(20), "endpoint": ["first", "second"]},
         )
+        pairs["distance"].attrs["units"] = "km"
 
         # Reduce the pairs into four log-spaced distance bins
         result = gu.Variogram.from_pairs(pairs, estimator="matheron", bins="log", n_lags=4)
@@ -144,6 +154,7 @@ class TestVariogramStorage:
         assert np.sum(result.counts) == 20
         assert result.backend_object is None
         assert result.semivariance == pytest.approx(np.full(4, 2.0))
+        assert result.attrs["distance_units"] == "km"
 
     def test_from_pairs_uses_sampled_distance_limits_for_stable_bins(self) -> None:
         """Checks that from_pairs() uses requested distance limits as repeatable bin edges."""
@@ -220,63 +231,106 @@ class TestVariogramStorage:
 
 
 class TestVariogramPlot:
-    """Test module for pair-count panels, lag scales, and default empirical and fitted variogram styles."""
+    """Test module for count panels, lag scales, and empirical and fitted semivariance or correlation plots."""
 
-    def test_plot__count_histogram_log_scale_and_neutral_styles(self) -> None:
-        """Checks that plot() uses plain log ticks and aligns counts above neutral variogram layers."""
+    @pytest.fixture
+    def fitted_variogram(self) -> gu.Variogram:
+        """Create a fitted variogram with unequal bins, sampling errors and a nugget."""
 
-        # Create three unequal distance bins with a fitted model and sampling errors
-        matplotlib = pytest.importorskip("matplotlib")
-        pyplot = pytest.importorskip("matplotlib.pyplot")
         pytest.importorskip("skgstat")
-        variogram = gu.Variogram(
+        model = VariogramModel(
+            "sum",
+            components=(
+                VariogramModel("gaussian", effective_range=2, partial_sill=0.4),
+                VariogramModel("spherical", effective_range=5, partial_sill=0.8),
+            ),
+            nugget=0.3,
+        )
+        return gu.Variogram(
             lags=np.array([0.5, 2.0, 4.5]),
             semivariance=np.array([0.2, 0.7, 1.1]),
             counts=np.array([8, 15, 6]),
             semivariance_error=np.array([0.03, 0.05, 0.08]),
             bin_lower_edges=np.array([0.0, 1.0, 3.0]),
             bin_edges=np.array([1.0, 3.0, 6.0]),
-            model=VariogramModel("spherical", effective_range=5.0, partial_sill=1.2),
+            model=model,
+            estimator="matheron",
         )
 
-        # Plot into an existing axes so callers keep the main variogram axes for later customization
-        figure, input_axis = pyplot.subplots(figsize=(6, 4))
-        output_axis = variogram.plot(ax=input_axis)
-        figure.canvas.draw()
+    def test_plot__counts_and_log_scale(self, fitted_variogram: gu.Variogram) -> None:
+        """Checks that plot() aligns pair counts with positive logarithmic lag bins on supplied axes."""
 
-        # Check the returned axes, plain logarithmic lag labels, and aligned bars with their original bin widths
-        assert output_axis is input_axis
-        assert len(figure.axes) == 2
-        assert output_axis.get_xscale() == "log"
-        visible_tick_labels = [label.get_text() for label in output_axis.get_xticklabels() if label.get_visible()]
-        assert visible_tick_labels
-        assert not any("e" in label.lower() or "^" in label or "×" in label for label in visible_tick_labels)
-        count_axis = next(axis for axis in figure.axes if axis is not output_axis)
-        np.testing.assert_allclose([patch.get_x() for patch in count_axis.patches], [0.25, 1, 3])
-        np.testing.assert_allclose([patch.get_width() for patch in count_axis.patches], [0.75, 2, 3])
-        np.testing.assert_allclose([patch.get_height() for patch in count_axis.patches], variogram.counts)
-        assert count_axis.get_ylabel() == "Pair count"
-        assert count_axis.get_xscale() == output_axis.get_xscale()
-        np.testing.assert_allclose(count_axis.get_xlim(), output_axis.get_xlim())
-        assert count_axis.get_shared_x_axes().joined(count_axis, output_axis)
-        assert count_axis.get_position().x0 == pytest.approx(output_axis.get_position().x0)
-        assert count_axis.get_position().x1 == pytest.approx(output_axis.get_position().x1)
-        count_ticks = [*count_axis.xaxis.get_major_ticks(), *count_axis.xaxis.get_minor_ticks()]
-        assert not any(tick.tick1line.get_visible() for tick in count_ticks)
+        plt = pytest.importorskip("matplotlib.pyplot")
+        figure, input_axis = plt.subplots()
 
-        # Check that both labelled variogram layers use distinct grayscale colors
-        empirical_container = next(
-            container for container in output_axis.containers if container.get_label() == "Empirical"
+        axis = fitted_variogram.plot(ax=input_axis, title="Custom title")
+
+        assert axis is input_axis and axis.get_xscale() == "log"
+        count_axis = next(item for item in figure.axes if item is not axis)
+        # Infer a positive first edge around the 0.5 lag for the logarithmic axis
+        np.testing.assert_allclose(
+            [[bar.get_x(), bar.get_width(), bar.get_height()] for bar in count_axis.patches],
+            [[0.25, 0.75, 8.0], [1.0, 2.0, 15.0], [3.0, 3.0, 6.0]],
         )
-        model_line = next(line for line in output_axis.lines if line.get_label() == "Model fit")
-        colors = []
-        for line in (empirical_container.lines[0], model_line):
-            color = matplotlib.colors.to_rgb(line.get_color())
-            assert color[0] == pytest.approx(color[1])
-            assert color[1] == pytest.approx(color[2])
-            colors.append(color)
-        assert colors[0] != colors[1]
-        pyplot.close(figure)
+        np.testing.assert_allclose(count_axis.get_xlim(), axis.get_xlim())
+        assert count_axis.get_title() == "Custom title"
+        lower, upper = axis.get_xlim()
+        ticks = axis.get_xticks()
+        np.testing.assert_allclose(ticks[(ticks >= lower) & (ticks <= upper)], [0.5, 1, 2, 5])
+        assert not any("e" in label.get_text().lower() or "^" in label.get_text() for label in axis.get_xticklabels())
+        plt.close(figure)
+
+    @pytest.mark.parametrize("kind", ["semivariance", "correlation"])
+    def test_plot__model_values(
+        self, fitted_variogram: gu.Variogram, kind: Literal["semivariance", "correlation"]
+    ) -> None:
+        """Checks that semivariance and correlation plots scale model values and sampling errors by the sill."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+
+        axis = fitted_variogram.plot(kind=kind, show_counts=False)
+
+        empirical = axis.containers[0]
+        fitted = next(line for line in axis.lines if line.get_label() == "Model (gaussian + spherical)")
+        assert empirical.get_label() == "Empirical (Matheron)"
+        values, errors = fitted_variogram.semivariance, fitted_variogram.semivariance_error
+        expected_model = fitted_variogram.variogram(fitted.get_xdata())
+        assert errors is not None
+        # Correlation includes the nugget in its normalization
+        if kind == "correlation":
+            values, errors = 1 - values / 1.5, errors / 1.5
+            expected_model = 1 - expected_model / 1.5
+        np.testing.assert_allclose(empirical.lines[0].get_ydata(), values)
+        segments = np.asarray(empirical.lines[2][0].get_segments())
+        np.testing.assert_allclose(segments[:, 1, 1] - segments[:, 0, 1], 2 * errors)
+        # Allow one rounding step near zero correlation
+        np.testing.assert_allclose(fitted.get_ydata(), expected_model, atol=float(np.finfo(float).eps))
+        assert axis.get_ylabel() == ("Correlation" if kind == "correlation" else "Semivariance")
+        plt.close(axis.figure)
+
+    @pytest.mark.parametrize(
+        "attrs,unit",
+        [
+            ({"crs": "EPSG:32633"}, "m"),
+            ({"crs": "EPSG:2263"}, "US survey ft"),
+            ({"crs": "EPSG:4326"}, "°"),
+            ({"crs": "EPSG:32633", "distance_units": "km"}, "km"),
+            ({}, "coordinate units"),
+            ({"crs": "unknown"}, "coordinate units"),
+        ],
+    )
+    def test_plot__distance_units(self, attrs: dict[str, str], unit: str) -> None:
+        """Checks that plot() labels spatial lag with explicit units or units inferred from the sampling CRS."""
+
+        pyplot = pytest.importorskip("matplotlib.pyplot")
+        result = gu.Variogram(
+            lags=np.array([1.0, 2.0]), semivariance=np.array([0.2, 0.5]), counts=np.array([10, 8]), attrs=attrs
+        )
+
+        axis = result.plot(show_counts=False)
+
+        assert axis.get_xlabel() == f"Spatial lag ({unit})"
+        pyplot.close(axis.figure)
 
 
 class TestVariogramEstimation:
@@ -311,6 +365,53 @@ class TestVariogramEstimation:
         np.testing.assert_array_equal(result.counts, expected.counts)
         np.testing.assert_array_equal(result.lags, expected.lags)
         np.testing.assert_array_equal(result.semivariance, expected.semivariance)
+
+    @pytest.mark.parametrize("object_type", ["raster", "dataarray"])
+    @pytest.mark.parametrize(
+        "shape,resolution,maximum",
+        [
+            ((12, 20), (2, 5), np.sqrt(1300)),
+            ((1, 8), (3, 4), np.sqrt(148)),
+            ((2, 2), (1, 1), np.sqrt(2)),
+        ],
+    )
+    def test_variogram__default_maximum_lag(
+        self, object_type: str, shape: tuple[int, int], resolution: tuple[int, int], maximum: float
+    ) -> None:
+        """Checks that variogram() samples and bins distances up to half the raster diagonal."""
+
+        # Use rectangular pixels and small grids to check the physical extent
+        values = np.arange(np.prod(shape), dtype=float).reshape(shape)
+        transform = from_origin(0, shape[0] * resolution[1], *resolution)
+        constructor = gu.Raster.from_array if object_type == "raster" else gu.raster.from_array
+        source = constructor(values, transform, 32633)
+        interface = source if object_type == "raster" else source.rst
+        options = {"n_pairs": 4, "n_lags": 3, "random_state": 42}
+
+        result = interface.variogram(**options)
+        expected = interface.variogram(max_lag=maximum, **options)
+
+        assert result.attrs["max_distance"] == pytest.approx(maximum)
+        assert result.bin_edges is not None
+        assert result.bin_edges[-1] == pytest.approx(maximum)
+        np.testing.assert_array_equal(result.counts, expected.counts)
+        np.testing.assert_array_equal(result.lags, expected.lags)
+        np.testing.assert_array_equal(result.semivariance, expected.semivariance)
+
+    @pytest.mark.parametrize("limit_name", ["max_lag", "max_distance"])
+    def test_variogram__supplied_maximum_lag(self, limit_name: str) -> None:
+        """Checks that variogram() uses a supplied maximum lag beyond half the raster diagonal."""
+
+        values = np.arange(400, dtype=float).reshape(20, 20)
+        source = gu.Raster.from_array(values, from_origin(0, 20, 1, 1), 32633)
+
+        options: dict[str, Any] = {limit_name: 25}
+        result = source.variogram(n_pairs=40, n_lags=4, random_state=42, **options)
+
+        assert result.attrs["max_distance"] == 25
+        assert result.bin_edges is not None
+        assert result.bin_edges[-1] == 25
+        assert result.lags[-1] > np.sqrt(200)
 
     @pytest.mark.parametrize("read_strategy", ["native", "packed_validity"])
     def test_variogram__raster_default_cache(self, read_strategy: str, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -451,6 +552,89 @@ class TestVariogramEstimation:
         # Check the standard component names stored in order
         assert fitted.model is not None
         assert [component.model_name for component in fitted.model.components] == ["gaussian", "spherical"]
+
+    @pytest.mark.parametrize("min_count", [1, 100, 150])
+    def test_fit__minimum_pair_count(self, min_count: int) -> None:
+        """Checks that fit() excludes bins below min_count and preserves the empirical arrays and threshold."""
+
+        pytest.importorskip("skgstat")
+        model = VariogramModel("gaussian", effective_range=8, partial_sill=2)
+        lags = np.array([0.5, 1, 2, 3, 4, 6, 8, 10], dtype=float)
+        values = model.variogram(lags).copy()
+        counts = np.array([0, 99, 100, 150, 200, 250, 99, 300])
+        # Large errors in sparse bins must not affect the filtered fit
+        values[[0, 1, 6]] = 1000
+        errors = np.linspace(0.01, 0.08, len(lags))
+        empirical = gu.Variogram(lags=lags, semivariance=values, counts=counts, semivariance_error=errors)
+        valid = counts >= min_count
+        reference = gu.Variogram(
+            lags=lags[valid], semivariance=values[valid], counts=counts[valid], semivariance_error=errors[valid]
+        )
+
+        fitted = empirical.fit("gaussian", min_count=min_count)
+        expected = reference.fit("gaussian", min_count=min_count)
+
+        np.testing.assert_array_equal(fitted.lags, lags)
+        np.testing.assert_array_equal(fitted.semivariance, values)
+        np.testing.assert_array_equal(fitted.counts, counts)
+        assert fitted.semivariance_error is not None
+        np.testing.assert_array_equal(fitted.semivariance_error, errors)
+        np.testing.assert_array_equal(fitted.fit_result["coefficients"], expected.fit_result["coefficients"])
+        if min_count >= 100:
+            np.testing.assert_allclose(fitted.fit_result["coefficients"], [8, 2], rtol=1e-7)
+        restored = gu.Variogram.from_dict(json.loads(json.dumps(fitted.to_dict())))
+        assert restored.fit_result["min_count"] == min_count
+        assert empirical.model is None
+
+    @pytest.mark.parametrize("use_nugget", [False, True])
+    def test_fit__custom_variogram(self, use_nugget: bool, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Checks that custom variograms recover every fitted parameter without importing SciKit-GStat."""
+
+        # Exact values give an independent reference for all fitted parameters
+        lags = np.linspace(0.5, 20, 40)
+        nugget = 0.2 if use_nugget else 0
+        values = stretched_variogram(lags, 8, 2, 1.3) + nugget
+        empirical = gu.Variogram(lags=lags, semivariance=values, counts=np.full(len(lags), 200))
+        initial = [6, 1, 1] + ([0.1] if use_nugget else [])
+        bounds = [(0.1, 20), (0, 10), (0.2, 2)] + ([(0, 1)] if use_nugget else [])
+
+        def fail_import(*args: Any, **kwargs: Any) -> Any:
+            """Fail if fitting or evaluating a custom model imports an optional backend."""
+
+            pytest.fail("Custom variogram functions do not require an optional backend")
+
+        monkeypatch.setattr("geoutils.stats.variography.import_optional", fail_import)
+        fitted = empirical.fit(stretched_variogram, p0=initial, bounds=bounds, use_nugget=use_nugget, min_count=100)
+
+        assert fitted.model is not None
+        assert fitted.model.function is stretched_variogram
+        expected = [8, 2, 1.3] + ([nugget] if use_nugget else [])
+        np.testing.assert_allclose(fitted.fit_result["coefficients"], expected, rtol=1e-6)
+        np.testing.assert_allclose(fitted.variogram(lags), values, rtol=1e-7)
+        assert fitted.variogram(0) == 0
+        assert fitted.covariance(0) == pytest.approx(2 + nugget)
+        restored = pickle.loads(pickle.dumps(fitted))
+        np.testing.assert_array_equal(restored.variogram(lags), fitted.variogram(lags))
+
+    def test_fit__custom_and_named_variograms(self) -> None:
+        """Checks that custom and named variograms can be fitted together as independent components."""
+
+        pytest.importorskip("skgstat")
+        lags = np.linspace(0.5, 30, 60)
+        named = VariogramModel("spherical", effective_range=20, partial_sill=0.5)
+        values = stretched_variogram(lags, 8, 2, 1.3) + named.variogram(lags)
+        empirical = gu.Variogram(lags=lags, semivariance=values, counts=np.full(len(lags), 200))
+
+        fitted = empirical.fit(
+            [stretched_variogram, "spherical"],
+            p0=[7, 1.8, 1.2, 19, 0.6],
+            bounds=[(1, 30), (0, 10), (0.2, 2), (1, 30), (0, 10)],
+        )
+
+        assert fitted.model is not None
+        assert fitted.model.components[0].function is stretched_variogram
+        assert fitted.model.components[1].model_name == "spherical"
+        np.testing.assert_allclose(fitted.variogram(lags), values, rtol=1e-6)
 
     def test_pointcloud_variogram_and_advanced_pairs_share_api(self) -> None:
         """Checks that PointCloud exposes both pair samples and their reduced variogram values."""
@@ -674,6 +858,8 @@ class TestVariogramReduction:
     def test_from_pairs__approximate_estimators(self, estimator: str, percentile: float | None) -> None:
         """Checks that t-digest estimators approximate exact results."""
 
+        pytest.importorskip("skgstat")
+
         # Create lognormal values and an exact reference
         pytest.importorskip("crick")
         pytest.importorskip("flox")
@@ -790,7 +976,7 @@ class TestVariogramConversion:
 
         # We check component exists and the right data is plotted
         axes = result.plot()
-        assert axes.get_xlabel() == "Lag distance"
+        assert axes.get_xlabel() == "Spatial lag (coordinate units)"
         assert axes.get_ylabel() == "Semivariance"
         assert len(axes.lines) >= 2
 
@@ -922,6 +1108,33 @@ class TestVariogramConversion:
 
 class TestVariogramReductionChunked:
     """Test module for chunked variogram reduction."""
+
+    def test_variogram__default_maximum_lag(self) -> None:
+        """Checks that lazy raster variograms use the same default maximum lag and values as eager rasters."""
+
+        dask = pytest.importorskip("dask")
+        da = pytest.importorskip("dask.array")
+
+        # Shorter final chunks check that the lag limit uses the full grid dimensions
+        values = np.arange(143, dtype=float).reshape(11, 13)
+        source = gu.raster.from_array(da.from_array(values, chunks=(4, 5)), from_origin(0, 11, 2, 3), 32633)
+        eager = source.compute()
+        assert not source.rst.is_loaded
+        assert eager.rst.is_loaded
+
+        # Select the same pairs across chunk layouts
+        options = {"n_pairs": 60, "n_lags": 6, "random_state": 42, "strategy": "independent"}
+        with dask.config.set(scheduler="synchronous"):
+            result = source.rst.variogram(**options)
+        expected = eager.rst.variogram(**options)
+
+        assert not source.rst.is_loaded
+        assert is_dask_array(source.data)
+        assert isinstance(result.semivariance, np.ndarray)
+        assert result.attrs["max_distance"] == expected.attrs["max_distance"]
+        np.testing.assert_array_equal(result.counts, expected.counts)
+        np.testing.assert_array_equal(result.lags, expected.lags)
+        np.testing.assert_array_equal(result.semivariance, expected.semivariance)
 
     @pytest.mark.parametrize(
         "backend,execution", [("geoutils", "dask"), ("flox", "dask"), ("geoutils", "mp"), ("geoutils", "lazy_mp")]
@@ -1408,6 +1621,51 @@ class TestVariogramReductionChunked:
 
 class TestVariogramErrors:
     """Test module for errors/warnings raised by variogram estimation and conversion."""
+
+    def test_to_dict__error_custom_variogram(self) -> None:
+        """Checks an error is raised when JSON export cannot preserve a custom variogram function."""
+
+        model = VariogramModel(
+            "stretched_variogram", effective_range=8, partial_sill=2, function=stretched_variogram, parameters=(1.3,)
+        )
+
+        with pytest.raises(ValueError, match="pickle instead of JSON"):
+            model.to_dict()
+
+    @pytest.mark.parametrize("min_count", [0, -1, 1.5, True, "100"])
+    def test_fit__error_invalid_min_count(self, min_count: Any) -> None:
+        """Checks an error is raised for a minimum pair count that is not a positive integer."""
+
+        empirical = gu.Variogram(lags=np.arange(3.0), semivariance=np.arange(3.0), counts=np.full(3, 100))
+
+        with pytest.raises(ValueError, match="min_count must be a positive integer"):
+            empirical.fit(min_count=min_count)
+
+    def test_fit__error_insufficient_pairs(self) -> None:
+        """Checks an error is raised when fewer than two finite bins meet the minimum pair count."""
+
+        pytest.importorskip("skgstat")
+        empirical = gu.Variogram(lags=np.arange(3.0), semivariance=np.arange(3.0), counts=np.array([99, 100, 99]))
+
+        with pytest.raises(ValueError, match="At least two finite empirical lag classes with at least 100 pairs"):
+            empirical.fit(min_count=100)
+
+    @pytest.mark.parametrize(
+        "kind,model,message",
+        [
+            ("unknown", None, "Argument 'kind'"),
+            ("correlation", None, "positive sill"),
+            ("correlation", VariogramModel("spherical", effective_range=1, partial_sill=0), "positive sill"),
+        ],
+    )
+    def test_plot__error_invalid_correlation(self, kind: Any, model: VariogramModel | None, message: str) -> None:
+        """Checks an error is raised for an unknown plot kind or correlation without a positive fitted sill."""
+
+        pytest.importorskip("matplotlib")
+        variogram = gu.Variogram(lags=np.array([1.0]), semivariance=np.array([0.5]), counts=np.array([10]), model=model)
+
+        with pytest.raises(ValueError, match=message):
+            variogram.plot(kind=kind)
 
     @pytest.mark.parametrize(
         "options,error_type,message",

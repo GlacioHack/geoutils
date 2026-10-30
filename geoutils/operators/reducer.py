@@ -144,7 +144,7 @@ class Reducer:
 
                 return gu.operators.LinearCoefficients(np.ones(len(data.values)))
 
-        errors = gu.ErrorStructure([gu.ErrorComponent("measurement", 2.0)])
+        errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2.0)])
         summary = gu.uncertainty.propagate(
             raster.resample_at_points, error_structure=errors,
             operation_kwargs=dict(points=(x, y), method=WindowSum(), as_array=True),

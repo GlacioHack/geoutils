@@ -113,6 +113,16 @@ def import_optional(import_name: str, package_name: str | None = None, extra_nam
         package_name = import_name
 
     try:
+        # Silence GPyTorch import of linear_operator TorchScript
+        if import_name == "gpytorch":
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"^`torch\.jit\.script` is not supported in Python 3\.14\+ and may break\.",
+                    category=FutureWarning,
+                    module=r"^torch\.jit\._script$",
+                )
+                return __import__(import_name)
         return __import__(import_name)
     except ImportError as e:
         raise ImportError(

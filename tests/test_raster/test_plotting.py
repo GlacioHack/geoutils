@@ -84,6 +84,25 @@ class TestPlot:
         assert colorbar_ax.get_position().height == pytest.approx(second_position.height)
         plt.close(fig)
 
+    @pytest.mark.parametrize("layout", ["tight", "constrained"])
+    @pytest.mark.parametrize("add_cbar", [False, True])
+    def test_plot__figure_layout(self, layout: str, add_cbar: bool) -> None:
+        """Checks that plotting rasters preserves the selected figure layout across panels."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+        raster = gu.Raster.from_array(np.arange(16).reshape(4, 4), Affine(10, 0, 0, 0, -10, 40), 32631)
+        figure, axes = plt.subplots(1, 2, layout=layout)
+        layout_engine = figure.get_layout_engine()
+
+        for ax in axes:
+            raster.plot(ax=ax, add_cbar=add_cbar, max_pixels=None)
+        figure.canvas.draw()
+
+        assert figure.get_layout_engine() is layout_engine
+        for ax in axes:
+            np.testing.assert_array_equal(ax.images[0].get_array(), np.flip(raster.data, axis=0))
+        plt.close(figure)
+
     def test_plot__projected_tick_spacing(self) -> None:
         """Checks that long projected coordinates do not overlap on a narrow plot."""
 

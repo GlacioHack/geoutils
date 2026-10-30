@@ -159,33 +159,32 @@ print(ds.rst.shape)
 A largely overlooked aspect of a raster's georeferencing is the **pixel interpretation** stored in the
 [AREA_OR_POINT metadata](https://gdal.org/user/raster_data_model.html#metadata).
 Pixels can be interpreted either as **"Area"** (the most common) where **the value represents a sampling over the region
-of the pixel** (and typically refers to the upper-left corner coordinate), or as **"Point"**
-where **the value relates to a point sample** (and typically refers to the center of the pixel), the latter often used
+of the pixel**, or as **"Point"** where **the value relates to a point sample at the center of the pixel**, the latter often used
 for digital elevation models (DEMs).
-
-Pixel interpretation is stored as a string.
 
 ```{code-cell} ipython3
 # Get pixel interpretation of raster
 ds.rst.area_or_point
 ```
 
-Although this interpretation is not intended to influence georeferencing, it **can influence sub-pixel coordinate
-interpretation during analysis**, especially for raster–vector–point interfacing operations such as point interpolation,
-or re-gridding, and might also be a problem if defined differently when comparing two rasters.
-
 ```{important}
-By default, **pixel interpretation induces a half-pixel shift during raster–point interfacing for a "Point" interpretation**
-(mirroring [GDAL's default ground-control point behaviour](https://trac.osgeo.org/gdal/wiki/rfc33_gtiff_pixelispoint)),
-but only **raises a warning for raster–raster operations** if interpretations differ.
+GeoUtils uses **pixel centers** for coordinates, whether in point conversion or interpolation, independently of pixel
+interpretation.
 
-This behaviour can be modified at the package-level by using GeoUtils' {ref}`config`
-`shift_area_or_point` and `warn_area_or_point`.
+This default behaviour matches [GDAL's georeferencing convention](https://gdal.org/en/stable/development/rfc/rfc33_gtiff_pixelispoint.html).
+Use {ref}`config` to control warnings for different interpretations. To shift the transform by half a pixel while
+changing between "Area" and "Point", explicitly pass `shift_half_pixel=True` to
+{meth}`set_area_or_point() <RasterBase.set_area_or_point>`.
 ```
 
 ## Manipulation
 
 Several functionalities are available to facilitate the manipulation of the georeferencing.
+
+Projected bounds and footprints use `densify_points=5000` by default to approximate curved edges.
+This default can be configured globally with `geoutils.config["densify_points"]` (see {ref}`config`).
+Passing `densify_points=` to a method overrides the configured value. Raster bounding boxes limit the count to
+the larger raster dimension in pixels.
 
 ### Projected bounding boxes
 

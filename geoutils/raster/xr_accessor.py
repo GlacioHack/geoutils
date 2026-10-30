@@ -40,6 +40,7 @@ from rioxarray.rioxarray import affine_to_coords
 from xarray.conventions import encode_cf_variable
 from xarray.core.utils import dict_equiv
 
+from geoutils._config import config
 from geoutils._dispatch import is_dask_array
 from geoutils._misc import _validate_downsample, import_optional, silence_rasterio_message
 from geoutils._typing import DTypeLike, MArrayNum, NDArrayBool, NDArrayNum, Number
@@ -63,7 +64,7 @@ def open_raster(
     is_mask: bool = False,
     downsample: Number = 1,
     *,
-    as_object_type: Literal["dataarray", "dataset"] = "dataarray",
+    as_object_type: Literal["dataarray", "dataset"] | None = None,
     data_name: str | None = None,
     parse_sensor_metadata: bool = False,
     **kwargs: Any,
@@ -94,8 +95,8 @@ def open_raster(
     :param is_mask: Whether to return the raster values as booleans.
     :param downsample: Downsampling factor (e.g., 2 selects one out of two pixels for every row/column). Rows or
         columns that do not fill a complete interval are omitted. Default 1 keeps the native resolution.
-    :param as_object_type: Returned representation: dataarray (the default) or dataset. A Dataset contains one raster
-        variable, with multiple bands on its band dimension.
+    :param as_object_type: Returned representation: dataarray or dataset. None uses config["raster_return_type"],
+        which defaults to dataarray. A Dataset contains one raster variable, with multiple bands on its band dimension.
     :param data_name: Name of the DataArray or Dataset variable. Defaults to the source array name, or raster for
         an unnamed array returned as a Dataset.
     :param parse_sensor_metadata: Parse sensor metadata from the filename and add it to the raster attributes.
@@ -104,6 +105,8 @@ def open_raster(
     """
 
     downsample = _validate_downsample(downsample)
+    if as_object_type is None:
+        as_object_type = config["raster_return_type"]
     if as_object_type not in ("dataarray", "dataset"):
         raise ValueError("Argument 'as_object_type' must be 'dataarray' or 'dataset'.")
     if downsample > 1 and kwargs.get("overview_level") is not None:

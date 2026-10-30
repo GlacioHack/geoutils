@@ -385,7 +385,7 @@ class Raster(RasterBase):
         if isinstance(filename_or_dataset, dict):
             self.tags = filename_or_dataset["tags"]
             # To have "area_or_point" user input go through checks of the set() function without shifting the transform
-            self.set_area_or_point(filename_or_dataset["area_or_point"], shift_area_or_point=False)
+            self.set_area_or_point(filename_or_dataset["area_or_point"])
 
             # Need to set nodata before the data setter, which uses it
             # We trick set_nodata into knowing the data type by setting self._disk_dtype, then unsetting it
@@ -2383,7 +2383,8 @@ class Raster(RasterBase):
         :param rasters: Raster or list of rasters to be stacked.
         :param reference: Index of reference raster in the list or separate reference raster.
             Defaults to this raster.
-        :param resampling_method: Resampling method for reprojection.
+        :param resampling_method: Resampling method for reprojection. Defaults to "linear". Can be configured
+            globally with geoutils.config["raster_resampling_method"].
         :param use_ref_bounds: If True, will use reference bounds, otherwise will use maximum bounds of all rasters.
 
         :returns: The merged raster with same CRS and resolution (and optionally bounds) as the reference.

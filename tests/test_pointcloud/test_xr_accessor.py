@@ -1213,7 +1213,33 @@ class TestDatasetPointCloudAccessor:
 
 
 class TestDatasetPointCloudAccessorChunked:
-    """Test module for lazy discovery and shared arrays in compatible point variables."""
+    """Test module for lazy discovery and gridding of Dataset point variables."""
+
+    @pytest.mark.parametrize("output_type", ["dataarray", "dataset"])
+    def test_grid__configured_return_type(
+        self, mixed_dataset: xr.Dataset, output_type: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Checks that Dataset gridding stays lazy and matches eager values for either raster default."""
+
+        pytest.importorskip("dask")
+        from dask.callbacks import Callback
+
+        # Use shorter final point chunks
+        source = mixed_dataset.chunk({"point": 4, "y": 3, "x": 4})
+        expected = mixed_dataset.pc.grid(ref=mixed_dataset.dem, resampling="nearest")
+        monkeypatch.setitem(gu.config, "raster_return_type", output_type)
+
+        # Grid without running tasks
+        with Callback(pretask=lambda *args: pytest.fail("Gridding must stay lazy")):
+            result = source.pc.grid(ref=source.dem, resampling="nearest")
+        assert isinstance(result, xr.Dataset)
+        for name in ("point_z", "point_sigma"):
+            assert not source[name].pc.is_loaded and not result[name].rst.is_loaded
+
+        # Compare values and unchanged loading
+        xr.testing.assert_identical(result.compute(), expected)
+        for name in ("point_z", "point_sigma"):
+            assert not source[name].pc.is_loaded and not result[name].rst.is_loaded
 
     def test_compatible_variables__loading_laziness(self, mixed_dataset: xr.Dataset) -> None:
         """Checks that compatible point discovery and access share Dask arrays without running tasks."""

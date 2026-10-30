@@ -74,6 +74,7 @@ from geoutils.operators.interpolator import (
     RasterConvolution,
     _regular_interpolation_method,
 )
+from geoutils.operators.methods import _GDAL_RESAMPLING_ALIASES, _resampling_operator
 from geoutils.operators.neighbours import (
     GridCoverage,
     GridNeighbours,
@@ -214,6 +215,7 @@ def _open_downsampled_raster(source: rio.io.DatasetReader, downsample: float) ->
 
 def _resampling_method_from_str(method_str: str) -> rio.enums.Resampling:
     """Get a rasterio resampling method from a string representation, e.g. "cubic_spline"."""
+    method_str = _GDAL_RESAMPLING_ALIASES.get(method_str, method_str)
     # Try to match the string version of the resampling method with a rio Resampling enum name
     for method in rio.enums.Resampling:
         if method.name == method_str:
@@ -547,8 +549,6 @@ def _destination_grid_in_source_crs(
         rows.reshape(-1),
         cols.reshape(-1),
         transform=dst_transform,
-        area_or_point=None,
-        shift_area_or_point=False,
         force_offset="center",
     )
     centers = np.column_stack((center_x, center_y))
@@ -571,8 +571,6 @@ def _destination_grid_in_source_crs(
         corner_rows,
         corner_columns,
         transform=dst_transform,
-        area_or_point=None,
-        shift_area_or_point=False,
         force_offset="ul",
     )
     corners = np.column_stack((np.asarray(corner_x), np.asarray(corner_y))).reshape(-1, 4, 2)
@@ -685,12 +683,9 @@ def _reproject_grid_operator(
             target_x,
             target_y,
             transform=src_transform,
-            area_or_point=None,
             op=np.float64,
-            shift_area_or_point=False,
         )
-        # _xy2ij() measures from the upper-left corner; array values are located half a pixel inside each cell
-        source_indices = (source_rows - 0.5, source_cols - 0.5)
+        source_indices = (source_rows, source_cols)
 
     # Validate nodata handling and prepare outputs
     propagation = _validate_nodata_propagation(nodata_propagation)
@@ -814,9 +809,7 @@ def _reproject_grid_operator(
                 source_band,
                 transform=src_transform,
                 points=(target_x, target_y),
-                area_or_point=None,
                 method=operator,
-                shift_area_or_point=False,
                 nodata_propagation=propagation,
                 array_indices=source_indices,
                 source_index_offset=source_index_offset,
@@ -837,8 +830,6 @@ def _reproject_grid_operator(
                     src_transform,
                     (target_x, target_y),
                     operator,
-                    area_or_point=None,
-                    shift_area_or_point=False,
                     nodata_propagation=propagation,
                     dist_nodata_spread=None,
                     neighborhood=neighborhood,
@@ -1184,8 +1175,6 @@ def _reproject_per_block(
             src_transform.c,
             src_transform.f,
             transform=combined_meta["global_source_transform"],
-            area_or_point=None,
-            shift_area_or_point=False,
             op=np.float64,
         )
         operator_result = _reproject_grid_operator(
@@ -1201,7 +1190,10 @@ def _reproject_per_block(
             overlap_backend=kwargs.get("overlap_backend", "auto"),
             coverage=kwargs.get("coverage"),
             area_weighting=kwargs.get("area_weighting", "diagonal_bounds"),
-            source_index_offset=(int(round(np.asarray(source_row).item())), int(round(np.asarray(source_col).item()))),
+            source_index_offset=(
+                int(round(np.asarray(source_row).item() + 0.5)),
+                int(round(np.asarray(source_col).item() + 0.5)),
+            ),
             global_source_shape=combined_meta["global_source_shape"],
             source_band_offset=source_band_offset,
         )
@@ -1548,7 +1540,11 @@ def _reproject(
 
     # If resampling method undefined, default to the global system config
     if resampling is None:
-        resampling = config["reprojection_method"]
+        configured_method = config["raster_resampling_method"]
+        try:
+            resampling = _resampling_method_from_str(configured_method)
+        except ValueError:
+            resampling = _resampling_operator(configured_method)
 
     # 1/ Check and normalize match-grid inputs
 

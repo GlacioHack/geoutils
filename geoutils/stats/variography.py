@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -78,6 +79,10 @@ class VariogramModel:
     :param shape: Stable model shape parameter.
     :param active_dims: Feature columns used by a converted covariance kernel.
     :param components: Base structures contained by a composite model.
+    :param function: Custom semivariance function receiving distance, effective range, partial sill and any extra
+        parameters. It must scale linearly with partial_sill and approach that sill at long distances.
+        Custom functions support direct evaluation and pickling, but not JSON export or backend conversion.
+    :param parameters: Additional fitted parameters passed to a custom function after range and partial sill.
     """
 
     model_name: str
@@ -88,6 +93,8 @@ class VariogramModel:
     shape: float | None = None
     active_dims: tuple[int, ...] | None = None
     components: tuple[VariogramModel, ...] = ()
+    function: Callable[..., Any] | None = field(default=None, repr=False)
+    parameters: tuple[float, ...] = ()
 
     #####################
     # MODEL VALIDATION
@@ -107,6 +114,13 @@ class VariogramModel:
         model_name = aliases.get(self.model_name.lower(), self.model_name.lower())
         object.__setattr__(self, "model_name", model_name)
         object.__setattr__(self, "components", tuple(self.components))
+        object.__setattr__(self, "parameters", tuple(float(value) for value in self.parameters))
+        if any(not np.isfinite(value) for value in self.parameters):
+            raise ValueError("Custom variogram parameters must be finite.")
+        if self.parameters and self.function is None:
+            raise ValueError("Additional variogram parameters require a custom function.")
+        if self.function is not None and (not callable(self.function) or model_name in _COMPOSITE_MODELS):
+            raise ValueError("A custom variogram requires a callable and a base model name.")
 
         # Convert numeric fields once so loaded and newly fitted models behave alike
         for name in ("effective_range", "partial_sill", "nugget", "smoothness", "shape"):
@@ -130,7 +144,7 @@ class VariogramModel:
                 partial_sills = [component.partial_sill or 0.0 for component in self.components]
                 combined_sill = sum(partial_sills) if model_name == "sum" else np.prod(partial_sills)
                 object.__setattr__(self, "partial_sill", float(combined_sill))
-        elif model_name not in _BASE_MODELS:
+        elif model_name not in _BASE_MODELS and self.function is None:
             raise ValueError(f"Unsupported variogram model {model_name!r}.")
         else:
             # Require the range, variance, and optional shape values needed by this model type
@@ -140,9 +154,9 @@ class VariogramModel:
                 raise ValueError("Variogram effective range must be a finite, strictly positive number.")
             if self.partial_sill is None:
                 raise ValueError("A base variogram requires a partial sill.")
-            if model_name == "matern" and self.smoothness is None:
+            if self.function is None and model_name == "matern" and self.smoothness is None:
                 raise ValueError("A Matérn variogram requires a smoothness parameter.")
-            if model_name == "stable" and self.shape is None:
+            if self.function is None and model_name == "stable" and self.shape is None:
                 raise ValueError("A stable variogram requires a shape parameter.")
 
         # Check the shared numeric fields after model-specific defaults are applied
@@ -200,6 +214,15 @@ class VariogramModel:
         # Confirm that validation supplied the numeric fields required by SciKit-GStat
         if self.effective_range is None or self.partial_sill is None:
             raise AssertionError("A base variogram model must define its range and partial sill.")
+
+        # Evaluate a supplied function directly, keeping its range and variance conventions
+        if self.function is not None:
+            values = np.asarray(
+                self.function(distances.ravel(), self.effective_range, self.partial_sill, *self.parameters), dtype=float
+            )
+            values = np.broadcast_to(values, distances.ravel().shape).reshape(distances.shape)
+            output = values + np.where(distances > 0, self.nugget, 0.0)
+            return output[0] if scalar_input else output
 
         # Pass parameters in the order expected by the selected SciKit-GStat model function
         skgstat = import_optional("skgstat", package_name="scikit-gstat")
@@ -293,6 +316,9 @@ class VariogramModel:
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible model description."""
 
+        if self.function is not None:
+            raise ValueError("Custom variogram functions require pickle instead of JSON serialization.")
+
         # Convert nested components too so the complete model contains only plain Python data
         return {
             "model_name": self.model_name,
@@ -328,6 +354,93 @@ class VariogramModel:
             ),
             components=components,
         )
+
+
+def _model_plot_label(model: VariogramModel) -> str:
+    """Describe a fitted model and any sums or products of its component models."""
+
+    if not model.components:
+        return model.model_name
+
+    # Parentheses distinguish nested combinations from their individual models
+    names = []
+    for component in model.components:
+        name = _model_plot_label(component)
+        if component.components:
+            name = f"({name})"
+        names.append(name)
+    operator = " + " if model.model_name == "sum" else " × "
+    return operator.join(names)
+
+
+@dataclass(frozen=True)
+class _VariogramFitModel:
+    """Function and parameter count used to fit one variogram component."""
+
+    name: str
+    function: Callable[..., Any]
+    parameter_count: int
+    custom: bool
+
+
+def _prepare_variogram_fit_models(
+    models: str | Callable[..., Any] | Sequence[str | Callable[..., Any]],
+    p0: Sequence[float] | None,
+    use_nugget: bool,
+) -> list[_VariogramFitModel]:
+    """Find the functions and parameter counts for named and custom variogram models."""
+
+    requested: list[str | Callable[..., Any]]
+    if isinstance(models, str):
+        requested = list(models.split("+"))
+    elif callable(models):
+        requested = [models]
+    else:
+        requested = list(models)
+    if not requested:
+        raise ValueError("Argument models must contain at least one variogram model.")
+
+    # Resolve library functions only when a named model is requested
+    aliases = {
+        "cub": "cubic",
+        "exp": "exponential",
+        "gau": "gaussian",
+        "mat": "matern",
+        "sph": "spherical",
+        "sta": "stable",
+    }
+    definitions = []
+    for model in requested:
+        name = model.strip().lower() if isinstance(model, str) else getattr(model, "__name__", "custom").lower()
+        name = aliases.get(name, name)
+        library_model = isinstance(model, str) or getattr(model, "__module__", "") == "skgstat.models"
+        if library_model:
+            if name not in _BASE_MODELS:
+                raise ValueError(f"Argument models must contain names from {sorted(_BASE_MODELS)} or custom callables.")
+            function = getattr(import_optional("skgstat", package_name="scikit-gstat").models, name)
+            count = 3 if name in {"stable", "matern"} else 2
+        else:
+            if not callable(model):
+                raise TypeError("A variogram model must be a name or a callable.")
+            function = model
+            parameters = inspect.signature(model).parameters.values()
+            if any(parameter.kind == inspect.Parameter.VAR_POSITIONAL for parameter in parameters):
+                if len(requested) != 1 or p0 is None:
+                    raise ValueError("A variadic custom variogram must be fitted alone with explicit p0.")
+                count = len(p0) - int(use_nugget)
+            else:
+                positional = [
+                    parameter
+                    for parameter in parameters
+                    if parameter.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                ]
+                count = len(positional) - 1
+            if count < 2:
+                raise ValueError("A custom variogram must receive distance, effective range and partial sill.")
+            if name in _COMPOSITE_MODELS:
+                name = f"custom_{name}"
+        definitions.append(_VariogramFitModel(name, function, count, custom=not library_model))
+    return definitions
 
 
 ################################
@@ -655,6 +768,10 @@ class Variogram:
 
         # 2/ Prepare pair differences and distance bins
         distances = pairs["distance"].data.astype(np.float64)
+        result_attrs = dict(pairs.attrs)
+        distance_units = pairs["distance"].attrs.get("units")
+        if distance_units:
+            result_attrs["distance_units"] = str(distance_units)
         endpoint_values = pairs["value"].data.astype(np.float64)
         differences = np.abs(endpoint_values[:, 0] - endpoint_values[:, 1])
         valid = np.isfinite(distances) & np.isfinite(differences) & (distances > 0)
@@ -686,7 +803,7 @@ class Variogram:
                 distance="euclidean",
                 binning=binning,
                 attrs={
-                    **pairs.attrs,
+                    **result_attrs,
                     "pair_count": int(np.sum(counts)),
                     "reduction_backend": reduction_backend,
                     "flox_engine": flox_engine,
@@ -749,7 +866,7 @@ class Variogram:
             distance="euclidean",
             binning=binning,
             attrs={
-                **pairs.attrs,
+                **result_attrs,
                 "pair_count": int(np.sum(counts)),
                 "method": "groupwise",
                 **({"percentile": percentile} if estimator == "percentile" else {}),
@@ -761,6 +878,7 @@ class Variogram:
         models: str | Callable[..., Any] | Sequence[str | Callable[..., Any]] = "spherical",
         *,
         use_nugget: bool = False,
+        min_count: int = 1,
         bounds: Sequence[tuple[float, float]] | None = None,
         p0: Sequence[float] | None = None,
         maxfev: int | None = None,
@@ -772,50 +890,39 @@ class Variogram:
         the small covariance matrix produced by the optimizer.
 
         :param models: Model name, SciKit-GStat model function or sequence ordered from short to long range.
+            A custom function receives distance, effective range, partial sill and any extra fitted parameters.
         :param use_nugget: Whether to fit a shared non-negative nugget.
+        :param min_count: Minimum sampled pairs required for a distance bin to enter the fit.
+            Bins below this count remain in the returned empirical arrays.
         :param bounds: Lower and upper bound for every fitted parameter.
         :param p0: Initial parameter values in range/sill order, followed by optional model shape and nugget.
         :param maxfev: Maximum number of model evaluations.
         :returns: New variogram containing fitted model parameters in the shared form.
         """
 
+        # Check the pair threshold before selecting bins
+        if isinstance(min_count, (bool, np.bool_)) or not isinstance(min_count, (int, np.integer)) or min_count < 1:
+            raise ValueError("min_count must be a positive integer.")
+
         # Turn short names, model functions, or a sequence into standard model names
-        requested_models: list[str | Callable[..., Any]] = []
-        if isinstance(models, str):
-            requested_models.extend(models.split("+"))
-        elif callable(models):
-            requested_models = [models]
-        else:
-            requested_models = list(models)
-        aliases = {
-            "cub": "cubic",
-            "exp": "exponential",
-            "gau": "gaussian",
-            "mat": "matern",
-            "sph": "spherical",
-            "sta": "stable",
-        }
-        model_names = []
-        for requested in requested_models:
-            name = requested.strip().lower() if isinstance(requested, str) else getattr(requested, "__name__", "")
-            model_names.append(aliases.get(name, name))
-        if not model_names or any(name not in _BASE_MODELS for name in model_names):
-            raise ValueError(f"Argument ``models`` must contain names from {sorted(_BASE_MODELS)}.")
+        definitions = _prepare_variogram_fit_models(models, p0, use_nugget)
+        model_names = [definition.name for definition in definitions]
+        parameter_counts = [definition.parameter_count for definition in definitions]
 
         # Fit only bins with measured values and require more bins than fitted parameters
-        valid = np.isfinite(self.lags) & np.isfinite(self.semivariance)
+        valid = np.isfinite(self.lags) & np.isfinite(self.semivariance) & (self.counts >= min_count)
         if np.count_nonzero(valid) < 2:
-            raise ValueError("At least two finite empirical lag classes are required for fitting.")
-
-        skgstat = import_optional("skgstat", package_name="scikit-gstat")
-        parameter_counts = [3 if name in {"stable", "matern"} else 2 for name in model_names]
+            raise ValueError(
+                f"At least two finite empirical lag classes with at least {min_count} pairs are required for fitting."
+            )
 
         def summed_model(distance: NDArrayNum, *parameters: float) -> NDArrayNum:
             # Add each component's parameters in the order expected by SciPy's curve fit
             values = np.zeros_like(np.asarray(distance, dtype=float))
             position = 0
-            for name, count in zip(model_names, parameter_counts):
-                values += getattr(skgstat.models, name)(distance, *parameters[position : position + count])
+            for definition in definitions:
+                count = definition.parameter_count
+                values += definition.function(distance, *parameters[position : position + count])
                 position += count
             if use_nugget:
                 values += np.where(np.asarray(distance) > 0, parameters[position], 0.0)
@@ -830,8 +937,7 @@ class Variogram:
             guesses: list[float] = []
             for index, count in enumerate(parameter_counts, start=1):
                 guesses.extend((index * maximum_lag / len(model_names), maximum_variance / len(model_names)))
-                if count == 3:
-                    guesses.append(1.0)
+                guesses.extend([1.0] * (count - 2))
             if use_nugget:
                 guesses.append(maximum_variance * 0.05)
             p0 = guesses
@@ -844,10 +950,11 @@ class Variogram:
         # Keep fitted parameters nonnegative unless the caller supplies other limits
         if bounds is None:
             model_bounds: list[tuple[float, float]] = []
-            for count in parameter_counts:
+            for definition in definitions:
+                count = definition.parameter_count
                 model_bounds.extend(((float(np.finfo(float).eps), maximum_lag), (0.0, np.inf)))
-                if count == 3:
-                    model_bounds.append((float(np.finfo(float).eps), np.inf))
+                extra_bounds = (-np.inf, np.inf) if definition.custom else (float(np.finfo(float).eps), np.inf)
+                model_bounds.extend([extra_bounds] * (count - 2))
             if use_nugget:
                 model_bounds.append((0.0, np.inf))
             bounds = model_bounds
@@ -880,7 +987,8 @@ class Variogram:
         # Split SciPy's fitted numbers back into the shared component model objects
         components: list[VariogramModel] = []
         position = 0
-        for name, count in zip(model_names, parameter_counts):
+        for definition in definitions:
+            name, count = definition.name, definition.parameter_count
             parameters = coefficients[position : position + count]
             position += count
             components.append(
@@ -888,8 +996,10 @@ class Variogram:
                     model_name=name,
                     effective_range=float(parameters[0]),
                     partial_sill=float(parameters[1]),
-                    smoothness=float(parameters[2]) if name == "matern" else None,
-                    shape=float(parameters[2]) if name == "stable" else None,
+                    smoothness=float(parameters[2]) if name == "matern" and not definition.custom else None,
+                    shape=float(parameters[2]) if name == "stable" and not definition.custom else None,
+                    function=definition.function if definition.custom else None,
+                    parameters=tuple(parameters[2:]) if definition.custom else (),
                 )
             )
 
@@ -906,8 +1016,14 @@ class Variogram:
             self,
             fitted_semivariance=fitted_model.variogram(self.lags),
             model=fitted_model,
-            backend="scikit-gstat models/scipy fit",
-            fit_result={"coefficients": coefficients.tolist(), "covariance": covariance.tolist()},
+            backend="scipy fit"
+            if all(definition.custom for definition in definitions)
+            else "scikit-gstat models/scipy fit",
+            fit_result={
+                "coefficients": coefficients.tolist(),
+                "covariance": covariance.tolist(),
+                "min_count": int(min_count),
+            },
         )
 
     @classmethod
@@ -1132,6 +1248,8 @@ class Variogram:
         show_error: bool = True,
         show_counts: bool = True,
         xscale: Literal["log", "linear"] = "log",
+        kind: Literal["semivariance", "correlation"] = "semivariance",
+        title: str | None = None,
         **kwargs: Any,
     ) -> Any:
         """
@@ -1141,19 +1259,38 @@ class Variogram:
         :param show_error: Whether to draw available sampling errors.
         :param show_counts: Whether to add a small pair-count histogram above the variogram.
         :param xscale: Scale used for lag distances. Logarithmic by default.
+        :param kind: Show semivariance or correlation. Correlation requires a fitted model with a positive sill.
+        :param title: Optional title above the plot and its count histogram.
         :param kwargs: Keyword arguments passed to the measured point plot.
-        :returns: Main Matplotlib axes containing the empirical variogram and fitted model.
+        :returns: Main Matplotlib axes containing the empirical values and fitted model.
         """
 
         # Import Matplotlib only when the caller requests a plot
         import_optional("matplotlib", package_name="matplotlib")
         import matplotlib.pyplot as pyplot
 
+        from geoutils.stats.grouping import _plot_count_histogram
+
+        # Convert semivariance and its sampling errors using the fitted total variance
+        if kind not in {"semivariance", "correlation"}:
+            raise ValueError("Argument 'kind' must be 'semivariance' or 'correlation'.")
+        empirical_values = self.semivariance
+        error = self.semivariance_error if show_error else None
+        if kind == "correlation":
+            if self.model is None or self.model.sill <= 0:
+                raise ValueError("Plotting correlation requires a fitted variogram model with a positive sill.")
+            empirical_values = 1 - self.semivariance / self.model.sill
+            if error is not None:
+                error = error / self.model.sill
+
         if ax is None:
             _, ax = pyplot.subplots()
 
         # Draw the empirical values with a neutral style that remains distinct from the fitted curve
-        error = self.semivariance_error if show_error else None
+        empirical_label = "Empirical"
+        if self.estimator:
+            estimator_label = self.estimator.replace("_", " ").capitalize()
+            empirical_label = f"Empirical ({estimator_label})"
         empirical_options = {
             "fmt": "o",
             "markersize": 4.5,
@@ -1165,10 +1302,10 @@ class Variogram:
             "elinewidth": 1.0,
             "capsize": 2.0,
             "linestyle": "none",
-            "label": "Empirical",
+            "label": empirical_label,
         }
         empirical_options.update(kwargs)
-        empirical_artist = ax.errorbar(self.lags, self.semivariance, yerr=error, **empirical_options)
+        empirical_artist = ax.errorbar(self.lags, empirical_values, yerr=error, **empirical_options)
 
         # Evaluate a smooth fitted curve across the positive distance range shown on the logarithmic axis
         if self.model is not None and np.any(np.isfinite(self.lags)):
@@ -1202,34 +1339,53 @@ class Variogram:
                 distances = np.geomspace(minimum_distance, maximum_distance, 500)
             else:
                 distances = np.linspace(0, maximum_distance, 500)
+            fitted_values = self.correlation(distances) if kind == "correlation" else self.variogram(distances)
+            model_label = _model_plot_label(self.model)
             model_artist = ax.plot(
-                distances, self.variogram(distances), color="0.15", linewidth=1.5, label="Model fit"
+                distances, fitted_values, color="0.15", linewidth=1.5, label=f"Model ({model_label})"
             )[0]
-            ax.legend(handles=[empirical_artist, model_artist], frameon=False)
+            ax.legend(handles=[empirical_artist, model_artist], framealpha=0.9)
+        elif self.estimator:
+            ax.legend(handles=[empirical_artist], framealpha=0.9)
 
-        # Keep the main panel light so the two neutral data layers remain easy to distinguish
-        ax.set(xlabel="Lag distance", ylabel="Semivariance")
+        # Read distance units from explicit metadata or the CRS used for pair sampling
+        unit = self.attrs.get("distance_units")
+        crs = self.attrs.get("crs")
+        if not unit and crs and crs != "None":
+            from pyproj import CRS
+            from pyproj.exceptions import CRSError
+
+            try:
+                coordinate_axes = CRS.from_user_input(crs).axis_info
+            except CRSError:
+                coordinate_axes = []
+            if coordinate_axes:
+                unit = coordinate_axes[0].unit_name
+        unit_labels = {
+            "metre": "m",
+            "meter": "m",
+            "kilometre": "km",
+            "foot": "ft",
+            "US survey foot": "US survey ft",
+            "degree": "°",
+        }
+        unit_label = unit_labels.get(str(unit), str(unit)) if unit else "coordinate units"
+        ax.set(xlabel=f"Spatial lag ({unit_label})", ylabel="Correlation" if kind == "correlation" else "Semivariance")
+
+        # Match the boxed axes used for grouped statistics and their count histograms
         ax.grid(axis="y", color="0.9", linewidth=0.6)
         ax.set_axisbelow(True)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-
-        # Use a logarithmic lag axis with ordinary decimal labels instead of powers of ten
-        ax.set_xscale(xscale)
-        if xscale == "log":
-            from matplotlib.ticker import ScalarFormatter
-
-            formatter = ScalarFormatter()
-            formatter.set_scientific(False)
-            formatter.set_useOffset(False)
-            ax.xaxis.set_major_formatter(formatter)
+        for spine in ax.spines.values():
+            spine.set_visible(True)
 
         # Add counts in a shallow panel without replacing the caller's main axes
+        count_axis = None
         if show_counts and len(self.counts) > 0:
             import_optional("mpl_toolkits", package_name="matplotlib")
             from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-            count_axis = make_axes_locatable(ax).append_axes("top", size="25%", pad=0.08, sharex=ax)
+            # Match grouped statistics' 70% main panel, 28% counts and 2% gap
+            count_axis = make_axes_locatable(ax).append_axes("top", size="40%", pad="2.857%", sharex=ax)
 
             # Use stored distance-bin limits, or infer limits halfway between lag centers when they are unavailable
             if self.bin_lower_edges is not None and self.bin_edges is not None:
@@ -1276,28 +1432,34 @@ class Variogram:
             )
             if xscale == "log":
                 valid_bins &= displayed_lower_edges > 0
+            _plot_count_histogram(
+                count_axis,
+                displayed_lower_edges[valid_bins],
+                upper_edges[valid_bins],
+                histogram_counts[valid_bins],
+                label="Pair count",
+            )
             if np.any(valid_bins):
-                widths = upper_edges[valid_bins] - displayed_lower_edges[valid_bins]
-                count_axis.bar(
-                    displayed_lower_edges[valid_bins],
-                    histogram_counts[valid_bins],
-                    width=widths,
-                    align="edge",
-                    color="0.78",
-                    edgecolor="white",
-                    linewidth=0.6,
-                )
                 minimum_displayed = float(np.nanmin(displayed_lower_edges[valid_bins]))
                 ax.set_xlim(minimum_displayed, float(np.nanmax(upper_edges[valid_bins])))
 
-            # Remove repeated labels and heavy borders from the compact count panel
-            count_axis.set_ylabel("Pair count")
-            count_axis.tick_params(axis="x", which="both", bottom=False, labelbottom=False)
-            count_axis.grid(axis="y", color="0.92", linewidth=0.5)
-            count_axis.set_axisbelow(True)
-            count_axis.spines["top"].set_visible(False)
-            count_axis.spines["right"].set_visible(False)
-            count_axis.spines["bottom"].set_visible(False)
+        # Label intermediate logarithmic ticks with ordinary decimal numbers
+        ax.set_xscale(xscale)
+        if xscale == "log":
+            from matplotlib.ticker import LogLocator, NullFormatter, ScalarFormatter
+
+            ax.xaxis.set_major_locator(LogLocator(base=10, subs=(1, 2, 5), numticks=12))
+            formatter = ScalarFormatter()
+            formatter.set_scientific(False)
+            formatter.set_useOffset(False)
+            ax.xaxis.set_major_formatter(formatter)
+            ax.xaxis.set_minor_formatter(NullFormatter())
+
+        # Place the title above the count panel when it is present
+        if title is not None:
+            title_axis = count_axis if count_axis is not None else ax
+            title_axis.set_title(title)
+
         return ax
 
     ############################
@@ -1687,13 +1849,15 @@ def variogram(
     :param n_lags: Number of distance bins when bins is ``"log"`` or ``"uniform"``.
     :param min_lag: Minimum sampled distance in CRS units; defaults to the smaller pixel spacing or half the estimated
         point spacing.
-    :param max_lag: Maximum sampled distance in CRS units; defaults to the diagonal of the source locations.
+    :param max_lag: Maximum sampled distance in CRS units; defaults to half the raster diagonal or the point cloud
+        diagonal. Explicit bin edges or a supplied pair-sampling maximum override the raster default.
     :param n_runs: Independent samples to average; repeat sampling to estimate each distance bin's standard error.
     :param model: SciKit-GStat model to fit: ``"spherical"``, ``"exponential"``, ``"gaussian"``, ``"cubic"``,
         ``"stable"`` or ``"matern"``, or the corresponding model function. Sum a list of models ordered from short
         to long range (e.g. ["spherical", "exponential"]). ``None`` keeps only the empirical variogram.
     :param fit_kwargs: Options for Variogram.fit(): ``use_nugget``, ``bounds``, ``p0`` or ``maxfev``
         (e.g. {"use_nugget": True}); optimization uses SciPy curve_fit().
+        min_count sets the minimum sampled pairs per distance bin used for fitting (default 1).
     :param random_state: Seed or NumPy generator for reproducible sampling across runs (e.g. 42).
     :param mask: Locations to keep: True values in a boolean mask, an aligned mask raster for raster inputs,
         or locations inside vector geometries.
@@ -1721,6 +1885,17 @@ def variogram(
 
     # 2/ Prepare pair sampling options, random seeds and distance bins
 
+    # Limit raster distances before sampling so fitting and plotting use the same extent
+    raster = _get_raster_interface(source)
+    is_raster = raster is not None
+    if raster is not None and max_lag is None and isinstance(bins, str):
+        if pair_sampling_kwargs.get("max_distance") is not None:
+            max_lag = float(pair_sampling_kwargs["max_distance"])
+        else:
+            dx, dy = raster.res
+            height, width = raster.shape
+            max_lag = float(np.hypot(width * dx, height * dy) / 2)
+
     # Keep raster band selection out of point pair sampling kwargs
     pair_kwargs: dict[str, Any] = {} if band is None else {"band": band}
     pair_kwargs.update(
@@ -1736,7 +1911,6 @@ def variogram(
     pair_kwargs.update(pair_sampling_kwargs)
 
     # Reuse sampled raster values without allocating a validity bitmap for the whole source
-    is_raster = _get_raster_interface(source) is not None
     if is_raster:
         pair_kwargs.setdefault("read_strategy", "reuse_values")
 
@@ -1906,6 +2080,9 @@ def _model_to_gstools(model: VariogramModel, *, gstools: Any, dim: int) -> Any:
     :returns: Native GSTools covariance model with the fitted range, variance, and nugget.
     """
 
+    if model.function is not None:
+        raise NotImplementedError("Custom variogram functions have no GSTools adapter.")
+
     # Convert each summed component, then apply the shared nugget once
     if model.model_name == "sum":
         components = [_model_to_gstools(component, gstools=gstools, dim=dim) for component in model.components]
@@ -2005,6 +2182,9 @@ def _model_to_gpytorch_parameters(
     :returns: Kernel name, length scale, variance, selected dimensions, and nugget; nested component dictionaries
         preserve summed or multiplied structures.
     """
+
+    if model.function is not None:
+        raise NotImplementedError("Custom variogram functions have no GPyTorch adapter.")
 
     # Describe nested models recursively so callers can inspect them without GPyTorch
     if model.model_name in _COMPOSITE_MODELS:

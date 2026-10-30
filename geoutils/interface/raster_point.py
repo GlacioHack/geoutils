@@ -97,8 +97,13 @@ def _regular_pointcloud_to_raster(
         if diff_x[0] <= 0 or diff_y[0] <= 0:
             raise ValueError("Grid coordinates must increase along X and Y.")
 
-        # Build transform from min X, max Y and step in both
-        out_transform = rio.transform.from_origin(np.min(grid_coords[0]), np.max(grid_coords[1]), diff_x[0], diff_y[0])
+        # Build the corner transform from the input cell centers
+        out_transform = rio.transform.from_origin(
+            np.min(grid_coords[0]) - diff_x[0] / 2,
+            np.max(grid_coords[1]) + diff_y[0] / 2,
+            diff_x[0],
+            diff_y[0],
+        )
         # Y is first axis, X is second axis
         out_shape = (len(grid_coords[1]), len(grid_coords[0]))
 
@@ -118,9 +123,7 @@ def _regular_pointcloud_to_raster(
     i, j = _xy2ij(
         x=x,
         y=y,
-        shift_area_or_point=False,
         transform=out_transform,
-        area_or_point=area_or_point,
     )
 
     # If coordinates are not integer type (forced in xy2ij), then some points are not falling on exact coordinates
@@ -157,7 +160,7 @@ def _raster_to_pointcloud(
     skip_nodata: bool = True,
     as_array: bool | Literal["xarray"] = False,
     random_state: int | np.random.Generator | None = None,
-    force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "ul",
+    force_pixel_offset: Literal["center", "ul", "ur", "ll", "lr"] = "center",
     mp_config: MultiprocConfig | None = None,
     force_output_to_memory: bool = False,
 ) -> Any:

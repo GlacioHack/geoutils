@@ -219,7 +219,7 @@ class TestPointParquet:
         sampled = source.pc.subsample(2, random_state=0)
         assert sampled.pc.point_count == 2
         assert not pd.isna(sampled.values).any()
-        reference = gu.raster.from_array(np.ones((1, 3)), from_origin(0, 0, 1, 1), 32633)
+        reference = gu.raster.from_array(np.ones((1, 3)), from_origin(-0.5, 0.5, 1, 1), 32633)
         gridded = source.pc.grid(ref=reference, resampling="nearest", radius=0.25)
 
         # Check exact samples and missing point positions rather than comparing two reads
@@ -287,7 +287,7 @@ class TestPointParquetChunked:
         frame.to_parquet(filename, write_statistics=False)
         eager = gu.open_pointcloud(filename, data_name="height", load=True)
         source = gu.open_pointcloud(filename, data_name="height", chunks=2)
-        reference = gu.raster.from_array(np.ones((1, 3)), from_origin(0, 0, 1, 1), 32633)
+        reference = gu.raster.from_array(np.ones((1, 3)), from_origin(-0.5, 0.5, 1, 1), 32633)
 
         # Build gridding lazily; statistics and sampling may read finite counts without loading the source
         with Callback(pretask=lambda *args: pytest.fail("Gridding must build a lazy result")):

@@ -293,7 +293,7 @@ class TestRasterPoint:
         transform = rio.transform.from_origin(0, 2, 1, 1)
         raster = gu.Raster.from_array(np.arange(4).reshape((2, 2)), transform, 32633)
         dataframe = raster.to_pointcloud().gdf.copy()
-        dataframe.loc[dataframe.index[0], "geometry"] = Point(-1, 2)
+        dataframe.loc[dataframe.index[0], "geometry"] = Point(-0.5, 1.5)
 
         # Reject the negative column instead of writing its value into the last raster column
         with pytest.raises(ValueError, match="fall outside the grid"):

@@ -57,8 +57,8 @@ def test_coords_crs() -> None:
     dem = Raster(examples.get_path_test("everest_landsat_b4"))
     dem.set_nodata(0)
     dem_4326 = dem.reproject(crs=4326)
-    coords_proj_4326 = dem.coords(grid=True, shift_area_or_point=None, force_offset=None, crs=4326)
-    coords_4326 = dem_4326.coords(grid=True, shift_area_or_point=None, force_offset=None)
+    coords_proj_4326 = dem.coords(grid=True, crs=4326)
+    coords_4326 = dem_4326.coords(grid=True)
     assert np.array_equal(coords_4326, coords_proj_4326)
 
 
@@ -296,7 +296,7 @@ class TestClassVsAccessorConsistency:
             {
                 "other": "reference",
                 "other_precision": "negligible",
-                "components": {"measurement": {"magnitude": "constant", "correlation": None}},
+                "components": {"uncorrelated": {"magnitude": "constant", "correlation": None}},
                 "spread_estimator": np.std,
                 "subsample_magnitude": 256,
                 "random_state": 42,
@@ -314,7 +314,7 @@ class TestClassVsAccessorConsistency:
         (
             "random_field",
             {
-                "error_structure": ErrorStructure([ErrorComponent("measurement", 1)]),
+                "error_structure": ErrorStructure([ErrorComponent("uncorrelated", 1)]),
                 "random_state": 42,
             },
         ),
@@ -371,6 +371,9 @@ class TestClassVsAccessorConsistency:
         For this test, the integer test file where converted ahead (to preserve loading mechanism and laziness) in the
         fixture "lazy_test_files".
         """
+
+        if method == "plot":
+            pytest.importorskip("matplotlib")
 
         # Get filepath
         path_raster = lazy_test_files[path_index]

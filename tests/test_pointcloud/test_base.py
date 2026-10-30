@@ -114,7 +114,7 @@ class TestClassVsAccessorConsistency:
             {
                 "other": PointCloud(ds.assign(b1=[0.0, 2.0, 1.0, 5.0]), data_name="b1"),
                 "other_precision": "negligible",
-                "components": {"measurement": {"magnitude": "constant", "correlation": None}},
+                "components": {"uncorrelated": {"magnitude": "constant", "correlation": None}},
                 "spread_estimator": np.std,
             },
         ),
@@ -166,7 +166,7 @@ class TestClassVsAccessorConsistency:
         (
             "random_field",
             {
-                "error_structure": gu.ErrorStructure([gu.ErrorComponent("measurement", 1)]),
+                "error_structure": gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 1)]),
                 "random_state": 42,
             },
         ),
@@ -224,6 +224,8 @@ class TestClassVsAccessorConsistency:
     ) -> None:
         """Checks that point methods load as needed and match in-memory class and accessor outputs."""
 
+        if method == "plot":
+            pytest.importorskip("matplotlib")
         if not loaded and (as_object_type == "geodataframe" or chunks is not None):
             pytest.importorskip("dask_geopandas")
 
@@ -635,9 +637,9 @@ class TestArrayVsGeometryConsistency:
     def test_cosample__equivalence_raster(self) -> None:
         """Checks that raster cosampling and regular point conversion return equivalent values."""
 
-        # Synthetic raster data for cosampling (upper-left grid nodes)
+        # Synthetic raster data for cosampling at pixel centers
         raster = gu.Raster.from_array(np.arange(12, dtype=np.float32).reshape(3, 4), from_origin(0, 3, 1, 1), 32633)
-        points = raster.to_pointcloud(pointcloud_return_type="dataarray", force_pixel_offset="ul")
+        points = raster.to_pointcloud(pointcloud_return_type="dataarray")
         expected = points.rename("self").assign_coords(other=points.variable)
 
         # Equal cosampling output
@@ -653,7 +655,8 @@ class TestArrayVsGeometryConsistency:
 
     def test_plot__equivalence(self) -> None:
         """Checks that point cloud plotting returns the expected sample and colorbar."""
-        from matplotlib import pyplot as plt
+
+        plt = pytest.importorskip("matplotlib.pyplot")
 
         # Synthetic data for plotting
         points = gu.DataArrayPointCloudAccessor.from_xyz(np.arange(11.0), np.zeros(11), np.arange(11.0), 32633)
@@ -686,7 +689,7 @@ class TestArrayVsGeometryConsistency:
             "other_precision": "negligible",
             "predictors": {"quality": "quality"},
             "components": {
-                "measurement": {"magnitude": "heteroscedastic", "correlation": "spherical" if correlated else None}
+                "error": {"magnitude": "heteroscedastic", "correlation": "spherical" if correlated else None}
             },
             "bins": 4,
             "min_count": 10,
@@ -924,7 +927,7 @@ class TestAccessorDask:
         statistics = pd.DataFrame({"std": [1.0, 3.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="quality"))
         magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
         correlation = gu.Variogram.from_model("gaussian", effective_range=3, partial_sill=1) if correlated else None
-        model = gu.ErrorStructure([gu.ErrorComponent("measurement", magnitude, correlation)])
+        model = gu.ErrorStructure([gu.ErrorComponent("error", magnitude, correlation)])
         points = gu.DataArrayPointCloudAccessor.from_xyz(
             np.arange(11.0),
             np.zeros(11),
