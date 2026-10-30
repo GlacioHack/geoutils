@@ -18,7 +18,7 @@ mystnb:
 GeoUtils implements tools to **estimate and propagate uncertainty** for spatial calculations.
 
 We focus on errors whose **magnitudes vary spatially** and/or that are **spatially correlated** for rasters
-or point clouds, with methods to both estimate and propagate these efficiently on large datasets. This is done both 
+or point clouds, with methods to both estimate and propagate these efficiently on large datasets. This is done both
 by using chunked execution in underlying operations, and by avoiding storing a full error covariance matrix.
 
 Uncertainty quantification in GeoUtils strives to be **composable**, for ease of use.
@@ -221,13 +221,13 @@ Errors can follow many distributions. For most applications, it is often useful 
 **systematic component** (bias) from a **random component** (fluctuations around zero).
 Random errors are often **spatially correlated**, with **spatially varying magnitudes**, which is the focus of this module.
 
-**Uncertainty** describes how well the true value is known, considering all types of error. In practice, the term 
-is often used loosely to refer to the **magnitude of random errors**, measured by the spread of their 
+**Uncertainty** describes how well the true value is known, considering all types of error. In practice, the term
+is often used loosely to refer to the **magnitude of random errors**, measured by the spread of their
 distribution (commonly described by its standard deviation σ).
 
 An **error structure**, short for error covariance structure, describes the random error magnitude at each pixel or
-point, and their **correlation** to the error of every other location. For spatial problems, this structure can often be 
-simplified into a function depending only on separation distance. This description avoids storing a full spatial 
+point, and their **correlation** to the error of every other location. For spatial problems, this structure can often be
+simplified into a function depending only on separation distance. This description avoids storing a full spatial
 covariance matrix, which would for instance contain **one trillion entries**
 for a 1000 × 1000 raster.
 
@@ -273,11 +273,11 @@ Use {ref}`grouped statistics <stats-grouped>` to examine how the mean and spread
 (uncertainty-structure)=
 ## The error structure object
 
-In GeoUtils, uncertainty features are centered around {class}`~geoutils.ErrorStructure`, a **lightweight** object that serves to 
+In GeoUtils, uncertainty features are centered around {class}`~geoutils.ErrorStructure`, a **lightweight** object that serves to
 describe the error structure, without storing neither a full covariance matrix, nor raster/point-cloud predictors that might be associated to it.
 
-An {class}`~geoutils.ErrorStructure` is composed of a sum of multiple **components** to describe errors from 
-different sources that can be assumed independent, such as separating local random noise from large-scale error patterns. 
+An {class}`~geoutils.ErrorStructure` is composed of a sum of multiple **components** to describe errors from
+different sources that can be assumed independent, such as separating local random noise from large-scale error patterns.
 Each component has:
 
 - An error **magnitude** model, describing its statistical spread. It can be constant or vary with any predictor, such as
@@ -336,12 +336,12 @@ for ax, symbol in zip(axes[1::2], ["×", "+", "×", "="]):
 plt.show()
 ```
 
-Structurally, an {class}`~geoutils.ErrorStructure` contains one or multiple {class}`~geoutils.ErrorComponent`, 
-each combining {class}`~geoutils.ErrorMagnitude` with an optional {class}`~geoutils.Variogram` correlation model. In practice,  
+Structurally, an {class}`~geoutils.ErrorStructure` contains one or multiple {class}`~geoutils.ErrorComponent`,
+each combining {class}`~geoutils.ErrorMagnitude` with an optional {class}`~geoutils.Variogram` correlation model. In practice,
 **users should not need to manipulate those** subclasses during estimation, refitting or propagation, except for advanced use.
 See {ref}`uncertainty-model` for manual construction.
 
-These components can be summarized with {meth}`~geoutils.ErrorStructure.info`, or plotted with {meth}`~geoutils.ErrorStructure.plot` (all), 
+These components can be summarized with {meth}`~geoutils.ErrorStructure.info`, or plotted with {meth}`~geoutils.ErrorStructure.plot` (all),
 or {meth}`~geoutils.ErrorStructure.plot_magnitude` and {meth}`~geoutils.ErrorStructure.plot_correlation` for each aspect.
 
 ```{code-cell} ipython3
@@ -358,7 +358,7 @@ An error structure is returned by {meth}`~geoutils.ErrorStructure.estimate` and 
 {meth}`ds.rst.estimate_error_structure() or Raster.estimate_error_structure() <RasterBase.estimate_error_structure>`<br>
 {meth}`gdf.pc.estimate_error_structure() or PointCloud.estimate_error_structure() <PointCloudBase.estimate_error_structure>`<br>
 
-For estimation, use {meth}`~geoutils.ErrorStructure.estimate` from an error structure object or {meth}`~RasterBase.estimate_error_structure` 
+For estimation, use {meth}`~geoutils.ErrorStructure.estimate` from an error structure object or {meth}`~RasterBase.estimate_error_structure`
 from a raster or point cloud, interchangeably.
 
 The sections below first explain the inputs and workflow to estimate an error structure, then how to choose
@@ -372,19 +372,19 @@ By default, error estimation uses the **standard deviation** as an estimator of 
 
 ### Inputs and workflow
 
-Estimating an error structure only strictly requires passing an **error proxy**, or a **reference data** to derive an 
-an error proxy by substraction with the other data. Both can be rasters or point clouds.
+Estimating an error structure only strictly requires passing an **error proxy**, or a **reference data** to derive an
+an error proxy by subtraction with the other data. Both can be rasters or point clouds.
 
 The estimation workflow uses the following steps, all **scalable** on large datasets:
 
 - First, {meth}`~RasterBase.cosample` selects valid data at common locations,
 - Then, {meth}`~RasterBase.stats` estimates error magnitude, globally or grouped by predictors,
-- Finally, {meth}`~RasterBase.variogram` estimates error correlation. 
+- Finally, {meth}`~RasterBase.variogram` estimates error correlation.
 
 For example, reusing the synthetic snow depth data from the {ref}`uncertainty-quick-use`:
 
 ```{note}
-When comparing to reference data, use `other_precision` to either neglect other errors (`"negligible"`, default), or 
+When comparing to reference data, use `other_precision` to either neglect other errors (`"negligible"`, default), or
 assume them independent with similar magnitude/correlation (`"same"`) which divides the error proxy by √2.
 ```
 
@@ -393,19 +393,19 @@ default_errors = ds.rst.estimate_error_structure(ds_ref)
 default_errors.plot()
 ```
 
-As we can see, **the fit is not convincing yet**. 
+As we can see, **the fit is not convincing yet**.
 
 By default, without defining **components** or **predictors**, GeoUtils uses one component with constant magnitude and a single-range spatial correlation model.
-If **predictors** are passed, GeoUtils uses two components: a short range component with magnitude varying with predictors, plus a long range component with constant magnitude, both 
+If **predictors** are passed, GeoUtils uses two components: a short range component with magnitude varying with predictors, plus a long range component with constant magnitude, both
 with a single-range spatial correlation model.
 
-The next sections explain how to define error **components** and potential **predictors** to reach a satisfactory estimation. 
+The next sections explain how to define error **components** and potential **predictors** to reach a satisfactory estimation.
 
 (uncertainty-constant-magnitude)=
 (uncertainty-variable-magnitude)=
 ### Error magnitude
 
-Error magnitude is **inferred by the spread of the error proxy** globally or within predictor groups, 
+Error magnitude is **inferred by the spread of the error proxy** globally or within predictor groups,
 directly relying on {ref}`stats-global` and {ref}`stats-grouped`.
 
 By default, GeoUtils uses the **standard deviation** as spread estimator, with linear interpolation as model.
@@ -413,7 +413,7 @@ See {ref}`statistics estimators <stats-estimators>` for alternatives such as NMA
 
 #### Constant magnitude
 
-A **constant magnitude** can be set to estimate the same average error spread everywhere, here we modify the estimator 
+A **constant magnitude** can be set to estimate the same average error spread everywhere, here we modify the estimator
 into the **NMAD** (median-like standard deviation):
 
 ```{code-cell} ipython3
@@ -428,7 +428,7 @@ print(f"±{constant_errors.predict_magnitude():.2f} m (1σ)")
 ```
 
 Here, `correlation=None` skips correlation estimation.
-As shown below, the spread simply corresponds to that of all error proxy values:  
+As shown below, the spread simply corresponds to that of all error proxy values:
 
 ```{code-cell} ipython3
 :tags: [hide-input]
@@ -469,7 +469,7 @@ plt.show()
 To infer **variable magnitudes** (also called **heteroscedasticity**), we bin the error proxy by predictor values to get enough samples to estimate
 its spread (we assume similar predictor values have similar error spread elsewhere).
 
-For example, below we use **viewing angle** to group spread estimates, selecting `"heteroscedastic"` for a variable magnitude, 
+For example, below we use **viewing angle** to group spread estimates, selecting `"heteroscedastic"` for a variable magnitude,
 and plotting it with {meth}`~geoutils.ErrorStructure.plot_magnitude`:
 
 ```{code-cell} ipython3
@@ -483,7 +483,7 @@ angle_errors = gu.ErrorStructure.estimate(
 
 ```
 
-We can then use {meth}`~geoutils.ErrorStructure.predict_magnitude` to predict the error for any view angle value, typically 
+We can then use {meth}`~geoutils.ErrorStructure.predict_magnitude` to predict the error for any view angle value, typically
 useful to create a per-pixel/point error map with the shape of the input:
 
 ```{code-cell} ipython3
@@ -571,7 +571,7 @@ variable_errors = gu.ErrorStructure.estimate(
 axes = variable_errors.plot_magnitude()
 ```
 
-Use {meth}`~geoutils.ErrorStructure.refit_magnitude` to fit **another model** (which default to linear interpolation), 
+Use {meth}`~geoutils.ErrorStructure.refit_magnitude` to fit **another model** (which default to linear interpolation),
 using the same binned estimates. Changing bins, categories or estimator requires running {meth}`~geoutils.ErrorStructure.estimate` again.
 
 Parametric models can also be used, as demonstrated in {ref}`uncertainty-custom-magnitude`.
@@ -606,7 +606,7 @@ single_errors = gu.ErrorStructure.estimate(
 ax = single_errors.plot_correlation(kind="correlation", title="One correlation model")
 ```
 
-Here, a single model **does not fit empirical correlation reliably**, so we need models that can 
+Here, a single model **does not fit empirical correlation reliably**, so we need models that can
 account for multiple correlation ranges, as examplified directly below.
 
 ```{note}
@@ -618,7 +618,7 @@ is the variance (sill). Use `kind="semivariance"` to plot semivariance instead.
 
 It is often useful to fit a **sum of models** to represent both a short and a long correlation range.
 
-For instance: 
+For instance:
 ```{code-cell} ipython3
 :mystnb:
 :  image:
@@ -655,8 +655,8 @@ Custom variogram functions are described in {ref}`uncertainty-custom-variogram`.
 
 Once an error structure is estimated, **propagation** computes uncertainty through a given operation.
 
-This can be done either **analytically**, or **numerically**. Both return a {class}`~geoutils.PropagationSummary` object summarizing the propagation. 
-Alternatively, you can directly generate **random fields** from the above error structure, respecting multiple correlations and variable errors, 
+This can be done either **analytically**, or **numerically**. Both return a {class}`~geoutils.PropagationSummary` object summarizing the propagation.
+Alternatively, you can directly generate **random fields** from the above error structure, respecting multiple correlations and variable errors,
 to perform your own simulations.
 
 (uncertainty-propagation-summary)=
@@ -665,7 +665,7 @@ to perform your own simulations.
 A {class}`~geoutils.PropagationSummary` is an object that stores metrics about the output of the uncertainty propagation.
 
 ```{important}
-Currently, propagation outputs are not designed to provide an {class}`~geoutils.ErrorStructure` for the output. 
+Currently, propagation outputs are not designed to provide an {class}`~geoutils.ErrorStructure` for the output.
 If you need to keep propagating errors of your output to another step, **bundle all steps at once** during your propagation.
 ```
 
@@ -717,7 +717,7 @@ raster_summary.estimate.shape, raster_summary.mean.shape, raster_summary.std.sha
 (uncertainty-analytical)=
 ### Analytical propagation
 
-Analytical propagation is only supported for **linear calculations**, using the calculation weights with the error covariance. See {ref}`core-operators` for details on how to 
+Analytical propagation is only supported for **linear calculations**, using the calculation weights with the error covariance. See {ref}`core-operators` for details on how to
 define a linear operator in GeoUtils.
 
 For instance, we compute the mean of **8 × 8 cells** and propagate its uncertainty:
@@ -1037,14 +1037,14 @@ ds_simulated = ds + field
 (uncertainty-advanced)=
 ## Advanced usage
 
-The following sections present more advanced usage of the uncertainty features, such as **defining your 
+The following sections present more advanced usage of the uncertainty features, such as **defining your
 error structure** manually, or **fitting custom models** for magnitude/correlation.
 
 (uncertainty-custom-magnitude)=
 ### Custom magnitude fit
 
-One can pass **a custom function** to fit the error magnitude bins, either as 
-`magnitude_model` and `magnitude_fit_kwargs` arguments to {meth}`~geoutils.ErrorStructure.estimate`, or to 
+One can pass **a custom function** to fit the error magnitude bins, either as
+`magnitude_model` and `magnitude_fit_kwargs` arguments to {meth}`~geoutils.ErrorStructure.estimate`, or to
 {meth}`~geoutils.ErrorStructure.refit_magnitude` more directly:
 
 ```{code-cell} ipython3
@@ -1106,4 +1106,3 @@ correlated = gu.ErrorComponent("correlated", magnitude=2.0, correlation=correlat
 known_errors = gu.ErrorStructure([uncorrelated, correlated])
 known_errors.plot(show_components=True)
 ```
-
