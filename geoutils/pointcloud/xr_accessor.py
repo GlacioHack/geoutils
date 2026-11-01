@@ -538,8 +538,10 @@ class DataArrayPointCloudAccessor(PointCloudBase):
         Write points to LAS/LAZ, GeoParquet, or a geometry format.
 
         :param filename: Destination filename; its suffix selects the format.
-        :param filesystem: Filesystem used to open the destination. Cannot be combined with storage_options.
-        :param storage_options: Fsspec settings for the destination URL. Cannot be combined with filesystem.
+        :param filesystem: An existing Fsspec filesystem object whose connection settings are used to write files.
+            Cannot be combined with storage_options.
+        :param storage_options: Dictionary of connection settings used to create a Fsspec filesystem from the
+            destination URL, such as credentials or a custom server address. Cannot be combined with filesystem.
         :param kwargs: Options passed to to_las(), to_parquet(), or GeoPandas to_file().
         """
 
@@ -1123,8 +1125,10 @@ class DatasetPointCloudAccessor:
 
         :param filename: Destination LAS/LAZ, GeoParquet or geometry filename.
         :param variables: Point fields to write; None selects all aligned values.
-        :param filesystem: Filesystem used to open the destination. Cannot be combined with storage_options.
-        :param storage_options: Fsspec settings for the destination URL. Cannot be combined with filesystem.
+        :param filesystem: An existing Fsspec filesystem object whose connection settings are used to write files.
+            Cannot be combined with storage_options.
+        :param storage_options: Dictionary of connection settings used to create a Fsspec filesystem from the
+            destination URL, such as credentials or a custom server address. Cannot be combined with filesystem.
         :param kwargs: Options passed to the DataArray point writer.
         """
         dataset = _prepare_point_dataset(self._obj)

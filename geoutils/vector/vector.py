@@ -993,8 +993,10 @@ class Vector(VectorBase):
         :param driver: Output driver, inferred from the filename when omitted.
         :param schema: Field schema for vector formats. Unsupported for GeoParquet.
         :param index: Whether to write the dataframe index.
-        :param filesystem: Filesystem used to open the destination. Cannot be combined with storage_options.
-        :param storage_options: Fsspec settings for the destination URL. Cannot be combined with filesystem.
+        :param filesystem: An existing Fsspec filesystem object whose connection settings are used to write files.
+            Cannot be combined with storage_options.
+        :param storage_options: Dictionary of connection settings used to create a Fsspec filesystem from the
+            destination URL, such as credentials or a custom server address. Cannot be combined with filesystem.
         :param kwargs: Options passed to the format writer.
         :returns: None.
         """

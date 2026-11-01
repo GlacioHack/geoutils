@@ -2080,8 +2080,10 @@ class Raster(RasterBase):
             an empty list omits them.
         :param gcps_crs: CRS of the GCPs. Defaults to the stored GCP CRS, then the raster CRS.
         :param rpcs: Rational polynomial coefficients. Defaults to stored coefficients.
-        :param filesystem: Filesystem used to open the destination. Cannot be combined with storage_options.
-        :param storage_options: Fsspec settings for the destination URL. Cannot be combined with filesystem.
+        :param filesystem: An existing Fsspec filesystem object whose connection settings are used to write files.
+            Cannot be combined with storage_options.
+        :param storage_options: Dictionary of connection settings used to create a Fsspec filesystem from the
+            destination URL, such as credentials or a custom server address. Cannot be combined with filesystem.
 
         :returns: None.
         """
