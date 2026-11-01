@@ -94,7 +94,7 @@ Alternatively, pass a dictionary with one option:
 - **Resolution**: `downsample={"res": (120, 180)}` sets the x/y pixel spacing in CRS units.
 - **Shape**: `downsample={"shape": (512, 1024)}` sets the number of rows and columns.
 
-Note that factor and resolution preserve exact pixel spacing and trim incomplete intervals at the right or bottom edge, changing the extent slightly, 
+Note that factor and resolution preserve exact pixel spacing and trim incomplete intervals at the right or bottom edge, changing the extent slightly,
 while an output shape adjusts spacing to preserve the extent.
 
 ### Point clouds

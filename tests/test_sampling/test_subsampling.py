@@ -10,7 +10,6 @@ from unittest.mock import patch
 
 import geopandas as gpd
 import numpy as np
-import pandas as pd
 import pytest
 import rasterio as rio
 import xarray as xr

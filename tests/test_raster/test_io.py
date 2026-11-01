@@ -104,7 +104,7 @@ class TestRasterOpening:
         with rio.open(filename, "r+") as source:
             source.scales, source.offsets = (2,), (10,)
 
-        # Check warning is raised opening with masked=Fasle
+        # Check warning is raised opening with masked=False
         with pytest.warns(UserWarning, match="masked=False"):
             result = open_raster(
                 str(filename),

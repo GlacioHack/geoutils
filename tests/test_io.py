@@ -83,6 +83,7 @@ class TestResolveFilesystem:
 
         class ConfiguredPath:
             """Relative path with configured filesystem."""
+
             def __init__(self) -> None:
                 self.path = path.name
                 self.fs = fsspec.filesystem("dir", path=str(tmp_path), fs=fsspec.filesystem("file"))

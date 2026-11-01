@@ -130,6 +130,7 @@ class TestVectorOpening:
 
         assert_geodataframe_equal(result, frame)
 
+
 class TestVectorOpeningChunked:
     """Test module for vector opening, respecting Dask lazyiness."""
 
@@ -159,6 +160,8 @@ class TestVectorOpeningChunked:
         """Checks that vector opening options match between lazy/eager exactly."""
         pytest.importorskip("dask_geopandas")
         fsspec = pytest.importorskip("fsspec")
+        if filesystem_access or options.get("engine") == "fiona":
+            pytest.importorskip("fiona")
 
         # Create and write geodataframe
         frame = gpd.GeoDataFrame(
@@ -170,7 +173,7 @@ class TestVectorOpeningChunked:
         source = path.name if filesystem_access else str(path)
         access = {"filesystem": filesystem} if filesystem_access else {}
 
-        # Open in-memory and lazily wiht chunks
+        # Open in-memory and lazily with chunks
         expected = gu.open_vector(source, load=True, **access, **options)
         result = gu.open_vector(source, chunks=chunks, **access, **options)
         assert expected.vct.is_loaded and not result.vct.is_loaded
@@ -183,6 +186,10 @@ class TestVectorOpeningChunked:
     @pytest.mark.parametrize("filesystem_access", [False, True])
     def test_open_vector__timezone(self, filesystem_access: bool, tmp_path: pathlib.Path) -> None:
         """Checks that lazy vector dates preserve their timezone across empty partitions."""
+        pytest.importorskip("dask_geopandas")
+        if filesystem_access:
+            pytest.importorskip("fiona")
+
         frame = gpd.GeoDataFrame(
             {"date": pd.date_range("2020-01-01", periods=7, tz="UTC"), "value": np.arange(7)},
             geometry=gpd.points_from_xy(np.arange(7), np.arange(7)),
@@ -206,6 +213,8 @@ class TestVectorOpeningChunked:
         self, chunks: int | None, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Checks that metadata is read once and selecting a partition reads only its rows."""
+        pytest.importorskip("dask_geopandas")
+        pytest.importorskip("fiona")
         filesystem = pytest.importorskip("fsspec").filesystem("file")
         frame = gpd.GeoDataFrame(
             {"value": np.arange(7)}, geometry=gpd.points_from_xy(np.arange(7), np.arange(7)), crs=4326
@@ -242,6 +251,7 @@ class TestVectorOpeningChunked:
     @pytest.mark.parametrize("chunks", [None, 3])
     def test_open_vector__parquet_filesystem(self, chunks: int | None, tmp_path: pathlib.Path) -> None:
         """Checks that Parquet filesystem reads stay lazy and match eager vector values."""
+        pytest.importorskip("dask_geopandas")
         pytest.importorskip("pyarrow")
         filesystem = pytest.importorskip("fsspec").filesystem("memory")
         frame = gpd.GeoDataFrame(
@@ -261,6 +271,8 @@ class TestVectorOpeningChunked:
     @pytest.mark.parametrize("remote_url", ["http-query"], indirect=True)
     def test_open_vector__url_token(self, remote_files: RemoteFiles, remote_url: Callable[[str], str]) -> None:
         """Checks that a URL access token is preserved for metadata and worker reads."""
+        pytest.importorskip("dask_geopandas")
+        pytest.importorskip("fiona")
         fsspec = pytest.importorskip("fsspec")
 
         # Creatr and write vector
@@ -332,22 +344,23 @@ class TestVectorWriting:
 
     aster_outlines_path = gu.examples.get_path_test("exploradores_rgi_outlines")
 
-    def test_to_file(self) -> None:
-        """Test the save wrapper for GeoDataFrame.to_file()."""
+    @pytest.mark.parametrize("representation", ["class", "geodataframe"])
+    def test_to_file(self, representation: str, tmp_path: Path) -> None:
+        """Checks that to_file() preserves vector features through the class and accessor."""
 
         vector = gu.Vector(self.aster_outlines_path)
+        writer = vector if representation == "class" else vector.gdf.vct
 
         # Create a temporary file in a temporary directory
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.gpkg")
+        temp_file = str(tmp_path / "test.gpkg")
 
         # Save and check the file exists
-        vector.to_file(temp_file)
+        writer.to_file(temp_file)
         assert os.path.exists(temp_file)
 
         # Open and check the object is the same
         vector_save = gu.Vector(temp_file)
-        vector_save.vector_equal(vector)
+        assert vector_save.vector_equal(vector)
 
     def test_to_file__shapefile_filesystem(self, tmp_path: pathlib.Path) -> None:
         """
@@ -355,6 +368,7 @@ class TestVectorWriting:
         .shx/.prj, in addition to the central .shp.
         """
 
+        pytest.importorskip("fiona")
         filesystem = pytest.importorskip("fsspec").filesystem("dir", path=str(tmp_path))
         frame = gpd.GeoDataFrame({"value": [1, 2]}, geometry=gpd.points_from_xy([0, 1], [2, 3]), crs=4326)
 
@@ -362,19 +376,6 @@ class TestVectorWriting:
 
         assert all(filesystem.exists("points" + suffix) for suffix in (".shp", ".shx", ".dbf", ".prj"))
         assert_geodataframe_equal(gpd.read_file(tmp_path / "points.shp"), frame, check_dtype=False)
-
-    def test_to_file(self) -> None:
-        """Write an in-memory accessor-backed dataframe through the Vector-compatible API."""
-
-        ds = gu.open_vector(self.aster_outlines_path, load=True)
-
-        # Use a temporary GeoPackage and reopen it through Vector for comparison
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.gpkg")
-        ds.vct.to_file(temp_file)
-
-        assert os.path.exists(temp_file)
-        assert gu.Vector(temp_file).vector_equal(gu.Vector(ds))
 
     @pytest.mark.parametrize("representation", ["class", "geodataframe"])
     @pytest.mark.parametrize("access", ["filesystem", "storage_options"])
@@ -445,6 +446,7 @@ class TestVectorWritingChunked:
     @pytest.mark.parametrize("fragment", ["", "#version"])
     def test_to_file__parquet_filesystem_fragment(self, fragment: str, tmp_path: pathlib.Path) -> None:
         """Checks that a URL fragment uses the Parquet writer without loading the input."""
+        pytest.importorskip("dask_geopandas")
         pytest.importorskip("pyarrow")
         filesystem = pytest.importorskip("fsspec").filesystem("memory")
         eager = gu.open_vector(self.aster_outlines_path, load=True)
@@ -469,6 +471,7 @@ class TestVectorIOErrors:
     )
     def test_open_vector__error_lazy_rows(self, rows: int | slice, tmp_path: pathlib.Path) -> None:
         """Checks an error is raised for negative row bounds or non-positive steps in lazy reads."""
+        pytest.importorskip("dask_geopandas")
         frame = gpd.GeoDataFrame({"value": [1, 2]}, geometry=gpd.points_from_xy([0, 1], [0, 1]), crs=4326)
         path = tmp_path / "rows.gpkg"
         frame.to_file(path)

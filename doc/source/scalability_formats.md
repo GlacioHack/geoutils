@@ -292,9 +292,9 @@ print("Written files:", fsspec.filesystem("s3").glob(f"{bucket_url}/*_out.*"))
 
 ### Connection settings
 
-To supply **connection settings** such as credentials, two consistent options exist. 
+To supply **connection settings** such as credentials, two consistent options exist.
 
-Either use a dictionary with `storage_options` to let GeoUtils create a [Fsspec filesystem](https://filesystem-spec.readthedocs.io/en/latest/) 
+Either use a dictionary with `storage_options` to let GeoUtils create a [Fsspec filesystem](https://filesystem-spec.readthedocs.io/en/latest/)
 that opens files at your URL using those settings. Alternatively, pass an existing filesystem to `filesystem` to reuse its settings.
 These two arguments cannot be combined.
 

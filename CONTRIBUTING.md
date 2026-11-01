@@ -72,7 +72,7 @@ python -m pytest
 
 Update pages in `doc/source/` when your PR affects the documentation.
 
-These pages are written in [MyST Markdown](https://myst-nb.readthedocs.io/en/latest/authoring/text-notebooks.html), 
+These pages are written in [MyST Markdown](https://myst-nb.readthedocs.io/en/latest/authoring/text-notebooks.html),
 with executable code cells. Gallery examples are Python scripts in `examples/`.
 
 With the dev environment activated, you can test locally the HTML documentation build, for example from the repo root:
