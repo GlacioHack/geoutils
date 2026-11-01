@@ -16,16 +16,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Functionalities for transformations of raster objects.
-"""
+"""Functionalities for transformations of raster objects."""
 
 from __future__ import annotations
 
 import os
 import warnings
-from collections.abc import Iterator
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack
 from copy import copy
 from dataclasses import replace
 from importlib.util import find_spec
@@ -40,7 +37,6 @@ from numpy.typing import NDArray
 from packaging.version import Version
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
-from rasterio.vrt import WarpedVRT
 from shapely.geometry import box
 from shapely.strtree import STRtree
 
@@ -111,6 +107,7 @@ from geoutils.operators.reducer import (
     Sum,
     _reduce_overlap_batch,
 )
+from geoutils.raster.io import _open_raster_dataset
 from geoutils.raster.referencing import (
     _bbox,
     _check_affine_georeferencing,
@@ -142,70 +139,6 @@ except ImportError:
             return func
 
         return decorator
-
-
-#####################################
-# 1/ DOWNSAMPLE AND OVERVIEW OPENING
-#####################################
-
-
-def _raster_overview_metadata(source: rio.io.DatasetReader, overview_level: int | None = None) -> dict[str, Any]:
-    """Read available overview metadata."""
-
-    factors = source.overviews(1)
-    selected_level = -1 if overview_level is None else int(overview_level)
-    selected_factor = factors[selected_level] if selected_level >= 0 else 1
-    metadata: dict[str, Any] = {
-        "overview_factors": factors,
-        "overview_selected_level": selected_level,
-        "overview_selected_factor": selected_factor,
-    }
-
-    # Include creation method only if it exists
-    resampling = source.tags(ns="rio_overview").get("resampling")
-    if resampling is not None:
-        metadata["overview_resampling"] = resampling
-    return metadata
-
-
-def _overview_level_for_downsample(source: rio.io.DatasetReader, downsample: float) -> int | None:
-    """Return the closest suitable stored overview level for a downsampling factor."""
-
-    # Match GDAL nearest-neighbor overview selection by allowing up to 20% oversampling
-    overview_level = None
-    for level, overview_factor in enumerate(source.overviews(1)):
-        if overview_factor > downsample * 1.2:
-            break
-        overview_level = level
-    return overview_level
-
-
-@contextmanager
-def _open_downsampled_raster(source: rio.io.DatasetReader, downsample: float) -> Iterator[WarpedVRT]:
-    """Open a reduced grid, using the closest suitable stored overview when one is available."""
-
-    # Define the requested grid from the native raster rather than from the selected overview
-    width = max(1, int(np.floor(source.width / downsample)))
-    height = max(1, int(np.floor(source.height / downsample)))
-    transform = projtools._affine_matmul(source.transform, affine.Affine.scale(downsample))
-
-    # Keep the selected overview open while the virtual raster resamples it to the requested grid
-    with ExitStack() as stack:
-        read_source = source
-        overview_level = _overview_level_for_downsample(source, downsample)
-        if overview_level is not None:
-            read_source = stack.enter_context(rio.open(source.name, overview_level=overview_level))
-        vrt = stack.enter_context(
-            WarpedVRT(
-                read_source,
-                crs=source.crs,
-                transform=transform,
-                width=width,
-                height=height,
-                resampling=Resampling.nearest,
-            )
-        )
-        yield vrt
 
 
 ###############
@@ -1827,14 +1760,19 @@ def _crop(
         final_window_disk = ref_win_disk.intersection(self_win_disk).round_lengths().round_offsets()
 
         # Round up to downsampling size, to match __init__
-        final_window_disk = rio.windows.round_window_to_full_blocks(
-            final_window_disk, ((source_raster._downsample, source_raster._downsample),)
-        )
+        if not isinstance(source_raster._downsample, dict):
+            final_window_disk = rio.windows.round_window_to_full_blocks(
+                final_window_disk, ((source_raster._downsample, source_raster._downsample),)
+            )
 
-        with ExitStack() as stack:
-            source = stack.enter_context(rio.open(source_raster.name))
-            if source_raster._downsample > 1:
-                raster = stack.enter_context(_open_downsampled_raster(source, source_raster._downsample))
+        assert source_raster.name is not None
+        with _open_raster_dataset(
+            source_raster.name,
+            filesystem=source_raster._filesystem,
+            overview_level=source_raster._overview_level,
+            downsample=source_raster._downsample,
+        ) as raster:
+            if source_raster._downsample != 1:
                 source_window = source_raster._out_window or rio.windows.Window(
                     0, 0, source_raster.width, source_raster.height
                 )
@@ -1850,7 +1788,7 @@ def _crop(
                     window=read_window,
                 )
             else:
-                crop_img = source.read(
+                crop_img = raster.read(
                     indexes=source_raster._bands,
                     masked=source_raster._masked,
                     window=final_window_disk,

@@ -1,7 +1,9 @@
-"""Test point cloud loading by bounds and row ranges."""
+"""Tests for point cloud I/O."""
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
+from unittest.mock import patch
 
 import geopandas as gpd
 import numpy as np
@@ -11,13 +13,15 @@ from geopandas.testing import assert_geodataframe_equal
 from rasterio.coords import BoundingBox
 
 import geoutils as gu
+from geoutils.multiproc import MultiprocConfig
 from geoutils.pointcloud.dataframe import _get_dataframe_attrs
-from geoutils.pointcloud.loading import (
+from geoutils.pointcloud.io import (
     _concat_point_parts,
     _filter_points_by_bounds,
     _load_pointcloud_bounds,
     _load_pointcloud_rows,
 )
+from tests.accessor_helpers import assert_output_equal
 
 
 class TestPointCloudOpening:
@@ -121,8 +125,16 @@ class TestPointCloudOpening:
 
     @pytest.mark.parametrize("suffix", ["gpkg", "las", "parquet"])
     @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
+    @pytest.mark.parametrize(
+        "downsample,size", [(4, 3), ({"factor": 4}, 3), ({"size": 3}, 3), ({"size": 1}, 1), ({"size": 20}, 11)]
+    )
     def test_open_pointcloud__downsample(
-        self, tmp_path: Path, suffix: str, as_object_type: Literal["dataarray", "dataset", "geodataframe"]
+        self,
+        tmp_path: Path,
+        suffix: str,
+        as_object_type: Literal["dataarray", "dataset", "geodataframe"],
+        downsample: Any,
+        size: int,
     ) -> None:
         """Checks that every opening type/format uses the same deterministic downsampling."""
         if as_object_type == "geodataframe":
@@ -140,13 +152,24 @@ class TestPointCloudOpening:
             cloud.to_las(str(filename))
         else:
             cloud.to_file(str(filename))
-        expected = cloud.subsample(3, random_state=0)
+
+        # Selecting all points should preserve their order
+        expected = cloud
+        if size < 11:
+            # subsample(1) means all points, so request one point as a fraction
+            request = size if size > 1 else 1 / 11
+            expected = cloud.subsample(request, random_state=0)
 
         # Open with same downsampling, and check equality
-        points = gu.open_pointcloud(filename, data_name=data_name, downsample=4, as_object_type=as_object_type)
+        points = gu.open_pointcloud(filename, data_name=data_name, downsample=downsample, as_object_type=as_object_type)
         values = points[data_name] if as_object_type == "dataset" else points
-        assert values.pc.point_count == 3
+        assert values.pc.point_count == size
         np.testing.assert_array_equal(values.pc.to_array(), expected.to_array())
+
+        # Check PointCloud behaviour is exactly the same
+        deferred = gu.PointCloud(filename, data_name=data_name, downsample=downsample)
+        assert not deferred.is_loaded and deferred.point_count == size
+        np.testing.assert_array_equal(deferred.to_array(), expected.to_array())
 
     @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
     def test_open_pointcloud__sensor_metadata(
@@ -175,8 +198,9 @@ class TestPointCloudOpening:
         assert not variable.pc.is_loaded
 
     @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
+    @pytest.mark.parametrize("downsample", [4, {"factor": 4}, {"size": 3}])
     def test_open_pointcloud__downsample_missing_values(
-        self, tmp_path: Path, as_object_type: Literal["dataarray", "dataset", "geodataframe"]
+        self, tmp_path: Path, as_object_type: Literal["dataarray", "dataset", "geodataframe"], downsample: Any
     ) -> None:
         """Checks that downsampling includes rows with missing values."""
         pytest.importorskip("pyarrow")
@@ -189,10 +213,10 @@ class TestPointCloudOpening:
         points = gu.pointcloud.from_xyz(np.arange(11.0), np.zeros(11), values, 32633)
         filename = tmp_path / "missing.parquet"
         points.pc.to_parquet(str(filename))
-        cloud = gu.PointCloud(filename, downsample=4)
+        cloud = gu.PointCloud(filename, downsample=downsample)
 
         # Open with downsampling and check equivalence
-        result = gu.open_pointcloud(filename, downsample=4, as_object_type=as_object_type)
+        result = gu.open_pointcloud(filename, downsample=downsample, as_object_type=as_object_type)
         variable = result.z if as_object_type == "dataset" else result
         assert variable.pc.point_count == cloud.point_count == 3
         np.testing.assert_array_equal(variable.pc.to_array(), cloud.to_array())
@@ -237,17 +261,32 @@ class TestPointCloudOpening:
         assert values.pc.crs == crs
         assert values.pc.is_loaded
 
+        # Check PointCloud behaviour is exactly the same
+        with patch.object(laspy.CopcReader, "_fetch_and_decompress_points_of_nodes", side_effect=AssertionError):
+            cloud = gu.PointCloud(copc_file, level=level, data_name=data_name)
+            assert not cloud.is_loaded and cloud.point_count == len(expected)
+        cloud.load(columns="all")
+        np.testing.assert_array_equal(cloud.to_array(), expected_array)
+        np.testing.assert_array_equal(cloud["intensity"], expected.intensity)
+        assert cloud.is_loaded and cloud.point_count == len(expected)
+
     @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
-    @pytest.mark.parametrize("downsample", [1, 2, 4.5, 1_000_000])
+    @pytest.mark.parametrize(
+        "downsample", [1, 2, 4.5, 1_000_000, {"factor": 4.5}, {"size": 20_000}, {"size": 1}, {"size": 200_000}]
+    )
     def test_open_pointcloud__copc_downsample(
-        self, copc_file: Path, as_object_type: Literal["dataarray", "dataset", "geodataframe"], downsample: float
+        self, copc_file: Path, as_object_type: Literal["dataarray", "dataset", "geodataframe"], downsample: Any
     ) -> None:
         """Checks that COPC downsampling selects levels of detail automatically."""
 
         # Build a reference with LasPy level read directly + subsampling
         laspy = pytest.importorskip("laspy")
         with laspy.CopcReader.open(copc_file) as reader:
-            target_count = int(np.ceil(reader.header.point_count / downsample))
+            if isinstance(downsample, dict) and "size" in downsample:
+                target_count = min(downsample["size"], reader.header.point_count)
+            else:
+                factor = downsample["factor"] if isinstance(downsample, dict) else downsample
+                target_count = int(np.ceil(reader.header.point_count / factor))
             selected = reader.query(level=0)
             assert 0 < len(selected) < reader.header.point_count
             if len(selected) < target_count:
@@ -316,14 +355,46 @@ class TestPointCloudOpening:
             assert values.attrs["copc_chunk_sizes"] == expected_sizes
 
 
+class TestPointCloudWriting:
+    """Test module for _write_pointcloud_array() and _write_geometry_pointcloud()."""
+
+    @pytest.mark.parametrize("representation", ["class", "dataarray", "dataset"])
+    @pytest.mark.parametrize("access", ["filesystem", "storage_options"])
+    def test_to_file__filesystem(self, representation: str, access: str, tmp_path: Path) -> None:
+        """Checks that to_file() uses access options and preserves values and CRS."""
+        filesystem = pytest.importorskip("fsspec").filesystem("memory")
+        path = tmp_path / "output.parquet"
+        filename = str(path) if access == "filesystem" else f"memory://{path}"
+        options = {"filesystem": filesystem} if access == "filesystem" else {"storage_options": {}}
+
+        # Create test data
+        points = gu.PointCloud.from_xyz(np.arange(7.0), np.arange(7.0), np.arange(7.0) + 10, 4326, "height")
+        points.gdf["quality"] = np.arange(7, dtype=np.uint16)
+        array = points.to_xarray()
+        if representation == "class":
+            writer = points
+        else:
+            writer = array.pc if representation == "dataarray" else array.to_dataset().pc
+
+        writer.to_file(filename, **options)
+        assert filesystem.exists(str(path)) and not path.exists()
+
+        # Read the filesystem output
+        result = gu.open_pointcloud(str(path), filesystem=filesystem, load=True, columns="all")
+        for actual, expected in zip(result.pc.to_xyz(), points.to_xyz()):
+            np.testing.assert_array_equal(actual, expected)
+        np.testing.assert_array_equal(result.quality, points.gdf.quality)
+        assert result.pc.crs == points.crs
+
+
 class TestPointCloudOpeningChunked:
     """Test module ``open_pointcloud()`` with chunked backends (Dask only)."""
 
     @pytest.mark.parametrize("suffix", ["las", "parquet", "gpkg"])
-    @pytest.mark.parametrize("downsample", [1, 2.5])
+    @pytest.mark.parametrize("downsample", [1, 2.5, {"factor": 2.5}, {"size": 3}, {"size": 1}])
     @pytest.mark.parametrize("chunks", [None, 3])
     def test_open_pointcloud__deferred_geodataframe(
-        self, tmp_path: Path, suffix: str, downsample: float, chunks: int | None
+        self, tmp_path: Path, suffix: str, downsample: Any, chunks: int | None
     ) -> None:
         """Checks that GeoDataFrame point reads are deferred."""
         dask = pytest.importorskip("dask")
@@ -464,6 +535,9 @@ class TestPointCloudOpeningChunked:
             {"downsample": 2},
             {"downsample": 4.5},
             {"downsample": 1_000_000},
+            {"downsample": {"factor": 4.5}},
+            {"downsample": {"size": 20_000}},
+            {"downsample": {"size": 1}},
         ],
     )
     def test_open_pointcloud__copc_loading_laziness(
@@ -531,7 +605,7 @@ class TestPointCloudOpeningChunked:
             assert max(lazy_values.chunks[0], default=0) <= 7001
 
         # Check reductions read only the root node
-        if options.get("downsample", 1) in (4.5, 1_000_000):
+        if options.get("downsample", 1) in (4.5, 1_000_000, {"factor": 4.5}, {"size": 20_000}, {"size": 1}):
             with laspy.CopcReader.open(copc_file) as reader:
                 root_offsets = {
                     entry.offset
@@ -539,6 +613,125 @@ class TestPointCloudOpeningChunked:
                     if entry.key.level == 0 and entry.point_count > 0
                 }
             assert set(read_offsets) == root_offsets
+
+    @pytest.mark.parametrize("file_access", ["http-filesystem"], indirect=True)
+    @pytest.mark.parametrize(
+        "reader,options,filename",
+        [
+            (gu.open_pointcloud, {}, "survey.laz"),
+            (gu.open_pointcloud, {"as_object_type": "geodataframe"}, "survey.las"),
+            (gu.open_pointcloud, {"as_object_type": "dataset"}, "survey.parquet"),
+            (gu.open_pointcloud, {"as_object_type": "geodataframe"}, "parts"),
+            (gu.open_pointcloud, {"data_name": "height", "as_object_type": "dataset"}, "survey.gpkg"),
+        ],
+    )
+    def test_open__private_chunks(
+        self,
+        reader: Callable[..., Any],
+        options: dict[str, Any],
+        file_access: tuple[Path, str, dict[str, Any]],
+    ) -> None:
+        """Checks that chunked readers preserve access options and match eager results."""
+        pytest.importorskip("dask_geopandas")
+        path, source, access_options = file_access
+        eager_options = options if reader is gu.open_raster else {**options, "load": True}
+        eager = reader(str(path), **eager_options)
+        if isinstance(eager, (xr.DataArray, xr.Dataset)):
+            eager.load()
+
+        # Check shorter final chunks
+        remote = reader(source, chunks=3, **options, **access_options)
+        variable = remote[next(iter(remote.data_vars))] if isinstance(remote, xr.Dataset) else remote
+        accessor = "rst" if reader is gu.open_raster else "vct" if reader is gu.open_vector else "pc"
+        interface = getattr(variable, accessor)
+        eager_variable = eager[next(iter(eager.data_vars))] if isinstance(eager, xr.Dataset) else eager
+        assert getattr(eager_variable, accessor).is_loaded
+        assert not interface.is_loaded
+
+        # Run process workers
+        computed = remote.compute(scheduler="processes", num_workers=1)
+        assert not interface.is_loaded
+        computed_variable = computed[next(iter(computed.data_vars))] if isinstance(computed, xr.Dataset) else computed
+        assert getattr(computed_variable, accessor).is_loaded
+        assert_output_equal(computed, eager)
+        if isinstance(remote, (xr.DataArray, xr.Dataset)):
+            remote.close()
+            eager.close()
+
+
+class TestPointCloudWritingChunked:
+    """Test module for _write_array_las(), _write_point_parquet() and _check_pointcloud_output_source()."""
+
+    @pytest.mark.parametrize("representation", ["dataarray", "geodataframe"])
+    @pytest.mark.parametrize("suffix", [".las", ".laz", ".parquet", "parts"])
+    def test_to_file__point_partitions(
+        self, representation: Literal["dataarray", "geodataframe"], suffix: str, tmp_path: Path
+    ) -> None:
+        """Checks that chunked point writes preserve values and CRS in the filesystem."""
+        filesystem = pytest.importorskip("fsspec").filesystem("memory")
+        points = gu.PointCloud.from_xyz(np.arange(7.0), np.arange(7.0), np.arange(7.0) + 10, 4326, "height")
+        points.gdf["quality"] = np.arange(7, dtype=np.uint16)
+        source_path = tmp_path / "source.parquet"
+        points.to_parquet(source_path, chunks=3)
+        # Check shorter final chunks
+        lazy = gu.open_pointcloud(source_path, chunks=3, columns="all", as_object_type=representation)
+        filename = str(tmp_path / ("output" + suffix))
+        assert points.is_loaded and not lazy.pc.is_loaded
+
+        if suffix in (".las", ".laz"):
+            lazy.pc.to_las(filename, filesystem=filesystem)
+        else:
+            lazy.pc.to_parquet(filename, filesystem=filesystem, partitioned=suffix == "parts", chunks=3)
+        assert not lazy.pc.is_loaded
+        result = gu.open_pointcloud(filename, filesystem=filesystem, columns="all", load=True)
+
+        for actual, expected in zip(result.pc.to_xyz(), points.to_xyz()):
+            np.testing.assert_array_equal(actual, expected)
+        np.testing.assert_array_equal(result.quality, points.gdf.quality)
+        assert result.pc.is_loaded and not lazy.pc.is_loaded
+        assert result.pc.crs == points.crs
+
+    def test_to_las__filesystem_workers(self, tmp_path: Path, mp_cluster: Any) -> None:
+        """Checks that to_las() workers write point values to the filesystem."""
+        filesystem = pytest.importorskip("fsspec").filesystem("memory")
+        points = gu.PointCloud.from_xyz(np.arange(7.0), np.arange(7.0), np.arange(7.0) + 10, 4326)
+        filename = str(tmp_path / "output.laz")
+        config = MultiprocConfig(chunks=3, cluster=mp_cluster)
+
+        points.to_las(filename, filesystem=filesystem, mp_config=config)
+        result = gu.open_pointcloud(filename, filesystem=filesystem, load=True)
+
+        for actual, expected in zip(result.pc.to_xyz(), points.to_xyz()):
+            np.testing.assert_array_equal(actual, expected)
+        assert points.is_loaded and result.pc.is_loaded
+        assert not Path(filename).exists()
+
+    @pytest.mark.parametrize("suffix", [".las", ".parquet"])
+    @pytest.mark.parametrize("backend", ["memory", "file"])
+    def test_to_file__error_lazy_source(self, suffix: str, backend: str, tmp_path: Path) -> None:
+        """Checks an error is raised before overwriting a lazy point cloud source."""
+        filesystem = pytest.importorskip("fsspec").filesystem(backend)
+        points = gu.PointCloud.from_xyz(np.arange(7.0), np.arange(7.0), np.arange(7.0) + 10, 4326)
+        path = str(tmp_path / ("points" + suffix))
+        writer = points.to_las if suffix == ".las" else points.to_parquet
+        writer(path, filesystem=filesystem)
+        original = filesystem.cat(path)
+        access = {"filesystem": filesystem} if backend == "memory" else {}
+        source = "memory://" + path if backend == "memory" else path
+        lazy = gu.open_pointcloud(source, chunks=3, **access)
+        assert points.is_loaded and not lazy.pc.is_loaded
+
+        with pytest.raises(ValueError, match="Cannot overwrite a lazy point cloud source"):
+            lazy.pc.to_file(path, filesystem=filesystem, chunks=3)
+
+        assert filesystem.cat(path) == original
+        assert not lazy.pc.is_loaded
+        lazy.load()
+        lazy.pc.to_file(path, filesystem=filesystem, chunks=3)
+        result = gu.open_pointcloud(path, filesystem=filesystem, load=True)
+        assert lazy.pc.is_loaded and result.pc.is_loaded
+        for actual, expected in zip(result.pc.to_xyz(), points.to_xyz()):
+            np.testing.assert_array_equal(actual, expected)
 
 
 class TestPointCloudOpeningErrors:
@@ -558,14 +751,39 @@ class TestPointCloudOpeningErrors:
             gu.open_pointcloud(filename, chunks=chunks)  # type: ignore[arg-type]
 
     @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
-    @pytest.mark.parametrize("downsample", [True, np.bool_(False), 0, -1, np.nan, np.inf, "wrong"])
+    @pytest.mark.parametrize(
+        "downsample",
+        [
+            True,
+            np.bool_(False),
+            0,
+            -1,
+            np.nan,
+            np.inf,
+            "wrong",
+            {},
+            {"factor": 2, "size": 3},
+            {"unknown": 2},
+            {"factor": 0},
+            {"factor": np.inf},
+            {"size": 0},
+            {"size": -1},
+            {"size": 1.5},
+            {"size": True},
+            {"size": np.bool_(False)},
+            {"size": np.inf},
+        ],
+    )
     def test_open_pointcloud__error_invalid_downsample(
         self, tmp_path: Path, as_object_type: Literal["dataarray", "dataset", "geodataframe"], downsample: object
     ) -> None:
-        """Checks an error is raised for invalid downsampling factors."""
+        """Checks an error is raised for invalid downsampling factors or sample sizes."""
         filename = tmp_path / "absent.las"
-        with pytest.raises((TypeError, ValueError), match="downsample must be"):
+        with pytest.raises((TypeError, ValueError), match="downsample"):
             gu.open_pointcloud(filename, as_object_type=as_object_type, downsample=downsample)  # type: ignore[arg-type]
+
+        with pytest.raises((TypeError, ValueError), match="downsample"):
+            gu.PointCloud(filename, downsample=downsample)  # type: ignore[arg-type]
 
     @pytest.mark.parametrize(
         "level", [True, np.bool_(False), -1, 1.5, "wrong", range(0), range(-1, 2), range(2, 0, -1)]
@@ -576,17 +794,20 @@ class TestPointCloudOpeningErrors:
         # Create an invalid filename (should not matter, arguments are checked before opening)
         filename = tmp_path / "absent.copc.laz"
         # Check invalid levels fail before file access
-        with pytest.raises(ValueError, match="Argument 'level'"):
-            gu.open_pointcloud(filename, level=level)  # type: ignore[arg-type]
+        for opener in (gu.PointCloud, gu.open_pointcloud):
+            with pytest.raises(ValueError, match="Argument 'level'"):
+                opener(filename, level=level)  # type: ignore[arg-type]
 
-    def test_open_pointcloud__error_level_and_downsample(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("downsample", [2, {"factor": 2}, {"size": 10}])
+    def test_open_pointcloud__error_level_and_downsample(self, tmp_path: Path, downsample: Any) -> None:
         """Checks an error is raised with COPC levels + downsampling at once."""
 
         # Create an invalid filename (should not matter, arguments are checked before opening)
         filename = tmp_path / "absent.copc.laz"
         # Check downsampling + levels are not accepted together
-        with pytest.raises(ValueError, match="downsample and level cannot be used together"):
-            gu.open_pointcloud(filename, level=0, downsample=2)
+        for opener in (gu.PointCloud, gu.open_pointcloud):
+            with pytest.raises(ValueError, match="downsample and level cannot be used together"):
+                opener(filename, level=0, downsample=downsample)
 
     @pytest.mark.parametrize("suffix", ["las", "parquet", "gpkg"])
     def test_open_pointcloud__error_level_without_copc(self, tmp_path: Path, suffix: str) -> None:
@@ -597,8 +818,9 @@ class TestPointCloudOpeningErrors:
             laspy = pytest.importorskip("laspy")
             laspy.create().write(filename)
         # Check passing "level" requires a COPC header
-        with pytest.raises(ValueError, match="only supported for COPC"):
-            gu.open_pointcloud(filename, level=0)
+        for opener in (gu.PointCloud, gu.open_pointcloud):
+            with pytest.raises(ValueError, match="only supported for COPC"):
+                opener(filename, level=0)
 
 
 class TestPointCloudLoading:
@@ -703,6 +925,20 @@ class TestPointCloudLoading:
         np.testing.assert_array_equal(bounded["height"], [2.0, 3.0])
         np.testing.assert_array_equal(unbounded["height"], frame["height"])
         assert not source.is_loaded
+
+    @pytest.mark.parametrize("level", [0, 1, range(2), 99])
+    def test_load_pointcloud_rows__copc_levels(self, copc_file: Path, level: int | range) -> None:
+        """Checks that PointCloud opening uses COPC levels without loading the source."""
+
+        source = gu.PointCloud(copc_file, level=level)
+        expected = gu.open_pointcloud(copc_file, level=level, as_object_type="geodataframe", load=True)
+
+        rows = _load_pointcloud_rows(source, start=1, count=5)
+        bounded = _load_pointcloud_bounds(source, source.bounds, "Z")
+
+        assert not source.is_loaded
+        np.testing.assert_array_equal(rows["Z"], expected["Z"].iloc[1:6])
+        np.testing.assert_array_equal(bounded["Z"], expected["Z"])
 
     @pytest.mark.parametrize("loaded", [True, False], ids=["memory", "file"])
     def test_load_pointcloud_rows__slice_and_empty(self, loaded: bool, tmp_path: Path) -> None:

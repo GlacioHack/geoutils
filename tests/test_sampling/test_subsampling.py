@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import pytest
 import rasterio as rio
 import xarray as xr
@@ -1752,7 +1753,7 @@ class TestRasterSubsampleChunked:
     ) -> None:
         """Checks that point rows from several small raster tiles are written in one GeoPackage batch."""
 
-        from geoutils.pointcloud import writing
+        from geoutils.pointcloud import io
 
         # Write a source whose scattered sample reaches several 3 x 4 raster tiles
         values = np.arange(80, dtype=np.int16).reshape((8, 10))
@@ -1764,7 +1765,7 @@ class TestRasterSubsampleChunked:
 
         # Record the number of rows in each final GeoPackage write
         written_rows = []
-        write_dataframe = writing.pyogrio.write_dataframe
+        write_dataframe = io.pyogrio.write_dataframe
 
         def record_write(dataframe: Any, *args: Any, **kwargs: Any) -> Any:
             """Record one file batch before writing its rows."""
@@ -1772,7 +1773,7 @@ class TestRasterSubsampleChunked:
             written_rows.append(len(dataframe))
             return write_dataframe(dataframe, *args, **kwargs)
 
-        monkeypatch.setattr(writing.pyogrio, "write_dataframe", record_write)
+        monkeypatch.setattr(io.pyogrio, "write_dataframe", record_write)
 
         # Convert 17 scattered cells, which is well below the bounded file-write batch size
         result = source.subsample(

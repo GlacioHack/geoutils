@@ -2635,21 +2635,24 @@ def _pointcloud_from_subsample_indices(
     meta = source_pointcloud._dataset._meta.copy()
     meta["_geoutils_subsample_order"] = pd.Series(dtype=np.int64)
     dask_dataframe = _import_dask_dataframe()
-    if selected_parts:
-        selected = dask_dataframe.from_delayed(selected_parts, meta=meta).sort_values("_geoutils_subsample_order")
-        selected = selected.drop(columns="_geoutils_subsample_order")
-    else:
-        selected = dask_dataframe.from_pandas(meta.drop(columns="_geoutils_subsample_order"), npartitions=1)
-    selected = _import_dask_geopandas().from_dask_dataframe(
-        selected,
-        geometry=source_pointcloud._dataset._meta.geometry.name,
-    )
+
+    # We maintain column dtypes when Dask rebuilds the selected partitions
+    with dask.config.set({"dataframe.convert-string": False}):
+        if selected_parts:
+            selected = dask_dataframe.from_delayed(selected_parts, meta=meta).sort_values("_geoutils_subsample_order")
+            selected = selected.drop(columns="_geoutils_subsample_order")
+        else:
+            selected = dask_dataframe.from_pandas(meta.drop(columns="_geoutils_subsample_order"), npartitions=1)
+        selected = _import_dask_geopandas().from_dask_dataframe(
+            selected,
+            geometry=source_pointcloud._dataset._meta.geometry.name,
+        )
+
     return source_pointcloud._cast_pointcloud_output(selected)
 
 
 def _stage_point_subsample_partition(
-    source: gpd.GeoDataFrame | pathlib.Path,
-    columns: list[str],
+    source: gpd.GeoDataFrame | PointCloudBase,
     start: int,
     count: int,
     positions: NDArray[np.int64],
@@ -2660,15 +2663,15 @@ def _stage_point_subsample_partition(
     """Read and stage selected point rows, returning their coordinate bounds for LAS/LAZ output."""
 
     # Read only this source partition when the point cloud remains file-backed
-    if isinstance(source, pathlib.Path):
-        from geoutils.pointcloud.loading import _read_point_file_rows
-
-        dataframe = _read_point_file_rows(source, columns, start, count)
-    else:
+    if isinstance(source, gpd.GeoDataFrame):
         dataframe = source
+    else:
+        from geoutils.pointcloud.io import _load_pointcloud_rows
+
+        dataframe = _load_pointcloud_rows(source, start, count)
 
     # Keep all geometry and attribute columns for the selected point rows
-    from geoutils.pointcloud.writing import _stage_pointcloud_partition
+    from geoutils.pointcloud.io import _stage_pointcloud_partition
 
     selected = dataframe.iloc[positions].copy()
     bounds = None
@@ -2690,11 +2693,13 @@ def _multiproc_subsample_pointcloud(
     """Write sampled point rows in source partitions and return the file-backed point cloud."""
 
     from geoutils.multiproc.cluster import _map_bounded
-    from geoutils.pointcloud.las import _is_laspy_supported, _point_partition_size
-    from geoutils.pointcloud.writing import (
+    from geoutils.pointcloud.io import (
         _resolve_pointcloud_output,
         _write_pointcloud_partitions,
     )
+    from geoutils.pointcloud.las import _is_laspy_supported, _point_partition_size
+    from geoutils.pointcloud.parquet import _is_parquet_supported
+    from geoutils.vector.io import _read_vector_info
 
     if source_pointcloud._is_dask:
         raise ValueError(
@@ -2710,22 +2715,23 @@ def _multiproc_subsample_pointcloud(
     output_filename.parent.mkdir(parents=True, exist_ok=True)
 
     # Keep unopened GPKG/LAS sources on disk and split in-memory dataframes before submitting them
-    source_filename = pathlib.Path(source_pointcloud.name) if source_pointcloud.name is not None else None
-    if not source_pointcloud.is_loaded:
-        if source_filename is None:
-            raise ValueError("Unloaded point cloud subsampling requires a file-backed source.")
-        if (
-            not _is_laspy_supported(source_filename)
-            and source_filename.suffix.lower() != ".parquet"
-            and not source_filename.is_dir()
-        ):
-            import pyogrio
-
-            if pyogrio.read_info(source_filename)["driver"] != "GPKG":
-                raise ValueError("Unloaded point cloud subsampling supports LAS, LAZ and GPKG sources.")
-        dataframe = None
+    source: gpd.GeoDataFrame | PointCloudBase
+    if source_pointcloud.is_loaded:
+        source = source_pointcloud._dataset
     else:
-        dataframe = source_pointcloud._dataset
+        filename = source_pointcloud.name
+        if filename is None:
+            raise ValueError("Unloaded point cloud subsampling requires a file-backed source.")
+
+        # Validate supported formats through the shared readers
+        filesystem = getattr(source_pointcloud, "_filesystem", None)
+        if (
+            not _is_laspy_supported(filename)
+            and not _is_parquet_supported(filename, filesystem=filesystem)
+            and _read_vector_info(filename, filesystem=filesystem)["driver"] != "GPKG"
+        ):
+            raise ValueError("Unloaded point cloud subsampling supports LAS, LAZ and GPKG sources.")
+        source = source_pointcloud
 
     # Select row positions through the array path, using a temporary NumPy file for a large sample
     with mp_config.temporary() as index_config, ExitStack() as memory_maps:
@@ -2761,11 +2767,12 @@ def _multiproc_subsample_pointcloud(
                 if left == right and len(sampled_indices) > 0:
                     continue
                 local_positions = sampled_indices[left:right] - start
-                partition_source = source_filename if dataframe is None else dataframe.iloc[start : start + count]
+                partition_source = (
+                    source.iloc[start : start + count] if isinstance(source, gpd.GeoDataFrame) else source
+                )
                 arguments.append(
                     (
                         partition_source,
-                        list(source_pointcloud._nongeo_columns),
                         start,
                         count,
                         local_positions,
@@ -3663,7 +3670,7 @@ def _wrapper_subsample_raster_partition_mp(
     )
 
     # 4/ Save the point partition to a temporary file
-    from geoutils.pointcloud.writing import _stage_pointcloud_partition
+    from geoutils.pointcloud.io import _stage_pointcloud_partition
 
     bounds = None
     if las_output:
@@ -3715,7 +3722,7 @@ def _multiproc_subsample_raster(
         )
 
     from geoutils.multiproc.cluster import _map_bounded
-    from geoutils.pointcloud.writing import (
+    from geoutils.pointcloud.io import (
         _resolve_pointcloud_output,
         _stage_pointcloud_partition,
         _write_pointcloud_partitions,

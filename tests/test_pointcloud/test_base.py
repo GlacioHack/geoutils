@@ -221,6 +221,7 @@ class TestClassVsAccessorConsistency:
         kwargs: dict[str, Any],
         loaded: bool,
         chunks: int | None,
+        filesystem: Any = None,
     ) -> None:
         """Checks that point methods load as needed and match in-memory class and accessor outputs."""
 
@@ -232,8 +233,13 @@ class TestClassVsAccessorConsistency:
         # Write four points so chunks of 3 leave a shorter final partition
         filename = tmp_path / "points.gpkg"
         self.ds.to_file(filename, index=False)
+        source = filename.name if filesystem is not None else filename
         eager_reference = loaded or chunks is not None
-        pc = PointCloud(self.ds.copy(), data_name="b1") if eager_reference else PointCloud(filename, data_name="b1")
+        pc = (
+            PointCloud(self.ds.copy(), data_name="b1")
+            if eager_reference
+            else PointCloud(source, data_name="b1", filesystem=filesystem)
+        )
         if loaded:
             ds = self.ds.copy()
             ds.pc.set_data_name("b1")
@@ -241,7 +247,12 @@ class TestClassVsAccessorConsistency:
                 ds = ds.pc.to_xarray()
         else:
             ds = gu.open_pointcloud(
-                filename, data_name="b1", columns="all", as_object_type=as_object_type, chunks=chunks
+                source,
+                data_name="b1",
+                columns="all",
+                as_object_type=as_object_type,
+                chunks=chunks,
+                filesystem=filesystem,
             )
         assert pc.is_loaded is eager_reference
         assert ds.pc.is_loaded is loaded
@@ -297,6 +308,16 @@ class TestClassVsAccessorConsistency:
             assert_output_equal(output_pc, output_ds, use_allclose=method in ("grid", "krige"), strict_masked=False)
 
         assert ds.pc.is_loaded is loaded
+
+    @pytest.mark.parametrize("method,kwargs", methods_and_kwargs)
+    def test_methods__filesystem(self, tmp_path: Path, method: str, kwargs: dict[str, Any]) -> None:
+        """Checks that point cloud methods match class and accessor outputs through a filesystem."""
+
+        pytest.importorskip("fiona")
+        filesystem = pytest.importorskip("fsspec").filesystem("dir", path=str(tmp_path))
+        self.test_methods__equality_and_loading(
+            tmp_path, "dataarray", method, kwargs, loaded=False, chunks=None, filesystem=filesystem
+        )
 
     class_methods_and_kwargs = [
         (
@@ -1204,19 +1225,29 @@ _REMOTE_POINT_FILES = [
     ("copc.laz", None),
     ("parquet", None),
 ]
-_REMOTE_POINT_OPEN_CASES = [
-    pytest.param(suffix, data_name, {}, id=suffix) for suffix, data_name in _REMOTE_POINT_FILES
-] + [
-    pytest.param("parquet-partitioned", None, {}, id="parquet-partitioned"),
-    pytest.param("copc-levels", None, {"level": 0}, id="copc-root"),
-    pytest.param("copc-levels", None, {"level": range(2)}, id="copc-levels"),
-    pytest.param("copc-levels", None, {"downsample": 4.5}, id="copc-downsample"),
-]
-_REMOTE_POINT_READERS = [
+_REMOTE_POINT_OPEN_CASES = (
+    [pytest.param(suffix, data_name, {}, id=suffix) for suffix, data_name in _REMOTE_POINT_FILES]
+    + [
+        pytest.param(suffix, data_name, {"downsample": downsample}, id=f"{suffix}-{name}")
+        for suffix, data_name in _REMOTE_POINT_FILES
+        for name, downsample in [("factor", {"factor": 2.5}), ("size", {"size": 3})]
+    ]
+    + [
+        pytest.param("parquet-partitioned", None, {}, id="parquet-partitioned"),
+        pytest.param("copc-levels", None, {"level": 0}, id="copc-root"),
+        pytest.param("copc-levels", None, {"level": range(2)}, id="copc-levels"),
+        pytest.param("copc-levels", None, {"downsample": 4.5}, id="copc-downsample"),
+    ]
+)
+_REMOTE_POINT_OPEN_READERS = [
     pytest.param(gu.PointCloud, {}, id="pointcloud"),
-    pytest.param(gu.open_pointcloud, {"as_object_type": "dataarray"}, id="dataarray"),
-    pytest.param(gu.open_pointcloud, {"as_object_type": "dataset"}, id="dataset"),
-    pytest.param(gu.open_pointcloud, {"as_object_type": "geodataframe"}, id="geodataframe"),
+    pytest.param(gu.open_pointcloud, {"as_object_type": "dataarray"}, id="dataarray-deferred"),
+    pytest.param(gu.open_pointcloud, {"as_object_type": "dataarray", "load": True}, id="dataarray-loaded"),
+    pytest.param(gu.open_pointcloud, {"as_object_type": "dataset"}, id="dataset-deferred"),
+    pytest.param(gu.open_pointcloud, {"as_object_type": "dataset", "load": True}, id="dataset-loaded"),
+    pytest.param(gu.open_pointcloud, {"as_object_type": "geodataframe", "load": True}, id="geodataframe"),
+]
+_REMOTE_POINT_READERS = _REMOTE_POINT_OPEN_READERS + [
     pytest.param(gu.open_pointcloud, {"as_object_type": "dataarray", "chunks": 3}, id="dataarray-chunked"),
     pytest.param(gu.open_pointcloud, {"as_object_type": "dataset", "chunks": 3}, id="dataset-chunked"),
     pytest.param(gu.open_pointcloud, {"as_object_type": "geodataframe", "chunks": 3}, id="geodataframe-chunked"),
@@ -1226,93 +1257,148 @@ _REMOTE_POINT_READERS = [
 class TestPointCloudRemote:
     """Test module for reading remote point clouds (in the cloud)."""
 
-    @pytest.mark.parametrize("remote_url", ["s3"], indirect=True)
-    @pytest.mark.parametrize("remote_native_points,data_name", _REMOTE_POINT_FILES, indirect=["remote_native_points"])
-    def test_init__remote(
-        self,
-        remote_files: RemoteFiles,
-        remote_url: Callable[[str], str],
-        remote_native_points: str,
-        data_name: str | None,
-    ) -> None:
-        """Checks that PointCloud instantiation works on a remote file."""
-
-        # Open local/remote
-        filename = remote_native_points
-        expected = gu.PointCloud(remote_files.directory / filename, data_name=data_name)
-        remote = gu.PointCloud(remote_url(filename), data_name=data_name)
-
-        # Check metadata, loading and equality after loading
-        assert not expected.is_loaded
-        assert not remote.is_loaded
-        assert remote.crs == expected.crs
-        assert remote.bounds == expected.bounds
-        assert remote.columns.equals(expected.columns)
-        assert remote.point_count == expected.point_count == 7
-        expected.load(columns="all")
-        remote.load(columns="all")
-        assert remote.is_loaded
-        assert_geodataframe_equal(remote.gdf, expected.gdf)
-
-        # Check that remote reads requested part of a file
-        assert any(method == "GET" and byte_range for method, path, byte_range in remote_files.requests)
-
-    @pytest.mark.parametrize("remote_url", ["s3"], indirect=True)
     @pytest.mark.parametrize(
         "remote_native_points,data_name,options", _REMOTE_POINT_OPEN_CASES, indirect=["remote_native_points"]
     )
-    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset", "geodataframe"])
-    def test_open_pointcloud__remote(
+    @pytest.mark.parametrize("reader,reader_options", _REMOTE_POINT_OPEN_READERS)
+    def test_open_or_init__remote(
         self,
         remote_files: RemoteFiles,
         remote_url: Callable[[str], str],
         remote_native_points: str,
         data_name: str | None,
-        as_object_type: Literal["dataarray", "dataset", "geodataframe"],
+        reader: Callable[..., Any],
+        reader_options: dict[str, Any],
         options: dict[str, Any],
     ) -> None:
-        """Checks that open_pointcloud() opens a remote point cloud file properly."""
+        """Checks that open_pointcloud or PointCloud works on a remote file."""
 
-        # Open local and remote
+        # Open local/remote
         filename = remote_native_points
-        options = {"data_name": data_name, "columns": "all", "as_object_type": as_object_type, "load": True, **options}
-        expected = gu.open_pointcloud(remote_files.directory / filename, **options)
-        remote = gu.open_pointcloud(remote_url(filename), **options)
+        expected = gu.PointCloud(remote_files.directory / filename, data_name=data_name, **options)
+        assert not expected.is_loaded
+        if not options:
+            assert expected.point_count == 7
+        if reader is gu.PointCloud:
+            remote = reader(remote_url(filename), data_name=data_name, **options)
+        else:
+            remote = reader(remote_url(filename), data_name=data_name, columns="all", **reader_options, **options)
+        remote_values = remote[expected.data_name] if isinstance(remote, xr.Dataset) else remote
+        interface = remote if isinstance(remote, gu.PointCloud) else remote_values.pc
+
+        # Check metadata, loading and equality after loading
+        assert interface.is_loaded == reader_options.get("load", False)
+        assert interface.crs == expected.crs
+        assert interface.point_count == expected.point_count
+        if isinstance(remote, gu.PointCloud):
+            assert remote.bounds == expected.bounds
+            assert remote.columns.equals(expected.columns)
+            expected.load(columns="all")
+            remote.load(columns="all")
+            assert_geodataframe_equal(remote.gdf, expected.gdf)
+        else:
+            if not interface.is_loaded:
+                remote.load()
+            expected.load(columns="all")
+
+        # Dataset loading can replace its variable objects
+        if isinstance(remote, xr.Dataset):
+            remote_values = remote[expected.data_name]
+            interface = remote_values.pc
 
         # Check exact equality
-        remote_values = remote[next(iter(remote.data_vars))] if as_object_type == "dataset" else remote
-        assert remote_values.pc.is_loaded
-        assert_output_equal(remote, expected)
+        assert interface.is_loaded
+        np.testing.assert_array_equal(interface.to_array(), expected.to_array())
+        for name in expected.gdf.columns.drop(expected.gdf.geometry.name):
+            # Columns become Dataset variables or DataArray coordinates
+            column = remote if isinstance(remote, xr.DataArray) and name == expected.data_name else remote[name]
+            np.testing.assert_array_equal(column, expected[name])
+            assert column.dtype == expected[name].dtype
 
         # Check that remote reads requested part of a file
         assert any(method == "GET" and filename in path for method, path, byte_range in remote_files.requests)
         assert any(method == "GET" and byte_range for method, path, byte_range in remote_files.requests)
 
     @pytest.mark.filterwarnings("ignore:.*GPKG application_id.*non conformant file extension:RuntimeWarning")
-    @pytest.mark.parametrize("remote_url", ["http", "http-query"], indirect=True)
+    @pytest.mark.parametrize("remote_url", ["http-query"], indirect=True)
     @pytest.mark.parametrize(
         "remote_native_points,data_name",
         [("gpkg", "height"), ("las", None), ("parquet", None)],
         indirect=["remote_native_points"],
     )
-    def test_open_pointcloud__remote_http_urls(
+    @pytest.mark.parametrize("reader,reader_options", _REMOTE_POINT_OPEN_READERS)
+    def test_methods__remote_http_urls(
         self,
         remote_files: RemoteFiles,
         remote_url: Callable[[str], str],
         remote_native_points: str,
         data_name: str | None,
+        reader: Callable[..., Any],
+        reader_options: dict[str, Any],
     ) -> None:
-        """Checks that open_pointcloud() preserves HTTP URLs with/without query strings."""
+        """Checks that every point cloud reader preserves the query token required to open an HTTP file."""
 
         # Open local and remote files through GDAL, LasPy or PyArrow
         filename = remote_native_points
-        expected = gu.open_pointcloud(remote_files.directory / filename, data_name=data_name, columns="all", load=True)
-        remote = gu.open_pointcloud(remote_url(filename), data_name=data_name, columns="all", load=True)
+        options = {"data_name": data_name, **reader_options}
+        if reader is gu.open_pointcloud:
+            options["columns"] = "all"
+        expected = reader(remote_files.directory / filename, **options)
+        remote = reader(remote_url(filename), **options)
 
         # For query URLs, the server refuses requests that lose the token
-        xr.testing.assert_identical(remote, expected)
-        assert remote.pc.is_loaded
+        if isinstance(remote, gu.PointCloud):
+            expected.load(columns="all")
+            remote.load(columns="all")
+            assert_geodataframe_equal(remote.gdf, expected.gdf)
+            assert remote.is_loaded
+        else:
+            if isinstance(remote, (xr.DataArray, xr.Dataset)):
+                expected.load()
+                remote.load()
+            assert_output_equal(remote, expected)
+            values = remote[next(iter(remote.data_vars))] if isinstance(remote, xr.Dataset) else remote
+            assert values.pc.is_loaded
         assert any(method == "GET" and byte_range for method, path, byte_range in remote_files.requests)
+
+    @pytest.mark.parametrize("access", ["filesystem", "storage_options"])
+    @pytest.mark.parametrize(
+        "reader,options",
+        _REMOTE_POINT_OPEN_READERS
+        + [
+            pytest.param(gu.open_pointcloud, {"chunks": 7001}, id="dataarray-chunked"),
+        ],
+    )
+    def test_open_or_init__copc_filesystem(
+        self,
+        copc_file: Path,
+        reader: Callable[..., Any],
+        options: dict[str, Any],
+        access: str,
+    ) -> None:
+        """Checks that filesystem objects and storage options preserve COPC level selection through every reader."""
+        fsspec = pytest.importorskip("fsspec")
+        filesystem = fsspec.filesystem("memory")
+        filesystem.pipe("copc/levels.copc.laz", copc_file.read_bytes())
+        if access == "filesystem":
+            filename = "copc/levels.copc.laz"
+            read_options = {"filesystem": filesystem}
+        else:
+            filename = "memory://copc/levels.copc.laz"
+            read_options = {"storage_options": {}}
+
+        expected = reader(str(copc_file), level=0, **options)
+        remote = reader(filename, level=0, **options, **read_options)
+        variable = remote[next(iter(remote.data_vars))] if isinstance(remote, xr.Dataset) else remote
+        interface = variable if isinstance(variable, gu.PointCloud) else variable.pc
+        assert interface.is_loaded == options.get("load", False)
+        if not isinstance(remote, gpd.GeoDataFrame):
+            expected.load()
+            remote.load()
+            variable = remote[next(iter(remote.data_vars))] if isinstance(remote, xr.Dataset) else remote
+            interface = variable if isinstance(variable, gu.PointCloud) else variable.pc
+            assert interface.is_loaded
+        assert_output_equal(remote, expected)
 
     @pytest.mark.parametrize("remote_url", ["s3"], indirect=True)
     def test_crop__remote_native_format(
@@ -1379,7 +1465,6 @@ class TestPointCloudRemote:
 class TestPointCloudRemoteChunked:
     """Test module for lazy/chunked reading on remote point clouds."""
 
-    @pytest.mark.parametrize("remote_url", ["s3"], indirect=True)
     @pytest.mark.parametrize(
         "remote_native_points,data_name,options", _REMOTE_POINT_OPEN_CASES, indirect=["remote_native_points"]
     )
@@ -1400,7 +1485,7 @@ class TestPointCloudRemoteChunked:
         if as_object_type == "geodataframe" or remote_native_points.endswith(".gpkg"):
             pytest.importorskip("dask_geopandas")
 
-        copc_selection = bool(options)
+        copc_selection = remote_native_points.endswith(".copc.laz") and bool(options)
         if copc_selection:
             # Open remote COPC chunks for level selection (larger to match the fixture)
             chunks = 7001
@@ -1429,7 +1514,9 @@ class TestPointCloudRemoteChunked:
         remote_values = remote[next(iter(remote.data_vars))] if as_object_type == "dataset" else remote
         assert expected_values.pc.is_loaded
         assert not remote_values.pc.is_loaded
-        expected_count = expected_values.pc.point_count if copc_selection else 7
+        expected_count = expected_values.pc.point_count
+        if "level" not in options and "downsample" not in options:
+            assert expected_count == 7
         assert remote_values.pc.point_count == expected_values.pc.point_count == expected_count
         assert not read_offsets
 

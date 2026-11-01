@@ -45,7 +45,7 @@ from geoutils.operators.reducer import (
     _can_reduce_arrays,
     _reduce_grouped_values,
 )
-from geoutils.pointcloud.loading import _concat_point_parts, _load_pointcloud_bounds, _load_pointcloud_rows
+from geoutils.pointcloud.io import _concat_point_parts, _load_pointcloud_bounds, _load_pointcloud_rows
 
 if TYPE_CHECKING:
     import geopandas as gpd
@@ -611,7 +611,7 @@ def _stage_filtered_point_partition(
 
     from rasterio.coords import BoundingBox
 
-    from geoutils.pointcloud.writing import _stage_pointcloud_partition
+    from geoutils.pointcloud.io import _stage_pointcloud_partition
 
     # Read one group of target rows and the source points inside their expanded bounds
     assert neighborhood.radius is not None
@@ -662,8 +662,8 @@ def _multiproc_filter_pointcloud(
     """Filter groups of point rows in worker processes, then write them to one output file."""
 
     from geoutils.multiproc.cluster import _map_bounded
+    from geoutils.pointcloud.io import _resolve_pointcloud_output, _write_pointcloud_partitions
     from geoutils.pointcloud.las import _point_partition_size
-    from geoutils.pointcloud.writing import _resolve_pointcloud_output, _write_pointcloud_partitions
 
     if source_pointcloud._is_dask:
         raise ValueError(

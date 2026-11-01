@@ -40,12 +40,18 @@ For more details on file formats and their use in the cloud, see {ref}`scalabili
 ## Downsampling when opening
 
 The {func}`~geoutils.open_raster` and {func}`~geoutils.open_pointcloud` functions can be passed a `downsample` argument, which defines a
-**downsampling factor**, with a slightly different meaning for each data type.
+reduced read. A number specifies a **downsampling factor**, with a slightly different meaning for each data type.
 
 For **rasters**, `downsample=4` samples one out of every four pixels in each dimension, dividing the total pixel
 count by about 16. A floating factor also works: `downsample=2.5` turns 30 m pixels into 75 m pixels in each
 dimension, with nearest-neighbor resampling selecting a value for each output pixel from the source grid or a suitable
 {ref}`stored overview <scalability-downsampling-overviews>`.
+
+Raster opening also accepts a dictionary with exactly one of `factor`, `res` or `shape`.
+For example, `downsample={"factor": 4}` is equivalent to `downsample=4`, while `downsample={"res": (120, 180)}`
+sets the x/y pixel spacing in CRS units. Factor and resolution requests preserve exact pixel spacing and omit
+incomplete intervals at the edges. To preserve the full extent, use `downsample={"shape": (512, 1024)}` to
+set the number of rows and columns and calculate their spacing. Upsampling is not allowed on either axis.
 
 ```{note}
 With **Dask**, passing `downsample` and `chunks` together when opening also allows later operations to process the
@@ -80,6 +86,9 @@ print("Sample stays lazy:", ds_coarse.chunks is not None)
 
 For **point clouds**, using `downsample` selects a random sample of size the total number of points divided by the downsampling factor.
 For example, `downsample=2.5` selects about 40% of the points.
+Point cloud opening also accepts exactly one of `factor` or `size` in a dictionary:
+`downsample={"factor": 2.5}` selects the same sample, while `downsample={"size": 1000}` selects at most 1000 points.
+Sizes must be positive integers. A size above the source count returns all points.
 For **COPC**, GeoUtils first selects {ref}`levels of detail <scalability-downsampling-copc>` from coarse to fine
 until enough points are available, then samples those points to the requested count.
 

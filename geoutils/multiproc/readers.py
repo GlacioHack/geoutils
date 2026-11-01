@@ -12,19 +12,16 @@ from __future__ import annotations
 
 import copy
 import math
-import pathlib
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
-import pyogrio
-import rasterio as rio
 
 from geoutils._dispatch import _get_pointcloud_interface, _get_raster_interface
-from geoutils._misc import import_optional
 from geoutils.projtools import _affine_matmul
 from geoutils.raster.array import get_mask_from_array
+from geoutils.raster.io import _open_raster_dataset
 
 if TYPE_CHECKING:
     import geopandas as gpd
@@ -68,7 +65,7 @@ class _ValueReader:
     def __post_init__(self) -> None:
         """Check the raster or point cloud source without loading its values."""
 
-        # Use the support shape because vector values are calculated when each block is read
+        # 1/ Describe values calculated from vector geometries
         if self.vector_values is not None:
             assert self.support is not None
             raster = _get_raster_interface(self.support)
@@ -78,7 +75,7 @@ class _ValueReader:
             object.__setattr__(self, "kind", "vector")
             return
 
-        # Copy the source information so worker reads cannot load or change the source object
+        # 2/ Check and copy source
         raster = _get_raster_interface(self.source)
         pointcloud = _get_pointcloud_interface(self.source) if raster is None else None
         source = raster if raster is not None else pointcloud
@@ -86,7 +83,9 @@ class _ValueReader:
             raise ValueError("Value readers require an unloaded raster or point cloud.")
         source = copy.copy(source)
 
-        # Record the selected raster band and the shape of its output
+        # 3/ Determine the output shape and data type
+
+        # 3.1/ Raster band values
         if raster is not None:
             selector = 1 if self.selector is None else self.selector
             if not isinstance(selector, (int, np.integer)) or not 1 <= selector <= source.count:
@@ -95,49 +94,67 @@ class _ValueReader:
             shape = tuple(source.shape)
             dtype = np.dtype(bool if source.is_mask else source.dtype)
             kind = "raster"
+
             if self.support is not None:
                 shape = (int(self.support.point_count),)
                 dtype = np.dtype(bool if source.is_mask else float)
                 kind = "interpolated"
+
+        # 3.2/ Point cloud column values
         else:
-            # Record the point count and selected column type from the file
             selector = source.data_name if self.selector is None else self.selector
             if selector is not None and (not isinstance(selector, str) or selector not in source.columns):
                 raise ValueError(f"Point column {selector!r} does not exist.")
             from geoutils.pointcloud.las import _is_laspy_supported
+            from geoutils.pointcloud.parquet import _is_parquet_supported
 
-            if _is_laspy_supported(source.name):
-                laspy = import_optional("laspy")
-                with laspy.open(source.name) as reader:
-                    count = reader.header.point_count
+            filesystem = getattr(source, "_filesystem", None)
+
+            # 3.2.1/ Read Xarray metadata without loading values
+            if source._is_xr:
+                count = source.point_count
+                variable = source._dataset if selector == source.data_name else source._dataset.coords[selector]
+                dtype = np.dtype(variable.dtype)
+
+            # 3.2.2/ Read LAS, LAZ or COPC metadata
+            elif _is_laspy_supported(source.name):
+                from geoutils.pointcloud.las import _open_las_reader
+
+                with _open_las_reader(source.name, filesystem=filesystem) as reader:
+                    count = source.point_count
                     dimension = reader.header.point_format.dimension_by_name(selector or "Z")
                     if dimension.num_elements != 1:
                         raise ValueError("Point values require one scalar value per selected column.")
+
+                    # Scaled coordinates and attributes need floating point values
                     if selector in (None, "Z") or dimension.scales is not None or dimension.offsets is not None:
                         dtype = np.dtype(float)
                     else:
                         dtype = np.dtype("uint8") if dimension.dtype is None else dimension.dtype
-            elif pathlib.Path(source.name).suffix.lower() == ".parquet" or pathlib.Path(source.name).is_dir():
+
+            # 3.2.3/ Read GeoParquet metadata
+            elif _is_parquet_supported(source.name, filesystem=filesystem):
                 from geoutils.pointcloud.parquet import _point_parquet_metadata
 
-                metadata = _point_parquet_metadata(source.name)
-                import_optional("pyarrow")
-                import pyarrow.parquet as pq
-
-                from geoutils.pointcloud.parquet import _parquet_files
-
-                count = metadata["point_count"]
-                schema = pq.ParquetFile(_parquet_files(source.name)[0]).schema_arrow
+                metadata = _point_parquet_metadata(source.name, filesystem=filesystem)
+                count = source.point_count
+                schema = metadata["schema"]
                 dtype = np.dtype(float if selector is None else schema.field(selector).type.to_pandas_dtype())
+
+            # 3.2.4/ Read metadata for other vector formats
             else:
-                info = pyogrio.read_info(source.name, force_feature_count=True)
-                count = info["features"]
+                from geoutils.vector.io import _read_vector_info
+
+                info = _read_vector_info(source.name, filesystem=filesystem)
+                count = source.point_count
                 dtypes = dict(zip(info["fields"], info["dtypes"]))
                 dtype = np.dtype(float if selector is None else dtypes[selector])
+
             shape = (int(count),)
             kind = "point"
 
-        # Store the checked source and its basic information on the frozen reader
+        # 4/ Store the source and output properties
+        # Set attributes directly because the reader is immutable
         object.__setattr__(self, "source", source)
         object.__setattr__(self, "selector", selector)
         object.__setattr__(self, "shape", shape)
@@ -346,9 +363,16 @@ def _read_selected_raster_bands(
     values = np.ma.masked_all((len(bands), len(indexes)), dtype=dtype)
     native_bands = [source.bands[band - 1] for band in bands]
 
+    # Locate cropped windows in the source grid
+    source_window = source._out_window
+    row_offset = 0 if source_window is None else int(source_window.row_off)
+    column_offset = 0 if source_window is None else int(source_window.col_off)
+
     # 2/ Read each tile once and place its selected cells in the requested order
     assert source.name is not None
-    with rio.open(source.name) as dataset:
+    with _open_raster_dataset(
+        source.name, filesystem=source._filesystem, overview_level=source._overview_level, downsample=source._downsample
+    ) as dataset:
         for tile_id in np.unique(tile_ids):
             selected = np.flatnonzero(tile_ids == tile_id)
             tile_row, tile_column = divmod(int(tile_id), tile_columns)
@@ -358,7 +382,10 @@ def _read_selected_raster_bands(
             column_stop = min(column_start + chunk_columns, source.shape[1])
             tile = dataset.read(
                 native_bands,
-                window=((row_start, row_stop), (column_start, column_stop)),
+                window=(
+                    (row_start + row_offset, row_stop + row_offset),
+                    (column_start + column_offset, column_stop + column_offset),
+                ),
                 masked=True,
             )
             local_rows = rows[selected] - row_start
@@ -377,27 +404,20 @@ def _read_point_rows(source: PointCloudBase, rows: slice, selector: int | str | 
     assert selector is None or isinstance(selector, str)
     columns = [] if selector is None else [selector]
 
-    # Read in-memory rows directly and otherwise use the reader for the file format
-    if source.is_loaded or source._is_pd:
-        dataframe = source._dataset.iloc[rows]
-        return dataframe[[*columns, dataframe.geometry.name]]
-    assert source.name is not None
-    from geoutils.pointcloud.las import _is_laspy_supported, _load_laspy_data_slice
-
-    if _is_laspy_supported(source.name):
-        return _load_laspy_data_slice(source.name, columns=columns, start=rows.start, count=count)
-
-    if pathlib.Path(source.name).suffix.lower() == ".parquet" or pathlib.Path(source.name).is_dir():
-        from geoutils.pointcloud.loading import _read_point_file_rows
-
-        dataframe = _read_point_file_rows(source.name, columns, rows.start, count)
+    if source._is_xr:
+        # Slice the array graph so source filters and filesystem access stay together
+        selected = source._dataset.isel({source._dataset.dims[0]: rows}).compute()
+        dataframe = selected.pc.to_geoutils().gdf
+        if selector is not None and selector not in dataframe:
+            values = selected if selector == source.data_name else selected.coords[selector]
+            dataframe[selector] = values.values
         return dataframe[[*columns, dataframe.geometry.name]]
 
-    # A zero max_features means unlimited rows in Pyogrio, so empty requests read at most one row for their schema
-    dataframe = pyogrio.read_dataframe(
-        source.name, columns=columns, skip_features=rows.start, max_features=max(1, count)
-    )
-    return dataframe.iloc[:0] if count == 0 else dataframe
+    # Reuse the row reader so file access and opening selections follow the source
+    from geoutils.pointcloud.io import _load_pointcloud_rows
+
+    dataframe = _load_pointcloud_rows(source, rows.start, count, columns=columns)
+    return dataframe[[*columns, dataframe.geometry.name]]
 
 
 def _read_values(value: Any) -> Any:
@@ -556,6 +576,8 @@ def _reader_from_source(
             pointcloud = pointcloud.reproject(crs=support_points.crs, mp_config=config)
         if pointcloud.point_count != support_points.point_count:
             raise ValueError("Point values do not share the ordered support coordinates.")
+        if pointcloud.is_loaded:
+            return None
         reference = None if pointcloud is support_points else support_points
         return _ValueReader(pointcloud, selector, support=reference)
     return None

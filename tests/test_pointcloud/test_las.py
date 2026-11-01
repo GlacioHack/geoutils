@@ -177,7 +177,7 @@ class TestLasPyIO:
         with tempfile.TemporaryDirectory() as temp_dir:
             source = self._write_source(pc, temp_dir)
             metadata = replace(_load_laspy_metadata(source), is_copc=True)
-            monkeypatch.setattr(las_module, "_load_laspy_metadata", lambda filename: metadata)
+            monkeypatch.setattr(las_module, "_load_laspy_metadata", lambda filename, **kwargs: metadata)
 
             def _raise_copc_error(**kwargs: object) -> gpd.GeoDataFrame:
                 raise RuntimeError("invalid COPC index")

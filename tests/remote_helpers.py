@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from multiprocessing.connection import Connection
 from pathlib import Path
+from typing import Any
 from xml.etree import ElementTree
 
 import pytest
@@ -91,7 +92,16 @@ def _serve_files(
             # Return the file list (aiohttp handles requests to read individual files)
             ElementTree.SubElement(listing, "KeyCount").text = str(count)
             return web.Response(body=ElementTree.tostring(listing), content_type="application/xml")
-        return web.FileResponse(directory / request.path.lstrip("/"))
+
+        # List files and subdirectories for HTTP readers
+        path = directory / request.path.lstrip("/")
+        if path.is_dir():
+            listing = ElementTree.Element("html")
+            for candidate in sorted(path.iterdir()):
+                name = candidate.name + ("/" if candidate.is_dir() else "")
+                ElementTree.SubElement(listing, "a", href=name).text = name
+            return web.Response(body=ElementTree.tostring(listing, method="html"), content_type="text/html")
+        return web.FileResponse(path)
 
     async def run_server() -> None:
         """Start the mock server and wait for the test fixture to stop it."""
@@ -219,3 +229,60 @@ def remote_url(request: pytest.FixtureRequest, remote_files: RemoteFiles) -> Cal
     if query:
         (remote_files.directory.parent / "required-token").write_text("local-test")
     return lambda filename: f"{prefix}/{filename}{query}"
+
+
+@pytest.fixture
+def file_access(
+    request: pytest.FixtureRequest, filename: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[tuple[Path, str, dict[str, Any]]]:
+    """Write test data and provide HTTP or S3 access options."""
+
+    import numpy as np
+    import rasterio as rio
+    from rasterio.transform import from_origin
+
+    import geoutils as gu
+
+    fsspec = pytest.importorskip("fsspec")
+    if filename.endswith(".gpkg"):
+        pytest.importorskip("fiona")
+    with mock_remote_files(tmp_path, monkeypatch, basic_auth=("demo", "geoutils")) as files:
+        # Write test data
+        path = files.directory / "private" / filename
+        path.parent.mkdir()
+        if filename.endswith(".tif"):
+            values = np.ma.array(np.arange(96, dtype=np.int16).reshape(8, 12), mask=False)
+            values.mask[0, 0] = True
+            gu.Raster.from_array(values, from_origin(0, 8, 1, 1), 32633, nodata=-9999).to_file(path)
+            with rio.open(path, "r+") as raster:
+                raster.build_overviews([2, 4], rio.enums.Resampling.average)
+        else:
+            points = gu.PointCloud.from_xyz(
+                np.arange(7.0), np.arange(7.0) + 1, np.arange(7.0) + 10, 32633, data_name="height"
+            )
+            if filename.endswith((".las", ".laz")):
+                points.to_las(path)
+            else:
+                points.gdf["quality"] = np.arange(7)
+                points.gdf["label"] = ["ground", "tree"] * 3 + ["ground"]
+                if filename.endswith(".gpkg"):
+                    points.to_file(path)
+                else:
+                    points.to_parquet(path, chunks=3, partitioned=filename == "parts")
+
+        # Set access options
+        protocol, option = request.param.split("-")
+        options: dict[str, Any]
+        if protocol == "http":
+            source = f"{files.endpoint}/bucket/private/{path.name}"
+            options = {"headers": {"Authorization": "Basic ZGVtbzpnZW91dGlscw=="}}
+        else:
+            (files.directory / path.name).write_bytes(path.read_bytes())
+            monkeypatch.delitem(fsspec.config.conf, "s3", raising=False)
+            monkeypatch.delenv("FSSPEC_S3", raising=False)
+            source = f"bucket/{path.name}"
+            options = {"anon": True, "endpoint_url": files.endpoint}
+            if option == "storage_options":
+                source = "s3://" + source
+        value = fsspec.filesystem(protocol, **options) if option == "filesystem" else options
+        yield path, source, {option: value}

@@ -21,7 +21,6 @@
 from __future__ import annotations
 
 import inspect
-import pathlib
 import warnings
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Iterable, Literal
@@ -130,6 +129,11 @@ class DataArrayPointCloudAccessor(PointCloudBase):
     def name(self) -> str | None:
         """Source filename when the array was opened from a file."""
         return self._dataset.encoding.get("source")
+
+    @property
+    def _filesystem(self) -> Any:
+        """Filesystem used to reopen the source for metadata or worker reads."""
+        return self._dataset.encoding.get("_filesystem")
 
     @property
     def point_count(self) -> int:
@@ -257,6 +261,9 @@ class DataArrayPointCloudAccessor(PointCloudBase):
         result = self._dataset.coords[new_data_name].copy().rename(new_data_name)
         result = result.drop_vars(new_data_name).assign_coords({self.data_name: self._dataset.variable})
         result.attrs = self._dataset.attrs.copy()
+        for key in ("source", "_filesystem"):
+            if key in self._dataset.encoding:
+                result.encoding[key] = self._dataset.encoding[key]
         if self._dataset.attrs.get("geometry_z"):
             result = result.assign_coords(_geometry_z=self._dataset.variable)
         result.attrs["geometry_z"] = False
@@ -274,7 +281,7 @@ class DataArrayPointCloudAccessor(PointCloudBase):
         if isinstance(raster, xr.DataArray):
             result = raster
         elif not raster.is_loaded and raster.name is not None:
-            return open_raster(raster.name)
+            return open_raster(raster.name, filesystem=raster._filesystem)
         else:
             result = DataArrayRasterAccessor.from_array(raster.data, raster.transform, raster.crs, nodata=raster.nodata)
 
@@ -524,43 +531,67 @@ class DataArrayPointCloudAccessor(PointCloudBase):
             **kwargs,
         )
 
-    def to_file(self, filename: str, **kwargs: Any) -> None:
+    def to_file(
+        self, filename: str, *, filesystem: Any = None, storage_options: dict[str, Any] | None = None, **kwargs: Any
+    ) -> None:
         """
         Write points to LAS/LAZ, GeoParquet, or a geometry format.
 
         :param filename: Destination filename; its suffix selects the format.
+        :param filesystem: Filesystem used to open the destination. Cannot be combined with storage_options.
+        :param storage_options: Fsspec settings for the destination URL. Cannot be combined with filesystem.
         :param kwargs: Options passed to to_las(), to_parquet(), or GeoPandas to_file().
         """
-        suffix = pathlib.Path(filename).suffix.lower()
-        if suffix in (".las", ".laz"):
-            self.to_las(filename, **kwargs)
-        elif suffix == ".parquet":
-            self.to_parquet(filename, **kwargs)
-        else:
-            self.to_geoutils()._dataset.to_file(filename, **kwargs)
 
-    def to_las(self, filename: str, *, laz_chunk_size: int | None = None, **kwargs: Any) -> None:
+        from geoutils.pointcloud.io import _write_pointcloud_array
+
+        _write_pointcloud_array(
+            self._dataset, filename, filesystem=filesystem, storage_options=storage_options, **kwargs
+        )
+
+    def to_las(
+        self,
+        filename: str,
+        *,
+        laz_chunk_size: int | None = None,
+        filesystem: Any = None,
+        storage_options: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
         """
         Write LAS/LAZ in numeric row partitions without constructing point geometries.
 
         :param filename: Destination LAS or LAZ file.
         :param laz_chunk_size: Number of points per compressed LAZ disk chunk. Requires Lazrs; None uses its default.
+        :param filesystem: Filesystem used to open the destination. Cannot be combined with storage_options.
+        :param storage_options: Fsspec settings for the destination URL. Cannot be combined with filesystem.
         :param kwargs: Header and partition options passed to the array LAS writer.
         """
         from geoutils.pointcloud.las import _write_array_las
 
-        _write_array_las(self._dataset, filename, laz_chunk_size=laz_chunk_size, **kwargs)
+        _write_array_las(
+            self._dataset,
+            filename,
+            laz_chunk_size=laz_chunk_size,
+            filesystem=filesystem,
+            storage_options=storage_options,
+            **kwargs,
+        )
 
-    def to_parquet(self, filename: str, **kwargs: Any) -> None:
+    def to_parquet(
+        self, filename: str, *, filesystem: Any = None, storage_options: dict[str, Any] | None = None, **kwargs: Any
+    ) -> None:
         """
         Write native GeoParquet points in bounded row groups or separate partition files.
 
         :param filename: Destination file, or directory when partitioned=True.
+        :param filesystem: Filesystem used to open the destination. Cannot be combined with storage_options.
+        :param storage_options: Fsspec settings for the destination URL. Cannot be combined with filesystem.
         :param kwargs: Partition size and compression options passed to the GeoParquet writer.
         """
         from geoutils.pointcloud.parquet import _write_point_parquet
 
-        _write_point_parquet(self._dataset, filename, **kwargs)
+        _write_point_parquet(self._dataset, filename, filesystem=filesystem, storage_options=storage_options, **kwargs)
 
 
 # Dataset accessor
@@ -614,6 +645,9 @@ def _point_dataset_support(dataset: xr.Dataset, variables: Sequence[str]) -> xr.
     compatible = _point_variables(dataset)
     source = dataset.set_coords([x_name, y_name])
     first = source[variables[0]].copy(deep=False)
+    for key in ("source", "_filesystem"):
+        if key in dataset.encoding:
+            first.encoding[key] = dataset.encoding[key]
     reference = None
     for name in compatible:
         crs = _point_crs(source[name])
@@ -1075,18 +1109,28 @@ class DatasetPointCloudAccessor:
         support = _point_dataset_support(dataset, selected)
         return support.pc.stats(*args, values={name: name for name in selected}, **kwargs)
 
-    def to_file(self, filename: str, *, variables: Sequence[str] | None = None, **kwargs: Any) -> None:
+    def to_file(
+        self,
+        filename: str,
+        *,
+        variables: Sequence[str] | None = None,
+        filesystem: Any = None,
+        storage_options: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
         """
         Write Dataset points using the format selected by the filename suffix.
 
         :param filename: Destination LAS/LAZ, GeoParquet or geometry filename.
         :param variables: Point fields to write; None selects all aligned values.
+        :param filesystem: Filesystem used to open the destination. Cannot be combined with storage_options.
+        :param storage_options: Fsspec settings for the destination URL. Cannot be combined with filesystem.
         :param kwargs: Options passed to the DataArray point writer.
         """
         dataset = _prepare_point_dataset(self._obj)
         selected = _select_dataset_variables(dataset, self.compatible_variables.keys(), variables)
         support = _point_dataset_support(dataset[selected], selected)
-        support.pc.to_file(filename, **kwargs)
+        support.pc.to_file(filename, filesystem=filesystem, storage_options=storage_options, **kwargs)
 
     def to_las(
         self,
@@ -1094,6 +1138,8 @@ class DatasetPointCloudAccessor:
         *,
         variables: Sequence[str] | None = None,
         laz_chunk_size: int | None = None,
+        filesystem: Any = None,
+        storage_options: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -1104,14 +1150,26 @@ class DatasetPointCloudAccessor:
         :param filename: Destination LAS or LAZ file.
         :param variables: Point fields to write; None selects all aligned values. The first supplies LAS elevations.
         :param laz_chunk_size: Number of points per compressed LAZ disk chunk. Requires Lazrs; None uses its default.
+        :param filesystem: Filesystem used to open the destination. Cannot be combined with storage_options.
+        :param storage_options: Fsspec settings for the destination URL. Cannot be combined with filesystem.
         :param kwargs: Header and partition options.
         """
         dataset = _prepare_point_dataset(self._obj)
         selected = _select_dataset_variables(dataset, self.compatible_variables.keys(), variables)
         support = _point_dataset_support(dataset[selected], selected)
-        support.pc.to_las(filename, laz_chunk_size=laz_chunk_size, **kwargs)
+        support.pc.to_las(
+            filename, laz_chunk_size=laz_chunk_size, filesystem=filesystem, storage_options=storage_options, **kwargs
+        )
 
-    def to_parquet(self, filename: str, *, variables: Sequence[str] | None = None, **kwargs: Any) -> None:
+    def to_parquet(
+        self,
+        filename: str,
+        *,
+        variables: Sequence[str] | None = None,
+        filesystem: Any = None,
+        storage_options: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
         """
         Write points in the dataset to GeoParquet.
 
@@ -1120,9 +1178,11 @@ class DatasetPointCloudAccessor:
 
         :param filename: Destination file or partition directory.
         :param variables: Point value fields to write; None selects all aligned values.
+        :param filesystem: Filesystem used to open the destination. Cannot be combined with storage_options.
+        :param storage_options: Fsspec settings for the destination URL. Cannot be combined with filesystem.
         :param kwargs: Partition and compression options.
         """
         dataset = _prepare_point_dataset(self._obj)
         selected = _select_dataset_variables(dataset, self.compatible_variables.keys(), variables)
         support = _point_dataset_support(dataset[selected], selected)
-        support.pc.to_parquet(filename, **kwargs)
+        support.pc.to_parquet(filename, filesystem=filesystem, storage_options=storage_options, **kwargs)

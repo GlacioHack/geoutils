@@ -269,6 +269,65 @@ For multidimensional Zarr and NetCDF datasets, follow
 
 ### Passwords and other credentials
 
+All three opening functions and their classes accept two ways to supply connection settings:
+
+- `storage_options` is a dictionary of settings, such as credentials or a custom server address.
+  GeoUtils uses it to create a [Fsspec filesystem](https://filesystem-spec.readthedocs.io/en/latest/api.html),
+  an object that opens files on the storage service. For example, `storage_options={"anon": True}`
+  reads a public S3 bucket without login credentials.
+- `filesystem` accepts a Fsspec filesystem object you have already configured. Use it to reuse the same
+  connection settings across several files.
+
+Both options are optional and cannot be combined. GeoUtils preserves these settings for deferred reads
+and Dask workers. Reading vector formats with these options requires the optional Fiona backend,
+included in `geoutils[cloud]`.
+
+```{code-cell} ipython3
+from aiohttp import encode_basic_auth
+
+options = {"headers": {"Authorization": encode_basic_auth("demo", "geoutils")}}
+private_url = f"{server_url}/private"
+filesystem = fsspec.filesystem("http", **options)
+
+with gu.open_raster(f"{private_url}/elevation.tif", filesystem=filesystem) as elevation:
+    print("Private raster shape:", elevation.rst.shape)
+with gu.open_pointcloud(f"{private_url}/survey.parquet", storage_options=options) as survey:
+    print("Private point mean:", survey.pc.stats(["mean"])["mean"])
+```
+
+S3 access can use anonymous reads or a named profile:
+
+```python
+gu.open_vector("s3://bucket/regions.fgb", storage_options={"anon": True})
+gu.Raster("bucket/elevation.tif", filesystem=fsspec.filesystem("s3", profile="research"))
+```
+
+Writers accept the same `filesystem` and `storage_options` arguments. Supply the destination settings when calling
+`to_file()`, `to_las()` or `to_parquet()`; they are independent of the source settings:
+
+```python
+destination = fsspec.filesystem("s3", profile="research")
+with gu.open_raster("https://example.org/elevation.tif") as raster:
+    raster.rst.to_file("bucket/elevation.tif", filesystem=destination)
+```
+
+GeoUtils passes writes directly to the backend. Support depends on the format and the filesystem's write and seek
+operations. Unsupported combinations raise an error; GeoUtils does not upload a local copy as a fallback. Dask
+writers carry destination access into their tasks. Point cloud and vector operations that assemble temporary
+partitions require a local multiprocessing `outfile`; those temporary files use local access independently of
+the source filesystem.
+
+An empty `storage_options={}` explicitly selects Fsspec. Path objects exposing `.path` and `.fs`, including
+configured Universal Pathlib paths, reuse their filesystem without requiring Universal Pathlib as a dependency.
+Fsspec archive URLs use the resolved inner path to select the reader. Process workers also require a filesystem
+that can be serialized, as Fsspec normally provides.
+
+Fiona 1.10.1 has an end-of-file bug affecting Shapefile reads through its filesystem opener. GeoUtils raises a
+compatibility error for that combination instead of returning empty data. Shapefile writes remain available
+when the filesystem supports them. Ordinary GDAL URL access without these arguments is unaffected.
+
+Existing GDAL and Fsspec configuration is also supported, as shown below.
+
 For **HTTPS with a username and password**, configure GDAL for rasters/vectors or Fsspec for LAS/LAZ/COPC and
 GeoParquet point clouds.
 

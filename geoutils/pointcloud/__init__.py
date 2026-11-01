@@ -16,10 +16,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Point cloud objects and specific loading/writing, specific LAS/LAZ/COPC/Parquet support, or functionalities."""
+"""Point cloud objects and specific loading/writing, LAS/LAZ/COPC/Parquet support, or functionalities."""
 
 from geoutils.pointcloud.constructors import from_xyz  # noqa
-from geoutils.pointcloud.loading import open_pointcloud  # noqa
+from geoutils.pointcloud.io import open_pointcloud  # noqa
 from geoutils.pointcloud.pointcloud import PointCloud  # noqa
 from geoutils.pointcloud.pd_accessor import GeoDataFramePointCloudAccessor  # noqa
 from geoutils.pointcloud.xr_accessor import DataArrayPointCloudAccessor  # noqa

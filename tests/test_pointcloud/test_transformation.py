@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -474,6 +474,44 @@ class TestTransformationChunked:
             np.testing.assert_array_equal(actual_values, expected_values)
         else:
             np.testing.assert_array_equal(actual.to_numpy(dtype="datetime64[ns]"), expected.to_numpy())
+
+    @pytest.mark.parametrize("level", [0, 1])
+    @pytest.mark.parametrize("method", ["clip", "reproject", "subsample"])
+    def test_copc_levels__multiproc(
+        self, copc_file: Path, tmp_path: Path, mp_cluster: MpCluster, level: int, method: str
+    ) -> None:
+        """Checks that multiprocessing reads selected COPC levels and exactly matches eager operations."""
+
+        # Open one deferred, one loaded
+        source = gu.PointCloud(copc_file, level=level)
+        reference = gu.PointCloud(copc_file, level=level)
+        reference.load(columns="all")
+
+        # We use uneven partition lengths
+        left, bottom, right, top = source.bounds
+        middle = (left + right) / 2
+        mask = Polygon([(left, bottom), (middle, bottom), (middle, top), (left, top)])
+        options: dict[str, Any]
+        if method == "clip":
+            options = {"mask": mask, "sort": True}
+        elif method == "reproject":
+            options = {"crs": 32632}
+        else:
+            options = {"subsample": 100, "random_state": 0, "strategy": "topk"}
+        configuration = MultiprocConfig(chunks=7001, outfile=str(tmp_path / f"{method}.gpkg"), cluster=mp_cluster)
+
+        # Apply method with multiproc from the loaded/deferred point cloud
+        if method == "subsample":
+            positions = reference.subsample(**options, as_array=True, return_indices=True)[0]
+            expected = gu.PointCloud(reference.gdf.iloc[np.sort(positions)], data_name=reference.data_name)
+        else:
+            expected = getattr(reference, method)(**options)
+        result = getattr(source, method)(**options, mp_config=configuration)
+
+        # Check loading and equality
+        assert not source.is_loaded and not result.is_loaded
+        np.testing.assert_array_equal(result.to_array(), expected.to_array())
+        assert not source.is_loaded
 
 
 class TestReprojectErrors:

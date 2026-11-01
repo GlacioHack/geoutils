@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import posixpath
 import tempfile
 from collections.abc import Iterable
 from contextlib import ExitStack
@@ -36,7 +37,7 @@ import xarray as xr
 from pyproj import CRS
 from rasterio.coords import BoundingBox
 
-from geoutils._io import _get_filesystem, _is_remote_path, _path_suffix
+from geoutils._io import _is_remote_path, _path_suffix, _resolve_filesystem
 from geoutils._misc import import_optional
 
 #################################
@@ -44,22 +45,23 @@ from geoutils._misc import import_optional
 #################################
 
 
-def _is_parquet_supported(filename: str | pathlib.Path) -> bool:
+def _is_parquet_supported(filename: str | pathlib.Path, *, filesystem: Any = None) -> bool:
     """Recognize GeoParquet files and dataset directories without altering remote URLs."""
     if _path_suffix(filename) == ".parquet":
         return True
-    if _is_remote_path(filename):
+    if filesystem is not None or _is_remote_path(filename):
         if _path_suffix(filename) and not str(filename).endswith("/"):
             return False
         try:
-            return _get_filesystem(filename).isdir(str(filename))
+            filename, filesystem = _resolve_filesystem(filename, filesystem=filesystem)
+            return filesystem.isdir(str(filename))
         except ImportError:
             # Other vector formats can still use GDAL when the optional remote filesystem is unavailable
             return False
     return pathlib.Path(filename).is_dir()
 
 
-def _parquet_files(filename: str | pathlib.Path) -> list[str]:
+def _parquet_files(filename: str | pathlib.Path, *, filesystem: Any = None) -> list[str]:
     """
     List files in a partitioned dataset in deterministic filename order.
 
@@ -68,12 +70,17 @@ def _parquet_files(filename: str | pathlib.Path) -> list[str]:
     """
 
     # Discover remote objects through their filesystem so URLs survive in delayed row reads
-    if _is_remote_path(filename):
-        filesystem = _get_filesystem(filename)
-        if filesystem.isfile(str(filename)):
-            return [str(filename)]
+    configured_filesystem = filesystem is not None
+    if filesystem is not None or _is_remote_path(filename):
+        filename, filesystem = _resolve_filesystem(filename, filesystem=filesystem)
+        if _path_suffix(filename) == ".parquet" and filesystem.isfile(str(filename)):
+            if configured_filesystem:
+                return [filesystem._strip_protocol(str(filename))]
+            return [filesystem.unstrip_protocol(str(filename))]
         files = sorted(
-            filesystem.unstrip_protocol(path) for path in filesystem.find(str(filename)) if path.endswith(".parquet")
+            path if configured_filesystem else filesystem.unstrip_protocol(path)
+            for path in filesystem.find(str(filename))
+            if path.endswith(".parquet")
         )
     else:
         path = pathlib.Path(filename)
@@ -83,7 +90,7 @@ def _parquet_files(filename: str | pathlib.Path) -> list[str]:
     return files
 
 
-def _point_parquet_metadata(filename: str | pathlib.Path) -> dict[str, Any]:
+def _point_parquet_metadata(filename: str | pathlib.Path, *, filesystem: Any = None) -> dict[str, Any]:
     """
     Read point count, CRS, schema and available bounds from Parquet footers.
 
@@ -101,9 +108,10 @@ def _point_parquet_metadata(filename: str | pathlib.Path) -> dict[str, Any]:
     unknown_null_columns: set[str] = set()
     metadata = None
     schema = None
-    for path in _parquet_files(filename):
+    for path in _parquet_files(filename, filesystem=filesystem):
         # Check point encoding and geometry types before reading any rows
-        with pq.ParquetFile(path, filesystem=_get_filesystem(path)) as file:
+        resolved_path, resolved_filesystem = _resolve_filesystem(path, filesystem=filesystem)
+        with pq.ParquetFile(resolved_path, filesystem=resolved_filesystem) as file:
             encoded = (file.schema_arrow.metadata or {}).get(b"geo")
             if encoded is None:
                 raise ValueError("Point Parquet input must contain GeoParquet geometry metadata.")
@@ -210,7 +218,12 @@ def _point_parquet_metadata(filename: str | pathlib.Path) -> dict[str, Any]:
 
 
 def _read_point_parquet_group(
-    filename: str, group: int, geometry_name: str | None, columns: list[str]
+    filename: str,
+    group: int,
+    geometry_name: str | None,
+    columns: list[str],
+    *,
+    filesystem: Any = None,
 ) -> dict[str, Any]:
     """Decode selected attributes and optional point coordinates from one Parquet row group."""
 
@@ -219,7 +232,8 @@ def _read_point_parquet_group(
 
     # Read geometry only when coordinates are requested
     read_columns = columns if geometry_name is None else [geometry_name, *columns]
-    with pq.ParquetFile(filename, filesystem=_get_filesystem(filename)) as file:
+    filename, filesystem = _resolve_filesystem(filename, filesystem=filesystem)
+    with pq.ParquetFile(filename, filesystem=filesystem) as file:
         table = file.read_row_group(group, columns=read_columns)
     arrays = {}
     for name in columns:
@@ -256,7 +270,9 @@ def _read_point_parquet_group(
     return arrays
 
 
-def _read_point_parquet_frame(filename: str, group: int, columns: list[str]) -> gpd.GeoDataFrame:
+def _read_point_parquet_frame(
+    filename: str, group: int, columns: list[str], *, filesystem: Any = None
+) -> gpd.GeoDataFrame:
     """
     Decode one GeoParquet row group without resetting its stored Pandas index.
 
@@ -267,7 +283,8 @@ def _read_point_parquet_frame(filename: str, group: int, columns: list[str]) -> 
     import pyarrow.parquet as pq
     from geopandas.io.arrow import _arrow_to_geopandas
 
-    with pq.ParquetFile(filename, filesystem=_get_filesystem(filename)) as file:
+    filename, filesystem = _resolve_filesystem(filename, filesystem=filesystem)
+    with pq.ParquetFile(filename, filesystem=filesystem) as file:
         table = file.read_row_group(group, columns=columns)
     return _arrow_to_geopandas(table)
 
@@ -343,6 +360,7 @@ def _open_point_parquet(
     columns: Literal["all", "main"] | list[str] = "all",
     chunks: int | None = None,
     load: bool = True,
+    filesystem: Any = None,
 ) -> xr.DataArray:
     """
     Open point arrays in-memory or with Dask from independently readable Parquet row groups.
@@ -350,7 +368,7 @@ def _open_point_parquet(
     from geoutils.pointcloud.xr_accessor import DataArrayPointCloudAccessor
 
     # Select values and auxiliary attributes from footer metadata alone
-    metadata = _point_parquet_metadata(filename)
+    metadata = _point_parquet_metadata(filename, filesystem=filesystem)
     data_name, selected, use_z = _point_parquet_columns(metadata, data_name, columns)
     index_columns = metadata["index_columns"]
     if len(index_columns) > 1:
@@ -388,11 +406,13 @@ def _open_point_parquet(
     row_groups = metadata["row_groups"] if load or chunks is not None else []
     for path, group, count in row_groups:
         if chunks is None:
-            values = _read_point_parquet_group(path, group, metadata["geometry_name"], stored)
+            values = _read_point_parquet_group(path, group, metadata["geometry_name"], stored, filesystem=filesystem)
             for name in arrays:
                 arrays[name].append(values[name])
         else:
-            values = dask.delayed(_read_point_parquet_group)(path, group, metadata["geometry_name"], stored)
+            values = dask.delayed(_read_point_parquet_group)(
+                path, group, metadata["geometry_name"], stored, filesystem=filesystem
+            )
             for name in arrays:
                 arrays[name].append(
                     da.from_delayed(values[name].astype(dtypes[name]), shape=(count,), dtype=dtypes[name])
@@ -402,12 +422,12 @@ def _open_point_parquet(
     combined = {}
     for name, parts in arrays.items():
         if not load and chunks is None:
-            from geoutils.pointcloud.loading import _deferred_point_variable
+            from geoutils.pointcloud.io import _deferred_point_variable
 
             combined[name] = _deferred_point_variable(
                 metadata["point_count"],
                 dtypes[name],
-                partial(_read_point_parquet_attribute, metadata, name, dtypes[name]),
+                partial(_read_point_parquet_attribute, metadata, name, dtypes[name], filesystem=filesystem),
             )
         elif chunks is None:
             combined[name] = (
@@ -445,7 +465,9 @@ def _open_point_parquet(
     return result
 
 
-def _read_point_parquet_attribute(metadata: dict[str, Any], name: str, dtype: Any, start: int, count: int) -> Any:
+def _read_point_parquet_attribute(
+    metadata: dict[str, Any], name: str, dtype: Any, start: int, count: int, *, filesystem: Any = None
+) -> Any:
     """Read an attribute from only the Parquet row groups intersecting a selected row range."""
     geometry_name = metadata["geometry_name"] if name in ("x", "y", "_geometry_z") else None
     columns = [] if geometry_name is not None else [name]
@@ -453,7 +475,7 @@ def _read_point_parquet_attribute(metadata: dict[str, Any], name: str, dtype: An
     offset = 0
     for path, group, length in metadata["row_groups"]:
         if offset < start + count and offset + length > start:
-            values = _read_point_parquet_group(path, group, geometry_name, columns)[name]
+            values = _read_point_parquet_group(path, group, geometry_name, columns, filesystem=filesystem)[name]
             lower = max(0, start - offset)
             upper = min(length, start + count - offset)
             parts.append(values[lower:upper])
@@ -467,6 +489,7 @@ def _open_parquet_geodataframe(
     data_name: str | None = None,
     columns: Literal["all", "main"] | list[str] = "all",
     chunks: int | None = None,
+    filesystem: Any = None,
 ) -> gpd.GeoDataFrame | Any:
     """
     Use GeoPandas to decode point geometry while preserving the selected values and lazy metadata.
@@ -478,16 +501,17 @@ def _open_parquet_geodataframe(
     from geoutils.vector.pd_accessor import _import_dask_geopandas
 
     # Use the same active attribute and schema checks as the numeric array reader
-    metadata = _point_parquet_metadata(filename)
+    metadata = _point_parquet_metadata(filename, filesystem=filesystem)
     data_name, selected, use_z = _point_parquet_columns(metadata, data_name, columns)
     stored = [name for name in selected if name in metadata["columns"] and not (use_z and name == data_name)]
     read_columns = [*stored, metadata["geometry_name"]]
-    files = [str(path) for path in _parquet_files(filename)]
+    files = [str(path) for path in _parquet_files(filename, filesystem=filesystem)]
     active_column = None if use_z else data_name
 
     # GeoPandas handles native point and WKB decoding; Dask-GeoPandas delays the same geometry work
     if chunks is None:
-        frame = gpd.read_parquet(files, columns=read_columns, filesystem=_get_filesystem(filename))
+        _, filesystem = _resolve_filesystem(filename, filesystem=filesystem)
+        frame = gpd.read_parquet(files, columns=read_columns, filesystem=filesystem)
         frame = _set_parquet_point_values(frame, active_column)
     else:
         descriptors = metadata["pandas_metadata"].get("columns", [])
@@ -498,6 +522,7 @@ def _open_parquet_geodataframe(
             metadata["geometry_type"] == "Point Z"
             or any(name in metadata["columns"] for name in index_names)
             or _is_remote_path(filename)
+            or filesystem is not None
         ):
             # Dask's Parquet reader resets named indexes, which fails when a value uses the same name
             # Decode bounded row groups with GeoPandas instead, preserving that valid Pandas layout
@@ -508,7 +533,7 @@ def _open_parquet_geodataframe(
             group_columns = list(dict.fromkeys([*read_columns, *metadata["index_columns"]]))
             meta = _arrow_to_geopandas(metadata["schema"].empty_table().select(group_columns))
             parts = [
-                dask.delayed(_read_point_parquet_frame)(path, group, group_columns)
+                dask.delayed(_read_point_parquet_frame)(path, group, group_columns, filesystem=filesystem)
                 for path, group, _ in metadata["row_groups"]
             ]
 
@@ -602,10 +627,11 @@ def _point_parquet_table(points: xr.DataArray, *, write_bbox: bool = True) -> An
 
 def _write_parquet_row_groups(
     partitions: Iterable[xr.DataArray | gpd.GeoDataFrame],
-    destination: pathlib.Path,
+    destination: str | pathlib.Path,
     *,
     compression: str = "zstd",
     data_name: str | None = None,
+    filesystem: Any = None,
 ) -> None:
     """Append bounded point partitions to one Parquet stream and close its footer on success or failure."""
     import_optional("pyarrow")
@@ -623,7 +649,9 @@ def _write_parquet_row_groups(
 
             # Omit partition-specific bboxes; row-group coordinate statistics supply complete file bounds
             if writer is None:
-                writer = stack.enter_context(pq.ParquetWriter(destination, table.schema, compression=compression))
+                writer = stack.enter_context(
+                    pq.ParquetWriter(destination, table.schema, compression=compression, filesystem=filesystem)
+                )
             writer.write_table(table)
 
 
@@ -634,6 +662,8 @@ def _write_point_parquet(
     chunks: int | None = None,
     partitioned: bool = False,
     compression: str = "zstd",
+    filesystem: Any = None,
+    storage_options: dict[str, Any] | None = None,
 ) -> None:
     """
     Write native point row groups or ordered files without collecting a lazy point cloud.
@@ -641,11 +671,28 @@ def _write_point_parquet(
     _array_partitions() computes one bounded row partition. _point_parquet_table() supplies an Arrow table
     for each separate file, while _write_parquet_row_groups() writes a shared stream. We finish the temporary
     output before replacing the destination, so a failed partition leaves an existing file intact.
+
+    Filesystem destinations are written directly without the local staging step.
     """
     import_optional("pyarrow")
     import pyarrow.parquet as pq
 
-    from geoutils.pointcloud.writing import _array_partitions
+    from geoutils.pointcloud.io import _array_partitions, _check_pointcloud_output_source
+
+    filename, filesystem = _resolve_filesystem(filename, filesystem, storage_options)
+    _check_pointcloud_output_source(points, filename, filesystem)
+    if filesystem is not None:
+        partitions = _array_partitions(points, chunks)
+        if partitioned:
+            if filesystem.exists(filename):
+                raise FileExistsError("A partitioned GeoParquet destination must not already exist.")
+            filesystem.makedirs(filename, exist_ok=True)
+            for index, part in enumerate(partitions):
+                path = posixpath.join(filename, f"part-{index:08d}.parquet")
+                pq.write_table(_point_parquet_table(part), path, compression=compression, filesystem=filesystem)
+        else:
+            _write_parquet_row_groups(partitions, filename, compression=compression, filesystem=filesystem)
+        return
 
     # Check the destination before computing point rows
     destination = pathlib.Path(filename)

@@ -96,6 +96,9 @@ from geoutils.projtools import (
     align_bounds,
     merge_bounds,
 )
+from geoutils.raster.io import (
+    RasterDownsampleOptions,
+)
 from geoutils.raster.referencing import (
     _bbox,
     _check_affine_georeferencing,
@@ -107,7 +110,13 @@ from geoutils.raster.referencing import (
     _xy2ij,
 )
 from geoutils.raster.testing import _array_equal_or_close
-from geoutils.raster.transformation import _clip, _crop, _reproject, _resolve_reprojection_operator, _translate
+from geoutils.raster.transformation import (
+    _clip,
+    _crop,
+    _reproject,
+    _resolve_reprojection_operator,
+    _translate,
+)
 from geoutils.sampling.subsampling import _subsample, _subsample_raster
 from geoutils.stats.stats import stats as _stats
 from geoutils.stats.variography import variogram as _variogram
@@ -167,7 +176,9 @@ class RasterBase(ABC):
         self._out_shape: tuple[int, int] | None = None
         self._out_window: rio.windows.Window | None = None
         self._disk_hash: int | None = None
-        self._downsample: int | float = 1
+        self._downsample: Number | RasterDownsampleOptions = 1
+        self._overview_level: int | None = None
+        self._filesystem: Any = None
         self._profile: dict[str, Any] | None = None
         self._is_mask: bool = False
 
@@ -186,23 +197,35 @@ class RasterBase(ABC):
     def _cast_raster_output(self, raster: Any) -> Any:
         """Return an accessor-backed raster when this raster is accessor-backed."""
 
-        if not self._is_xr or hasattr(raster, "rst"):
+        if not self._is_xr:
             return raster
 
         from geoutils.raster.xr_accessor import DataArrayRasterAccessor, open_raster
 
-        if raster.name is not None and not raster.is_loaded:
-            return open_raster(raster.name, is_mask=raster.is_mask, as_object_type="dataarray")
-        return DataArrayRasterAccessor.from_array(
-            data=raster.data,
-            transform=raster.transform,
-            crs=raster.crs,
-            nodata=raster.nodata,
-            area_or_point=raster.area_or_point,
-            tags=raster.tags,
-            gcps=raster.gcps,
-            rpcs=raster.rpcs,
-        )
+        if not hasattr(raster, "rst"):
+            if raster.name is not None and not raster.is_loaded:
+                raster = open_raster(
+                    raster.name, is_mask=raster.is_mask, as_object_type="dataarray", filesystem=raster._filesystem
+                )
+            else:
+                raster = DataArrayRasterAccessor.from_array(
+                    data=raster.data,
+                    transform=raster.transform,
+                    crs=raster.crs,
+                    nodata=raster.nodata,
+                    area_or_point=raster.area_or_point,
+                    tags=raster.tags,
+                    gcps=raster.gcps,
+                    rpcs=raster.rpcs,
+                )
+
+        # Restore a singleton band and its label when the input has one
+        assert self._obj is not None
+        if "band" in self._obj.dims and self.count == 1 and raster.rst.count == 1:
+            if "band" not in raster.dims:
+                raster = raster.expand_dims("band")
+            raster = raster.assign_coords(band=self._obj.band.variable)
+        return raster
 
     def _resolve_pointcloud_output_type(
         self, pointcloud_return_type: Literal["dataarray", "dataset", "geodataframe"] | None = None
@@ -429,7 +452,7 @@ class RasterBase(ABC):
         if self._is_xr:
             # For Mypy, always verified
             assert self._obj is not None
-            from geoutils.raster.xr_accessor import _set_raster_encoding
+            from geoutils.raster.io import _set_raster_encoding
 
             old_nodata = self.nodata
             decoded = self._obj.encoding.get("_FillValue") is not None
@@ -800,8 +823,16 @@ class RasterBase(ABC):
 
         :return: if the filename exists and if its is a BigTIFF or not
         """
-        if self.name and pathlib.Path(self.name).exists():
-            with open(self.name, "rb") as f:
+        if self.name:
+            if self._filesystem is not None:
+                if not self._filesystem.isfile(self.name):
+                    return False
+                stream = self._filesystem.open(self.name, "rb")
+            else:
+                if not pathlib.Path(self.name).exists():
+                    return False
+                stream = open(self.name, "rb")
+            with stream as f:
                 header = f.read(4)
                 byteorder = {b"II": "<", b"MM": ">"}[header[:2]]
                 version = struct.unpack(byteorder + "h", header[2:])[0]
@@ -1231,6 +1262,11 @@ class RasterBase(ABC):
             else:
                 left_data = self.data
                 right_data = other.data
+            # A singleton band describes the same pixels as a two-dimensional raster
+            if left_data.ndim == 3 and left_data.shape[0] == 1:
+                left_data = left_data[0]
+            if right_data.ndim == 3 and right_data.shape[0] == 1:
+                right_data = right_data[0]
             array_eq = _array_equal_or_close(
                 left_data,
                 right_data,
@@ -1946,8 +1982,8 @@ class RasterBase(ABC):
             encoding = self._obj.encoding.copy()
             if dtype is not None:
                 encoding["dtype"] = np.dtype(dtype)
-            array_options = {"encoding": encoding, "name": self._obj.name}
-        return self.from_array(
+            array_options = {"encoding": encoding, "name": self._obj.name, "squeeze": self._obj.ndim == 2}
+        result = self.from_array(
             data=data,
             transform=transformed,
             crs=crs,
@@ -1956,6 +1992,7 @@ class RasterBase(ABC):
             tags={key: value for key, value in self.tags.items() if key != "RPC"},
             **array_options,
         )
+        return self._cast_raster_output(result)
 
     def krige(
         self: RasterType,
@@ -2040,7 +2077,7 @@ class RasterBase(ABC):
 
         from geoutils.uncertainty import random_field
 
-        return random_field(
+        result = random_field(
             error_structure,
             like=self,
             predictors=predictors,
@@ -2051,6 +2088,9 @@ class RasterBase(ABC):
             backend=backend,
             gpytorch_inducing_points=gpytorch_inducing_points,
         )
+        if isinstance(result, list):
+            return [self._cast_raster_output(field) for field in result]
+        return self._cast_raster_output(result)
 
     @overload
     def translate(

@@ -198,7 +198,13 @@ class TestClassVsAccessorConsistency:
     @pytest.mark.parametrize("loaded,chunks", [(True, None), (False, None), (False, 2)])
     @pytest.mark.parametrize("method, kwargs", methods_and_kwargs)
     def test_methods__equality_and_loading(
-        self, tmp_path: Path, method: str, kwargs: dict[str, Any], loaded: bool, chunks: int | None
+        self,
+        tmp_path: Path,
+        method: str,
+        kwargs: dict[str, Any],
+        loaded: bool,
+        chunks: int | None,
+        filesystem: Any = None,
     ) -> None:
         """Checks that vector methods load as needed and match in-memory class and accessor outputs."""
 
@@ -208,9 +214,10 @@ class TestClassVsAccessorConsistency:
         # Write three features so chunks of 2 leave a shorter final partition
         filename = tmp_path / "outlines.gpkg"
         self.ds.to_file(filename, index=False)
+        source = filename.name if filesystem is not None else filename
         eager_reference = loaded or chunks is not None
-        vector = Vector(self.ds.copy()) if eager_reference else Vector(filename)
-        ds = gu.open_vector(str(filename), load=loaded, chunks=chunks)
+        vector = Vector(self.ds.copy()) if eager_reference else Vector(source, filesystem=filesystem)
+        ds = gu.open_vector(str(source), load=loaded, chunks=chunks, filesystem=filesystem)
         assert vector.is_loaded is eager_reference
         assert ds.vct.is_loaded is loaded
 
@@ -245,6 +252,16 @@ class TestClassVsAccessorConsistency:
         actual = output_ds.compute() if is_dask_dataframe(output_ds) else output_ds
         assert_output_equal(output_vector, actual, use_allclose=method == "proximity", strict_masked=False)
         assert ds.vct.is_loaded is loaded
+
+    @pytest.mark.parametrize("method,kwargs", methods_and_kwargs)
+    def test_methods__filesystem(self, tmp_path: Path, method: str, kwargs: dict[str, Any]) -> None:
+        """Checks that vector methods match class and accessor outputs through a filesystem."""
+
+        pytest.importorskip("fiona")
+        filesystem = pytest.importorskip("fsspec").filesystem("dir", path=str(tmp_path))
+        self.test_methods__equality_and_loading(
+            tmp_path, method, kwargs, loaded=False, chunks=None, filesystem=filesystem
+        )
 
     inplace_methods_and_kwargs = [
         ("crop", {"bbox": (9, 9, 11, 11), "inplace": True}),
@@ -349,55 +366,51 @@ class TestClassVsAccessorConsistency:
         assert_output_equal(output_vector, output_ds)
 
 
+_REMOTE_VECTOR_READERS = [
+    pytest.param(gu.Vector, {}, id="vector"),
+    pytest.param(gu.open_vector, {"load": True}, id="geodataframe"),
+]
+
+
 class TestVectorRemote:
     """Test module for remote vector reading (in the cloud)."""
 
     @pytest.mark.parametrize("suffix", ["geojson", "gpkg", "fgb"])
-    def test_init__remote(self, remote_files: RemoteFiles, remote_url: Callable[[str], str], suffix: str) -> None:
-        """Checks remote vector reading."""
+    @pytest.mark.parametrize("reader,options", _REMOTE_VECTOR_READERS)
+    def test_open_or_init__remote(
+        self,
+        remote_files: RemoteFiles,
+        remote_url: Callable[[str], str],
+        suffix: str,
+        reader: Callable[..., Any],
+        options: dict[str, Any],
+    ) -> None:
+        """Checks that Vector() and open_vector() match local geometries, attributes and CRS over HTTP and S3."""
 
         # We write a vector file, then read local/remote
         frame = gpd.GeoDataFrame({"id": [1, 2]}, geometry=[box(0, 0, 2, 3), box(4, 5, 7, 9)], crs=4326)
         filename = remote_files.directory / f"polygons.{suffix}"
         frame.to_file(filename)
         expected = gu.Vector(filename)
-        remote = gu.Vector(remote_url(filename.name))
+        remote = reader(remote_url(filename.name), **options)
+        expected_type = gu.Vector if reader is gu.Vector else gpd.GeoDataFrame
+        assert isinstance(remote, expected_type)
+        interface = remote if isinstance(remote, gu.Vector) else remote.vct
 
         # Check loading and metadata
         assert not expected.is_loaded
-        assert not remote.is_loaded
-        assert remote.crs == expected.crs
-        assert remote.bounds == expected.bounds
-        assert remote.columns.equals(expected.columns)
+        assert interface.is_loaded == options.get("load", False)
+        assert interface.crs == expected.crs
+        assert interface.bounds == expected.bounds
+        assert interface.columns.equals(expected.columns)
 
         # Load both files and check everything
-        remote.load()
+        if isinstance(remote, gu.Vector):
+            remote.load()
         expected.load()
-        assert remote.is_loaded
-        assert_geodataframe_equal(remote.gdf, expected.gdf)
-
-        # Check that remote reads requested part of a file
-        assert any(method == "GET" and filename.name in path for method, path, byte_range in remote_files.requests)
-        assert any(method == "GET" and byte_range for method, path, byte_range in remote_files.requests)
-
-    @pytest.mark.parametrize("suffix", ["geojson", "gpkg", "fgb"])
-    def test_open_vector__remote(
-        self, remote_files: RemoteFiles, remote_url: Callable[[str], str], suffix: str
-    ) -> None:
-        """Checks that open_vector() reads the same geometries, attributes and CRS from remote and local files."""
-
-        # Write a vector file, then open local/remote
-        frame = gpd.GeoDataFrame({"id": [1, 2]}, geometry=[box(0, 0, 2, 3), box(4, 5, 7, 9)], crs=4326)
-        filename = remote_files.directory / f"polygons.{suffix}"
-        frame.to_file(filename)
-        expected = gu.open_vector(str(filename), load=True)
-        remote = gu.open_vector(remote_url(filename.name), load=True)
-
-        # Check loading and equality
-        assert isinstance(remote, gpd.GeoDataFrame)
-        assert expected.vct.is_loaded
-        assert remote.vct.is_loaded
-        assert_geodataframe_equal(remote, expected)
+        assert interface.is_loaded
+        result = remote.gdf if isinstance(remote, gu.Vector) else remote
+        assert_geodataframe_equal(result, expected.gdf)
 
         # Check that remote reads requested part of a file
         assert any(method == "GET" and filename.name in path for method, path, byte_range in remote_files.requests)
@@ -408,8 +421,9 @@ class TestVectorRemoteChunked:
     """Test module for remote vector files with lazy/chunked Dask reading."""
 
     @pytest.mark.parametrize("suffix", ["geojson", "gpkg", "fgb"])
+    @pytest.mark.parametrize("chunks", [None, 2])
     def test_open_vector__remote_laziness(
-        self, remote_files: RemoteFiles, remote_url: Callable[[str], str], suffix: str
+        self, remote_files: RemoteFiles, remote_url: Callable[[str], str], suffix: str, chunks: int | None
     ) -> None:
         """Checks that remote files can be read in chunked lazily."""
 
@@ -423,10 +437,10 @@ class TestVectorRemoteChunked:
 
         # Open local/remote with chunks (Dask)
         expected = gu.open_vector(str(filename), load=True)
-        remote = gu.open_vector(remote_url(filename.name), chunks=2)
+        remote = gu.open_vector(remote_url(filename.name), chunks=chunks)
         assert expected.vct.is_loaded
         assert not remote.vct.is_loaded
-        assert remote.npartitions == 3
+        assert remote.npartitions == (1 if chunks is None else 3)
 
         # Compute and check equality without loading the original object
         computed = remote.compute(scheduler="synchronous")
@@ -442,21 +456,21 @@ class TestVectorRemoteChunked:
 class TestVectorRemoteErrors:
     """Test module for errors/warnings on remote files."""
 
-    def test_init__error_missing_remote_file(self, remote_url: Callable[[str], str]) -> None:
-        """Checks an error is raised when a remote vector file is unavailable."""
+    @pytest.mark.parametrize(
+        "reader,options",
+        _REMOTE_VECTOR_READERS + [pytest.param(gu.open_vector, {"chunks": 2, "load": True}, id="chunked")],
+    )
+    def test_open_or_init__error_missing_remote_file(
+        self, remote_url: Callable[[str], str], reader: Callable[..., Any], options: dict[str, Any]
+    ) -> None:
+        """Checks an error is raised when open_vector or Vector cannot find a remote file."""
 
-        with pytest.raises(pyogrio.errors.DataSourceError):
-            gu.Vector(remote_url("missing.gpkg"))
-
-    @pytest.mark.parametrize("chunks", [None, 2])
-    def test_open_vector__error_missing_remote_file(self, remote_url: Callable[[str], str], chunks: int | None) -> None:
-        """Checks an error is raised when open_vector() cannot find a remote file, with or without chunks."""
-
-        if chunks is not None:
+        if options.get("chunks") is not None:
             pytest.importorskip("dask_geopandas")
 
         # GeoPandas checks HTTP URLs directly, chunked and S3 reads report GDAL errors
         filename = remote_url("missing.gpkg")
-        error = HTTPError if chunks is None and filename.startswith("http://") else pyogrio.errors.DataSourceError
+        geopandas_http = reader is gu.open_vector and options.get("chunks") is None and filename.startswith("http://")
+        error = HTTPError if geopandas_http else pyogrio.errors.DataSourceError
         with pytest.raises(error):
-            gu.open_vector(filename, chunks=chunks, load=True)
+            reader(filename, **options)

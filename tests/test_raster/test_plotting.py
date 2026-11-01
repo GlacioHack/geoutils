@@ -256,12 +256,15 @@ class TestPlot:
         assert ax.get_ylim() == pytest.approx((reference.bounds.bottom, reference.bounds.top))
         plt.close()
 
-    def test_plot__accessor(self) -> None:
+    @pytest.mark.parametrize("squeeze", [False, True])
+    def test_plot__accessor(self, squeeze: bool) -> None:
         """Checks that DataArrayRasterAccessor exposes the shared plotting implementation."""
 
         # Build a DataArray raster and plot a reduced grid through .rst
         values = np.arange(100, dtype=np.float32).reshape(10, 10)
         data_array = gu.DataArrayRasterAccessor.from_array(values, Affine(1, 0, 0, 0, -1, 10), 32632)
+        if not squeeze:
+            data_array = data_array.expand_dims(band=[1])
         data_array.rst.plot(max_pixels=25, add_cbar=False)
 
         assert plt.gca().get_images()[0].get_array().shape == (5, 5)

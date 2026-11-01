@@ -715,7 +715,7 @@ def _chunked_point_fields_dask(
     elif like._is_dask:
         dataframe = like._dataset.repartition(npartitions=max(1, int(np.ceil(like.point_count / chunksize))))
     elif not like.is_loaded:
-        from geoutils.pointcloud.loading import open_pointcloud
+        from geoutils.pointcloud.io import open_pointcloud
 
         assert like.name is not None
         dataframe = open_pointcloud(
@@ -920,8 +920,8 @@ def _chunked_point_fields_multiproc(
     """Derive random fields per point partition and write to file with MP backend."""
 
     from geoutils.multiproc.cluster import _map_bounded
-    from geoutils.pointcloud.loading import _load_pointcloud_rows
-    from geoutils.pointcloud.writing import (
+    from geoutils.pointcloud.io import (
+        _load_pointcloud_rows,
         _resolve_pointcloud_output,
         _stage_pointcloud_partition,
         _write_pointcloud_partitions,

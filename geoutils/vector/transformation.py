@@ -20,15 +20,12 @@
 
 from __future__ import annotations
 
-import os
 import pathlib
 import tempfile
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
 import geopandas as gpd
-import pandas as pd
-import pyogrio
 from rasterio.crs import CRS
 from shapely.geometry import box
 from shapely.geometry.base import BaseGeometry
@@ -39,6 +36,8 @@ from geoutils._dispatch import (
     _get_reproject_crs,
     is_dask_dataframe,
 )
+from geoutils._io import _is_remote_path
+from geoutils.vector.io import _load_vector_rows, _vector_row_source, _write_vector_partitions
 
 if TYPE_CHECKING:
     from geoutils.multiproc import MultiprocConfig
@@ -163,7 +162,7 @@ def _vector_partition_size(mp_config: MultiprocConfig) -> int:
 
 
 def _clip_vector_partition(
-    source: gpd.GeoDataFrame | pathlib.Path,
+    source: gpd.GeoDataFrame | VectorBase,
     start: int,
     count: int,
     crop_filters: Sequence[tuple[tuple[float, float, float, float], Literal["intersects", "within"]]],
@@ -175,11 +174,11 @@ def _clip_vector_partition(
     """Read and clip one vector row partition, then save it for ordered output construction."""
 
     # Read independent file ranges so an unloaded source stays outside the parent process
-    if isinstance(source, pathlib.Path):
-        dataframe = pyogrio.read_dataframe(source, skip_features=start, max_features=count)
-        dataframe = _apply_crop_filters(dataframe, crop_filters)
-    else:
+    if isinstance(source, gpd.GeoDataFrame):
         dataframe = source
+    else:
+        dataframe = _load_vector_rows(source, start, count)
+        dataframe = _apply_crop_filters(dataframe, crop_filters)
 
     # Save exact GeoPandas values for the parent to append after workers finish
     clipped = _clip_geodataframe(
@@ -190,61 +189,6 @@ def _clip_vector_partition(
     )
     clipped.to_pickle(filename)
     return filename
-
-
-def _write_vector_partitions(
-    filename: pathlib.Path,
-    partition_filenames: Sequence[pathlib.Path],
-) -> Vector:
-    """Append saved vector partitions to one GeoPackage and return an unloaded Vector."""
-
-    from geoutils.vector.vector import Vector
-
-    if len(partition_filenames) == 0:
-        raise ValueError("Vector output requires at least one saved partition.")
-    filename.parent.mkdir(parents=True, exist_ok=True)
-
-    # Build the complete destination beside the requested path before replacing any existing file
-    with tempfile.TemporaryDirectory(prefix=".geoutils-vector-output-", dir=filename.parent) as directory:
-        temporary_output = pathlib.Path(directory) / "output.gpkg"
-        output_created = False
-        layer_options: dict[str, str] | None = None
-
-        for partition_filename in partition_filenames:
-            dataframe = pd.read_pickle(partition_filename)
-            if layer_options is None:
-                column_names = {str(column).lower() for column in dataframe.columns}
-                layer_options = {"FID": "fid", "GEOMETRY_NAME": "geom"}
-                for option, field_name in layer_options.items():
-                    while field_name.lower() in column_names:
-                        field_name = "_" + field_name
-                    layer_options[option] = field_name
-
-            # Create the layer from the first partition even when every clipped partition is empty
-            if not output_created:
-                pyogrio.write_dataframe(
-                    dataframe,
-                    temporary_output,
-                    layer="features",
-                    driver="GPKG",
-                    append=False,
-                    geometry_type="Unknown",
-                    layer_options=layer_options,
-                )
-                output_created = True
-            elif len(dataframe) > 0:
-                pyogrio.write_dataframe(
-                    dataframe,
-                    temporary_output,
-                    layer="features",
-                    driver="GPKG",
-                    append=True,
-                    layer_options=layer_options,
-                )
-
-        os.replace(temporary_output, filename)
-
-    return Vector(filename)
 
 
 def _clip_vector_multiproc(
@@ -266,6 +210,8 @@ def _clip_vector_multiproc(
     if chunks <= 0:
         raise ValueError("Argument ``chunks`` must be a strictly positive integer.")
     driver = "GPKG" if mp_config.driver is None else mp_config.driver.upper()
+    if _is_remote_path(mp_config.outfile):
+        raise ValueError("Multiprocessing vector output requires a local path.")
     output_filename = pathlib.Path(mp_config.outfile)
     if driver != "GPKG":
         raise ValueError("Vector multiprocessing clip() supports only the 'GPKG' output driver.")
@@ -277,15 +223,7 @@ def _clip_vector_multiproc(
     geometry = _clip_geometry(mask, target_crs=target_crs)
 
     # Plan raw file ranges from metadata, preserving any deferred crop filters inside each worker
-    source_filename = pathlib.Path(source_vector.name) if not source_vector.is_loaded and source_vector.name else None
-    if source_filename is None:
-        dataframe = source_vector._dataset
-        feature_count = len(dataframe)
-    else:
-        dataframe = None
-        feature_count = int(pyogrio.read_info(source_filename, force_feature_count=True)["features"])
-        if feature_count < 0:
-            raise RuntimeError("Could not determine the number of vector features from the file metadata.")
+    source, feature_count = _vector_row_source(source_vector)
     crop_filters = list(getattr(source_vector, "_crop_filters", []))
 
     # Complete all worker reads in temporary files before atomically replacing the destination
@@ -295,7 +233,7 @@ def _clip_vector_multiproc(
         futures = []
         for index, start in enumerate(range(0, max(feature_count, 1), chunks)):
             count = min(chunks, feature_count - start)
-            partition_source = source_filename if dataframe is None else dataframe.iloc[start : start + count]
+            partition_source = source.iloc[start : start + count] if isinstance(source, gpd.GeoDataFrame) else source
             futures.append(
                 mp_config.cluster.submit(
                     _clip_vector_partition,

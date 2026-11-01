@@ -9,9 +9,7 @@ import tempfile
 import warnings
 
 import geopandas as gpd
-import geopandas.base
 import matplotlib.pyplot as plt
-import numpy as np
 import pyproj
 import pytest
 from geopandas.testing import assert_geodataframe_equal, assert_geoseries_equal
@@ -59,42 +57,6 @@ class TestVector:
         with pytest.raises(TypeError, match="Filename argument should be a string, path or geodataframe."):
             gu.Vector(1)  # type: ignore
 
-    def test_lazy_load_from_file(self) -> None:
-        """Check that file-backed vectors only load their GeoDataFrame when data are requested."""
-
-        # Read an in-memory reference separately from the lazy Vector constructor
-        vector = gu.Vector(self.aster_outlines_path)
-        eager = gpd.read_file(self.aster_outlines_path)
-
-        # Public metadata should be available without retaining all features
-        assert not vector.is_loaded
-        assert vector.crs == eager.crs
-        assert np.array_equal(vector.total_bounds, eager.total_bounds)
-        assert list(vector.columns) == list(eager.columns)
-        assert not vector.is_loaded
-
-        # Accessing the full dataframe triggers loading and matches GeoPandas
-        assert_geodataframe_equal(vector.gdf, eager)
-        assert vector.is_loaded
-
-    def test_init__select_file_layer(self, tmp_path: pathlib.Path) -> None:
-        """Checks that Vector class can select a specific layer, both for lazy metadata and data loading."""
-
-        # Write two layers with distinct values and extents to one GeoPackage
-        filename = tmp_path / "multiple-layers.gpkg"
-        first = gpd.GeoDataFrame({"value": [1]}, geometry=gpd.points_from_xy([0], [0]), crs=4326)
-        second = gpd.GeoDataFrame({"value": [2, 3]}, geometry=gpd.points_from_xy([10, 20], [10, 20]), crs=4326)
-        first.to_file(filename, layer="first")
-        second.to_file(filename, layer="second")
-
-        # Select the second layer while keeping its features unloaded
-        vector = gu.Vector(filename, layer="second")
-        assert not vector.is_loaded
-        np.testing.assert_array_equal(vector.total_bounds, second.total_bounds)
-
-        # Load the selected layer and compare it with the original frame
-        assert_geodataframe_equal(vector.gdf, second)
-
     def test_copy(self) -> None:
 
         vector = gu.Vector(self.aster_outlines_path)
@@ -120,23 +82,6 @@ class TestVector:
         assert isinstance(output2, str)
         list_prints = ["Filename", "Coordinate system", "Extent", "Number of features", "Attributes"]
         assert all(p in output2 for p in list_prints)
-
-    def test_to_file(self) -> None:
-        """Test the save wrapper for GeoDataFrame.to_file()."""
-
-        vector = gu.Vector(self.aster_outlines_path)
-
-        # Create a temporary file in a temporary directory
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.gpkg")
-
-        # Save and check the file exists
-        vector.to_file(temp_file)
-        assert os.path.exists(temp_file)
-
-        # Open and check the object is the same
-        vector_save = gu.Vector(temp_file)
-        vector_save.vector_equal(vector)
 
     def test_bounds(self) -> None:
         vector = gu.Vector(self.aster_outlines_path)
