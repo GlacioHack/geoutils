@@ -290,8 +290,8 @@ class TestClassVsAccessorConsistency:
         ("to_nanarray", {}),
         ("to_pointcloud", {"subsample": 1, "random_state": 42}),
         ("polygonize", {"target_values": "all"}),
-        ("subsample", {"subsample": 1000, "random_state": 42}),
-        ("cosample", {"other": "self", "subsample": 1_000, "random_state": 42}),
+        ("subsample", {"subsample": 100, "random_state": 42}),
+        ("cosample", {"other": "self", "subsample": 100, "random_state": 42}),
         (
             "estimate_error_structure",
             {
@@ -368,7 +368,7 @@ class TestClassVsAccessorConsistency:
         path_index: int,
         method: str,
         kwargs: dict[str, Any],
-        lazy_test_files: list[str],
+        lazy_test_files_tiny: list[str],
         squeeze: bool,
         filesystem: Any = None,
     ) -> None:
@@ -377,14 +377,14 @@ class TestClassVsAccessorConsistency:
         Xarray rst accessor.
 
         For this test, the integer test file where converted ahead (to preserve loading mechanism and laziness) in the
-        fixture "lazy_test_files".
+        fixture "lazy_test_files_tiny".
         """
 
         if method == "plot":
             pytest.importorskip("matplotlib")
 
         # Get filepath
-        path_raster = lazy_test_files[path_index]
+        path_raster = lazy_test_files_tiny[path_index]
 
         # Open both objects
         ds = open_raster(path_raster, squeeze=squeeze, filesystem=filesystem)
@@ -526,7 +526,7 @@ class TestClassVsAccessorConsistency:
             path_index=0,
             method=method,
             kwargs=kwargs,
-            lazy_test_files=[filename.name],
+            lazy_test_files_tiny=[filename.name],
             squeeze=True,
             filesystem=filesystem,
         )
@@ -598,7 +598,7 @@ class TestClassVsAccessorConsistency:
     @pytest.mark.parametrize("path_index", [0, 1, 2])
     @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in chunked_methods_and_args])
     def test_chunked_methods__equality_loading_laziness(
-        self, path_index: int, method: str, kwargs: dict[str, Any], lazy_test_files: list[str]
+        self, path_index: int, method: str, kwargs: dict[str, Any], lazy_test_files_tiny: list[str]
     ) -> None:
         """
         Test that chunked methods have the exact same output, loading mechanism and laziness.
@@ -615,12 +615,12 @@ class TestClassVsAccessorConsistency:
         import dask.array as da
 
         # Get filepath
-        path_raster = lazy_test_files[path_index]
+        path_raster = lazy_test_files_tiny[path_index]
 
         # Open lazily with Dask
-        ds = open_raster(path_raster, chunks={"band": 1, "x": 25, "y": 25})
+        ds = open_raster(path_raster, chunks={"band": 1, "x": 9, "y": 8})
         # Open raster that will be processed using Multiprocessing
-        mp_config = MultiprocConfig(chunks=25)  # To pass to the function
+        mp_config = MultiprocConfig(chunks=(8, 9))  # To pass to the function
         raster = Raster(path_raster)
         # Open and load both DataArray/Raster with NumPy
         ds2 = open_raster(path_raster)

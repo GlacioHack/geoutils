@@ -12,7 +12,7 @@ import pytest
 
 from geoutils import Raster, examples
 from geoutils.multiproc.cluster import MpCluster
-from tests.remote_helpers import file_access, remote_files, remote_url  # noqa: F401
+from tests.remote_helpers import file_access, remote_files, remote_pool, remote_url  # noqa: F401
 
 
 @pytest.fixture(scope="module")

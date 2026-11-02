@@ -7,9 +7,10 @@ import json
 import multiprocessing
 from base64 import b64encode
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from multiprocessing.connection import Connection
+from multiprocessing.pool import Pool
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
@@ -131,7 +132,11 @@ def _serve_files(
 
 @contextmanager
 def mock_remote_files(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, basic_auth: tuple[str, str] | None = None
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    basic_auth: tuple[str, str] | None = None,
+    pool: Pool | None = None,
 ) -> Iterator[RemoteFiles]:
     """
     Start the local HTTP/S3 server used by tests and documentation.
@@ -143,6 +148,7 @@ def mock_remote_files(
     :param tmp_path: Existing temporary directory in which to create the bucket and request log.
     :param monkeypatch: Pytest settings manager belonging to the test or an explicit MonkeyPatch.context().
     :param basic_auth: Optional username and password for the private subdirectory.
+    :param pool: Optional worker pool to reuse the server process between tests.
     :returns: The directory, server address and request history available inside the context.
     """
 
@@ -160,52 +166,63 @@ def mock_remote_files(
     # Give each test its own server address to avoid interference between tests
     context = multiprocessing.get_context("spawn")
     connection, child_connection = context.Pipe()
-    process = context.Process(
-        target=_serve_files, args=(tmp_path, request_log, child_connection, basic_auth), daemon=True
-    )
-    process.start()
-    child_connection.close()
-    try:
-        if not connection.poll(20):
-            raise RuntimeError("The remote file test server did not start.")
-        port = connection.recv()
-        files = RemoteFiles(directory=directory, endpoint=f"http://127.0.0.1:{port}", request_log=request_log)
+    pool_context = nullcontext(pool) if pool is not None else context.Pool(processes=1)
+    with pool_context as server_pool:
+        server = server_pool.apply_async(_serve_files, (tmp_path, request_log, child_connection, basic_auth))
+        try:
+            if not connection.poll(20):
+                raise RuntimeError("The remote file test server did not start.")
+            port = connection.recv()
+            child_connection.close()
+            files = RemoteFiles(directory=directory, endpoint=f"http://127.0.0.1:{port}", request_log=request_log)
 
-        # Read without credentials, limit wait times, and restore settings after each test
-        options = {
-            "AWS_S3_ENDPOINT": f"127.0.0.1:{port}",
-            "AWS_HTTPS": "NO",
-            "AWS_VIRTUAL_HOSTING": "FALSE",
-            "AWS_NO_SIGN_REQUEST": "YES",
-            # Discard cached S3 contents on close because tests reuse the same bucket paths
-            "CPL_VSIL_CURL_NON_CACHED": "/vsis3/bucket/",
-            "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
-            "GDAL_HTTP_TIMEOUT": "5",
-            "GDAL_HTTP_MAX_RETRY": "0",
-            "NO_PROXY": "127.0.0.1,localhost",
-            "no_proxy": "127.0.0.1,localhost",
-        }
-        for name, value in options.items():
-            monkeypatch.setenv(name, value)
+            # Read without credentials, limit wait times, and restore settings after each test
+            options = {
+                "AWS_S3_ENDPOINT": f"127.0.0.1:{port}",
+                "AWS_HTTPS": "NO",
+                "AWS_VIRTUAL_HOSTING": "FALSE",
+                "AWS_NO_SIGN_REQUEST": "YES",
+                # Discard cached S3 contents on close because tests reuse the same bucket paths
+                "CPL_VSIL_CURL_NON_CACHED": "/vsis3/bucket/",
+                "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
+                "GDAL_HTTP_TIMEOUT": "5",
+                "GDAL_HTTP_MAX_RETRY": "0",
+                "NO_PROXY": "127.0.0.1,localhost",
+                "no_proxy": "127.0.0.1,localhost",
+            }
+            for name, value in options.items():
+                monkeypatch.setenv(name, value)
 
-        # Configure point cloud readers to use the same local storage through fsspec
-        s3_options = {"anon": True, "endpoint_url": files.endpoint}
-        monkeypatch.setitem(fsspec.config.conf, "s3", s3_options)
-        monkeypatch.setenv("FSSPEC_S3", json.dumps(s3_options))
-        yield files
-    finally:
-        # Stop the mock server after the test, including when setup or reading failed
-        if process.is_alive():
-            connection.send("stop")
-        process.join(timeout=5)
-        if process.is_alive():
-            process.terminate()
-            process.join(timeout=5)
-        connection.close()
+            # Configure point cloud readers to use the same local storage through fsspec
+            s3_options = {"anon": True, "endpoint_url": files.endpoint}
+            monkeypatch.setitem(fsspec.config.conf, "s3", s3_options)
+            monkeypatch.setenv("FSSPEC_S3", json.dumps(s3_options))
+            yield files
+        finally:
+            # Stop this listener before another test uses the same process
+            try:
+                if not server.ready():
+                    connection.send("stop")
+                server.get(timeout=5)
+            except multiprocessing.TimeoutError:
+                server_pool.terminate()
+                raise RuntimeError("The remote file test server did not stop.") from None
+            finally:
+                child_connection.close()
+                connection.close()
+
+
+@pytest.fixture(scope="module")
+def remote_pool() -> Iterator[Pool]:
+    """Reuse a spawned server process without sharing files or listeners between tests."""
+
+    pytest.importorskip("aiohttp")
+    with multiprocessing.get_context("spawn").Pool(processes=1) as pool:
+        yield pool
 
 
 @pytest.fixture
-def remote_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[RemoteFiles]:
+def remote_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, remote_pool: Pool) -> Iterator[RemoteFiles]:
     """
     Mock remote storage for tests using temporary local files.
 
@@ -219,7 +236,7 @@ def remote_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Re
     A real local server tests file reads made by GDAL as well as Python libraries.
     This follows GDAL's S3 tests: https://github.com/OSGeo/gdal/blob/master/autotest/gcore/vsis3.py
     """
-    with mock_remote_files(tmp_path, monkeypatch) as files:
+    with mock_remote_files(tmp_path, monkeypatch, pool=remote_pool) as files:
         yield files
 
 
@@ -235,7 +252,7 @@ def remote_url(request: pytest.FixtureRequest, remote_files: RemoteFiles) -> Cal
 
 @pytest.fixture
 def file_access(
-    request: pytest.FixtureRequest, filename: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    request: pytest.FixtureRequest, filename: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, remote_pool: Pool
 ) -> Iterator[tuple[Path, str, dict[str, Any]]]:
     """Write test data and provide HTTP or S3 access options."""
 
@@ -248,7 +265,7 @@ def file_access(
     fsspec = pytest.importorskip("fsspec")
     if filename.endswith(".gpkg"):
         pytest.importorskip("fiona")
-    with mock_remote_files(tmp_path, monkeypatch, basic_auth=("demo", "geoutils")) as files:
+    with mock_remote_files(tmp_path, monkeypatch, basic_auth=("demo", "geoutils"), pool=remote_pool) as files:
         # Write test data
         path = files.directory / "private" / filename
         path.parent.mkdir()
