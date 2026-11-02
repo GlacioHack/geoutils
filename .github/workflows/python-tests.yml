@@ -100,6 +100,7 @@ jobs:
         conda list
 
     - name: Test with pytest
+      if: ${{ runner.os != 'Windows' || matrix.python-version != '3.11' || matrix.dep-level != 'opt' }}
       env:
         # Render plots without a GUI backend (avoid Tcl/Tk issues on Windows)
         MPLBACKEND: Agg
@@ -108,6 +109,21 @@ jobs:
         NUMBA_CACHE_DIR: ${{ runner.temp }}
       # Module execution also collects tests from the repository-only benchmarks package
       run: python -m pytest -ra --durations=30 --cov=geoutils/ --cov-report=lcov
+
+    - name: Test with pytest shutdown diagnostics
+      if: ${{ runner.os == 'Windows' && matrix.python-version == '3.11' && matrix.dep-level == 'opt' }}
+      env:
+        MPLBACKEND: Agg
+        NUMBA_JIT_COVERAGE: "1"
+        NUMBA_CACHE_DIR: ${{ runner.temp }}
+        PYTHONFAULTHANDLER: "1"
+        PYTHONUNBUFFERED: "1"
+      run: |
+        $PSNativeCommandUseErrorActionPreference = $false
+        python .github/scripts/run_pytest_diagnostics.py -ra --durations=30 --cov=geoutils/ --cov-report=lcov
+        $testExitCode = $LASTEXITCODE
+        Write-Host "[pytest diagnostics] Python process exit code: $testExitCode"
+        exit $testExitCode
 
     - name: Upload coverage to Coveralls
       uses: coverallsapp/github-action@v2
