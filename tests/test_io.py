@@ -102,7 +102,9 @@ class TestResolveFilesystem:
     ) -> None:
         """Checks that URL dispatch follows remote_default unless access options are passed."""
         fsspec = pytest.importorskip("fsspec")
-        path = str(tmp_path / "data.bin")
+
+        # Use forward slashes for memory paths on every platform
+        path = f"/{tmp_path.name}/data.bin"
         source = "memory://" + path
         fsspec.filesystem("memory").pipe(path, b"point values")
 

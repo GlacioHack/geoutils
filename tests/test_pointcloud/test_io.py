@@ -712,7 +712,12 @@ class TestPointCloudWritingChunked:
         """Checks an error is raised before overwriting a lazy point cloud source."""
         filesystem = pytest.importorskip("fsspec").filesystem(backend)
         points = gu.PointCloud.from_xyz(np.arange(7.0), np.arange(7.0), np.arange(7.0) + 10, 4326)
-        path = str(tmp_path / ("points" + suffix))
+
+        # Use forward slashes for memory paths on every platform
+        if backend == "memory":
+            path = f"/{tmp_path.name}/points{suffix}"
+        else:
+            path = str(tmp_path / ("points" + suffix))
         writer = points.to_las if suffix == ".las" else points.to_parquet
         writer(path, filesystem=filesystem)
         original = filesystem.cat(path)

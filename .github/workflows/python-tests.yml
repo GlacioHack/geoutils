@@ -64,7 +64,8 @@ jobs:
     - name: Install base environment with a fixed Python version
       if: steps.cache.outputs.cache-hit != 'true'
       env:
-        # Use Conda for Fiona where wheels are unavailable and share OpenMP with PyTorch
+        # Fiona 1.10.1 has no Python 3.14 wheels, so install it with Conda
+        # Use Conda's OpenMP runtime for PyTorch and its numerical dependencies
         CI_EXTRA_DEPS: >-
           gdal<3.13.3${{ matrix.dep-level != 'base' && ',fiona>=1.10' || '' }}${{
           runner.os != 'Linux' && matrix.dep-level != 'base' && ',pytorch-cpu>=2,gpytorch>=1.11' || '' }}

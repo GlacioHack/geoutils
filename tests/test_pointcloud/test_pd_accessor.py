@@ -40,6 +40,9 @@ class TestPointCloudAccessor:
     # Reuse one deterministic point cloud across accessor construction and IO tests
     rng = np.random.default_rng(42)
     arr_points = rng.integers(low=1, high=1000, size=(20, 3)) + rng.normal(0, 0.15, size=(20, 3))
+
+    # Keep longitude and latitude within 50 degrees
+    arr_points[:, :2] /= 20
     gdf = gpd.GeoDataFrame(
         data={"z": arr_points[:, 2]},
         geometry=gpd.points_from_xy(x=arr_points[:, 0], y=arr_points[:, 1]),
@@ -222,8 +225,8 @@ class TestPointCloudAccessor:
         ("method", "kwargs"),
         [
             ("copy", {}),
-            ("crop", {"bbox": (0, 0, 500, 500)}),
-            ("clip", {"mask": (0, 0, 500, 500)}),
+            ("crop", {"bbox": (0, 0, 25, 25)}),
+            ("clip", {"mask": (0, 0, 25, 25)}),
             ("translate", {"xoff": 1, "yoff": 2}),
         ],
     )

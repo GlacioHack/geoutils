@@ -68,7 +68,8 @@ def _serve_files(
 
         # List matching files so readers can find datasets split across several files
         # Response fields follow https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html
-        # GDAL also uses ListObjects without a list-type parameter
+        # GDAL 3.12 in Python 3.14 CI uses ListObjects to check GeoPackage companion files
+        # Its requests have a prefix but no list-type parameter
         if "list-type" in request.query or "prefix" in request.query:
             prefix = request.query.get("prefix", "")
             bucket = directory / "bucket"

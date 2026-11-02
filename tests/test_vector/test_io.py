@@ -112,7 +112,9 @@ class TestVectorOpening:
             crs=4326,
         )
         frame.index = pd.Index([4, 8], name="feature")
-        path = str(tmp_path / "points.parquet")
+
+        # Use forward slashes for memory paths on every platform
+        path = f"/{tmp_path.name}/points.parquet"
         if partitioned:
             filesystem.makedirs(path)
             for index in range(len(frame)):

@@ -1314,7 +1314,7 @@ class TestPointCloudRemote:
             column = remote if isinstance(remote, xr.DataArray) and name == expected.data_name else remote[name]
             expected_column = expected[name]
 
-            # Xarray uses the column's NumPy dtype
+            # Pandas 3 in Python 3.14 CI infers a string dtype, while Xarray uses NumPy object arrays
             if isinstance(column, xr.DataArray):
                 expected_column = expected_column.to_numpy()
             np.testing.assert_array_equal(column, expected_column)
