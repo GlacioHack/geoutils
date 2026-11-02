@@ -68,7 +68,8 @@ def _serve_files(
 
         # List matching files so readers can find datasets split across several files
         # Response fields follow https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html
-        if "list-type" in request.query:
+        # GDAL also uses ListObjects without a list-type parameter
+        if "list-type" in request.query or "prefix" in request.query:
             prefix = request.query.get("prefix", "")
             bucket = directory / "bucket"
             listing = ElementTree.Element("ListBucketResult", xmlns="http://s3.amazonaws.com/doc/2006-03-01/")

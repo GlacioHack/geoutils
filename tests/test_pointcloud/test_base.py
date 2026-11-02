@@ -1312,8 +1312,13 @@ class TestPointCloudRemote:
         for name in expected.gdf.columns.drop(expected.gdf.geometry.name):
             # Columns become Dataset variables or DataArray coordinates
             column = remote if isinstance(remote, xr.DataArray) and name == expected.data_name else remote[name]
-            np.testing.assert_array_equal(column, expected[name])
-            assert column.dtype == expected[name].dtype
+            expected_column = expected[name]
+
+            # Xarray uses the column's NumPy dtype
+            if isinstance(column, xr.DataArray):
+                expected_column = expected_column.to_numpy()
+            np.testing.assert_array_equal(column, expected_column)
+            assert column.dtype == expected_column.dtype
 
         # Check that remote reads requested part of a file
         assert any(method == "GET" and filename in path for method, path, byte_range in remote_files.requests)
