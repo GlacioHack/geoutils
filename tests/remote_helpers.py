@@ -7,8 +7,9 @@ import json
 import multiprocessing
 from base64 import b64encode
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import dataclass
+from functools import wraps
 from multiprocessing.connection import Connection
 from multiprocessing.pool import Pool
 from pathlib import Path
@@ -31,6 +32,52 @@ class RemoteFiles:
         """List requests received by the mock server, including requests for missing files."""
 
         return [tuple(json.loads(line)) for line in self.request_log.read_text().splitlines()]
+
+
+@contextmanager
+def _remote_filesystem_sessions(fsspec: Any) -> Iterator[None]:
+    """Close HTTP and S3 sessions created during a remote file test."""
+
+    from fsspec.asyn import sync
+
+    # Track construction so uncached filesystems are closed properly
+    instances = []
+    with pytest.MonkeyPatch.context() as patch:
+        for protocol in ("http", "s3"):
+            filesystem_class = fsspec.get_filesystem_class(protocol)
+
+            @wraps(filesystem_class.__init__)
+            def record_filesystem(
+                filesystem: Any,
+                *args: Any,
+                _initialize: Callable[..., None] = filesystem_class.__init__,
+                **kwargs: Any,
+            ) -> None:
+                """Record a newly initialized filesystem for session cleanup."""
+
+                _initialize(filesystem, *args, **kwargs)
+                instances.append(filesystem)
+
+            patch.setattr(filesystem_class, "__init__", record_filesystem)
+
+        try:
+            yield
+        finally:
+            # Await every close while the server is still available, even if another close fails
+            with ExitStack() as cleanup:
+                for filesystem in instances:
+                    s3_context = getattr(filesystem, "_s3creator", None)
+                    http_session = getattr(filesystem, "_session", None)
+                    if s3_context is not None:
+                        cleanup.callback(sync, filesystem.loop, s3_context.__aexit__, None, None, None, timeout=10)
+                    elif http_session is not None:
+                        cleanup.callback(sync, filesystem.loop, http_session.close, timeout=10)
+
+                    # Remove only owned instances from the cache so later tests cannot reuse closed sessions
+                    cache = type(filesystem)._cache
+                    for token, cached in tuple(cache.items()):
+                        if cached is filesystem:
+                            del cache[token]
 
 
 def _serve_files(
@@ -176,28 +223,29 @@ def mock_remote_files(
             child_connection.close()
             files = RemoteFiles(directory=directory, endpoint=f"http://127.0.0.1:{port}", request_log=request_log)
 
-            # Read without credentials, limit wait times, and restore settings after each test
-            options = {
-                "AWS_S3_ENDPOINT": f"127.0.0.1:{port}",
-                "AWS_HTTPS": "NO",
-                "AWS_VIRTUAL_HOSTING": "FALSE",
-                "AWS_NO_SIGN_REQUEST": "YES",
-                # Discard cached S3 contents on close because tests reuse the same bucket paths
-                "CPL_VSIL_CURL_NON_CACHED": "/vsis3/bucket/",
-                "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
-                "GDAL_HTTP_TIMEOUT": "5",
-                "GDAL_HTTP_MAX_RETRY": "0",
-                "NO_PROXY": "127.0.0.1,localhost",
-                "no_proxy": "127.0.0.1,localhost",
-            }
-            for name, value in options.items():
-                monkeypatch.setenv(name, value)
+            with _remote_filesystem_sessions(fsspec):
+                # Read without credentials, limit wait times, and restore settings after each test
+                options = {
+                    "AWS_S3_ENDPOINT": f"127.0.0.1:{port}",
+                    "AWS_HTTPS": "NO",
+                    "AWS_VIRTUAL_HOSTING": "FALSE",
+                    "AWS_NO_SIGN_REQUEST": "YES",
+                    # Discard cached S3 contents on close because tests reuse the same bucket paths
+                    "CPL_VSIL_CURL_NON_CACHED": "/vsis3/bucket/",
+                    "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
+                    "GDAL_HTTP_TIMEOUT": "5",
+                    "GDAL_HTTP_MAX_RETRY": "0",
+                    "NO_PROXY": "127.0.0.1,localhost",
+                    "no_proxy": "127.0.0.1,localhost",
+                }
+                for name, value in options.items():
+                    monkeypatch.setenv(name, value)
 
-            # Configure point cloud readers to use the same local storage through fsspec
-            s3_options = {"anon": True, "endpoint_url": files.endpoint}
-            monkeypatch.setitem(fsspec.config.conf, "s3", s3_options)
-            monkeypatch.setenv("FSSPEC_S3", json.dumps(s3_options))
-            yield files
+                # Configure point cloud readers to use the same local storage through fsspec
+                s3_options = {"anon": True, "endpoint_url": files.endpoint}
+                monkeypatch.setitem(fsspec.config.conf, "s3", s3_options)
+                monkeypatch.setenv("FSSPEC_S3", json.dumps(s3_options))
+                yield files
         finally:
             # Stop this listener before another test uses the same process
             try:

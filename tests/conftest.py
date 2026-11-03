@@ -5,12 +5,14 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Iterator
+from importlib.util import find_spec
 from typing import Any
 
 import numpy as np
 import pytest
 
 from geoutils import Raster, examples
+from geoutils._misc import import_optional
 from geoutils.multiproc.cluster import MpCluster
 from tests.remote_helpers import file_access, remote_files, remote_pool, remote_url  # noqa: F401
 
@@ -45,6 +47,8 @@ class LoggingWarningCollector(logging.Handler):
 
 
 def _safe_record_line(r: logging.LogRecord) -> str:
+    """Format a captured warning or error with its exception traceback."""
+
     # Helper to avoid record.getMessage() raising errors if msg/args formatting is invalid
     try:
         msg = r.getMessage()
@@ -52,7 +56,12 @@ def _safe_record_line(r: logging.LogRecord) -> str:
         # Fall back to a representation that will always work
         msg = f"<message formatting failed: {type(e).__name__}: {e}; msg={r.msg!r} args={r.args!r}>"
 
-    return f"{r.levelname}:{r.name}:{msg}"
+    line = f"{r.levelname}:{r.name}:{msg}"
+    if r.exc_info:
+        line += "\n" + logging.Formatter().formatException(r.exc_info)
+    if r.stack_info:
+        line += "\n" + r.stack_info
+    return line
 
 
 @pytest.fixture(autouse=True)
@@ -88,6 +97,29 @@ def fail_on_logging_warnings(request: Any) -> Any:
     if bad:
         msgs = "\n".join(_safe_record_line(r) for r in bad)
         pytest.fail("Logging warning/error detected:\n" + msgs, pytrace=False)
+
+
+@pytest.fixture(autouse=True)
+def dask_test_configuration(fail_on_logging_warnings: Any) -> Iterator[None]:
+    """Limit Dask local workers and disable its background profiling in tests."""
+
+    if find_spec("dask") is None:
+        yield
+        return
+    dask = import_optional("dask")
+
+    if find_spec("distributed") is not None:
+        import_optional("distributed")
+
+    # Follow config_for_cluster_tests() for CPU profiling and GIL monitoring
+    # https://github.com/dask/distributed/blob/main/distributed/utils_test.py
+    settings = {
+        "num_workers": 2,
+        "distributed.worker.profile.enabled": False,
+        "distributed.admin.system-monitor.gil.enabled": False,
+    }
+    with dask.config.set(settings):
+        yield
 
 
 @pytest.fixture(scope="module")
