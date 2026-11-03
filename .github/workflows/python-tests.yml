@@ -101,7 +101,7 @@ jobs:
         conda list
 
     - name: Test with pytest
-      if: ${{ runner.os != 'Windows' || matrix.python-version != '3.11' || matrix.dep-level != 'opt' }}
+      if: ${{ runner.os != 'Windows' }}
       env:
         # Render plots without a GUI backend (avoid Tcl/Tk issues on Windows)
         MPLBACKEND: Agg
@@ -112,7 +112,7 @@ jobs:
       run: python -m pytest -ra --durations=30 --cov=geoutils/ --cov-report=lcov
 
     - name: Test with pytest shutdown diagnostics
-      if: ${{ runner.os == 'Windows' && matrix.python-version == '3.11' && matrix.dep-level == 'opt' }}
+      if: ${{ runner.os == 'Windows' }}
       env:
         MPLBACKEND: Agg
         NUMBA_JIT_COVERAGE: "1"
