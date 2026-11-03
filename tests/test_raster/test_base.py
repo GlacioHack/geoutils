@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Literal
 
 import geopandas as gpd
@@ -289,8 +290,8 @@ class TestClassVsAccessorConsistency:
         ("to_nanarray", {}),
         ("to_pointcloud", {"subsample": 1, "random_state": 42}),
         ("polygonize", {"target_values": "all"}),
-        ("subsample", {"subsample": 1000, "random_state": 42}),
-        ("cosample", {"other": "self", "subsample": 1_000, "random_state": 42}),
+        ("subsample", {"subsample": 100, "random_state": 42}),
+        ("cosample", {"other": "self", "subsample": 100, "random_state": 42}),
         (
             "estimate_error_structure",
             {
@@ -361,26 +362,33 @@ class TestClassVsAccessorConsistency:
 
     @pytest.mark.parametrize("path_index", [0, 1, 2])
     @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in methods_and_kwargs])
+    @pytest.mark.parametrize("squeeze", [True, False])
     def test_methods__equality_and_loading(
-        self, path_index: int, method: str, kwargs: dict[str, Any], lazy_test_files: list[str]
+        self,
+        path_index: int,
+        method: str,
+        kwargs: dict[str, Any],
+        lazy_test_files_tiny: list[str],
+        squeeze: bool,
+        filesystem: Any = None,
     ) -> None:
         """
         Test that the method output and loading mechanism of the two objects are exactly the same between a Raster and
         Xarray rst accessor.
 
         For this test, the integer test file where converted ahead (to preserve loading mechanism and laziness) in the
-        fixture "lazy_test_files".
+        fixture "lazy_test_files_tiny".
         """
 
         if method == "plot":
             pytest.importorskip("matplotlib")
 
         # Get filepath
-        path_raster = lazy_test_files[path_index]
+        path_raster = lazy_test_files_tiny[path_index]
 
         # Open both objects
-        ds = open_raster(path_raster)
-        raster = Raster(path_raster)
+        ds = open_raster(path_raster, squeeze=squeeze, filesystem=filesystem)
+        raster = Raster(path_raster, filesystem=filesystem)
         if method == "variogram":
             pytest.importorskip("skgstat")
 
@@ -395,12 +403,16 @@ class TestClassVsAccessorConsistency:
                 nodata=-99999,
                 area_or_point=raster.area_or_point,
             )
+            array = integer_data.filled(-99999)
+            if not squeeze and array.ndim == 2:
+                array = array[None, ...]
             ds = DataArrayRasterAccessor.from_array(
-                integer_data.filled(-99999),
+                array,
                 transform=raster.transform,
                 crs=raster.crs,
                 nodata=-99999,
                 area_or_point=raster.area_or_point,
+                squeeze=squeeze,
             )
 
         # For methods that require knowledge of the data (relative to bounds), create specific inputs
@@ -492,7 +504,32 @@ class TestClassVsAccessorConsistency:
 
         # Finally, assert exact equality of outputs
         # (in case of raster; this will load all the data, so has to come at the end)
+        if not squeeze and isinstance(output_raster, Raster) and ds.rst.count == output_raster.count == 1:
+            assert "band" in output_ds.dims
+        if isinstance(output_raster, np.ndarray) and output_raster.ndim == 2 and np.ndim(output_ds) == 3:
+            output_ds = output_ds[0]
         assert_output_equal(output_raster, output_ds)
+
+    @pytest.mark.parametrize("method,kwargs", methods_and_kwargs)
+    def test_methods__filesystem(self, tmp_path: Path, method: str, kwargs: dict[str, Any]) -> None:
+        """Checks that raster methods match class and accessor outputs through a filesystem (remote files)."""
+
+        # Write enough pixels for sampling
+        filename = tmp_path / "raster.tif"
+        values = np.arange(32 * 40, dtype=np.float32).reshape(32, 40)
+        transform = rio.transform.from_origin(500000, 5000000, 30, 30)
+        Raster.from_array(values, transform, 32610, nodata=-99999).to_file(filename)
+        filesystem = pytest.importorskip("fsspec").filesystem("dir", path=str(tmp_path))
+
+        # Run the existing method comparison
+        self.test_methods__equality_and_loading(
+            path_index=0,
+            method=method,
+            kwargs=kwargs,
+            lazy_test_files_tiny=[filename.name],
+            squeeze=True,
+            filesystem=filesystem,
+        )
 
     class_methods_and_kwargs = [
         (
@@ -561,7 +598,7 @@ class TestClassVsAccessorConsistency:
     @pytest.mark.parametrize("path_index", [0, 1, 2])
     @pytest.mark.parametrize("method, kwargs", [(f, k) for f, k in chunked_methods_and_args])
     def test_chunked_methods__equality_loading_laziness(
-        self, path_index: int, method: str, kwargs: dict[str, Any], lazy_test_files: list[str]
+        self, path_index: int, method: str, kwargs: dict[str, Any], lazy_test_files_tiny: list[str]
     ) -> None:
         """
         Test that chunked methods have the exact same output, loading mechanism and laziness.
@@ -578,12 +615,12 @@ class TestClassVsAccessorConsistency:
         import dask.array as da
 
         # Get filepath
-        path_raster = lazy_test_files[path_index]
+        path_raster = lazy_test_files_tiny[path_index]
 
         # Open lazily with Dask
-        ds = open_raster(path_raster, chunks={"band": 1, "x": 25, "y": 25})
+        ds = open_raster(path_raster, chunks={"band": 1, "x": 9, "y": 8})
         # Open raster that will be processed using Multiprocessing
-        mp_config = MultiprocConfig(chunks=25)  # To pass to the function
+        mp_config = MultiprocConfig(chunks=(8, 9))  # To pass to the function
         raster = Raster(path_raster)
         # Open and load both DataArray/Raster with NumPy
         ds2 = open_raster(path_raster)
@@ -764,62 +801,76 @@ def remote_raster(remote_files: RemoteFiles) -> str:
         transform=rio.transform.from_origin(500000, 5100000, 10, 10),
         nodata=-9999,
         blocksize=128,
+        overview_count=2,
+        overview_resampling="AVERAGE",
     ) as destination:
         destination.write(values, 1)
     return filename.name
 
 
+_REMOTE_RASTER_READERS = [
+    pytest.param(gu.Raster, {}, id="raster-deferred"),
+    pytest.param(gu.Raster, {"load_data": True}, id="raster-loaded"),
+    pytest.param(gu.open_raster, {"as_object_type": "dataarray"}, id="dataarray"),
+    pytest.param(gu.open_raster, {"as_object_type": "dataset"}, id="dataset"),
+]
+_REMOTE_RASTER_OPTIONS = [
+    pytest.param({}, id="full"),
+    pytest.param({"downsample": 2.5}, id="number"),
+    pytest.param({"downsample": {"factor": 2.5}}, id="factor"),
+    pytest.param({"downsample": {"res": (25, 30)}}, id="res"),
+    pytest.param({"downsample": {"shape": (75, 97)}}, id="shape"),
+    pytest.param({"overview_level": -1}, id="overview-full"),
+    pytest.param({"overview_level": 0}, id="overview-first"),
+    pytest.param({"overview_level": 1}, id="overview-second"),
+]
+
+
 class TestRasterRemote:
     """Test module for remote raster reading (in the cloud)."""
 
-    @pytest.mark.parametrize("load_data", [True, False])
-    def test_init__remote(
-        self, remote_files: RemoteFiles, remote_url: Callable[[str], str], remote_raster: str, load_data: bool
-    ) -> None:
-        """Checks that instantiating a Raster on a remote file in the cloud works properly."""
-
-        # Open both as remote/local
-        expected = gu.Raster(remote_files.directory / remote_raster, load_data=True)
-        remote = gu.Raster(remote_url(remote_raster), load_data=load_data)
-
-        # Check loading, metadata and exact equality after loading
-        assert remote.is_loaded == load_data
-        assert remote.crs == expected.crs
-        assert remote.transform == expected.transform
-        assert remote.bounds == expected.bounds
-        assert remote.shape == expected.shape
-        assert remote.nodata == expected.nodata
-        if not load_data:
-            remote.load()
-        assert remote.is_loaded
-        assert remote.raster_equal(expected)
-
-        # Check that remote reads requested part of a file
-        assert any(method == "GET" and byte_range for method, path, byte_range in remote_files.requests)
-
-    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
-    def test_open_raster__remote(
+    @pytest.mark.parametrize("reader,reader_options", _REMOTE_RASTER_READERS)
+    @pytest.mark.parametrize("options", _REMOTE_RASTER_OPTIONS)
+    def test_open_or_init__remote(
         self,
         remote_files: RemoteFiles,
         remote_url: Callable[[str], str],
         remote_raster: str,
-        as_object_type: Literal["dataarray", "dataset"],
+        reader: Callable[..., Any],
+        reader_options: dict[str, Any],
+        options: dict[str, Any],
     ) -> None:
-        """Checks that open_raster() works properly on a remote file in the cloud."""
+        """Checks that open_raster() and Raster.__init__() both work properly on a remote file in the cloud."""
 
         # Open both local/remote
-        expected = gu.open_raster(
-            str(remote_files.directory / remote_raster), as_object_type=as_object_type, data_name="height"
-        )
-        remote = gu.open_raster(remote_url(remote_raster), as_object_type=as_object_type, data_name="height")
+        expected = gu.Raster(remote_files.directory / remote_raster, load_data=True, **options)
+        if reader is gu.open_raster:
+            reader_options = {**reader_options, "data_name": "height"}
+        remote = reader(remote_url(remote_raster), **reader_options, **options)
+        variable = remote["height"] if isinstance(remote, xr.Dataset) else remote
+        interface = variable if isinstance(variable, gu.Raster) else variable.rst
 
         # Check equality, and close the backing file handles
         try:
-            xr.testing.assert_identical(remote, expected)
-            assert remote.rio.crs == expected.rio.crs
+            assert interface.is_loaded == reader_options.get("load_data", False)
+            assert interface.crs == expected.crs
+            assert interface.transform == expected.transform
+            assert interface.bounds == expected.bounds
+            assert interface.shape == expected.shape
+            assert interface.nodata == expected.nodata
+            assert interface.dtype == expected.dtype
+            assert interface.area_or_point == expected.area_or_point
+            if reader is gu.open_raster:
+                assert variable.name == "height"
+            for key in ("overview_factors", "overview_selected_level", "overview_selected_factor", "block_shape"):
+                assert interface.tags[key] == expected.tags[key]
+            if not interface.is_loaded:
+                remote.load()
+            assert interface.is_loaded
+            assert_output_equal(variable, expected, strict_masked=False)
         finally:
-            remote.close()
-            expected.close()
+            if not isinstance(remote, gu.Raster):
+                remote.close()
 
         # Check that remote reads requested part of a file
         assert any(method == "GET" and byte_range for method, path, byte_range in remote_files.requests)
@@ -828,28 +879,43 @@ class TestRasterRemote:
 class TestRasterRemoteChunked:
     """Test module for remote raster files with lazy/chunked Dask reading."""
 
+    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
+    @pytest.mark.parametrize("options", _REMOTE_RASTER_OPTIONS)
     def test_open_raster__remote_laziness(
-        self, remote_files: RemoteFiles, remote_url: Callable[[str], str], remote_raster: str
+        self,
+        remote_files: RemoteFiles,
+        remote_url: Callable[[str], str],
+        remote_raster: str,
+        as_object_type: Literal["dataarray", "dataset"],
+        options: dict[str, Any],
     ) -> None:
         """Checks that remote raster chunks stay lazy and compute exactly the in-memory local raster."""
 
         pytest.importorskip("dask")
 
         # Open both local/remote with chunks (Dask)
-        expected = gu.open_raster(str(remote_files.directory / remote_raster)).load()
-        remote = gu.open_raster(remote_url(remote_raster), chunks={"x": 90, "y": 70})
-        assert expected.rst.is_loaded
-        assert not remote.rst.is_loaded
-        assert remote.chunks is not None
+        expected = gu.open_raster(
+            str(remote_files.directory / remote_raster), as_object_type=as_object_type, **options
+        ).load()
+        remote = gu.open_raster(
+            remote_url(remote_raster), chunks={"x": 29, "y": 23}, as_object_type=as_object_type, **options
+        )
+        expected_values = expected["raster"] if as_object_type == "dataset" else expected
+        remote_values = remote["raster"] if as_object_type == "dataset" else remote
+        assert expected_values.rst.is_loaded
+        assert not remote_values.rst.is_loaded
+        assert remote_values.chunks is not None
         requests_before_compute = len(remote_files.requests)
 
         # Compute and check equality, without loading the original lazy object
         try:
             computed = remote.compute(scheduler="synchronous")
             xr.testing.assert_identical(computed, expected)
-            assert computed.rst.is_loaded
-            assert not remote.rst.is_loaded
-            assert len(remote_files.requests) > requests_before_compute
+            computed_values = computed["raster"] if as_object_type == "dataset" else computed
+            assert computed_values.rst.is_loaded
+            assert not remote_values.rst.is_loaded
+            if not options:
+                assert len(remote_files.requests) > requests_before_compute
         finally:
             remote.close()
             expected.close()
@@ -861,21 +927,22 @@ class TestRasterRemoteChunked:
 class TestRasterRemoteErrors:
     """Test module for errors/warnings for raster remote files."""
 
-    def test_init__error_missing_remote_file(self, remote_url: Callable[[str], str]) -> None:
-        """Checks an error is raised when a remote raster file is unavailable."""
-        with pytest.raises(rio.errors.RasterioIOError):
-            gu.Raster(remote_url("missing.tif"))
-
-    @pytest.mark.parametrize("as_object_type", ["dataarray", "dataset"])
-    @pytest.mark.parametrize("chunks", [None, {"x": 90, "y": 70}])
-    def test_open_raster__error_missing_remote_file(
+    @pytest.mark.parametrize(
+        "reader,options",
+        _REMOTE_RASTER_READERS
+        + [
+            pytest.param(gu.open_raster, {"as_object_type": kind, "chunks": {"x": 90, "y": 70}}, id=f"{kind}-chunked")
+            for kind in ("dataarray", "dataset")
+        ],
+    )
+    def test_open_or_init__error_missing_remote_file(
         self,
         remote_url: Callable[[str], str],
-        as_object_type: Literal["dataarray", "dataset"],
-        chunks: dict[str, int] | None,
+        reader: Callable[..., Any],
+        options: dict[str, Any],
     ) -> None:
-        """Checks an error is raised when open_raster() cannot find a remote file, with or without chunks."""
+        """Checks an error is raised when open_raster() or Raster() cannot find a remote file."""
 
         filename = remote_url("missing.tif")
         with pytest.raises(rio.errors.RasterioIOError):
-            gu.open_raster(filename, as_object_type=as_object_type, chunks=chunks)
+            reader(filename, **options)

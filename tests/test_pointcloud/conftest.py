@@ -22,7 +22,7 @@ def copc_file(tmp_path_factory: pytest.TempPathFactory) -> Path:
     # Check optional dependencies before loading PDAL COPC writer
     pytest.importorskip("laspy")
     pytest.importorskip("lazrs")
-    pdal = pytest.importorskip("pdal")
+    pdal = pytest.importorskip("pdal", reason="Requires PDAL to write COPC test files.")
 
     # We create enough points for multiple levels of detail
     point_numbers = np.arange(100_003)

@@ -138,7 +138,23 @@ def _raster_chunk_source(like: RasterBase, chunksizes: tuple[int, int] | None) -
         if like.name is None:
             raise ValueError("An unloaded raster must have a source filename.")
         assert chunksizes is not None
-        return open_raster(like.name, chunks={"y": chunksizes[0], "x": chunksizes[1]}, as_object_type="dataarray").data
+        source = open_raster(
+            like.name,
+            chunks={"y": chunksizes[0], "x": chunksizes[1]},
+            as_object_type="dataarray",
+            filesystem=like._filesystem,
+            downsample=like._downsample,
+            overview_level=like._overview_level,
+            squeeze=False,
+        )
+        if like._out_window is not None:
+            window = like._out_window
+            source = source.isel(
+                y=slice(int(window.row_off), int(window.row_off + window.height)),
+                x=slice(int(window.col_off), int(window.col_off + window.width)),
+            )
+        source = source.sel(band=list(like.bands))
+        return source.squeeze("band").data if like.count == 1 else source.data
     return like.data
 
 
@@ -728,7 +744,7 @@ def _dask_point_magnitude(
     elif like._is_dask:
         dataframe = like._dataset.repartition(npartitions=max(1, int(np.ceil(like.point_count / chunksize))))
     elif not like.is_loaded:
-        from geoutils.pointcloud.loading import open_pointcloud
+        from geoutils.pointcloud.io import open_pointcloud
 
         assert like.name is not None
         dataframe = open_pointcloud(
@@ -892,7 +908,7 @@ def _wrapper_point_magnitude_partition_multiproc(
 ) -> Any:
     """Wrapper to predict error magnitude within a point chunk, for MP backend."""
 
-    from geoutils.pointcloud.writing import _stage_pointcloud_partition
+    from geoutils.pointcloud.io import _stage_pointcloud_partition
 
     source = dataframe.copy()
     for name, values in arrays.items():
@@ -911,12 +927,12 @@ def _multiproc_point_magnitude(
     """Write predicted point magnitudes with MP into a file-backed point cloud."""
 
     from geoutils.multiproc.cluster import _map_bounded
-    from geoutils.pointcloud.las import _point_partition_size
-    from geoutils.pointcloud.loading import _load_pointcloud_rows
-    from geoutils.pointcloud.writing import (
+    from geoutils.pointcloud.io import (
+        _load_pointcloud_rows,
         _resolve_pointcloud_output,
         _write_pointcloud_partitions,
     )
+    from geoutils.pointcloud.las import _point_partition_size
 
     # 1/ Check row chunks and prepare output file
     chunk_size = _point_partition_size(mp_config)

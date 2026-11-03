@@ -758,7 +758,12 @@ class TestPairSampleChunked:
 
         async def run_cluster() -> xr.Dataset:
             async with LocalCluster(
-                n_workers=2, threads_per_worker=1, processes=False, dashboard_address=None, asynchronous=True
+                n_workers=2,
+                threads_per_worker=1,
+                processes=False,
+                memory_limit=0,
+                dashboard_address=None,
+                asynchronous=True,
             ) as cluster:
                 async with Client(cluster, asynchronous=True) as client:
                     return await asyncio.to_thread(sample_pairs, client)

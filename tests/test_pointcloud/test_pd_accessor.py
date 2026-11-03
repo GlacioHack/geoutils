@@ -6,7 +6,7 @@ import os.path
 import tempfile
 from importlib.util import find_spec
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import geopandas as gpd
 import numpy as np
@@ -17,6 +17,7 @@ from geopandas.testing import assert_geodataframe_equal
 from pyproj import CRS
 
 import geoutils as gu
+import geoutils.vector.io as vector_io
 import geoutils.vector.pd_accessor as vector_pd_accessor
 from geoutils.multiproc import MultiprocConfig
 
@@ -39,6 +40,9 @@ class TestPointCloudAccessor:
     # Reuse one deterministic point cloud across accessor construction and IO tests
     rng = np.random.default_rng(42)
     arr_points = rng.integers(low=1, high=1000, size=(20, 3)) + rng.normal(0, 0.15, size=(20, 3))
+
+    # Keep longitude and latitude within 50 degrees
+    arr_points[:, :2] /= 20
     gdf = gpd.GeoDataFrame(
         data={"z": arr_points[:, 2]},
         geometry=gpd.points_from_xy(x=arr_points[:, 0], y=arr_points[:, 1]),
@@ -81,7 +85,8 @@ class TestPointCloudAccessor:
         assert_geodataframe_equal(source.compute(), expected)
         assert source.expr is graph and not source.pc.is_loaded
 
-    def test_open_pointcloud__downsample_loading_laziness(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("downsample", [4, {"factor": 4}, {"size": 25}])
+    def test_open_pointcloud__downsample_loading_laziness(self, tmp_path: Path, downsample: Any) -> None:
         """Checks that chunked opening keeps the sample lazy and exactly matches in-memory opening."""
 
         pytest.importorskip("dask_geopandas")
@@ -91,10 +96,10 @@ class TestPointCloudAccessor:
         filename = tmp_path / "points.gpkg"
         _point_grid().to_file(filename, index=False)
         eager = gu.open_pointcloud(
-            str(filename), data_name="value", downsample=4, as_object_type="geodataframe", load=True
+            str(filename), data_name="value", downsample=downsample, as_object_type="geodataframe", load=True
         )
         lazy = gu.open_pointcloud(
-            str(filename), data_name="value", chunks=17, downsample=4, as_object_type="geodataframe"
+            str(filename), data_name="value", chunks=17, downsample=downsample, as_object_type="geodataframe"
         )
 
         # Check source is lazy and matches the in-memory result exactly
@@ -220,8 +225,8 @@ class TestPointCloudAccessor:
         ("method", "kwargs"),
         [
             ("copy", {}),
-            ("crop", {"bbox": (0, 0, 500, 500)}),
-            ("clip", {"mask": (0, 0, 500, 500)}),
+            ("crop", {"bbox": (0, 0, 25, 25)}),
+            ("clip", {"mask": (0, 0, 25, 25)}),
             ("translate", {"xoff": 1, "yoff": 2}),
         ],
     )
@@ -330,7 +335,7 @@ class TestPointCloudAccessor:
         temp_dir = tempfile.TemporaryDirectory()
         temp_file = os.path.join(temp_dir.name, "test.gpkg")
         self.gdf.to_file(temp_file)
-        import_optional = vector_pd_accessor.import_optional
+        import_optional = vector_io.import_optional
 
         def _missing_dask_geopandas(
             import_name: str, package_name: str | None = None, extra_name: str = "opt"
@@ -342,7 +347,7 @@ class TestPointCloudAccessor:
             return import_optional(import_name, package_name=package_name, extra_name=extra_name)
 
         # Replace the module-level optional importer used by ``open_pointcloud``
-        monkeypatch.setattr(vector_pd_accessor, "import_optional", _missing_dask_geopandas)
+        monkeypatch.setattr(vector_io, "import_optional", _missing_dask_geopandas)
         with pytest.raises(ImportError, match="Optional dependency 'dask-geopandas' required.*"):
             gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_object_type="geodataframe")
 

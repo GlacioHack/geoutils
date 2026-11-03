@@ -1464,12 +1464,16 @@ class Variogram:
                 minimum_displayed = float(np.nanmin(displayed_lower_edges[valid_bins]))
                 ax.set_xlim(minimum_displayed, float(np.nanmax(upper_edges[valid_bins])))
 
-        # Label intermediate logarithmic ticks with ordinary decimal numbers
+        # Label intermediate distances only when the logarithmic range is narrow
         ax.set_xscale(xscale)
+        from geoutils.vector.plotting import _reduce_tick_label_overlap, _spaced_tick_locator
+
         if xscale == "log":
             from matplotlib.ticker import LogLocator, NullFormatter, ScalarFormatter
 
-            ax.xaxis.set_major_locator(LogLocator(base=10, subs=(1, 2, 5), numticks=12))
+            lower, upper = ax.get_xlim()
+            tick_multipliers = (1, 2, 5) if np.log10(upper / lower) <= 2 else (1,)
+            ax.xaxis.set_major_locator(_spaced_tick_locator(LogLocator(base=10, subs=tick_multipliers, numticks=12)))
             formatter = ScalarFormatter()
             formatter.set_scientific(False)
             formatter.set_useOffset(False)
@@ -1481,6 +1485,7 @@ class Variogram:
             title_axis = count_axis if count_axis is not None else ax
             title_axis.set_title(title)
 
+        _reduce_tick_label_overlap(ax)
         return ax
 
     ############################

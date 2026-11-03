@@ -19,19 +19,20 @@
 from geoutils.raster.array import *  # noqa
 from geoutils.raster.base import RasterBase  # noqa
 from geoutils.raster.constructors import from_array  # noqa
+from geoutils.raster.io import RasterDownsampleOptions  # noqa
 from geoutils.raster.multiraster import *  # noqa
 
-# To-be-deprecated
-from geoutils.raster.raster import Mask  # noqa
 from geoutils.raster.referencing import *  # noqa
 from geoutils.raster.satimg import *  # noqa
 from geoutils.raster.tiling import *  # noqa
 from geoutils.raster.transformation import *  # noqa
 
 from geoutils.raster.raster import Raster, RasterType, handled_array_funcs  # noqa isort:skip
-from geoutils.raster.xr_accessor import open_raster  # noqa isort:skip
+from geoutils.raster.io import open_raster  # noqa isort:skip
 from geoutils.raster.xr_accessor import DataArrayRasterAccessor  # noqa isort:skip
 from geoutils.raster.xr_accessor import DatasetRasterAccessor  # noqa isort:skip
 
+# To-be-deprecated
+from geoutils.raster.raster import Mask  # noqa
 
 __all__ = ["Raster", "DataArrayRasterAccessor", "DatasetRasterAccessor", "RasterType", "open_raster", "from_array"]

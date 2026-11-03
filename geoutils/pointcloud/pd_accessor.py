@@ -221,6 +221,8 @@ class GeoDataFramePointCloudAccessor(GeometryPointCloudBase, GeoDataFrameVectorA
         chunks: int | None = None,
         mp_config: Any = None,
         laz_chunk_size: int | None = None,
+        filesystem: Any = None,
+        storage_options: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -235,6 +237,8 @@ class GeoDataFramePointCloudAccessor(GeometryPointCloudBase, GeoDataFrameVectorA
         :param mp_config: Multiprocessing configuration for writing in-memory point-cloud chunks in workers.
             Not supported for Dask-backed point clouds.
         :param laz_chunk_size: Number of points per compressed LAZ disk chunk. Requires Lazrs; None uses its default.
+        :param filesystem: Filesystem used to open the destination. Cannot be combined with storage_options.
+        :param storage_options: Fsspec settings for the destination URL. Cannot be combined with filesystem.
         :param kwargs: Additional attributes to set on the LasPy header.
         """
 
@@ -249,5 +253,7 @@ class GeoDataFramePointCloudAccessor(GeometryPointCloudBase, GeoDataFrameVectorA
             chunks=chunks,
             mp_config=mp_config,
             laz_chunk_size=laz_chunk_size,
+            filesystem=filesystem,
+            storage_options=storage_options,
             **kwargs,
         )

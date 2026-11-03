@@ -22,7 +22,6 @@ Module for the Pandas accessor ``vct`` mirroring the Vector API.
 
 from __future__ import annotations
 
-import pathlib
 import warnings
 from typing import Any
 
@@ -32,18 +31,11 @@ import pandas as pd
 from geoutils._dispatch import is_dask_dataframe, is_dask_geodataframe
 from geoutils._misc import import_optional
 from geoutils.vector.base import VectorBase
+from geoutils.vector.io import _import_dask_geopandas as _import_dask_geopandas
+from geoutils.vector.io import _write_vector_file
+from geoutils.vector.io import open_vector as open_vector
 
 _DASK_ACCESSOR_REGISTERED = False
-
-
-def _import_dask_geopandas() -> Any:
-    """Import Dask-GeoPandas as an optional dependency."""
-
-    # Delay the import until the caller explicitly requests chunks
-    import_optional("dask_geopandas", package_name="dask-geopandas")
-    import dask_geopandas as dgpd
-
-    return dgpd
 
 
 def _register_dask_vector_accessor() -> None:
@@ -86,38 +78,6 @@ def _replace_geodataframe(target: gpd.GeoDataFrame, source: gpd.GeoDataFrame) ->
     target.set_geometry(source.geometry.name, inplace=True)
     if source.crs is not None:
         target.set_crs(source.crs, allow_override=True, inplace=True)
-
-
-def open_vector(
-    filename: str, chunks: int | None = None, *, load: bool = False, **kwargs: Any
-) -> gpd.GeoDataFrame | Any:
-    """
-    Open a vector file.
-
-    :param filename: Path to the vector file to open.
-    :param chunks: Number of features per Dask partition. None uses one partition, or in-memory GeoPandas
-        with load=True.
-    :param load: Whether to read features immediately when chunks is None. The default False opens one Dask partition
-        and requires Dask-GeoPandas. Explicit chunks always stay lazy.
-    :param kwargs: Keyword arguments passed to :func:`geopandas.read_file`.
-    :returns: A lazy Dask-GeoPandas GeoDataFrame, or an in-memory GeoDataFrame when load=True without chunks.
-    """
-
-    if not load and chunks is None:
-        import pyogrio
-
-        info = pyogrio.read_info(filename, layer=kwargs.get("layer"))
-        chunks = max(1, info["features"])
-    if chunks is not None:
-        # Load the optional Dask backend and add ``.vct`` before returning the lazy GeoDataFrame
-        if chunks <= 0:
-            raise ValueError("Argument 'chunks' must be a strictly positive integer.")
-        dgpd = _import_dask_geopandas()
-        _register_dask_vector_accessor()
-        return dgpd.read_file(filename, chunksize=chunks, **kwargs)
-
-    # Without chunks, use GeoPandas' regular behavior
-    return gpd.read_file(filename, **kwargs)
 
 
 @pd.api.extensions.register_dataframe_accessor("vct")
@@ -196,36 +156,38 @@ class GeoDataFrameVectorAccessor(VectorBase):
         ds = self._obj.compute() if is_dask_dataframe(self._obj) else self._obj
         return Vector(ds)
 
-    def to_file(self, filename: str, driver: Any = None, schema: Any = None, index: Any = None, **kwargs: Any) -> None:
+    def to_file(
+        self,
+        filename: str,
+        driver: Any = None,
+        schema: Any = None,
+        index: Any = None,
+        *,
+        filesystem: Any = None,
+        storage_options: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
         """
         Write the vector to a vector file or GeoParquet dataset.
 
         :param filename: Path to the output file or dataset.
-        :param driver: Output format driver. By default, infer it from ``filename``.
+        :param driver: Output format driver. By default, inferred from ``filename``.
         :param schema: Schema passed to GeoPandas for vector formats. Not supported for Dask GeoParquet.
         :param index: Whether to write the dataframe index.
+        :param filesystem: An existing Fsspec filesystem object whose connection settings are used to write files.
+            Cannot be combined with storage_options.
+        :param storage_options: Dictionary of connection settings used to create a Fsspec filesystem from the
+            destination URL, such as credentials or a custom server address. Cannot be combined with filesystem.
         :param kwargs: Additional keyword arguments passed to GeoPandas or Dask-GeoPandas.
         """
 
-        if is_dask_dataframe(self._obj):
-            # GeoParquet supports direct partitioned output from Dask-GeoPandas
-            suffix = pathlib.Path(filename).suffix.lower()
-            driver_name = str(driver).lower() if driver is not None else None
-            if suffix in [".parquet", ".pq"] or driver_name in ["parquet", "geoparquet"]:
-                if schema is not None:
-                    raise ValueError("Argument 'schema' is not supported for Dask GeoParquet output.")
-                if driver is not None:
-                    kwargs.pop("driver", None)
-                if index is not None:
-                    kwargs["write_index"] = index
-                else:
-                    kwargs.setdefault("write_index", False)
-                self._obj.to_parquet(filename, **kwargs)
-                return
-
-            # Other vector formats require one in-memory GeoDataFrame for GeoPandas writing
-            ds = self._obj.compute()
-        else:
-            ds = self._obj
-
-        ds.to_file(filename=filename, driver=driver, schema=schema, index=index, **kwargs)
+        _write_vector_file(
+            self._obj,
+            filename=filename,
+            driver=driver,
+            schema=schema,
+            index=index,
+            filesystem=filesystem,
+            storage_options=storage_options,
+            **kwargs,
+        )

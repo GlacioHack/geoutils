@@ -9,6 +9,7 @@ from typing import Any
 import geopandas as gpd
 import numpy as np
 import pytest
+import rasterio as rio
 from numpy.typing import NDArray
 from pyproj import CRS
 from rasterio.transform import from_origin
@@ -17,6 +18,7 @@ import geoutils as gu
 from geoutils.multiproc import MultiprocConfig
 from geoutils.multiproc.cluster import BasicCluster
 from geoutils.multiproc.readers import (
+    _read_selected_raster_bands,
     _read_selected_values,
     _read_values,
     _reader_from_source,
@@ -79,6 +81,30 @@ class TestValueReaderChunked:
         assert np.array_equal(np.ma.getmaskarray(result), np.ma.getmaskarray(expected))
         assert result.shape == (2, 3)
         assert not source.is_loaded
+
+    @pytest.mark.parametrize("overview_level", [0, 1])
+    def test_value_reader__raster_overview(self, tmp_path: Path, overview_level: int) -> None:
+        """Checks that we can read select overview without loading the raster."""
+
+        # We create overviews
+        values = np.ma.array(np.arange(2 * 18 * 26, dtype=np.int16).reshape(2, 18, 26), mask=False)
+        values.mask[:, :4, :4] = True
+        path = tmp_path / "overviews.tif"
+        gu.Raster.from_array(values, from_origin(0, 18, 1, 1), 32631, nodata=-9999).to_file(path)
+        with rio.open(path, "r+") as dataset:
+            dataset.build_overviews([2, 4], rio.enums.Resampling.average)
+
+        # We read tiles
+        source = gu.Raster(path, overview_level=overview_level)
+        indexes = np.array([0, 1, 10, np.prod(source.shape) - 1])
+        result = _read_selected_raster_bands(source, indexes, [2, 1], chunks=(3, 4))
+
+        # We compare with the same overview opened through Xarray, and check input is not loaded
+        reference = gu.open_raster(str(path), overview_level=overview_level)
+        expected = reference.values[[1, 0]].reshape(2, -1)[:, indexes]
+        np.testing.assert_array_equal(result.astype(float).filled(np.nan), expected)
+        assert not source.is_loaded
+        reference.close()
 
     @pytest.mark.parametrize("file_mask", [False, True])
     def test_value_reader__raster_nodata_and_mask(self, file_mask: bool, tmp_path: Path) -> None:

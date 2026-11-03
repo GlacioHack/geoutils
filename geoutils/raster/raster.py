@@ -27,7 +27,7 @@ import copy
 import pathlib
 import warnings
 from contextlib import ExitStack
-from typing import IO, Any, Callable, cast, overload
+from typing import IO, Any, Callable, overload
 
 import numpy as np
 import rasterio as rio
@@ -40,7 +40,8 @@ from rasterio.crs import CRS
 
 import geoutils as gu
 from geoutils import profiler
-from geoutils._misc import _validate_downsample, deprecate
+from geoutils._io import _filesystem_file_options, _resolve_filesystem
+from geoutils._misc import deprecate
 from geoutils._typing import (
     DTypeLike,
     MArrayNum,
@@ -49,6 +50,16 @@ from geoutils._typing import (
     Number,
 )
 from geoutils.raster.base import RasterBase, RasterType
+from geoutils.raster.io import (
+    RasterDownsampleOptions,
+    _downsample_grid,
+    _load_rio,
+    _open_downsampled_raster,
+    _open_raster_dataset,
+    _overview_level_for_downsample,
+    _raster_overview_metadata,
+    _write_rio,
+)
 from geoutils.raster.referencing import (
     _cast_nodata,
     _cast_pixel_interpretation,
@@ -61,9 +72,6 @@ from geoutils.raster.satimg import (
 )
 from geoutils.raster.transformation import (
     _crop_window,
-    _open_downsampled_raster,
-    _overview_level_for_downsample,
-    _raster_overview_metadata,
 )
 
 # If python38 or above, Literal is builtin. Otherwise, use typing_extensions
@@ -155,78 +163,6 @@ _default_rio_attrs = [
     "width",
     "profile",
 ]
-
-
-def _load_rio(
-    dataset: rio.io.DatasetReader,
-    only_mask: bool = False,
-    convert_to_mask: bool = False,
-    indexes: int | list[int] | None = None,
-    masked: bool = False,
-    transform: Affine | None = None,
-    shape: tuple[int, int] | None = None,
-    out_count: int | None = None,
-    **kwargs: Any,
-) -> MArrayNum:
-    r"""
-    Load specific bands of the dataset, using :func:`rasterio.read`.
-
-    Ensure that ``self.data.ndim=3`` for ease of use (needed e.g. in show).
-
-    :param dataset: Dataset to read (opened with :func:`rasterio.open`).
-    :param only_mask: Read only the dataset mask.
-    :param convert_to_mask: Whether to convert to mask after reading.
-    :param indexes: Band(s) to load. Note that rasterio begins counting at 1, not 0.
-    :param masked: Whether the mask should be read (if any exists) to use the nodata to mask values.
-    :param transform: Create a window from the given transform (to read only parts of the raster)
-    :param shape: Expected shape of the read ndarray. Must be given together with the `transform` argument.
-    :param out_count: Specify the count for a downsampled version (to be used with kwargs out_shape).
-
-    :raises ValueError: If only one of ``transform`` and ``shape`` are given.
-
-    :returns: An unmasked array if ``masked`` is ``False``, or a masked array otherwise.
-
-    \*\*kwargs: any additional arguments to rasterio.io.DatasetReader.read.
-    Useful ones are:
-    .. hlist::
-    * out_shape : to load a downsampled version, always use with out_count
-    * window : to load a cropped version
-    * resampling : to set the resampling algorithm
-    """
-    # Use the complete dataset unless a window is passed or derived from a transform
-    window = kwargs.pop("window", None)
-
-    # If out_shape is passed, no need to account for transform and shape
-    if kwargs.get("out_shape") is not None:
-        # If multi-band raster, the out_shape needs to contain the count
-        if out_count is not None and out_count > 1:
-            kwargs["out_shape"] = (out_count, *kwargs["out_shape"])
-    else:
-        if transform is not None and shape is not None:
-            if transform == dataset.transform:
-                row_off, col_off = 0, 0
-            else:
-                row_off, col_off = (round(val) for val in dataset.index(transform[2], abs(transform[4])))
-
-            window = rio.windows.Window(col_off, row_off, *shape[::-1])
-        elif sum(param is None for param in [shape, transform]) == 1:
-            raise ValueError("If 'shape' or 'transform' is provided, BOTH must be given.")
-
-    if indexes is None:
-        if only_mask:
-            data = dataset.read_masks(window=window, **kwargs)
-        else:
-            data = dataset.read(masked=masked, window=window, **kwargs)
-    else:
-        if only_mask:
-            data = dataset.read_masks(indexes=indexes, window=window, **kwargs)
-        else:
-            data = dataset.read(indexes=indexes, masked=masked, window=window, **kwargs)
-
-    if convert_to_mask:
-        return data.astype(bool)
-
-    return data
 
 
 def _cast_numeric_array_raster(
@@ -354,32 +290,78 @@ class Raster(RasterBase):
         load_data: bool = False,
         parse_sensor_metadata: bool = False,
         silent: bool = True,
-        downsample: Number = 1,
+        downsample: Number | RasterDownsampleOptions = 1,
         force_nodata: int | float | None = None,
+        *,
+        overview_level: int | None = None,
+        filesystem: Any = None,
+        storage_options: dict[str, Any] | None = None,
     ) -> None:
         """
         Instantiate a raster from a filename or rasterio dataset.
+
+        Use ``downsample`` to open a smaller raster with a downsampling factor.
+        For example, ``downsample=2`` returns about one out of 2 pixel for each axis. Alternatively, select a pixel size
+        in CRS units with ``downsample={"res": 120}``, or an exact shape (height, width) with ``downsample={"shape":
+        (64, 128)}``. To optimize file reads, downsampling uses only nearest-neighbor selection from the closest
+        suitable stored overview (reduced copy of the raster), or from the full raster if no suitable overview exists.
+        For other resampling methods, use reproject(), for example ``reproject(res=120, resampling="bilinear")``.
+
+        Use ``overview_level`` to select a stored overview explicitly. Level 0 selects the first stored overview, level
+        1 the second, and so on. The returned array uses that overview's shape, resolution and resampling. Thus,
+        ``overview_level`` cannot be combined with ``downsample``.
+
+        See :ref:`scalability-downsampling` for examples.
+
+        To open a remote file, pass an HTTPS URL or S3 address, such as ``"https://example.org/data.tif"`` or
+        ``"s3://bucket/data.tif"``.
+
+        Use ``storage_options`` to pass a dictionary of connection settings, such as credentials or a custom
+        server address. GeoUtils creates a Fsspec filesystem for you, which handles access to files on that service.
+        For example, ``storage_options={"anon": True}`` reads a public S3 bucket without login credentials.
+
+        Use ``filesystem`` if you already have a Fsspec filesystem object and want to reuse its connection
+        settings across files. Both options are optional and cannot be combined.
+
+        These settings are preserved for deferred and chunked reads.
+        See :ref:`scalability-formats` for supported formats and authentication.
 
         :param filename_or_dataset: Path to file or Rasterio dataset.
         :param bands: Band(s) to load into the object. Default loads all bands.
         :param load_data: Whether to load the array during instantiation. Default is False.
         :param parse_sensor_metadata: Whether to parse sensor metadata from filename and similarly-named metadata files.
         :param silent: Whether to parse metadata silently or with console output.
-        :param downsample: Downsampling factor (e.g., 2 selects one out of two pixels for every row/column). Rows or
-            columns that do not fill a complete interval are omitted. Default 1 keeps the native resolution. See
-            `Rasterio's overview documentation <https://rasterio.readthedocs.io/en/stable/topics/overviews.html>`_
-            for how stored overviews can make reduced reads faster.
+        :param downsample: A downsampling factor, or a dictionary containing exactly one of "factor", "res" or "shape".
+            For example, passing 2 is equivalent to {"factor": 2} and selects one pixel out of two on both axes. Passing
+            {"res": 120} sets the pixel spacing to 120 CRS units, or use an (xres, yres) pair for different spacing on
+            each axis. Passing {"shape": (64, 128)} reads 64 rows and 128 columns. Nearest selection is used for
+            optimized reads, use ``reproject()`` instead of other resamplings. "factor" and "res" preserve exact
+            pixel spacing and can thus trim extent, while "shape" adjusts pixel spacing and thus preserves extent.
+            Default 1 reads the full grid.
         :param force_nodata: Force nodata value to be used (overwrites the metadata). Default reads from metadata.
+        :param overview_level: Stored overview level, starting at 0 for the first overview. Use -1 for the full raster.
+            Cannot be combined with downsample. Default None selects an overview automatically when downsampling.
+        :param filesystem: An existing Fsspec filesystem object whose connection settings are used to open files.
+            Cannot be combined with storage_options.
+        :param storage_options: Dictionary of connection settings used to create a Fsspec filesystem from the file URL,
+            such as credentials or a custom server address. Cannot be combined with filesystem.
         """
 
         # Sets attributes as None in RasterBase
         super().__init__()
+
+        if downsample != 1 and overview_level is not None:
+            raise ValueError("downsample and overview_level cannot be used together.")
 
         # Only attributes defined from instantiation
         self._nodata = force_nodata
         self._bands = bands
         self._is_mask = is_mask
         self._masked = True
+        self._overview_level = overview_level
+        filename_or_dataset, self._filesystem = _resolve_filesystem(
+            filename_or_dataset, filesystem, storage_options, remote_default=False
+        )
 
         # This is for Raster.from_array to work.
         if isinstance(filename_or_dataset, dict):
@@ -413,28 +395,39 @@ class Raster(RasterBase):
 
         # Image is a file on disk.
         elif isinstance(filename_or_dataset, (str, pathlib.Path, rio.io.DatasetReader, rio.io.MemoryFile)):
-            downsample = _validate_downsample(downsample)
-
             # ExitStack is used instead of "with rio.open(filename_or_dataset) as ds:".
             # This is because we might not actually want to open it like that, so this is equivalent
             # to the pseudocode:
             # "with rio.open(filename_or_dataset) as ds if isinstance(filename_or_dataset, str) else ds:"
             # This is slightly black magic, but it works!
-            with ExitStack():
+            open_filename = filename_or_dataset
+            open_kwargs = {}
+            if self._filesystem is not None:
+                open_filename, open_kwargs["opener"] = _filesystem_file_options(filename_or_dataset, self._filesystem)
+            with ExitStack() as stack:
                 if isinstance(filename_or_dataset, (str, pathlib.Path)):
-                    ds: rio.io.DatasetReader = rio.open(filename_or_dataset)
+                    ds: rio.io.DatasetReader = stack.enter_context(rio.open(open_filename, **open_kwargs))
                 elif isinstance(filename_or_dataset, rio.io.DatasetReader):
                     ds = filename_or_dataset
                 # This is if it's a MemoryFile
                 else:
-                    ds = filename_or_dataset.open()
+                    ds = stack.enter_context(filename_or_dataset.open())
                     # In that case, data has to be loaded
                     load_data = True
+
+                # Select the stored grid while reading overview metadata from the full raster
+                source_dataset = ds
+                if overview_level is not None:
+                    overview_source = (
+                        open_filename if isinstance(filename_or_dataset, (str, pathlib.Path)) else source_dataset.name
+                    )
+                    ds = stack.enter_context(rio.open(overview_source, overview_level=overview_level, **open_kwargs))
 
                 self._transform = ds.transform
                 self._crs = ds.crs
                 self.gcps = ds.gcps
                 self.rpcs = ds.rpcs
+                out_shape, out_transform, factors = _downsample_grid(ds, downsample)
                 if downsample != 1 and (self.gcps[0] or self.rpcs):
                     raise NotImplementedError(
                         "Reproject GCP/RPC rasters to an affine grid before opening with downsample."
@@ -444,11 +437,11 @@ class Raster(RasterBase):
                     self._nodata = force_nodata
                 else:
                     self._nodata = ds.nodata
-                self._name = ds.name
+                self._name = str(filename_or_dataset) if self._filesystem is not None else ds.name
                 self._driver = ds.driver
                 self._tags.update(ds.tags())
                 self._profile = ds.profile
-                self._tags["block_shape"] = tuple(ds.block_shapes[0])
+                self._tags["block_shape"] = tuple(source_dataset.block_shapes[0])
 
                 # For tags saved from sensor metadata, convert from string to practical type (datetime, etc)
                 converted_tags = decode_sensor_metadata(self.tags)
@@ -457,9 +450,9 @@ class Raster(RasterBase):
                 self._tags.update(ds.tags(ns="IMAGE_STRUCTURE"))
 
                 # Cache source overview metadata before closing the file
-                overview_level = _overview_level_for_downsample(ds, downsample) if downsample > 1 else None
+                selected_level = _overview_level_for_downsample(ds, min(factors)) if downsample != 1 else overview_level
                 self._tags.pop("overview_resampling", None)
-                self._tags.update(_raster_overview_metadata(ds, overview_level))
+                self._tags.update(_raster_overview_metadata(source_dataset, selected_level))
 
                 self._area_or_point = self.tags.get("AREA_OR_POINT", None)
 
@@ -468,58 +461,53 @@ class Raster(RasterBase):
                 self._disk_dtype = ds.dtypes[0]
                 self._disk_transform = ds.transform
 
-            # Check number of bands to be loaded
-            if bands is None:
-                count = self.count
-            elif isinstance(bands, int):
-                count = 1
-            else:
-                count = len(bands)
+                # Check number of bands to be loaded
+                if bands is None:
+                    count = self.count
+                elif isinstance(bands, int):
+                    count = 1
+                else:
+                    count = len(bands)
 
-            # Compute the complete output intervals that fit inside the source raster
-            if downsample == 1:
-                out_shape = (self.height, self.width)
-            else:
-                down_width = max(1, int(np.floor(self.width / downsample)))
-                down_height = max(1, int(np.floor(self.height / downsample)))
-                out_shape = (down_height, down_width)
-                res = tuple(np.asarray(self.res) * downsample)
-                self.transform = rio.transform.from_origin(self.bbox.left, self.bbox.top, res[0], res[1])
-                self._downsample = downsample
+                # Compute the complete output intervals that fit inside the source raster
+                self._transform = out_transform
+                self._downsample = downsample.copy() if isinstance(downsample, dict) else downsample
 
-            # This will record the downsampled out_shape is data is only loaded later on by .load()
-            self._out_shape = out_shape
-            self._out_window = rio.windows.Window(0, 0, out_shape[1], out_shape[0])
-            self._out_count = count
+                # This will record the downsampled out_shape is data is only loaded later on by .load()
+                self._out_shape = out_shape
+                self._out_window = rio.windows.Window(0, 0, out_shape[1], out_shape[0])
+                self._out_count = count
 
-            if load_data:
-                if downsample > 1:
-                    # Read a suitable overview through the exact grid requested by the downsampling factor
-                    with _open_downsampled_raster(ds, downsample) as downsampled:
+                if load_data:
+                    if downsample != 1:
+                        # Read a suitable overview through the exact grid requested by the downsampling factor
+                        with _open_downsampled_raster(
+                            ds, downsample, filename=self.name, filesystem=self._filesystem
+                        ) as downsampled:
+                            self.data = _load_rio(
+                                downsampled,
+                                indexes=bands,
+                                masked=self._masked,
+                                convert_to_mask=is_mask,
+                            )
+                    else:
+                        # Mypy doesn't like the out_shape for some reason. I can't figure out why!
+                        # (erikmannerfelt, 14/01/2022)
+                        # Don't need to pass shape and transform, because out_shape overrides it
                         self.data = _load_rio(
-                            downsampled,
+                            ds,
                             indexes=bands,
                             masked=self._masked,
                             convert_to_mask=is_mask,
-                        )
-                else:
-                    # Mypy doesn't like the out_shape for some reason. I can't figure out why!
-                    # (erikmannerfelt, 14/01/2022)
-                    # Don't need to pass shape and transform, because out_shape overrides it
-                    self.data = _load_rio(
-                        ds,
-                        indexes=bands,
-                        masked=self._masked,
-                        convert_to_mask=is_mask,
-                        out_shape=out_shape,
-                        out_count=count,
-                        window=self._out_window,
-                    )  # type: ignore
+                            out_shape=out_shape,
+                            out_count=count,
+                            window=self._out_window,
+                        )  # type: ignore
 
-            # Probably don't want to use set_nodata that can update array, setting self._nodata is sufficient
-            # Set nodata only if data is loaded
-            # if nodata is not None and self._data is not None:
-            #     self.set_nodata(self._nodata)
+                # Probably don't want to use set_nodata that can update array, setting self._nodata is sufficient
+                # Set nodata only if data is loaded
+                # if nodata is not None and self._data is not None:
+                #     self.set_nodata(self._nodata)
 
         # Provide a catch in case trying to load from data array
         elif isinstance(filename_or_dataset, np.ndarray):
@@ -909,31 +897,19 @@ class Raster(RasterBase):
 
         # Read a suitable overview for a reduced grid, or use the native dataset without downsampling
         read_kwargs = kwargs.copy()
-        with ExitStack() as stack:
-            source = stack.enter_context(rio.open(self.name))
-            if self._downsample > 1:
-                dataset = stack.enter_context(_open_downsampled_raster(source, self._downsample))
-                mask = _load_rio(
-                    dataset,
-                    only_mask=True,
-                    indexes=list(valid_bands),
-                    masked=self._masked,
-                    window=self._out_window,
-                    out_shape=self._out_shape,
-                    out_count=out_count,
-                    **read_kwargs,
-                )
-            else:
-                mask = _load_rio(
-                    source,
-                    only_mask=True,
-                    indexes=list(valid_bands),
-                    masked=self._masked,
-                    window=self._out_window,
-                    out_shape=self._out_shape,
-                    out_count=out_count,
-                    **read_kwargs,
-                )
+        with _open_raster_dataset(
+            self.name, filesystem=self._filesystem, overview_level=self._overview_level, downsample=self._downsample
+        ) as dataset:
+            mask = _load_rio(
+                dataset,
+                only_mask=True,
+                indexes=list(valid_bands),
+                masked=self._masked,
+                window=self._out_window,
+                out_shape=self._out_shape,
+                out_count=out_count,
+                **read_kwargs,
+            )
 
         # Rasterio says the mask should be returned in 2D for a single band but it seems not
         mask = mask.squeeze()
@@ -980,31 +956,19 @@ class Raster(RasterBase):
         read_kwargs = kwargs.copy()
         if self._out_dtype is not None and np.dtype(self._out_dtype) != np.bool_:
             read_kwargs["out_dtype"] = self._out_dtype
-        with ExitStack() as stack:
-            source = stack.enter_context(rio.open(self.name))
-            if self._downsample > 1:
-                dataset = stack.enter_context(_open_downsampled_raster(source, self._downsample))
-                self.data = _load_rio(
-                    dataset,
-                    indexes=list(valid_bands),
-                    masked=self._masked,
-                    convert_to_mask=self._is_mask,
-                    window=self._out_window,
-                    out_shape=self._out_shape,
-                    out_count=self._out_count,
-                    **read_kwargs,
-                )
-            else:
-                self.data = _load_rio(
-                    source,
-                    indexes=list(valid_bands),
-                    masked=self._masked,
-                    convert_to_mask=self._is_mask,
-                    window=self._out_window,
-                    out_shape=self._out_shape,
-                    out_count=self._out_count,
-                    **read_kwargs,
-                )
+        with _open_raster_dataset(
+            self.name, filesystem=self._filesystem, overview_level=self._overview_level, downsample=self._downsample
+        ) as dataset:
+            self.data = _load_rio(
+                dataset,
+                indexes=list(valid_bands),
+                masked=self._masked,
+                convert_to_mask=self._is_mask,
+                window=self._out_window,
+                out_shape=self._out_shape,
+                out_count=self._out_count,
+                **read_kwargs,
+            )
 
         # Probably don't want to use set_nodata() that updates the array
         # Set nodata value with the loaded array
@@ -1787,6 +1751,8 @@ class Raster(RasterBase):
             "_out_dtype",
             "_disk_transform",
             "_downsample",
+            "_overview_level",
+            "_filesystem",
             "_name",
             "_driver",
             "_out_shape",
@@ -2085,6 +2051,9 @@ class Raster(RasterBase):
         gcps: list[tuple[float, ...]] | list[rio.control.GroundControlPoint] | None = None,
         gcps_crs: CRS | None = None,
         rpcs: rio.rpc.RPC | None = None,
+        *,
+        filesystem: Any = None,
+        storage_options: dict[str, Any] | None = None,
     ) -> None:
         """
         Write the raster to file.
@@ -2111,111 +2080,29 @@ class Raster(RasterBase):
             an empty list omits them.
         :param gcps_crs: CRS of the GCPs. Defaults to the stored GCP CRS, then the raster CRS.
         :param rpcs: Rational polynomial coefficients. Defaults to stored coefficients.
+        :param filesystem: An existing Fsspec filesystem object whose connection settings are used to write files.
+            Cannot be combined with storage_options.
+        :param storage_options: Dictionary of connection settings used to create a Fsspec filesystem from the
+            destination URL, such as credentials or a custom server address. Cannot be combined with filesystem.
 
         :returns: None.
         """
 
-        if co_opts is None:
-            co_opts = {}
-
-        # Set COMPRESS default value to DEFLATE
-        if "COMPRESS" not in map(str.upper, co_opts.keys()):
-            co_opts["COMPRESS"] = "DEFLATE"
-
-        # Set BIGTIFF default value to IF_SAFER, to save the output image as a BigTIFF if it might exceed 4GB.
-        if "BIGTIFF" not in map(str.upper, co_opts.keys()):
-            co_opts["BIGTIFF"] = "IF_SAFER"
-
-        meta = dict(self.tags) if self.tags is not None else {}
-        if metadata is not None:
-            meta.update(metadata)
-
-        # RPC dictionaries belong in GDAL's RPC namespace, rather than a string in the default tags
-        rpc_metadata = meta.pop("RPC", None)
-        rpcs = self.rpcs if rpcs is None else rpcs
-        if rpcs is None and rpc_metadata is not None:
-            rpcs = rio.rpc.RPC.from_gdal(rpc_metadata)
-
-        # Normalize explicit GCPs before opening the output file, preserving the legacy tuple input
-        explicit_gcps = gcps is not None
-        if gcps is None:
-            gcps = self.gcps[0]
-        if not isinstance(gcps, list):
-            raise ValueError("gcps must be a list")
-        rio_gcps = [
-            gcp if isinstance(gcp, rio.control.GroundControlPoint) else rio.control.GroundControlPoint(*gcp)
-            for gcp in gcps
-        ]
-        gcps_crs = gcps_crs or self.gcps[1] or self.crs
-        if rio_gcps and gcps_crs is None:
-            raise ValueError("gcps_crs is required when saving GCPs without a raster CRS.")
-        if explicit_gcps and rio_gcps and self.transform != rio.Affine.identity():
-            warnings.warn(
-                "A geotransform previously set is going to be cleared due to the setting of GCPs.",
-                category=UserWarning,
-            )
-
-        # Use nodata set by user, otherwise default to self's
-        nodata = nodata if nodata is not None else self.nodata
-        output_dtype = np.dtype(dtype) if dtype is not None else np.dtype(self.dtype)
-
-        # If the output is a mask, convert to uint8 before saving and force nodata to 255
-        if output_dtype == np.bool_:
-            output_dtype = np.dtype("uint8")
-            nodata = 255
-
-        # Declare type of save_data to work in all occurrences
-        save_data: NDArrayNum
-
-        # Define save_data depending on blank_value argument
-        if (self.data is None) & (blank_value is None):
-            raise AttributeError("No data loaded, and alternative blank_value not set.")
-        elif blank_value is not None:
-            if isinstance(blank_value, int) | isinstance(blank_value, float):
-                save_data = np.zeros(self.data.shape, dtype=output_dtype)
-                save_data[:] = blank_value
-            else:
-                raise ValueError("blank_values must be one of int, float (or None).")
-        else:
-            save_data = self.data
-
-        # Make nodata compatible with the requested file type before filling masked values
-        nodata = _cast_nodata(output_dtype, cast(int | float | None, nodata))
-
-        # If masked array, save with masked values replaced by nodata
-        if isinstance(save_data, np.ma.masked_array):
-            # In this case, nodata=None is not compatible, so revert to default values, only if masked values exist
-            if (nodata is None) & (np.count_nonzero(save_data.mask) > 0):
-                nodata = _default_nodata(output_dtype)
-                warnings.warn(f"No nodata set, will use default value of {nodata}", category=UserWarning)
-            # Convert masked data before filling so nodata is represented in the requested output type
-            save_data = save_data.astype(output_dtype, copy=False).filled(nodata)
-        else:
-            save_data = save_data.astype(output_dtype, copy=False)
-
-        # Cast to 3D before saving if single band
-        if self.count == 1:
-            save_data = save_data[np.newaxis, :, :]
-
-        with rio.open(
-            filename,
-            "w",
+        _write_rio(
+            self,
+            filename=filename,
             driver=driver,
-            height=self.height,
-            width=self.width,
-            count=self.count,
-            dtype=save_data.dtype,
-            crs=gcps_crs if rio_gcps else self.crs,
-            transform=None if rio_gcps or (rpcs and self.transform == rio.Affine.identity()) else self.transform,
-            gcps=rio_gcps or None,
-            rpcs=rpcs,
+            dtype=dtype,
             nodata=nodata,
-            **co_opts,
-        ) as dst:
-            dst.write(save_data)
-
-            # Add metadata (tags in rio)
-            dst.update_tags(**meta)
+            blank_value=blank_value,
+            co_opts=co_opts,
+            metadata=metadata,
+            gcps=gcps,
+            gcps_crs=gcps_crs,
+            rpcs=rpcs,
+            filesystem=filesystem,
+            storage_options=storage_options,
+        )
 
     @deprecate(
         removal_version=Version("0.3.0"),

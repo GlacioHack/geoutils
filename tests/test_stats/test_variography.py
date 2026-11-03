@@ -280,6 +280,28 @@ class TestVariogramPlot:
         assert not any("e" in label.get_text().lower() or "^" in label.get_text() for label in axis.get_xticklabels())
         plt.close(figure)
 
+    def test_plot__wide_log_scale(self) -> None:
+        """Checks that plot() labels powers of ten without overlapping across a wide distance range."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+        variogram = gu.Variogram(
+            lags=np.array([1, 10, 100, 1000, 10000]),
+            semivariance=np.array([0.1, 0.3, 0.6, 0.9, 1.0]),
+            counts=np.ones(5, dtype=int),
+        )
+        figure, axis = plt.subplots(figsize=(5, 4))
+        axis.set_xlim(1, 10000)
+
+        variogram.plot(ax=axis, show_counts=False)
+        figure.canvas.draw()
+
+        ticks = axis.get_xticks()
+        np.testing.assert_allclose(ticks[(ticks >= 1) & (ticks <= 10000)], [1, 10, 100, 1000, 10000])
+        labels = [label for value, label in zip(ticks, axis.get_xticklabels()) if 1 <= value <= 10000]
+        bounds = [label.get_window_extent() for label in labels]
+        assert all(left.x1 < right.x0 for left, right in zip(bounds, bounds[1:]))
+        plt.close(figure)
+
     @pytest.mark.parametrize("kind", ["semivariance", "correlation"])
     def test_plot__model_values(
         self, fitted_variogram: gu.Variogram, kind: Literal["semivariance", "correlation"]
@@ -1040,6 +1062,32 @@ class TestVariogramConversion:
         fitted_curve = axes.lines[-1]
         np.testing.assert_allclose(fitted_curve.get_ydata(), result.variogram(fitted_curve.get_xdata()))
         pyplot.close(axes.figure)
+
+    @pytest.mark.parametrize("xscale", ["log", "linear"])
+    @pytest.mark.parametrize("show_counts", [False, True])
+    def test_plot__tick_spacing(self, xscale: Literal["log", "linear"], show_counts: bool) -> None:
+        """Checks that variogram and count ticks remain readable after resizing on either distance scale."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+        variogram = gu.Variogram(
+            lags=np.geomspace(20, 20_000, 12),
+            semivariance=np.linspace(0.1, 1, 12),
+            counts=np.full(12, 300_000),
+        )
+        figure, ax = plt.subplots(figsize=(5, 4))
+
+        variogram.plot(ax=ax, xscale=xscale, show_counts=show_counts)
+
+        for width in [5, 3]:
+            figure.set_size_inches(width, 4)
+            figure.canvas.draw()
+            for panel in figure.axes:
+                for axis in (panel.xaxis, panel.yaxis):
+                    labels = [label for label in axis.get_ticklabels() if label.get_visible() and label.get_text()]
+                    bounds = [label.get_window_extent() for label in labels]
+                    assert all(not first.overlaps(second) for first, second in zip(bounds[:-1], bounds[1:]))
+        assert ax.get_xscale() == xscale
+        plt.close(figure)
 
     def test_combine__flattens_nested_sum_and_uses_one_nugget(self) -> None:
         """Checks that combining a summed model adds its components properly, including nugget."""

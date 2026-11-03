@@ -39,20 +39,16 @@ For more details on file formats and their use in the cloud, see {ref}`scalabili
 (scalability-downsampling-opening)=
 ## Downsampling when opening
 
-The {func}`~geoutils.open_raster` and {func}`~geoutils.open_pointcloud` functions can be passed a `downsample` argument, which defines a
-**downsampling factor**, with a slightly different meaning for each data type.
+**Downsampling** controls how much data is read, and is available for all raster and point cloud openings, whether through GeoUtils
+{class}`~geoutils.Raster` and {class}`~geoutils.PointCloud` objects or the
+{func}`~geoutils.open_raster` and {func}`~geoutils.open_pointcloud` functions for accessors.
 
-For **rasters**, `downsample=4` samples one out of every four pixels in each dimension, dividing the total pixel
-count by about 16. A floating factor also works: `downsample=2.5` turns 30 m pixels into 75 m pixels in each
-dimension, with nearest-neighbor resampling selecting a value for each output pixel from the source grid or a suitable
-{ref}`stored overview <scalability-downsampling-overviews>`.
+As the behaviour differs slightly between raster and point cloud, we separate those below.
 
 ```{note}
-With **Dask**, passing `downsample` and `chunks` together when opening also allows later operations to process the
-reduced dataset in chunks.
+With **Dask**, combining **downsampling** and **chunked reading** when opening also allows later operations to
+process the reduced dataset in chunks.
 ```
-
-The examples use the 30 m Exploradores DEM and the Coromandel LiDAR survey.
 
 ```{code-cell} ipython3
 :tags: [remove-cell]
@@ -67,6 +63,11 @@ plt.rcParams["savefig.dpi"] = 600
 plt.rcParams["font.size"] = 9
 ```
 
+### Rasters
+
+A **downsampling factor** of 4 samples one out of every four pixels in each dimension, dividing the total pixel
+count by about 16.
+
 ```{code-cell} ipython3
 import geoutils as gu
 
@@ -78,10 +79,27 @@ print("Downsampled raster pixels:", ds_coarse.size)
 print("Sample stays lazy:", ds_coarse.chunks is not None)
 ```
 
-For **point clouds**, using `downsample` selects a random sample of size the total number of points divided by the downsampling factor.
-For example, `downsample=2.5` selects about 40% of the points.
-For **COPC**, GeoUtils first selects {ref}`levels of detail <scalability-downsampling-copc>` from coarse to fine
-until enough points are available, then samples those points to the requested count.
+Floating factors also work: a **downsampling factor** of 2.5 turns 30 m pixels into 75 m pixels in each dimension,
+with nearest-neighbor resampling.
+
+Downsampled values are automatically selected from a {ref}`stored overview <scalability-downsampling-overviews>` when available.
+
+We follow [GDAL's default nearest-neighbor criterion](https://gdal.org/en/stable/api/gdalrasterband_cpp.html):
+use the coarsest overview whose downsampling factor is at most **1.2 times the requested factor**.
+If no overview qualifies, we read the full-resolution raster.
+
+Alternatively, pass a dictionary with one option:
+
+- **Factor**: `downsample={"factor": 4}` is equivalent to a downsampling factor of 4.
+- **Resolution**: `downsample={"res": (120, 180)}` sets the x/y pixel spacing in CRS units.
+- **Shape**: `downsample={"shape": (512, 1024)}` sets the number of rows and columns.
+
+Note that factor and resolution preserve exact pixel spacing and trim incomplete intervals at the right or bottom edge, changing the extent slightly,
+while an output shape adjusts spacing to preserve the extent.
+
+### Point clouds
+
+A **downsampling factor** of 4 selects a random sample containing about one quarter of the points.
 
 ```{code-cell} ipython3
 point_path = gu.examples.get_path("coromandel_lidar")
@@ -92,9 +110,14 @@ print("Sampled points:", ds_sample.pc.point_count)
 print("Sample stays lazy:", ds_sample.chunks is not None)
 ```
 
-For rasters, dimensions are rounded down to complete sampling intervals, omitting an incomplete interval
-at the right or bottom edge. Downsampling leaves the source file unchanged, and is also available
-when opening {class}`~geoutils.Raster` and {class}`~geoutils.PointCloud` objects.
+Floating factors also work: a **downsampling factor** of 2.5 selects about 40% of the points.
+Alternatively, pass a dictionary with exactly one option:
+
+- **Factor**: `downsample={"factor": 2.5}` selects the same sample.
+- **Sample size**: `downsample={"size": 1000}` selects at most 1000 points.
+
+For **COPC**, GeoUtils first selects {ref}`levels of detail <scalability-downsampling-copc>` from coarse to fine
+until enough points are available, then samples those points to the requested count.
 
 ```{code-cell} ipython3
 :tags: [remove-cell]
@@ -167,7 +190,7 @@ variogram.to_dataframe().head()
 ## Raster overviews
 
 GeoUtils **reads suitable raster overviews** in GeoTIFFs/COGs through [Rasterio](https://rasterio.readthedocs.io/en/stable/) when specifying an overview level,
-or when opening with `downsample`,.
+or when opening with downsampling.
 
 [Overviews](https://rasterio.readthedocs.io/en/stable/topics/overviews.html) are coarser copies stored inside or beside a raster file, avoid reading and
 resampling the full-resolution data.
@@ -239,7 +262,7 @@ files.cleanup()
 ## Point cloud levels of detail
 
 GeoUtils **reads suitable levels of detail** in COPCs through [LasPy](https://laspy.readthedocs.io/en/latest/) when specifying a level of detail,
-or when opening with `downsample`.
+or when opening with downsampling.
 
 [Levels of detail](https://copc.io/) are coarser point samples stored in a COPC's octree, a hierarchy of progressively smaller spatial cells,
 avoiding reading every point. They select original points, preserving their coordinates, values and attributes.

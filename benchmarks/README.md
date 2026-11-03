@@ -77,6 +77,7 @@ results/
 ### Working with our ASV benchmarks locally
 
 Below a short summary on how to use our benchmarks locally, including both typical ASV commands and our custom routines.
+Run these commands from the repository root.
 
 To run a benchmark while developing:
 
@@ -93,15 +94,28 @@ To compare the performance a new implementation with that of the `main` branch: 
 asv continuous main HEAD -b 'grid_idw_numba_inmem__rastersize.time_operation'
 ```
 
-To save the results and generate the HTML report locally:
+To save one benchmark's measurements and generate ASV's HTML report locally, pass `--set-commit-hash HEAD`.
+Without it, `-E existing` runs the benchmark but does not save measurements. Omit the method name to record all
+three metrics: operation time, end-to-end time and memory increase.
+For a development branch, add its name to `branches` in `asv.conf.json` before publishing.
 
 ```bash
-asv run --show-stderr -E existing --bench 'grid_idw_numba_inmem__rastersize.time_operation'
+asv run --show-stderr -E existing --set-commit-hash HEAD --bench 'grid_idw_numba_inmem__rastersize'
+asv publish
+```
+
+Then open `benchmarks/results/asv/html/asv/index.html`.
+
+Our custom comparison website requires all comparison benchmarks and all three metrics from the same commit,
+machine and environment. To build it, record the full suite with `GEOUTILS_ASV_PR_CHECK` unset:
+
+```bash
+asv run --show-stderr -E existing --set-commit-hash HEAD
 asv publish
 python -m benchmarks.asv_suite.render_results
 ```
 
-Then open `results/asv/html/index.html`.
+Then open `benchmarks/results/asv/html/index.html`.
 
 To visualize the rendering of the GitHub page without running benchmarks, generate fake results and render them locally with:
 

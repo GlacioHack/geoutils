@@ -30,6 +30,7 @@ dependencies:
   - s3fs # For S3 point cloud files
 
   # I/O
+  - fiona>=1.10 # For configured vector filesystems
   - pyarrow>=14 # For GeoParquet support
   - laspy # For LAS file support
   - lazrs-python # For LAZ file support
@@ -60,6 +61,7 @@ dependencies:
   - pdal>=2.10  # To benchmark functionalities against PDAL
 
   # Test dependencies
+  - python-pdal # For COPC test files and PDAL reference comparisons
   - pytest>=8,<10
   - pytest-xdist
   - pytest-lazy-fixtures

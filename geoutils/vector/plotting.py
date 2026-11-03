@@ -54,47 +54,90 @@ def _create_colorbar_axes(ax: matplotlib.axes.Axes) -> matplotlib.axes.Axes:
     return ax.inset_axes((1.02, 0, 0.05, 1))
 
 
-def _tick_labels_overlap(ax: matplotlib.axes.Axes, axis_name: Literal["x", "y"]) -> bool:
-    """Check whether adjacent visible tick labels overlap along an axes dimension."""
+def _spaced_tick_locator(locator: Any) -> Any:
+    """Thin a locator's ticks to fit their formatted labels on every draw."""
 
-    labels = ax.get_xticklabels() if axis_name == "x" else ax.get_yticklabels()
-    visible_labels = [label for label in labels if label.get_visible() and label.get_text()]
-    if len(visible_labels) < 2:
-        return False
+    from copy import copy
 
-    # Compare neighboring labels in display coordinates, where their rendered text size is known
-    renderer = ax.figure.canvas.get_renderer()
-    label_boxes = [label.get_window_extent(renderer=renderer) for label in visible_labels]
-    coordinate = "x0" if axis_name == "x" else "y0"
-    label_boxes.sort(key=lambda box: getattr(box, coordinate))
-    return any(first.overlaps(second) for first, second in zip(label_boxes[:-1], label_boxes[1:]))
+    import numpy as np
+    from matplotlib.ticker import Locator
+
+    class SpacedLocator(Locator):  # type: ignore[misc]
+        """Adapt tick spacing to the axis scale, formatted text and available space."""
+
+        def set_axis(self, axis: Any) -> None:
+            """Attach both locators to the same axis."""
+
+            super().set_axis(axis)
+            locator.set_axis(axis)
+
+        def set_params(self, **kwargs: Any) -> None:
+            """Pass tick options to the original locator."""
+
+            locator.set_params(**kwargs)
+
+        def view_limits(self, vmin: float, vmax: float) -> Any:
+            """Use the original locator's automatic limits."""
+
+            return locator.view_limits(vmin, vmax)
+
+        def nonsingular(self, vmin: float, vmax: float) -> Any:
+            """Expand degenerate limits using the original locator's scale."""
+
+            return locator.nonsingular(vmin, vmax)
+
+        def __call__(self) -> Any:
+            """Choose ticks for the current view limits."""
+
+            return self.tick_values(*self.axis.get_view_interval())
+
+        def tick_values(self, vmin: float, vmax: float) -> Any:
+            """Reduce candidate ticks until their formatted labels fit along the axis."""
+
+            ticks = np.asarray(locator.tick_values(vmin, vmax))
+            ticks = ticks[np.isfinite(ticks) & (ticks >= min(vmin, vmax)) & (ticks <= max(vmin, vmax))]
+            if ticks.size < 2:
+                return ticks
+            axis = self.axis
+            horizontal = axis.axis_name == "x"
+            bounds = axis.axes.get_window_extent()
+            transform = axis.get_transform()
+            limits = transform.transform([vmin, vmax])
+            pixels_per_unit = (bounds.width if horizontal else bounds.height) / abs(limits[1] - limits[0])
+
+            # Measure a copy of the tick text without changing the labels or triggering another draw
+            renderer = axis.axes.figure._get_renderer()
+            label = copy(axis.majorTicks[0].label1)
+            padding = label.get_fontsize() * axis.axes.figure.dpi / 144
+            for stride in range(1, len(ticks)):
+                candidates = ticks[::stride]
+                sizes = []
+                for text in axis.get_major_formatter().format_ticks(candidates):
+                    label.set_text(text)
+                    text_bounds = label.get_window_extent(renderer=renderer)
+                    sizes.append(text_bounds.width if horizontal else text_bounds.height)
+
+                # Compare neighboring label widths with their separation in display coordinates
+                required = (np.asarray(sizes[:-1]) + sizes[1:]) / 2 + padding
+                spacing = np.abs(np.diff(transform.transform(candidates))) * pixels_per_unit
+                if np.all(spacing >= required):
+                    return candidates
+
+            # A very narrow panel may only have room for one labeled tick
+            return ticks[-1:]
+
+    return SpacedLocator()
 
 
 def _reduce_tick_label_overlap(ax: matplotlib.axes.Axes) -> None:
-    """Reduce automatic major tick frequency until adjacent labels no longer overlap."""
+    """Choose automatic ticks from their label widths and the available space on every draw."""
 
-    from matplotlib.ticker import AutoLocator, LinearLocator, MaxNLocator
+    from matplotlib.ticker import AutoLocator
 
-    # Lay out the artists without rasterizing the complete map whenever Matplotlib supports it
-    draw_figure = getattr(ax.figure, "draw_without_rendering", ax.figure.canvas.draw)
-    draw_figure()
-    axis_names: tuple[Literal["x", "y"], ...] = ("x", "y")
-    for axis_name, axis in zip(axis_names, (ax.xaxis, ax.yaxis)):
-        if not isinstance(axis.get_major_locator(), AutoLocator):
-            continue
-
-        # Try progressively fewer intervals while keeping at least two labeled positions
-        visible_labels = [label for label in axis.get_ticklabels() if label.get_visible() and label.get_text()]
-        for maximum_intervals in range(len(visible_labels) - 2, 0, -1):
-            if not _tick_labels_overlap(ax, axis_name):
-                break
-            axis.set_major_locator(MaxNLocator(nbins=maximum_intervals, min_n_ticks=2))
-            draw_figure()
-
-        # MaxNLocator may keep three rounded ticks even with one requested interval; fall back to the two limits
-        if _tick_labels_overlap(ax, axis_name):
-            axis.set_major_locator(LinearLocator(numticks=2))
-            draw_figure()
+    # Leave explicitly supplied locators unchanged
+    for axis in (ax.xaxis, ax.yaxis):
+        if isinstance(axis.get_major_locator(), AutoLocator):
+            axis.set_major_locator(_spaced_tick_locator(axis.get_major_locator()))
 
 
 def _get_reference_bbox(reference: Any) -> rio.coords.BoundingBox | None:

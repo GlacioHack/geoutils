@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
@@ -26,7 +25,6 @@ from tests.accessor_helpers import (
 from tests.accessor_helpers import (
     mixed_dataset as mixed_dataset,
 )
-from tests.test_pointcloud.test_pd_accessor import TestPointCloudAccessor as PointCloudAccessorReference
 
 
 @pytest.fixture
@@ -66,50 +64,22 @@ def pointcloud_file(tmp_path: Any) -> Any:
 class TestDataArrayPointCloudAccessor:
     """Test module for the Xarray ``pc`` accessor."""
 
-    # Reuse the point locations and values from the Pandas accessor tests
-    arr_points = PointCloudAccessorReference.arr_points
-    gdf = PointCloudAccessorReference.gdf
-    fn_las = PointCloudAccessorReference.fn_las
-
-    def test_accessor(self) -> None:
-        """Checks that point cloud metadata, values and conversion are exposed through the accessor."""
-
-        # We convert the shared GeoDataFrame to a Xarray point cloud with z as the active values
-        ds = gu.PointCloud(self.gdf, data_name="z").to_xarray()
-
-        # Compare the accessor view with the underlying array
-        assert ds.pc.data_name == "z"
-        assert ds.pc.point_count == len(ds)
-        np.testing.assert_array_equal(ds.pc.data, ds.data)
-        assert isinstance(ds.pc.to_geoutils(), gu.PointCloud)
-
-    def test_open_pointcloud(self, tmp_path: Path) -> None:
-        """Checks that a point file opens as a DataArray per default."""
-
-        # We write the point fixture to a point file
-        filename = tmp_path / "test.gpkg"
-        self.gdf.to_file(filename)
-
-        # Then open it eagerly and check its type, loading state and exact point cloud equality
-        ds = gu.open_pointcloud(filename, data_name="z", load=True)
-        assert isinstance(ds, xr.DataArray)
-        assert ds.pc.is_loaded
-        assert ds.pc.to_geoutils().pointcloud_equal(gu.PointCloud(self.gdf, data_name="z"))
-
     @pytest.mark.parametrize("suffix", ["las", "parquet", "gpkg"])
     @pytest.mark.parametrize(
         "selection", [slice(2, 5), slice(None, None, -2), [3, 2, 3], slice(0, 0), slice(2, 5, -1), []]
     )
-    @pytest.mark.parametrize("downsample", [1, 2.5])
+    @pytest.mark.parametrize("downsample", [1, 2.5, {"factor": 2.5}, {"size": 4}])
     def test_open_pointcloud__deferred_reads(
-        self, tmp_path: Path, suffix: str, selection: Any, downsample: float
+        self, tmp_path: Path, suffix: str, selection: Any, downsample: Any
     ) -> None:
         """Checks that point cloud reads and row selections are deferred."""
         if suffix == "las":
             pytest.importorskip("laspy")
         elif suffix == "parquet":
             pytest.importorskip("pyarrow")
-        from geoutils.pointcloud import las, loading, parquet
+        import pyogrio
+
+        from geoutils.pointcloud import las, parquet
 
         # Write point cloud with integer attributes
         name = "Z" if suffix == "las" else "height"
@@ -134,7 +104,7 @@ class TestDataArrayPointCloudAccessor:
         module, reader = {
             "las": (las, "_read_las_records"),
             "parquet": (parquet, "_read_point_parquet_group"),
-            "gpkg": (loading.pyogrio, "read_dataframe"),
+            "gpkg": (pyogrio, "read_dataframe"),
         }[suffix]
         with patch.object(module, reader, wraps=getattr(module, reader)) as reads:
             source = gu.open_pointcloud(filename, data_name=name, columns="all", downsample=downsample)
@@ -186,7 +156,17 @@ class TestDataArrayPointCloudAccessor:
         xr.testing.assert_identical(result.load(), expected)
         np.testing.assert_array_equal(result.pc.to_geoutils().geometry.z, cloud.geometry.z)
 
-    @pytest.mark.parametrize("options", [{}, {"level": 0}, {"level": 99}, {"downsample": 4.5}])
+    @pytest.mark.parametrize(
+        "options",
+        [
+            {},
+            {"level": 0},
+            {"level": 99},
+            {"downsample": 4.5},
+            {"downsample": {"factor": 4.5}},
+            {"downsample": {"size": 20_000}},
+        ],
+    )
     def test_open_pointcloud__deferred_copc(self, copc_file: Path, options: dict[str, Any]) -> None:
         """Checks that COPC reads and row selections are deferred."""
         from geoutils.pointcloud import las
@@ -240,18 +220,6 @@ class TestDataArrayPointCloudAccessor:
                 assert not result.pc.is_loaded
                 xr.testing.assert_identical(result.load(), getattr(eager.pc, method)(bounds))
                 assert not source.pc.is_loaded
-
-    def test_from_xyz(self) -> None:
-        """Checks that DataArray construction from X/Y/Z arrays."""
-
-        # We create a DataArray from X/Y/Z arrays
-        ds = gu.DataArrayPointCloudAccessor.from_xyz(
-            x=self.arr_points[:, 0], y=self.arr_points[:, 1], z=self.arr_points[:, 2], crs=4326, data_name="z"
-        )
-
-        # Check DataArray type and exact equality
-        assert isinstance(ds, xr.DataArray)
-        assert ds.pc.to_geoutils().pointcloud_equal(gu.PointCloud(self.gdf, data_name="z"))
 
     def test_from_xyz__values_coords_attrs(self) -> None:
         """Checks that separate arrays preserve dtypes and attributes."""
@@ -588,30 +556,6 @@ class TestDatasetPointCloudAccessor:
 
     @pytest.mark.parametrize("lazy", [False, True])
     @pytest.mark.parametrize(
-        "method,options,with_mask,compare_outputs",
-        [
-            pytest.param(
-                "variogram",
-                {
-                    "n_pairs": 12,
-                    "strategy": "kdtree",
-                    "anchors_per_round": 32,
-                    "n_runs": 2,
-                    "bins": [0, 2, 4, 8],
-                    "min_lag": 0.1,
-                    "max_lag": 8,
-                    "estimator": np.mean,
-                    "random_state": 7,
-                    # Use the same pair storage for strict metadata comparisons
-                    "force_output_to_memory": True,
-                },
-                True,
-                assert_variograms_equal,
-                id="variogram",
-            ),
-        ],
-    )
-    @pytest.mark.parametrize(
         "variables,coordinates,random_state",
         [
             (None, "names", "seed"),
@@ -622,10 +566,6 @@ class TestDatasetPointCloudAccessor:
     def test_methods__dict_outputs(
         self,
         mixed_dataset: xr.Dataset,
-        method: str,
-        options: dict[str, Any],
-        with_mask: bool,
-        compare_outputs: Callable[[dict[str, Any], dict[str, Any]], None],
         variables: list[str] | None,
         coordinates: str,
         random_state: str,
@@ -651,11 +591,22 @@ class TestDatasetPointCloudAccessor:
             source.easting.attrs["axis"] = "X"
             source.northing.attrs["axis"] = "Y"
 
-        # Copy the method options and optionally exclude row 2 with the same mask for both calculations
+        # Share sampling options and mask
         names = list(source.pc.compatible_variables.keys()) if variables is None else variables
-        options = options.copy()
-        if with_mask:
-            options["mask"] = np.arange(9) != 2
+        options: dict[str, Any] = {
+            "n_pairs": 12,
+            "strategy": "kdtree",
+            "anchors_per_round": 32,
+            "n_runs": 2,
+            "bins": [0, 2, 4, 8],
+            "min_lag": 0.1,
+            "max_lag": 8,
+            "estimator": np.mean,
+            "random_state": 7,
+            "mask": np.arange(9) != 2,
+            # Use the same pair storage for strict metadata comparisons
+            "force_output_to_memory": True,
+        }
 
         # Save the in-memory source for independent DataArray calculations
         reference = source
@@ -684,34 +635,30 @@ class TestDatasetPointCloudAccessor:
         # 2/ Run Dataset and DataArray methods with the same mask, bins and random state
         # Run the DataArray method per variable name, using a seed or one shared random generator
         reference_options = options.copy()
-        if "random_state" in reference_options:
-            reference_options["random_state"] = 7 if random_state == "seed" else np.random.default_rng(7)
-        expected = {name: getattr(reference[name].pc, method)(**reference_options) for name in names}
+        reference_options["random_state"] = 7 if random_state == "seed" else np.random.default_rng(7)
+        expected = {name: reference[name].pc.variogram(**reference_options) for name in names}
 
         # We reset the random state and pass bin edges as an iterator
         # The Dataset call must reuse those edges and process variables in the same order as the reference
-        if "random_state" in options:
-            options["random_state"] = 7 if random_state == "seed" else np.random.default_rng(7)
-        if "bins" in options and not isinstance(options["bins"], str):
-            options["bins"] = iter(options["bins"])
+        options["random_state"] = 7 if random_state == "seed" else np.random.default_rng(7)
+        options["bins"] = iter(options["bins"])
 
         # Run the Dataset method while recording any reads of chunked inputs
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(1)) if lazy else nullcontext():
-            result = getattr(source.pc, method)(variables=variables, **options)
+            result = source.pc.variogram(variables=variables, **options)
         if lazy:
             # Check that selected tasks ran without reading the unused field or changing the lazy source arrays
             assert tasks
             assert not read_unused.called
             assert all(source[name].chunks for name in source.pc.compatible_variables)
             assert source.dem.chunks
-            if method == "variogram":
-                assert all(isinstance(variogram.semivariance, np.ndarray) for variogram in result.values())
+            assert all(isinstance(variogram.semivariance, np.ndarray) for variogram in result.values())
 
         # 3/ Check exact equality
         assert isinstance(result, dict)
         assert list(result) == names
-        compare_outputs(result, expected)
+        assert_variograms_equal(result, expected)
         xr.testing.assert_identical(source, original)
 
     @pytest.mark.parametrize("lazy", [False, True])
@@ -1431,68 +1378,39 @@ class TestDatasetPointCloudAccessorErrors:
         with pytest.raises(ValueError, match="Untouched variables.*dem"):
             mixed_dataset.pc.grid(res=2, resampling="nearest")
 
-    def test_grid__error_unknown_lazy_extent(self, mixed_dataset: xr.Dataset) -> None:
+    @pytest.mark.parametrize(
+        "method,args,options,message",
+        [
+            ("grid", (), {"res": 2, "resampling": "nearest"}, "explicit bounds"),
+            ("crop", ((0, 0, 3, 4),), {}, "compute coordinates"),
+            ("clip", ((0, 0, 3, 4),), {}, "compute coordinates"),
+            ("subsample", (4,), {}, "compute the mask"),
+        ],
+    )
+    def test_methods__error_implicit_loading(
+        self, mixed_dataset: xr.Dataset, method: str, args: tuple[Any, ...], options: dict[str, Any], message: str
+    ) -> None:
         """
-        Checks an error is raised when gridding lazy points without explicit bounds.
+        Checks an error is raised before computing unknown point bounds or a selection from lazy inputs.
 
-        We need this additional test for requiring grid bounds when finding the point extent would load lazy X/Y.
+        Gridding needs explicit bounds. For row selection, crop() and clip() need loaded coordinates, while subsample()
+        needs a loaded mask to determine the selected row count.
         """
 
         pytest.importorskip("dask")
         from dask.callbacks import Callback
 
-        # We chunk the points so finding their extent would require computing X/Y coordinates
+        # Chunk values and coordinates
         lazy = mixed_dataset.chunk({"point": 4})
+        if method == "subsample":
+            options = dict(options, mask=lazy.point_z > 2)
 
-        # Request a grid without bounds and check an error is raised while recording any Dask tasks
+        # Check errors without reading data
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(1)):
-            with pytest.raises(ValueError, match="explicit bounds"):
-                lazy.pc.grid(res=2, resampling="nearest")
+            with pytest.raises(ValueError, match=message):
+                getattr(lazy.pc, method)(*args, **options)
 
-        # Check that no tasks ran and point values and coordinates stayed lazy
+        # Check source arrays stay lazy
         assert not tasks
         assert lazy.point_z.chunks and lazy.x_point.chunks
-
-    @pytest.mark.parametrize("method", ["crop", "clip"])
-    def test_methods__error_lazy_coordinates(self, mixed_dataset: xr.Dataset, method: str) -> None:
-        """Checks an error is raised before implicitly computing lazy coordinates for row selection."""
-
-        pytest.importorskip("dask")
-        from dask.callbacks import Callback
-
-        # We chunk point values and X/Y so finding the selected row count would require reading coordinates
-        lazy = mixed_dataset.chunk({"point": 4})
-
-        # Request a spatial selection and check an error is raised while recording any Dask tasks
-        tasks = []
-        with Callback(pretask=lambda *args: tasks.append(1)):
-            with pytest.raises(ValueError, match="compute coordinates"):
-                getattr(lazy.pc, method)((0, 0, 3, 4))
-
-        # Check that no tasks ran and point values and coordinates stayed lazy
-        assert not tasks
-        assert lazy.point_z.chunks and lazy.x_point.chunks
-
-    def test_subsample__error_lazy_mask(self, mixed_dataset: xr.Dataset) -> None:
-        """
-        Checks an error is raised for subsampling with a lazy mask whose selected row count is unknown.
-
-        We need this test for requiring a loaded mask when Dataset subsampling must know how many point rows it selects.
-        """
-
-        pytest.importorskip("dask")
-        from dask.callbacks import Callback
-
-        # We chunk the points so a mask calculated from their values has an unknown selected row count
-        lazy = mixed_dataset.chunk({"point": 4})
-
-        # Subsample with the lazy mask and check an error is raised while recording any Dask tasks
-        tasks = []
-        with Callback(pretask=lambda *args: tasks.append(1)):
-            with pytest.raises(ValueError, match="compute the mask"):
-                lazy.pc.subsample(4, mask=lazy.point_z > 2)
-
-        # Check that no tasks ran and the source point values stayed lazy
-        assert not tasks
-        assert lazy.point_z.chunks

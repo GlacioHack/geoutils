@@ -58,7 +58,8 @@ Optional dependencies are grouped in the following pip extras (**`opt`** include
 
 - **`gstat`**: [SciKit-GStat](https://scikit-gstat.readthedocs.io/en/latest/) for variogram estimation and fitting,
   and [GSTools](https://geostat-framework.readthedocs.io/projects/gstools/en/stable/) and [GPyTorch](https://docs.gpytorch.ai/en/stable/) (with [PyTorch](https://pytorch.org/)) for kriging and random fields.
-- **`cloud`**: [Fsspec](https://filesystem-spec.readthedocs.io/) with HTTP and S3 support for remote file access.
+- **`cloud`**: [Fsspec](https://filesystem-spec.readthedocs.io/) with HTTP and S3 support for remote file access,
+  and [Fiona](https://fiona.readthedocs.io/) for vector reads through a configured filesystem.
 - **`io`**: [LasPy](https://laspy.readthedocs.io/en/latest/) with [Lazrs](https://github.com/tmontaigu/laz-rs) for LAS/LAZ/COPC files, [PyArrow](https://arrow.apache.org/docs/python/) with GeoPandas 1.1 and above for GeoParquet,
   and [netCDF4](https://unidata.github.io/netcdf4-python/) and [Zarr](https://zarr.readthedocs.io/) for array storage.
 - **`paral`**: [Dask](https://www.dask.org/), [Distributed](https://distributed.dask.org/en/stable/) and [Dask-GeoPandas](https://dask-geopandas.readthedocs.io/en/stable/) for out-of-memory and distributed parallel execution.

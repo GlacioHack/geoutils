@@ -226,6 +226,8 @@ def _plot_raster(
     data = display.data if display.count == 1 else display.data[np.array(bands) - 1, :, :]
     if is_dask_array(data):
         data = cast(Any, data).compute()
+    if display.count == 1 and data.ndim == 3:
+        data = data[0]
 
     # Reorder RGB(A) bands for imshow and omit their colorbar
     if isinstance(bands, abc.Sequence):

@@ -15,6 +15,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     strategy:
+      fail-fast: false
       matrix:
         os: ["ubuntu-latest", "macos-latest", "windows-latest"]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
@@ -39,7 +40,7 @@ jobs:
         channel-priority: strict
         activate-environment: geoutils-dev
 
-    - uses: astral-sh/setup-uv@v10.3.2
+    - uses: astral-sh/setup-uv@v10.3.3
       with:
         enable-cache: true
 
@@ -54,7 +55,7 @@ jobs:
         path: ${{ env.CONDA }}/envs
         key: conda-${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.dep-level }}-${{ env.cache_date }}-${{ hashFiles('dev-environment.yml') }}-${{ env.CACHE_NUMBER }}
       env:
-        CACHE_NUMBER: 3 # Increase this value to reset cache if environment.yml has not changed
+        CACHE_NUMBER: 4 # Increase this value to reset cache if environment.yml has not changed
       id: cache
 
     # The trick below is necessary because the generic environment file does not specify a Python version, and ONLY
@@ -64,8 +65,11 @@ jobs:
     - name: Install base environment with a fixed Python version
       if: steps.cache.outputs.cache-hit != 'true'
       env:
+        # Fiona 1.10.1 has no Python 3.14 wheels, so install it with Conda
         # Use Conda's OpenMP runtime for PyTorch and its numerical dependencies
-        CI_EXTRA_DEPS: ${{ runner.os != 'Linux' && matrix.dep-level != 'base' && 'gdal<3.13.3,pytorch-cpu>=2,gpytorch>=1.11' || 'gdal<3.13.3' }}
+        CI_EXTRA_DEPS: >-
+          gdal<3.13.3${{ matrix.dep-level != 'base' && ',fiona>=1.10' || '' }}${{
+          runner.os != 'Linux' && matrix.dep-level != 'base' && ',pytorch-cpu>=2,gpytorch>=1.11' || '' }}
       run: |
         mamba install pyyaml python=${{ matrix.python-version }}
         python .github/scripts/generate_yml_env_fixed_py.py --pyv ${{ matrix.python-version }} --add "${{ env.CI_EXTRA_DEPS }}" "environment.yml"
@@ -97,6 +101,7 @@ jobs:
         conda list
 
     - name: Test with pytest
+      if: ${{ runner.os != 'Windows' }}
       env:
         # Render plots without a GUI backend (avoid Tcl/Tk issues on Windows)
         MPLBACKEND: Agg
@@ -105,6 +110,21 @@ jobs:
         NUMBA_CACHE_DIR: ${{ runner.temp }}
       # Module execution also collects tests from the repository-only benchmarks package
       run: python -m pytest -ra --durations=30 --cov=geoutils/ --cov-report=lcov
+
+    - name: Test with pytest shutdown diagnostics
+      if: ${{ runner.os == 'Windows' }}
+      env:
+        MPLBACKEND: Agg
+        NUMBA_JIT_COVERAGE: "1"
+        NUMBA_CACHE_DIR: ${{ runner.temp }}
+        PYTHONFAULTHANDLER: "1"
+        PYTHONUNBUFFERED: "1"
+      run: |
+        $PSNativeCommandUseErrorActionPreference = $false
+        python .github/scripts/run_pytest_diagnostics.py -ra --durations=30 --cov=geoutils/ --cov-report=lcov
+        $testExitCode = $LASTEXITCODE
+        Write-Host "[pytest diagnostics] Python process exit code: $testExitCode"
+        exit $testExitCode
 
     - name: Upload coverage to Coveralls
       uses: coverallsapp/github-action@v2

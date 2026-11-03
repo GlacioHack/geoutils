@@ -9,6 +9,7 @@ import tempfile
 import warnings
 from importlib.util import find_spec
 from pathlib import Path
+from typing import Any
 
 import geopandas as gpd
 import numpy as np
@@ -116,32 +117,34 @@ class TestPointCloud:
         assert np.array_equal(pc.data, self.gdf1["b1"].values)
         assert pc.is_loaded
 
-    def test_init__downsample(self) -> None:
+    @pytest.mark.parametrize("downsample", [4, {"factor": 4}, {"size": 25}])
+    def test_init__downsample(self, downsample: Any) -> None:
         """Checks that a point cloud opening respects input downsampling."""
 
         # Downsample a loaded dataframe by a factor of four
         dataframe = _point_grid()
-        pointcloud = gu.PointCloud(dataframe, data_name="value", downsample=4)
+        pointcloud = gu.PointCloud(dataframe, data_name="value", downsample=downsample)
         expected = gu.PointCloud(dataframe, data_name="value").subsample(25, random_state=0)
 
         # Exact equality check
         assert pointcloud.point_count == 25
         assert_geodataframe_equal(pointcloud.gdf.reset_index(drop=True), expected.gdf.reset_index(drop=True))
 
-    def test_init__downsample_lazy_file(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("downsample,size", [(4, 25), ({"factor": 4}, 25), ({"size": 25}, 25), ({"size": 1}, 1)])
+    def test_init__downsample_lazy_file(self, tmp_path: Path, downsample: Any, size: int) -> None:
         """Checks that a file-backed point cloud loads its reduced row count."""
 
         # Request downsampling and check file stays unloaded
         filename = tmp_path / "points.gpkg"
         _point_grid().to_file(filename, index=False)
-        pointcloud = gu.PointCloud(filename, data_name="value", downsample=4)
+        pointcloud = gu.PointCloud(filename, data_name="value", downsample=downsample)
         assert not pointcloud.is_loaded
-        assert pointcloud.point_count == 25
+        assert pointcloud.point_count == size
 
         # Loading later applies the subsampling
         pointcloud.load()
         assert pointcloud.is_loaded
-        assert pointcloud.point_count == 25
+        assert pointcloud.point_count == size
 
     @pytest.mark.parametrize("downsample", [0, -1, np.inf, "wrong"])
     def test_open_pointcloud__error_downsample(self, downsample: object) -> None:
@@ -149,6 +152,30 @@ class TestPointCloud:
 
         with pytest.raises((TypeError, ValueError), match="downsample must be"):
             gu.PointCloud(_point_grid(2), data_name="value", downsample=downsample)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("level", [0, 1, range(2), 99])
+    def test_init__copc_level_crop(self, copc_file: Path, level: int | range) -> None:
+        """Checks that deferred crops and copies select points only from the requested COPC levels."""
+
+        # Crop a quadrant of the selected points
+        source = gu.PointCloud(copc_file, level=level)
+        expected = gu.open_pointcloud(copc_file, level=level, as_object_type="geodataframe", load=True)
+        left, bottom, right, top = source.bounds
+        bounds = (left, bottom, (left + right) / 2, (bottom + top) / 2)
+        cropped = gu.PointCloud(source).crop(bounds)
+        assert not source.is_loaded and not cropped.is_loaded
+
+        np.testing.assert_array_equal(cropped.to_array(), expected.pc.crop(bounds).pc.to_array())
+        assert not source.is_loaded
+
+    @pytest.mark.parametrize("as_cloud", [False, True])
+    def test_init__error_level_without_copc_file(self, as_cloud: bool) -> None:
+        """Checks an error is raised for COPC level selection on an in-memory point cloud."""
+
+        points = _point_grid(2)
+        source = gu.PointCloud(points, data_name="value") if as_cloud else points
+        with pytest.raises(ValueError, match="only supported for COPC"):
+            gu.PointCloud(source, data_name="value", level=0)
 
     def test_point_count__unknown_file_metadata_stays_unloaded(self, tmp_path: pathlib.Path) -> None:
         """Checks that an unknown cached point count is read without loading point data."""

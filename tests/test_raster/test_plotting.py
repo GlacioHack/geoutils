@@ -123,6 +123,47 @@ class TestPlot:
         assert all(not first.overlaps(second) for first, second in zip(label_boxes[:-1], label_boxes[1:]))
         plt.close(fig)
 
+    @pytest.mark.parametrize("layout", ["tight", "constrained"])
+    @pytest.mark.parametrize("dpi", [100, 600])
+    def test_plot__tick_spacing_after_layout(self, layout: str, dpi: int) -> None:
+        """Checks that map ticks stay readable across panels after layout changes and figure resizing."""
+
+        raster = gu.Raster.from_array(np.ones((10, 14)), Affine(2_000, 0, 500_000, 0, -2_000, 8_670_000), 32632)
+        figure, axes = plt.subplots(1, 3, figsize=(11, 3.5), dpi=dpi, layout=layout)
+        for ax in axes:
+            raster.plot(ax=ax, cbar_title="Elevation (m)", title="Reference DEM", max_pixels=None)
+
+        # Later panels and resizing can shrink maps after their first plot call
+        for width in [11, 7]:
+            figure.set_size_inches(width, 3.5)
+            figure.canvas.draw()
+            for ax in axes:
+                for axis in (ax.xaxis, ax.yaxis):
+                    labels = [label for label in axis.get_ticklabels() if label.get_visible() and label.get_text()]
+                    bounds = [label.get_window_extent() for label in labels]
+                    assert all(not first.overlaps(second) for first, second in zip(bounds[:-1], bounds[1:]))
+        plt.close(figure)
+
+    def test_plot__custom_tick_locator(self) -> None:
+        """Checks that plot() preserves explicitly supplied tick positions and labels."""
+
+        from matplotlib.ticker import FixedFormatter, FixedLocator
+
+        raster = gu.Raster.from_array(np.ones((4, 4)), Affine(10, 0, 0, 0, -10, 40), 32632)
+        figure, ax = plt.subplots()
+        locator = FixedLocator([10, 30])
+        formatter = FixedFormatter(["Left", "Right"])
+        ax.xaxis.set_major_locator(locator)
+        ax.xaxis.set_major_formatter(formatter)
+
+        raster.plot(ax=ax, max_pixels=None)
+        figure.canvas.draw()
+
+        assert ax.xaxis.get_major_locator() is locator
+        assert ax.xaxis.get_major_formatter() is formatter
+        assert [label.get_text() for label in ax.get_xticklabels()] == ["Left", "Right"]
+        plt.close(figure)
+
     def test_plot__native_single_band(self) -> None:
         """Checks that disabling the pixel limit plots every source value at the source extent."""
 
@@ -256,12 +297,15 @@ class TestPlot:
         assert ax.get_ylim() == pytest.approx((reference.bounds.bottom, reference.bounds.top))
         plt.close()
 
-    def test_plot__accessor(self) -> None:
+    @pytest.mark.parametrize("squeeze", [False, True])
+    def test_plot__accessor(self, squeeze: bool) -> None:
         """Checks that DataArrayRasterAccessor exposes the shared plotting implementation."""
 
         # Build a DataArray raster and plot a reduced grid through .rst
         values = np.arange(100, dtype=np.float32).reshape(10, 10)
         data_array = gu.DataArrayRasterAccessor.from_array(values, Affine(1, 0, 0, 0, -1, 10), 32632)
+        if not squeeze:
+            data_array = data_array.expand_dims(band=[1])
         data_array.rst.plot(max_pixels=25, add_cbar=False)
 
         assert plt.gca().get_images()[0].get_array().shape == (5, 5)

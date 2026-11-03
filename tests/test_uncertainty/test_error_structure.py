@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pickle
 from importlib.util import find_spec
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -723,17 +723,19 @@ class TestErrorStructure:
         plt.close(figure)
 
     @pytest.mark.parametrize("magnitude", [0.0, 2.0])
-    def test_plot__constant_independent(self, magnitude: float) -> None:
+    @pytest.mark.parametrize("ylabel", [None, "Elevation error variance (m²)", ""])
+    def test_plot__constant_independent(self, magnitude: float, ylabel: str | None) -> None:
         """Checks that plot() shows the variance of independent errors without empirical diagnostics."""
 
         plt = pytest.importorskip("matplotlib.pyplot")
         structure = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", magnitude)])
 
-        panels = structure.plot(return_axes=True)
+        options = {} if ylabel is None else {"ylabel": ylabel}
+        panels = structure.plot(return_axes=True, magnitude_kwargs=options)
 
         assert set(panels) == {"variance"}
         assert [bar.get_height() for bar in panels["variance"].patches] == [magnitude**2]
-        assert panels["variance"].get_ylabel() == "Error variance"
+        assert panels["variance"].get_ylabel() == ("Error variance" if ylabel is None else ylabel)
         plt.close(panels["variance"].figure)
 
     @pytest.mark.parametrize("kind", ["correlation", "semivariance"])
@@ -1012,18 +1014,13 @@ class TestErrorStructure:
                 )
         plt.close(axes["statistic"].figure)
 
-    @pytest.mark.parametrize(
-        "method,plot_kind,show_model",
-        [
-            ("plot_magnitude", "line", False),
-            ("plot_magnitude", "line", True),
-            ("plot_magnitude", "heatmap", False),
-            ("plot_magnitude", "heatmap", True),
-            ("plot", "line", True),
-            ("plot", "heatmap", True),
-        ],
-    )
-    def test_plot_magnitude__layout_override(self, method: str, plot_kind: str, show_model: bool) -> None:
+    @pytest.mark.parametrize("method", ["plot_magnitude", "plot"])
+    @pytest.mark.parametrize("plot_kind", ["auto", "line", "heatmap"])
+    @pytest.mark.parametrize("show_model", [None, False, True])
+    @pytest.mark.parametrize("cmap", [None, "magma"])
+    def test_plot_magnitude__layout_override(
+        self, method: str, plot_kind: str, show_model: bool | None, cmap: str | None
+    ) -> None:
         """Checks that line and heatmap layouts preserve magnitudes and optional model overlays through either API."""
 
         plt = pytest.importorskip("matplotlib.pyplot")
@@ -1033,28 +1030,101 @@ class TestErrorStructure:
         statistics = pd.DataFrame({"std": [1, 2, 3, 4], "count": 20}, index=index)
         magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
         structure = gu.ErrorStructure([gu.ErrorComponent("terrain", magnitude)])
-        options = {"return_axes": True} if method == "plot" else {"show_model": show_model}
+        options: dict[str, Any] = {}
+        if show_model is not None:
+            options["show_model"] = show_model
+        if cmap is not None:
+            options["cmap"] = cmap
+        if method == "plot":
+            options = {"return_axes": True, "magnitude_kwargs": options}
 
         axes = getattr(structure, method)(plot_kind=plot_kind, **options)
         axes = axes["magnitude:terrain"] if method == "plot" else axes
 
-        assert ("colorbar" in axes) == (plot_kind == "heatmap")
-        if plot_kind == "heatmap":
+        heatmap = plot_kind in {"auto", "heatmap"}
+        expected_model = show_model if show_model is not None else not heatmap
+        assert ("colorbar" in axes) == heatmap
+        if heatmap:
             np.testing.assert_array_equal(axes["statistic"].collections[0].get_array(), [[1, 3], [2, 4]])
-            assert any(isinstance(item, QuadContourSet) for item in axes["statistic"].collections) == show_model
+            assert axes["statistic"].collections[0].cmap.name == (cmap or "Purples")
+            assert any(isinstance(item, QuadContourSet) for item in axes["statistic"].collections) == expected_model
+            suffix = "" if expected_model else "; not shown"
+            labels = [text.get_text() for text in axes["statistic"].get_legend().get_texts()]
+            assert labels == ["Empirical (STD)", f"Model (linear interpolation{suffix})"]
+            if not expected_model:
+                axes["statistic"].figure.canvas.draw()
+                legend = axes["statistic"].get_legend()
+                assert legend.get_window_extent().x0 >= axes["statistic"].get_window_extent().x0
         else:
             lines = axes["statistic"].lines
-            assert len(lines) == 2 * (1 + show_model)
+            assert len(lines) == 2 * (1 + expected_model)
             for slope, fitted in zip([2.0, 3.0], lines[2:]):
                 angles = np.interp(fitted.get_xdata(), [0.5, 1.5], [0.0, 1.0])
                 np.testing.assert_allclose(fitted.get_ydata(), magnitude.predict({"angle": angles, "slope": slope}))
         assert [bar.get_height() for bar in axes["count_x"].patches] == [40, 40]
         plt.close(axes["statistic"].figure)
 
+    @pytest.mark.parametrize("method", ["plot_magnitude", "plot"])
+    @pytest.mark.parametrize("statistic", ["std", "nmad"])
+    @pytest.mark.parametrize("model", ["piecewise_linear", "linear", quadratic_spread])
+    def test_plot_magnitude__heatmap_legend_models(self, method: str, statistic: str, model: Any) -> None:
+        """Checks that heatmap legends name the estimator and fitted model without drawing contours."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+        from matplotlib.contour import QuadContourSet
+
+        index = pd.MultiIndex.from_product([np.arange(3.0), np.arange(3.0)], names=["x", "y"])
+        x, y = np.meshgrid(np.arange(3.0), np.arange(3.0), indexing="ij")
+        values = 1 + 2 * (x**2 + y**2)
+        statistics = pd.DataFrame({statistic: values.ravel(), "count": 20}, index=index)
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics, model=model)
+        structure = gu.ErrorStructure([gu.ErrorComponent("terrain", magnitude)])
+        options = {"return_axes": True} if method == "plot" else {}
+
+        axes = getattr(structure, method)(**options)
+        axes = axes["magnitude:terrain"] if method == "plot" else axes
+
+        model_name = "linear interpolation" if model == "piecewise_linear" else magnitude.model_name
+        labels = [text.get_text() for text in axes["statistic"].get_legend().get_texts()]
+        assert labels == [f"Empirical ({statistic.upper()})", f"Model ({model_name}; not shown)"]
+        assert not any(isinstance(item, QuadContourSet) for item in axes["statistic"].collections)
+        axes["statistic"].figure.canvas.draw()
+        legend_bounds = axes["statistic"].get_legend().get_window_extent()
+        plot_bounds = axes["statistic"].get_window_extent()
+        assert legend_bounds.x0 >= plot_bounds.x0
+        assert legend_bounds.x1 <= plot_bounds.x1
+        plt.close(axes["statistic"].figure)
+
+    @pytest.mark.parametrize("model", ["piecewise_linear", "linear"])
+    @pytest.mark.parametrize("custom_labels", [False, True])
+    def test_plot_magnitude__heatmap_legend(
+        self, model: Literal["piecewise_linear", "linear"], custom_labels: bool
+    ) -> None:
+        """Checks that heatmap legends name the estimator and hidden model and respect supplied labels."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+        index = pd.MultiIndex.from_product([[0.0, 1.0], [2.0, 3.0]], names=["angle", "slope"])
+        statistics = pd.DataFrame({"nmad": [1, 2, 3, 4], "count": 20}, index=index)
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics, model=model)
+        structure = gu.ErrorStructure([gu.ErrorComponent("terrain", magnitude)])
+        labels: dict[str, Any] = (
+            {"empirical_label": "Grouped spread", "model_label": "My magnitude model"} if custom_labels else {}
+        )
+
+        axes = structure.plot_magnitude(show_model=False, **labels)
+
+        name = "linear interpolation" if model == "piecewise_linear" else "linear"
+        expected = list(labels.values()) if custom_labels else ["Empirical (NMAD)", f"Model ({name}; not shown)"]
+        assert [text.get_text() for text in axes["statistic"].get_legend().get_texts()] == expected
+        assert len(axes["statistic"].collections) == 1
+        assert not axes["statistic"].lines
+        plt.close(axes["statistic"].figure)
+
     @pytest.mark.parametrize("dimensions", [1, 2])
     @pytest.mark.parametrize("categorical", [False, True])
     @pytest.mark.parametrize("empty_labels", [False, True])
-    def test_plot_magnitude__labels(self, dimensions: int, categorical: bool, empty_labels: bool) -> None:
+    @pytest.mark.parametrize("method", ["plot_magnitude", "plot"])
+    def test_plot_magnitude__labels(self, dimensions: int, categorical: bool, empty_labels: bool, method: str) -> None:
         """Checks that supplied axis, count and legend labels override metadata, including empty strings."""
 
         plt = pytest.importorskip("matplotlib.pyplot")
@@ -1078,7 +1148,16 @@ class TestErrorStructure:
         if empty_labels:
             labels = dict.fromkeys(labels, "")
 
-        axes = structure.plot_magnitude(**labels, empirical_label="Binned spread", model_label="Inferred magnitude")
+        plot_options = {
+            **labels,
+            "empirical_label": "Binned spread",
+            "model_label": "Inferred magnitude",
+            "show_model": True,
+        }
+        if method == "plot":
+            axes = structure.plot(magnitude_kwargs=plot_options, return_axes=True)["magnitude:terrain"]
+        else:
+            axes = structure.plot_magnitude(**plot_options)
 
         assert axes["statistic"].get_xlabel() == labels["xlabel"]
         assert axes["statistic"].get_ylabel() == labels["ylabel"]

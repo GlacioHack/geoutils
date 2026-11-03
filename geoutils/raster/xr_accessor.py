@@ -25,245 +25,27 @@ from __future__ import annotations
 import threading
 import warnings
 from collections.abc import Hashable, Mapping, Sequence
-from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 import rasterio
-import rioxarray as rioxr
 import xarray as xr
 from affine import Affine
 from pyproj import CRS as PyprojCRS
 from rasterio.crs import CRS
 from rioxarray.exceptions import MissingSpatialDimensionError
 from rioxarray.rioxarray import affine_to_coords
-from xarray.conventions import encode_cf_variable
-from xarray.core.utils import dict_equiv
 
-from geoutils._config import config
 from geoutils._dispatch import is_dask_array
-from geoutils._misc import _validate_downsample, import_optional, silence_rasterio_message
-from geoutils._typing import DTypeLike, MArrayNum, NDArrayBool, NDArrayNum, Number
+from geoutils._misc import import_optional
+from geoutils._typing import DTypeLike, MArrayNum, NDArrayBool, NDArrayNum
 from geoutils._xarray import _rebuild_dataset, _select_dataset_variables
 from geoutils.raster.base import RasterBase
-from geoutils.raster.transformation import (
-    _open_downsampled_raster,
-    _overview_level_for_downsample,
-    _raster_overview_metadata,
-)
+from geoutils.raster.io import _open_raster_dataset, _set_raster_encoding, _write_raster, _write_raster_array
+from geoutils.raster.io import open_raster as open_raster
 
 if TYPE_CHECKING:
     from geoutils.stats.variography import Variogram
-
-
-# Opening raster files
-
-
-def open_raster(
-    filename: str,
-    is_mask: bool = False,
-    downsample: Number = 1,
-    *,
-    as_object_type: Literal["dataarray", "dataset"] | None = None,
-    data_name: str | None = None,
-    parse_sensor_metadata: bool = False,
-    **kwargs: Any,
-) -> xr.DataArray | xr.Dataset:
-    """
-    Open a raster as a Xarray DataArray or Dataset.
-
-    This function relies directly on rioxarray.open_rasterio(), to which keyword arguments are passed.
-
-    The raster array is always masked (i.e. forced to floating with NaNs) and squeezed (single-band dimension
-    removed).
-
-    Use ``downsample`` to open a smaller raster by sampling rows and columns at regular intervals. For example,
-    ``downsample=2`` keeps one row and one column out of every two, returning about one quarter of the source pixels.
-
-    To open an overview (reduced copy) already stored in the file, pass ``overview_level`` through ``kwargs`` passed
-    to Rioxarray. Level 0 selects the first stored overview, level 1 the second, and so on. The returned array uses
-    that overview's shape and resolution. See Rioxarray's `Cloud Optimized GeoTIFF example
-    <https://vylor.github.io/rioxarray/stable/examples/COG.html>`_.
-
-    Overviews are also used automatically with ``downsample``: GeoUtils reads the closest suitable overview and
-    resamples it to the requested factor, or reads the original raster if no suitable overview exists. ``downsample``
-    and ``overview_level`` cannot be combined because one selects an overview automatically and the other explicitly.
-    See `Rasterio's overview documentation <https://rasterio.readthedocs.io/en/stable/topics/overviews.html>`_ for how
-    reduced reads use stored overviews.
-
-    :param filename: Path to the raster file to open.
-    :param is_mask: Whether to return the raster values as booleans.
-    :param downsample: Downsampling factor (e.g., 2 selects one out of two pixels for every row/column). Rows or
-        columns that do not fill a complete interval are omitted. Default 1 keeps the native resolution.
-    :param as_object_type: Returned representation: dataarray or dataset. None uses config["raster_return_type"],
-        which defaults to dataarray. A Dataset contains one raster variable, with multiple bands on its band dimension.
-    :param data_name: Name of the DataArray or Dataset variable. Defaults to the source array name, or raster for
-        an unnamed array returned as a Dataset.
-    :param parse_sensor_metadata: Parse sensor metadata from the filename and add it to the raster attributes.
-    :param kwargs: Keyword arguments passed to :func:`rioxarray.open_rasterio`.
-    :returns: The opened raster as a DataArray or Dataset with Rioxarray georeferencing.
-    """
-
-    downsample = _validate_downsample(downsample)
-    if as_object_type is None:
-        as_object_type = config["raster_return_type"]
-    if as_object_type not in ("dataarray", "dataset"):
-        raise ValueError("Argument 'as_object_type' must be 'dataarray' or 'dataset'.")
-    if downsample > 1 and kwargs.get("overview_level") is not None:
-        raise ValueError("downsample and overview_level cannot be used together.")
-
-    # Open the native grid directly, or expose an exact reduced grid through a lazy GDAL virtual raster
-    overview_level = kwargs.get("overview_level")
-    if downsample == 1:
-        ds = rioxr.open_rasterio(filename, masked=True, **kwargs)
-    else:
-        with rasterio.open(filename) as source:
-            if source.gcps[0] or source.rpcs:
-                raise NotImplementedError("Reproject GCP/RPC rasters to an affine grid before opening with downsample.")
-            overview_level = _overview_level_for_downsample(source, downsample)
-            with _open_downsampled_raster(source, downsample) as vrt:
-                if overview_level is not None:
-                    kwargs["overview_level"] = overview_level
-                ds = rioxr.open_rasterio(vrt, masked=True, **kwargs)
-
-    # Store RPCs consistently across Rioxarray versions
-    source_context = (
-        nullcontext(filename) if isinstance(filename, rasterio.io.DatasetReaderBase) else rasterio.open(filename)
-    )
-    with source_context as source:
-        # Store overview metadata
-        overview_metadata = _raster_overview_metadata(source, overview_level)
-        disk_metadata = {"block_shape": tuple(source.block_shapes[0])}
-        ds.attrs.pop("overview_resampling", None)
-        ds.attrs.update(overview_metadata)
-        ds.attrs.update(disk_metadata)
-        if source.rpcs is not None:
-            ds.attrs["RPC"] = source.rpcs.to_gdal()
-        if source.gcps[0] and source.rpcs is not None:
-            # Rioxarray assigns WGS84 when reading RPCs; restore the CRS of the stored GCP coordinates
-            ds.rio.write_gcps(*source.gcps, inplace=True)
-
-    # Remove the band dimension if there is only one
-    if ds.sizes.get("band") == 1:
-        ds = ds.squeeze("band")  # Delete band coordinate (only one dimension)
-
-    # If input needs to be interpreted as a boolean mask
-    if is_mask:
-        ds = ds.astype(bool)
-
-    # Parse sensor filenames without reading pixel values
-    if parse_sensor_metadata:
-        from geoutils.raster.satimg import parse_and_convert_metadata_from_filename
-
-        source_name = getattr(filename, "name", filename)
-        ds.attrs.update(parse_and_convert_metadata_from_filename(str(source_name), silent=True))
-
-    # Name the raster and wrap its coordinates and lazy data in one Dataset variable when requested
-    if data_name is not None:
-        ds = ds.rename(data_name)
-    if as_object_type == "dataset":
-        dataset = ds.to_dataset(name=ds.name or "raster")
-        dataset.attrs.update(overview_metadata)
-        dataset.attrs.update(disk_metadata)
-        if parse_sensor_metadata:
-            dataset.attrs.update(ds.attrs)
-        return dataset
-    return ds
-
-
-# Writing raster files
-
-
-def _write_raster(xarray_obj: xr.DataArray | xr.Dataset, *args: Any, **kwargs: Any) -> Any:
-    """Write Xarray rasters with a scheduler lock when their values are chunked."""
-
-    # Serialize chunk writes across threads or worker processes without gathering the complete raster
-    # Dataset variables can have different chunks, so inspect each array independently
-    variables = xarray_obj.data_vars.values() if isinstance(xarray_obj, xr.Dataset) else (xarray_obj,)
-    if "lock" not in kwargs and any(variable.chunks for variable in variables):
-        import_optional("dask")
-        from dask.utils import get_scheduler_lock
-
-        kwargs["lock"] = get_scheduler_lock(xarray_obj)
-
-    # Rioxarray's Dataset writer drops dtype when combining variables, so common packing must follow the values
-    if isinstance(xarray_obj, xr.Dataset):
-        fields = ("dtype", "scale_factor", "add_offset", "_FillValue")
-        encodings = [{key: value.encoding[key] for key in fields if key in value.encoding} for value in variables]
-        if any(not dict_equiv(encoding, encodings[0]) for encoding in encodings[1:]):
-            raise ValueError(
-                "Raster variables must share storage encoding; write differently encoded variables separately."
-            )
-        if any(encodings):
-            x_dimension, y_dimension = xarray_obj.rio.x_dim, xarray_obj.rio.y_dim
-            encoded = {name: encode_cf_variable(value.variable) for name, value in xarray_obj.data_vars.items()}
-            xarray_obj = xr.Dataset(encoded, coords=xarray_obj.coords, attrs=xarray_obj.attrs)
-            if len(encoded) == 1:
-                name, variable = next(iter(xarray_obj.data_vars.items()))
-                if variable.ndim == 3:
-                    xarray_obj = variable.assign_attrs({**variable.attrs, **xarray_obj.attrs})
-                    xarray_obj.attrs.setdefault("long_name", name)
-            xarray_obj.rio.set_spatial_dims(x_dimension, y_dimension, inplace=True)
-
-    # Encode first when the file's missing-data value cannot fit exactly in the in-memory dtype
-    if isinstance(xarray_obj, xr.DataArray) and xarray_obj.encoding.get("_FillValue") is not None:
-        fill_value = np.asarray(xarray_obj.encoding["_FillValue"]).item()
-        with np.errstate(invalid="ignore", over="ignore"):
-            compatible = np.isnan(fill_value) or np.asarray(fill_value).astype(xarray_obj.dtype).item() == fill_value
-        if not compatible:
-            x_dimension, y_dimension = xarray_obj.rio.x_dim, xarray_obj.rio.y_dim
-            xarray_obj = xr.DataArray(
-                encode_cf_variable(xarray_obj.variable), coords=xarray_obj.coords, name=xarray_obj.name
-            )
-            xarray_obj.rio.set_spatial_dims(x_dimension, y_dimension, inplace=True)
-
-    return xarray_obj.rio.to_raster(*args, **kwargs)
-
-
-# Raster encoding
-
-
-def _set_raster_encoding(
-    array: xr.DataArray,
-    encoding: Mapping[str, Any],
-    nodata: int | float | None,
-    cast_nodata: bool = True,
-) -> None:
-    """
-    Copy storage encoding and adapt it to the output raster's nodata and grid mapping.
-
-    Integer storage needs a fill value for decoded NaNs. We use the array's dtype if that fill value is removed or
-    cannot fit in the stored dtype. Encoded fill values are assigned directly to avoid casting them to decoded floats.
-    """
-
-    # Copy settings before editing them, using the grid mapping belonging to the output coordinates
-    mapping = array.rio.grid_mapping
-    encoded = "_FillValue" in encoding or "dtype" in encoding
-    output_encoding = dict(encoding)
-    if mapping in array.coords:
-        output_encoding["grid_mapping"] = mapping
-
-    # Check the stored dtype without reading or computing the array's values
-    storage_dtype = np.dtype(output_encoding.get("dtype") or array.dtype)
-    with np.errstate(invalid="ignore", over="ignore"):
-        compatible = nodata is None or rasterio.dtypes.can_cast_dtype(nodata, storage_dtype)
-    if not compatible and not cast_nodata:
-        raise ValueError(f"Nodata value {nodata} incompatible with self.dtype {storage_dtype}.")
-    missing_without_fill = nodata is None and array.dtype.kind == "f" and storage_dtype.kind in "biu"
-    if not compatible or missing_without_fill:
-        for key in ("dtype", "rasterio_dtype", "_Unsigned"):
-            output_encoding.pop(key, None)
-
-    # Store encoded nodata only in encoding; unencoded arrays continue to use their attributes
-    if encoded:
-        array.attrs.pop("_FillValue", None)
-        if nodata is None:
-            output_encoding.pop("_FillValue", None)
-        else:
-            output_encoding["_FillValue"] = nodata
-    array.rio.set_encoding(output_encoding, inplace=True)
-    if not encoded:
-        array.rio.write_nodata(nodata, inplace=True)
 
 
 # DataArray accessor
@@ -288,6 +70,9 @@ class DataArrayRasterAccessor(RasterBase):
 
         # Base instantiation of Xarray accessor
         self._obj: xr.DataArray = xarray_obj
+        self._filesystem = xarray_obj.encoding.get("_filesystem")
+        self._downsample = xarray_obj.encoding.get("_downsample", 1)
+        self._overview_level = xarray_obj.encoding.get("_overview_level")
 
         # Refresh array chunks, including after writing a different disk layout
         if "chunksizes" in self._obj.encoding or "chunks" in self._obj.encoding:
@@ -478,7 +263,7 @@ class DataArrayRasterAccessor(RasterBase):
             driver = xr_driver
         # Otherwise, if filename exists, get it from Rasterio directly
         elif self.name is not None:
-            with rasterio.open(self.name) as ds:
+            with _open_raster_dataset(self.name, filesystem=self._filesystem) as ds:
                 driver = ds.driver
             # Add it to encoding
             self._obj.encoding.update({"driver": driver})
@@ -534,6 +319,7 @@ class DataArrayRasterAccessor(RasterBase):
         rpcs: rasterio.rpc.RPC | None = None,
         encoding: Mapping[str, Any] | None = None,
         name: Hashable | None = None,
+        squeeze: bool = True,
     ) -> xr.DataArray:
         """
         Create a georeferenced DataArray with optional storage encoding.
@@ -550,6 +336,7 @@ class DataArrayRasterAccessor(RasterBase):
         :param encoding: Xarray storage settings to copy, such as dtype, scale/offset, fill value and compression.
             The grid mapping is updated to reference the output coordinates.
         :param name: Name of the DataArray.
+        :param squeeze: Remove a singleton band dimension from the supplied data.
         :returns: A DataArray with the supplied values, georeferencing and metadata.
         """
 
@@ -573,7 +360,7 @@ class DataArrayRasterAccessor(RasterBase):
                 data = np.ma.getdata(masked)
 
         # Remove only a singleton band axis so one row or column still defines a raster grid
-        if data.ndim == 3 and data.shape[0] == 1:
+        if squeeze and data.ndim == 3 and data.shape[0] == 1:
             data = data[0]
 
         # Rotated grids need two-dimensional map coordinates alongside their row and column axes
@@ -644,7 +431,9 @@ class DataArrayRasterAccessor(RasterBase):
             rpcs=self.rpcs,
         )
 
-    def to_file(self, *args: Any, **kwargs: Any) -> Any:
+    def to_file(
+        self, *args: Any, filesystem: Any = None, storage_options: dict[str, Any] | None = None, **kwargs: Any
+    ) -> Any:
         """
         Write raster to file.
 
@@ -655,42 +444,16 @@ class DataArrayRasterAccessor(RasterBase):
         A user lock is passed through, including lock=False to disable chunked writing.
 
         :param args: Positional arguments passed to rioxarray.to_raster().
+        :param filesystem: An existing Fsspec filesystem object whose connection settings are used to write files.
+            Cannot be combined with storage_options.
+        :param storage_options: Dictionary of connection settings used to create a Fsspec filesystem from the
+            destination URL, such as credentials or a custom server address. Cannot be combined with filesystem.
         :param kwargs: Keyword arguments passed to rioxarray.to_raster().
 
         :returns: A deferred Dask write when compute=False with chunked writing; otherwise None.
         """
 
-        output = self._obj
-        rpcs = kwargs.pop("rpcs", None)
-        if rpcs is None:
-            rpcs = self.rpcs
-        if rpcs is not None:
-            # RPC metadata is written by Rasterio, so omit it from the default tags without modifying the input
-            output = output.copy(deep=False)
-            output.attrs.pop("RPC", None)
-            if kwargs.get("tags") is not None:
-                kwargs["tags"] = {key: value for key, value in kwargs["tags"].items() if key != "RPC"}
-
-            # Newer Rioxarray versions serialize RPCs themselves, older versions accept the Rasterio option
-            if hasattr(output.rio, "write_rpcs"):
-                output.rio.write_rpcs(rpcs, inplace=True)
-            else:
-                kwargs["rpcs"] = rpcs
-            if self.gcps[0]:
-                # Writing RPCs assigns WGS84 in Rioxarray, but Rasterio needs the GCPs' CRS to save their coordinates
-                output.rio.write_gcps(*self.gcps, inplace=True)
-        with (
-            warnings.catch_warnings(),
-            silence_rasterio_message(param_name="geotransform previously set", warn_code="CPLE_AppDefined"),
-        ):
-            if self.gcps[0] or rpcs:
-                # The identity affine placeholder can be omitted safely when a GCP/RPC model is written
-                warnings.filterwarnings(
-                    "ignore",
-                    message="The given matrix is equal to Affine.identity",
-                    category=rasterio.errors.NotGeoreferencedWarning,
-                )
-            return _write_raster(output, *args, **kwargs)
+        return _write_raster_array(self._obj, *args, filesystem=filesystem, storage_options=storage_options, **kwargs)
 
 
 # Dataset accessor
@@ -783,7 +546,9 @@ class DatasetRasterAccessor:
         """
         return self._obj[_raster_variables(self._obj)].data_vars
 
-    def to_file(self, *args: Any, **kwargs: Any) -> Any:
+    def to_file(
+        self, *args: Any, filesystem: Any = None, storage_options: dict[str, Any] | None = None, **kwargs: Any
+    ) -> Any:
         """
         Write Dataset rasters to a file.
 
@@ -793,10 +558,14 @@ class DatasetRasterAccessor:
         An explicitly supplied lock is passed through, including lock=False to disable chunked writing.
 
         :param args: Positional arguments passed to rioxarray.to_raster().
+        :param filesystem: An existing Fsspec filesystem object whose connection settings are used to write files.
+            Cannot be combined with storage_options.
+        :param storage_options: Dictionary of connection settings used to create a Fsspec filesystem from the
+            destination URL, such as credentials or a custom server address. Cannot be combined with filesystem.
         :param kwargs: Keyword arguments passed to rioxarray.to_raster().
         :returns: A deferred Dask write when compute=False with chunked writing; otherwise None.
         """
-        return _write_raster(self._obj, *args, **kwargs)
+        return _write_raster(self._obj, *args, filesystem=filesystem, storage_options=storage_options, **kwargs)
 
     def _wrap_output_raster(
         self, operation: str, variables: Sequence[str] | None, /, *args: Any, **kwargs: Any

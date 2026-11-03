@@ -41,6 +41,7 @@ from geoutils.uncertainty.error_structure import (
     ErrorComponent,
     ErrorMagnitude,
     ErrorStructure,
+    _magnitude_bin_values,
 )
 
 if TYPE_CHECKING:
@@ -669,8 +670,11 @@ def _build_error_components(
             initial_variance[item["name"]] for item in configuration if item["magnitude"] == "constant"
         )
 
-        # Cap fixed variance so the variable component has at least five percent at the reference magnitude
-        maximum_fixed = 0.95 * reference_variance
+        # Reserve five percent of variance for the variable component in every supported bin
+        magnitudes = _magnitude_bin_values(total_magnitude)
+        if magnitudes.size == 0:
+            raise ValueError("Variable magnitude contains no finite values at supported bin centers.")
+        maximum_fixed = 0.95 * float(np.min(magnitudes)) ** 2
         if fixed_variance > maximum_fixed:
             factor = maximum_fixed / fixed_variance
             for item in configuration:

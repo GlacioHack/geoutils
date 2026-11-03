@@ -20,7 +20,6 @@
 
 from __future__ import annotations
 
-import pathlib
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
@@ -38,7 +37,6 @@ from typing import (
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import pyogrio
 import xarray as xr
 from pyproj import CRS
 
@@ -1398,12 +1396,17 @@ class GeometryPointCloudBase(PointCloudBase, VectorBase):
             count = getattr(self, "_nb_points", -1)
             if count < 0:
                 # Ask the file driver to count its features without loading their geometries or columns
-                count = int(pyogrio.read_info(self.name, force_feature_count=True)["features"])
+                from geoutils.vector.io import _read_vector_info
+
+                assert self.name is not None
+                count = int(_read_vector_info(self.name, filesystem=getattr(self, "_filesystem", None))["features"])
                 if count < 0:
                     raise RuntimeError("Could not determine the number of points from the file metadata.")
                 self._nb_points = count
             downsample = getattr(self, "_downsample", 1)
-            return int(np.ceil(count / downsample))
+            from geoutils.pointcloud.io import _pointcloud_downsample_count
+
+            return _pointcloud_downsample_count(count, downsample)
         if self._is_dask:
             # Use file or construction metadata before falling back to a Dask row count
             count = _get_dataframe_attrs(self._dataset).get("point_count")
@@ -1807,7 +1810,17 @@ class GeometryPointCloudBase(PointCloudBase, VectorBase):
             result = result.assign_coords(point=self._dataset.index.to_numpy())
         return result
 
-    def to_file(self, filename: str, driver: Any = None, schema: Any = None, index: Any = None, **kwargs: Any) -> None:
+    def to_file(
+        self,
+        filename: str,
+        driver: Any = None,
+        schema: Any = None,
+        index: Any = None,
+        *,
+        filesystem: Any = None,
+        storage_options: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
         """
         Write point geometries to a vector file or native GeoParquet.
 
@@ -1815,23 +1828,35 @@ class GeometryPointCloudBase(PointCloudBase, VectorBase):
         :param driver: Optional GDAL driver for other vector formats.
         :param schema: Optional vector schema for other formats.
         :param index: Whether to write the dataframe index for other formats.
+        :param filesystem: An existing Fsspec filesystem object whose connection settings are used to write files.
+            Cannot be combined with storage_options.
+        :param storage_options: Dictionary of connection settings used to create a Fsspec filesystem from the
+            destination URL, such as credentials or a custom server address. Cannot be combined with filesystem.
         :param kwargs: Additional options passed to to_parquet() or GeoPandas to_file().
         """
-        if pathlib.Path(filename).suffix.lower() == ".parquet" or driver == "PARQUET":
-            self.to_parquet(filename, **kwargs)
-        elif self._is_dask and (pathlib.Path(filename).suffix.lower() == ".gpkg" or driver == "GPKG"):
-            # Write one partition at a time so the complete point cloud never occupies client memory
-            options = dict(kwargs)
-            for partition in self._dataset.to_delayed():
-                dataframe = partition.compute()
-                dataframe.to_file(filename, driver=driver, schema=schema, index=index, **options)
-                options["mode"] = "a"
-        else:
-            # Vector and GeoDataFrameVectorAccessor supply the concrete writer through multiple inheritance
-            super().to_file(filename, driver=driver, schema=schema, index=index, **kwargs)  # type: ignore[misc]
+
+        from geoutils.pointcloud.io import _write_geometry_pointcloud
+
+        _write_geometry_pointcloud(
+            self,
+            filename=filename,
+            driver=driver,
+            schema=schema,
+            index=index,
+            filesystem=filesystem,
+            storage_options=storage_options,
+            **kwargs,
+        )
 
     def to_parquet(
-        self, filename: str, *, chunks: int | None = None, partitioned: bool = False, compression: str = "zstd"
+        self,
+        filename: str,
+        *,
+        chunks: int | None = None,
+        partitioned: bool = False,
+        compression: str = "zstd",
+        filesystem: Any = None,
+        storage_options: dict[str, Any] | None = None,
     ) -> None:
         """
         Write point coordinates and attributes to native GeoParquet row groups or partition files.
@@ -1840,5 +1865,14 @@ class GeometryPointCloudBase(PointCloudBase, VectorBase):
         :param chunks: Maximum rows per written partition.
         :param partitioned: Whether to write separate ordered files in a directory.
         :param compression: Parquet compression codec.
+        :param filesystem: Filesystem used to open the destination. Cannot be combined with storage_options.
+        :param storage_options: Fsspec settings for the destination URL. Cannot be combined with filesystem.
         """
-        self.to_xarray().pc.to_parquet(filename, chunks=chunks, partitioned=partitioned, compression=compression)
+        self.to_xarray().pc.to_parquet(
+            filename,
+            chunks=chunks,
+            partitioned=partitioned,
+            compression=compression,
+            filesystem=filesystem,
+            storage_options=storage_options,
+        )
