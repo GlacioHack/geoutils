@@ -68,7 +68,7 @@ jobs:
         # Fiona 1.10.1 has no Python 3.14 wheels, so install it with Conda
         # Use Conda's OpenMP runtime for PyTorch and its numerical dependencies
         CI_EXTRA_DEPS: >-
-          gdal<3.13.3${{ matrix.dep-level != 'base' && ',fiona>=1.10' || '' }}${{
+          gdal<3.13.3,pdal>=2.10,python-pdal${{ matrix.dep-level != 'base' && ',fiona>=1.10' || '' }}${{
           runner.os != 'Linux' && matrix.dep-level != 'base' && ',pytorch-cpu>=2,gpytorch>=1.11' || '' }}
       run: |
         mamba install pyyaml python=${{ matrix.python-version }}
@@ -85,8 +85,8 @@ jobs:
       # Hosted runners use CPUs, so avoid loading PyTorch's CUDA libraries on Windows
       run: uv pip install --torch-backend=cpu -e ".[test,${{ matrix.dep-level }}]"
 
-    - name: Check import works
-      run: python -c "import geoutils"
+    - name: Check GeoUtils and PDAL imports
+      run: python -c "import geoutils; import pdal; print('PDAL:', pdal.__version__)"
 
     - name: Check GPyTorch imports
       if: ${{ matrix.dep-level != 'base' }}

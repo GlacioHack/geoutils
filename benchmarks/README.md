@@ -94,10 +94,9 @@ To compare the performance a new implementation with that of the `main` branch: 
 asv continuous main HEAD -b 'grid_idw_numba_inmem__rastersize.time_operation'
 ```
 
-To save one benchmark's measurements and generate ASV's HTML report locally, pass `--set-commit-hash HEAD`.
-Without it, `-E existing` runs the benchmark but does not save measurements. Omit the method name to record all
-three metrics: operation time, end-to-end time and memory increase.
-For a development branch, add its name to `branches` in `asv.conf.json` before publishing.
+To save one benchmark measurements and generate ASV HTML report locally, pass `--set-commit-hash HEAD`.
+Without it, `-E existing` runs the benchmark but does not save measurements.
+For a development branch, add its name to `branches` in `asv.conf.json` as well.
 
 ```bash
 asv run --show-stderr -E existing --set-commit-hash HEAD --bench 'grid_idw_numba_inmem__rastersize'
@@ -106,8 +105,8 @@ asv publish
 
 Then open `benchmarks/results/asv/html/asv/index.html`.
 
-Our custom comparison website requires all comparison benchmarks and all three metrics from the same commit,
-machine and environment. To build it, record the full suite with `GEOUTILS_ASV_PR_CHECK` unset:
+Our custom rendering of the HTML pages requires all comparison benchmarks and all three metrics from the same commit,
+machine and environment. To build it, run the full suite (very long!):
 
 ```bash
 asv run --show-stderr -E existing --set-commit-hash HEAD
@@ -117,14 +116,14 @@ python -m benchmarks.asv_suite.render_results
 
 Then open `benchmarks/results/asv/html/index.html`.
 
-To visualize the rendering of the GitHub page without running benchmarks, generate fake results and render them locally with:
+Otherwise, to simply visualize the rendering of the GitHub page without running benchmarks, generate fake results and render them locally with:
 
 ```bash
 python -m benchmarks.asv_suite.render_results --preview
 asv preview --browser --html-dir benchmarks/results/asv/preview
 ```
 
-Pass `--baseline-commit <commit>` to the renderer to add `comparisons/performance-change.md`, an before/after
+Pass `--baseline-commit <commit>` to the renderer to add `comparisons/performance-change.md`, a before/after
 table for in-memory, Dask and Multiprocessing end-to-end time normalized to the GDAL CLI on the same revision.
 
 To generate the benchmarking figures used both on the benchmarking webpage + linked in the RTD documentation, run:
