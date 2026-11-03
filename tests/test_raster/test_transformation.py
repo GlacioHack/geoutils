@@ -2334,8 +2334,6 @@ class TestReprojectionOperatorsChunked:
         """Checks Dask and MP match the in-memory results for various neighborhoods."""
 
         # 1/ Write raster
-
-        # We pick chunks of 3x2 to leave shorter blocks in 11x13 raster
         values = np.arange(143, dtype=np.float64).reshape(11, 13) ** 2
         values[4, 6] = np.nan
         raster = gu.Raster.from_array(
@@ -2350,10 +2348,10 @@ class TestReprojectionOperatorsChunked:
 
         # 2/ Run in-memory, Dask and MP
         expected = raster.reproject(reference, resampling=operator)
-        lazy_source = open_raster(source_path, chunks={"y": 3, "x": 2})
+        lazy_source = open_raster(source_path, chunks={"y": 5, "x": 6})
         lazy_result = lazy_source.rst.reproject(ref=reference, resampling=operator)
         unloaded_source = gu.Raster(source_path)
-        mp_config = MultiprocConfig(chunks=(3, 2), outfile=str(tmp_path / "window_result.tif"))
+        mp_config = MultiprocConfig(chunks=(5, 6), outfile=str(tmp_path / "window_result.tif"))
         mp_result = unloaded_source.reproject(reference, resampling=operator, mp_config=mp_config)
 
         # Dask lazy, and MP unloaded for input/output

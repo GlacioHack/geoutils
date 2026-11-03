@@ -17,6 +17,7 @@
 # limitations under the License.
 
 from geoutils.vector.geometric import *  # noqa
-from geoutils.vector.pd_accessor import GeoDataFrameVectorAccessor, open_vector  # noqa
+from geoutils.vector.io import open_vector  # noqa
+from geoutils.vector.pd_accessor import GeoDataFrameVectorAccessor  # noqa
 from geoutils.vector.transformation import *  # noqa
 from geoutils.vector.vector import Vector, VectorType  # noqa

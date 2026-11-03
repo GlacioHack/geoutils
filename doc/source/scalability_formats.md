@@ -136,14 +136,13 @@ load only selected column attributes, while row groups allow data to be processe
 reduces storage and transfer sizes. See [PyArrow's Parquet guide](https://arrow.apache.org/docs/python/parquet).
 
 (scalability-cloud)=
-## Reading from cloud storage
+## Working with cloud storage
 
-To read a remote file, simply pass an **HTTPS URL** or an **S3 address** to {func}`~geoutils.open_raster`,
-{func}`~geoutils.open_pointcloud` or {func}`~geoutils.open_vector`, using the same options as for a local file.
+GeoUtils uses a **consistent interface** for reading and writing remote files across all supported file formats and data structures.
 
 ```{note}
 The examples below reuse a **"mock" (i.e. simulated) HTTP/S3 server** from our tests.
-Replace `server_url` in the HTTP example and `bucket_url` in the S3 example below with your own addresses.
+Replace `server_url` in the HTTP example and `bucket_url` in the S3 example below with your own.
 ```
 
 ```{code-cell} ipython3
@@ -236,6 +235,11 @@ for name in ("elevation.tif", "survey.parquet"):
     copyfile(remote.directory / name, private_directory / name)
 ```
 
+### Reading
+
+To read a remote file, simply pass an **HTTPS URL** or an **S3 address** to {func}`~geoutils.open_raster`,
+{func}`~geoutils.open_pointcloud` or {func}`~geoutils.open_vector`, using the same options as for a local file.
+
 ```{code-cell} ipython3
 import geoutils as gu
 
@@ -267,29 +271,49 @@ Raster and vector formats use GDAL through Rasterio and Pyogrio. LAS/LAZ/COPC an
 For multidimensional Zarr and NetCDF datasets, follow
 [Xarray's cloud storage guide](https://docs.xarray.dev/en/stable/user-guide/io.html#cloud-storage).
 
-### Passwords and other credentials
+### Writing
 
-For **HTTPS with a username and password**, configure GDAL for rasters/vectors or Fsspec for LAS/LAZ/COPC and
-GeoParquet point clouds.
+To write a remote file, simply pass its **destination URL** to {meth}`~geoutils.DataArrayRasterAccessor.to_file`:
 
 ```{code-cell} ipython3
-import os
+:tags: [skip-execution]
 
+import fsspec
+
+bucket_url = "s3://bucket"
+
+# Write raster, point cloud or vector
+ds_remote.compute().rst.to_file(f"{bucket_url}/elevation_out.tif", driver="COG")
+points.pc.to_file(f"{bucket_url}/survey_out.parquet")
+features.vct.to_file(f"{bucket_url}/regions_out.parquet")
+
+print("Written files:", fsspec.filesystem("s3").glob(f"{bucket_url}/*_out.*"))
+```
+
+### Connection settings
+
+To supply **connection settings** such as credentials, two consistent options exist.
+
+Either use a dictionary with `storage_options` to let GeoUtils create a [Fsspec filesystem](https://filesystem-spec.readthedocs.io/en/latest/)
+that opens files at your URL using those settings. Alternatively, pass an existing filesystem to `filesystem` to reuse its settings.
+These two arguments cannot be combined.
+
+Both arguments are **optional**. If no connection settings are needed, simply pass the filename.
+
+For **HTTPS with a username and password**, pass an authorization header:
+
+```{code-cell} ipython3
 import fsspec
 from aiohttp import encode_basic_auth
 
-username, password = "demo", "geoutils"
 private_url = f"{server_url}/private"
-authorization = encode_basic_auth(username, password)
+options = {"headers": {"Authorization": encode_basic_auth("demo", "geoutils")}}
+filesystem = fsspec.filesystem("http", **options)
 
-# Configure raster and vector reads through GDAL, and native point cloud reads through Fsspec
-os.environ["GDAL_HTTP_HEADERS"] = f"Authorization: {authorization}"
-fsspec.config.conf["http"] = {"headers": {"Authorization": authorization}}
-
-ds_private = gu.open_raster(f"{private_url}/elevation.tif", chunks={"x": 256, "y": 256})
-points_private = gu.open_pointcloud(f"{private_url}/survey.parquet", chunks=1_000)
-print("Private raster mean:", ds_private.rst.stats(["mean"])["mean"])
-print("Private point mean:", points_private.pc.stats(["mean"])["mean"])
+raster = gu.open_raster(f"{private_url}/elevation.tif", filesystem=filesystem)
+pointcloud = gu.open_pointcloud(f"{private_url}/survey.parquet", storage_options=options)
+print("Private raster shape:", raster.rst.shape)
+print("Private point mean:", pointcloud.pc.stats(["mean"])["mean"])
 ```
 
 See [GDAL's authentication options](https://gdal.org/en/stable/user/configoptions.html#networking-options) and
@@ -303,6 +327,8 @@ temporary credentials).
 For **public S3 buckets**, enable anonymous reads:
 
 ```{code-cell} ipython3
+import os
+
 bucket_url = "s3://bucket"
 os.environ["AWS_NO_SIGN_REQUEST"] = "YES"  # GDAL
 fsspec.config.conf.setdefault("s3", {})["anon"] = True  # Fsspec/S3fs
@@ -310,7 +336,8 @@ points_public = gu.open_pointcloud(f"{bucket_url}/survey.copc.laz", level=0, chu
 print("Public S3 level 0 points:", points_public.pc.point_count)
 ```
 
-Leave credentials configured until lazy reads finish. With distributed Dask, set them on **each worker**.
+When using environment variables, leave credentials configured until lazy reads finish.
+With distributed Dask, set them on **each worker**.
 
 (scalability-format-chunks)=
 ## Reading and writing in chunks
@@ -470,8 +497,8 @@ with xr.open_dataset(data_dir / "result.nc", engine="netcdf4", chunks={}, decode
 :tags: [remove-cell]
 
 # Close arrays and stop the server before restoring configuration and deleting its files
-for array in (ds, cog, ds_zarr, ds_netcdf, ds_laz, ds_copc, ds_saved, ds_parts, ds_remote, window, ds_private, points,
-              points_private, points_public):
+for array in (ds, cog, ds_zarr, ds_netcdf, ds_laz, ds_copc, ds_saved, ds_parts, ds_remote, window, points,
+              points_public, raster, pointcloud):
     array.close()
 resources.close()
 files.cleanup()

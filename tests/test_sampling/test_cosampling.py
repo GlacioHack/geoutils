@@ -833,7 +833,7 @@ class TestCosampleChunked:
 
         # 1/ Prepare distinguishable values on a target grid and two shifted auxiliary grids
         # Different offsets expose an intermediate temporary raster files being overwritten by a later spatial operation
-        rows, columns = np.indices((12, 15))
+        rows, columns = np.indices((7, 9))
         values = (10 * rows + columns).astype(float)
         raster = _raster(values)
         points = _raster(values + 1000).to_pointcloud()
@@ -959,7 +959,7 @@ class TestCosampleChunked:
 
     @pytest.mark.parametrize(
         "mask_type,chunks,workers",
-        [("array", (4, 5), False), ("raster", (5, 4), False), ("vector", (4, 5), True)],
+        [("array", (7, 8), False), ("raster", (8, 7), False), ("vector", (7, 8), True)],
     )
     def test_cosample__multiproc_raster_matches_in_memory_and_dask(
         self, mask_type: str, chunks: tuple[int, int], workers: bool, tmp_path: Path, request: pytest.FixtureRequest
@@ -1001,7 +1001,7 @@ class TestCosampleChunked:
         # 2/ Calculate in-memory and differently chunked Dask references through the public method
         eager = first.cosample(second, auxiliary={"scaled": (auxiliary, 2), "raw": raw_auxiliary}, mask=mask, **options)
         expected = eager.data.filled(np.nan)
-        for rows, columns in ((4, 5), (5, 4)):
+        for rows, columns in ((7, 8), (8, 7)):
             lazy_first = first.to_xarray().chunk({"y": rows, "x": columns})
             lazy_second = second.to_xarray().chunk({"y": columns, "x": rows})
             lazy_auxiliary = auxiliary.to_xarray().chunk({"y": rows, "x": columns})

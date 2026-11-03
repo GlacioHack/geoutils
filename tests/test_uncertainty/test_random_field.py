@@ -467,7 +467,7 @@ class TestRandomFieldChunked:
         source_path = tmp_path / "points.gpkg"
         points.to_file(source_path)
         file_points = gu.PointCloud(source_path, data_name=points.data_name)
-        from geoutils.pointcloud.loading import open_pointcloud
+        from geoutils.pointcloud.io import open_pointcloud
 
         file_dataframe = open_pointcloud(
             str(source_path), data_name=points.data_name, chunks=4, as_object_type=as_object_type
@@ -588,7 +588,7 @@ class TestRandomFieldChunked:
 
         # Same with Dask
         pytest.importorskip("dask_geopandas")
-        from geoutils.pointcloud.loading import open_pointcloud
+        from geoutils.pointcloud.io import open_pointcloud
 
         source_path = tmp_path / "points.gpkg"
         points.to_file(source_path)

@@ -51,7 +51,7 @@ from geoutils.multiproc.readers import (
     _reader_from_vector,
     _ValueReader,
 )
-from geoutils.pointcloud.writing import _array_partitions, _stage_pointcloud_partition
+from geoutils.pointcloud.io import _array_partitions, _stage_pointcloud_partition
 from geoutils.raster.array import _selected_raster_data, get_mask_from_array
 from geoutils.sampling.support import (
     _as_geodataframe,

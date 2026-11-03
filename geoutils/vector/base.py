@@ -116,7 +116,7 @@ class VectorBase(ABC):
         if hasattr(raster, "rst"):
             result = raster
         elif raster.name is not None and not raster.is_loaded:
-            return open_raster(raster.name, is_mask=raster.is_mask)
+            return open_raster(raster.name, is_mask=raster.is_mask, filesystem=raster._filesystem)
         else:
             result = DataArrayRasterAccessor.from_array(
                 data=raster.data,

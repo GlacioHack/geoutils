@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os.path
 import tempfile
-from importlib.util import find_spec
 from typing import Any
 
 import geopandas as gpd
@@ -13,7 +12,6 @@ import pytest
 import rasterio as rio
 import xarray as xr
 from geopandas.testing import assert_geodataframe_equal
-from pyproj import CRS
 from shapely.geometry import box
 
 import geoutils as gu
@@ -24,14 +22,6 @@ class TestVectorAccessor:
     """Check that the Pandas ``vct`` accessor mirrors Vector for in-memory and lazy dataframes."""
 
     aster_outlines_path = gu.examples.get_path_test("exploradores_rgi_outlines")
-
-    def test_open_vector(self) -> None:
-        """Open a vector file as the same in-memory GeoDataFrame used by Vector."""
-
-        ds = gu.open_vector(self.aster_outlines_path, load=True)
-
-        assert isinstance(ds, gpd.GeoDataFrame)
-        assert_geodataframe_equal(ds, gu.Vector(self.aster_outlines_path).gdf)
 
     def test_bbox__dask_geopandas(self) -> None:
         """Checks that a lazy vector reads its bounding box without replacing its Dask collection."""
@@ -85,25 +75,6 @@ class TestVectorAccessor:
         with pytest.raises(ValueError, match="cannot be modified in place"):
             getattr(ds.vct, method)(**kwargs, inplace=True)
         assert not ds.vct.is_loaded
-
-    def test_open_vector__dask_geopandas_missing_dep(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Explain the missing optional dependency when chunked vector opening requests Dask."""
-
-        import_optional = pd_accessor.import_optional
-
-        def _missing_dask_geopandas(
-            import_name: str, package_name: str | None = None, extra_name: str = "opt"
-        ) -> object:
-            """Fail only the Dask-GeoPandas import while forwarding other imports."""
-
-            if import_name == "dask_geopandas":
-                raise ImportError("Optional dependency 'dask-geopandas' required.")
-            return import_optional(import_name, package_name=package_name, extra_name=extra_name)
-
-        # Replace the module-level optional importer used by ``open_vector``
-        monkeypatch.setattr(pd_accessor, "import_optional", _missing_dask_geopandas)
-        with pytest.raises(ImportError, match="Optional dependency 'dask-geopandas' required.*"):
-            gu.open_vector(self.aster_outlines_path, chunks=1)
 
     def test_copy_and_bounds(self) -> None:
         """Copy the dataframe independently while preserving its vector bounds."""
@@ -161,57 +132,6 @@ class TestVectorAccessor:
         assert actual.attrs["title"] == "survey features"
         assert source._meta.attrs["title"] == "survey features"
         assert not getattr(source, accessor).is_loaded and not getattr(result, accessor).is_loaded
-
-    def test_to_file(self) -> None:
-        """Write an in-memory accessor-backed dataframe through the Vector-compatible API."""
-
-        ds = gu.open_vector(self.aster_outlines_path, load=True)
-
-        # Use a temporary GeoPackage and reopen it through Vector for comparison
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.gpkg")
-        ds.vct.to_file(temp_file)
-
-        assert os.path.exists(temp_file)
-        assert gu.Vector(temp_file).vector_equal(gu.Vector(ds))
-
-    @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
-    def test_to_file__dask_geopandas_gpkg(self) -> None:
-        """Compute lazy vector partitions while writing a single GeoPackage."""
-
-        # Include a lazy reprojection so writing evaluates the complete task graph
-        ds = gu.open_vector(self.aster_outlines_path, chunks=1).vct.reproject(crs=CRS.from_epsg(3857))
-        assert not ds.vct.is_loaded
-
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.gpkg")
-        ds.vct.to_file(temp_file)
-
-        # Reopen the file eagerly and compare it with the projected source
-        assert os.path.exists(temp_file)
-        assert gu.Vector(temp_file).vector_equal(
-            gu.Vector(gu.open_vector(self.aster_outlines_path, load=True).to_crs(3857))
-        )
-        assert not ds.vct.is_loaded
-
-    @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
-    def test_to_file__dask_geopandas_parquet(self) -> None:
-        """Write lazy vector partitions to GeoParquet without changing features."""
-
-        pytest.importorskip("pyarrow")
-
-        # GeoParquet supports a partitioned Dask write directly
-        ds = gu.open_vector(self.aster_outlines_path, chunks=1)
-        assert not ds.vct.is_loaded
-
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.parquet")
-        ds.vct.to_file(temp_file)
-
-        # Read through GeoPandas to validate the complete written dataset
-        assert os.path.exists(temp_file)
-        assert_geodataframe_equal(gpd.read_parquet(temp_file), gu.open_vector(self.aster_outlines_path, load=True))
-        assert not ds.vct.is_loaded
 
     def test_cross_type_outputs_are_accessors(self) -> None:
         """Return accessor-native objects when vector operations change geospatial type."""

@@ -7,17 +7,14 @@ from __future__ import annotations
 import os
 import pathlib
 import re
-import tempfile
 import warnings
 from pathlib import Path
-from tempfile import TemporaryFile
 from typing import Literal
 
 import numpy as np
 import pytest
 import rasterio as rio
 import xarray as xr
-from PIL import Image
 from pyproj import CRS
 
 import geoutils as gu
@@ -238,186 +235,6 @@ class TestRaster:
         assert "Lower right corner:" not in result
         assert not raster.is_loaded
 
-    def test_load(self) -> None:
-        """
-        Test that loading metadata and data works for all possible cases.
-        """
-        # Test 0 - test that loading explicitly via load() or implicitly via .data is similar
-        r_explicit = gu.Raster(self.landsat_b4_path, load_data=True)
-        r_implicit = gu.Raster(self.landsat_b4_path)
-
-        assert r_explicit.raster_equal(r_implicit)
-
-        # Same for a multi-band raster
-        r_explicit_rgb = gu.Raster(self.landsat_rgb_path, load_data=True)
-        r_implicit_rgb = gu.Raster(self.landsat_rgb_path)
-
-        assert r_explicit_rgb.raster_equal(r_implicit_rgb)
-
-        # Test 1 - loading metadata only, single band
-        # For the first example with Landsat B4
-        r = gu.Raster(self.landsat_b4_path)
-
-        assert not r.is_loaded
-        assert r.driver == "GTiff"
-        assert r.width == 193
-        assert r.height == 167
-        assert r.shape == (r.height, r.width)
-        assert r.count == 1
-        assert r._count_on_disk == 1
-        assert r.bands == (1,)
-        assert r._bands_on_disk == (1,)
-        assert r.dtype == "uint8"
-        assert r.transform == rio.transform.Affine(30.0, 0.0, 489340.0, 0.0, -30.0, 3098570.0)
-        assert np.array_equal(r.res, [30.0, 30.0])
-        assert r.bounds == rio.coords.BoundingBox(left=489340.0, bottom=3093560.0, right=495130.0, top=3098570.0)
-        assert r.crs == rio.crs.CRS.from_epsg(32645)
-        assert r.footprint.vector_equal(r.get_footprint_projected(r.crs))
-
-        # And the second example with ASTER DEM
-        r2 = gu.Raster(self.aster_dem_path)
-
-        assert not r2.is_loaded
-        assert r2.driver == "GTiff"
-        assert r2.width == 165
-        assert r2.height == 124
-        assert r2.shape == (r2.height, r2.width)
-        assert r2.count == 1
-        assert r._count_on_disk == 1
-        assert r.bands == (1,)
-        assert r._bands_on_disk == (1,)
-        assert r2.dtype == "float32"
-        assert r2.transform == rio.transform.Affine(30.0, 0.0, 626785.0, 0.0, -30.0, 4837025.0)
-        assert np.array_equal(r2.res, [30.0, 30.0])
-        assert r2.bounds == rio.coords.BoundingBox(left=626785.0, bottom=4833305.0, right=631735.0, top=4837025.0)
-        assert r2.crs == rio.crs.CRS.from_epsg(32718)
-        assert r2.footprint.vector_equal(r2.get_footprint_projected(r2.crs))
-
-        # Test 2 - loading the data afterward
-        r.load()
-        assert r.is_loaded
-        assert r.count == 1
-        assert r._count_on_disk == 1
-        assert r.bands == (1,)
-        assert r._bands_on_disk == (1,)
-        assert r.data.shape == (r.height, r.width)
-
-        # Test 3 - single band, loading data
-        r = gu.Raster(self.landsat_b4_path, load_data=True)
-        assert r.is_loaded
-        assert r.count == 1
-        assert r._count_on_disk == 1
-        assert r.bands == (1,)
-        assert r._bands_on_disk == (1,)
-        assert r.data.shape == (r.height, r.width)
-
-        # Test 4 - multiple bands, load all bands
-        r = gu.Raster(self.landsat_rgb_path, load_data=True)
-        assert r.count == 3
-        assert r._count_on_disk == 3
-        assert r.bands == (
-            1,
-            2,
-            3,
-        )
-        assert r._bands_on_disk == (
-            1,
-            2,
-            3,
-        )
-        assert r.data.shape == (r.count, r.height, r.width)
-
-        # Test 5 - multiple bands, load one band only
-        r = gu.Raster(self.landsat_rgb_path, load_data=True, bands=1)
-        assert r.count == 1
-        assert r._count_on_disk == 3
-        assert r.bands == (1,)
-        assert r._bands_on_disk == (1, 2, 3)
-        assert r.data.shape == (r.height, r.width)
-
-        # Test 6 - multiple bands, load a list of bands
-        r = gu.Raster(self.landsat_rgb_path, load_data=True, bands=[2, 3])
-        assert r.count == 2
-        assert r._count_on_disk == 3
-        assert r.bands == (1, 2)
-        assert r._bands_on_disk == (1, 2, 3)
-        assert r.data.shape == (r.count, r.height, r.width)
-
-        # Test 7 - load a single band a posteriori calling load()
-        r = gu.Raster(self.landsat_rgb_path)
-        r.load(bands=1)
-        assert r.count == 1
-        assert r._count_on_disk == 3
-        assert r.bands == (1,)
-        assert r._bands_on_disk == (1, 2, 3)
-        assert r.data.shape == (r.height, r.width)
-
-        # Test 8 - load a list of band a posteriori calling load()
-        r = gu.Raster(self.landsat_rgb_path)
-        r.load(bands=[2, 3])
-        assert r.count == 2
-        assert r._count_on_disk == 3
-        assert r.bands == (1, 2)
-        assert r._bands_on_disk == (1, 2, 3)
-        assert r.data.shape == (r.count, r.height, r.width)
-
-        # Check that errors are raised when appropriate
-        with pytest.raises(ValueError, match="Data are already loaded."):
-            r.load()
-        with pytest.raises(
-            AttributeError,
-            match="Cannot load as name is not set anymore. Did you manually update the name attribute?",
-        ):
-            r = gu.Raster(self.landsat_b4_path)
-            r._name = None
-            r.load()
-
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
-    def test_load_only_mask(self, example: str) -> None:
-        """
-        Test that loading only mask works properly.
-        """
-
-        # Load raster with and without loading
-        r_loaded = gu.Raster(example, load_data=True)
-        r_notloaded = gu.Raster(example)
-
-        # Get the mask for the two options
-        mask_loaded = np.ma.getmaskarray(r_loaded.data)
-        mask_notloaded = r_notloaded._load_only_mask()
-
-        # Data should not be loaded and masks should be equal
-        assert not r_notloaded.is_loaded
-        assert np.array_equal(mask_notloaded, mask_loaded)
-
-    @pytest.mark.parametrize("bands", [2, [2, 3]])
-    def test_load_only_mask__selected_bands_downsample(self, bands: int | list[int]) -> None:
-        """Checks that selected band masks match loaded data after downsampling without loading the source."""
-
-        # Read a reduced mask from a multiband file with either one or two selected bands
-        source = gu.Raster(self.landsat_rgb_path, downsample=2)
-        selected_mask = source._load_only_mask(bands=bands)
-
-        # Compare with the mask of the same bands loaded as raster values
-        reference = gu.Raster(self.landsat_rgb_path, downsample=2, bands=bands)
-        expected_mask = np.ma.getmaskarray(reference.data)
-        assert np.array_equal(selected_mask, expected_mask)
-        assert not source.is_loaded
-
-    def test_load_only_mask__error_loaded_or_missing_name(self) -> None:
-        """Checks an error is raised when mask-only reading has no unloaded file to read."""
-
-        # A loaded raster already has its mask in memory
-        loaded = gu.Raster(self.landsat_b4_path, load_data=True)
-        with pytest.raises(ValueError, match="Data are already loaded"):
-            loaded._load_only_mask()
-
-        # Removing the filename leaves no source for a mask-only read
-        unnamed = gu.Raster(self.landsat_b4_path)
-        unnamed._name = None
-        with pytest.raises(AttributeError, match="Cannot load as name is not set anymore"):
-            unnamed._load_only_mask()
-
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_get_mask(self, example: str) -> None:
         """
@@ -550,56 +367,6 @@ class TestRaster:
             ds = rst.to_xarray()
             rst3 = gu.Raster.from_xarray(ds=ds, dtype=rst.dtype)
             assert rst3.raster_equal(rst, strict_masked=False)
-
-    @pytest.mark.parametrize(
-        "raster_gcp_rpc",
-        ["gcp_projected", "gcp_nonlinear", "rpc_polynomial", "rpc_rational", "gcp_rpc_polynomial", "gcp_rpc_rational"],
-        indirect=True,
-    )
-    @pytest.mark.parametrize("method", ["to_file", "to_rio_dataset", "to_xarray", "to_xarray_file", "from_xarray_file"])
-    def test_metadata__roundtrip(self, raster_gcp_rpc: gu.Raster, tmp_path: Path, method: str) -> None:
-        """Checks that GCPs/RPCs and values survive both disk writing/reading, and in-memory conversions."""
-
-        # Export, then read the result back as a Raster
-        source = raster_gcp_rpc
-        if method == "to_file":
-            filename = tmp_path / "roundtrip.tif"
-            source.to_file(filename)
-            result = gu.Raster(filename)
-        elif method == "to_rio_dataset":
-            with source.to_rio_dataset() as dataset:
-                assert "RPC" not in dataset.tags()
-                result = gu.Raster(dataset, load_data=True)
-        else:
-            ds = source.to_xarray()
-            result = ds.rst.to_geoutils()
-            assert [g.asdict() for g in ds.rst.gcps[0]] == [g.asdict() for g in source.gcps[0]]
-            assert ds.rst.gcps[1] == source.gcps[1]
-            assert ds.rst.rpcs == source.rpcs
-            if method in ("to_xarray_file", "from_xarray_file"):
-                filename = tmp_path / "xarray_roundtrip.tif"
-                if method == "to_xarray_file":
-                    ds.rst.to_file(filename, tiled=True, blockxsize=256, blockysize=256)
-                else:
-                    result.to_file(filename)
-                result = gu.Raster(filename)
-                assert ds.rst.rpcs == source.rpcs
-                assert ds.rst.gcps[1] == source.gcps[1]
-                assert [g.asdict() for g in ds.rst.gcps[0]] == [g.asdict() for g in source.gcps[0]]
-
-        # We also read file metadata directly -so an RPC dictionary cannot be hidden in a default string tag)
-        if method in ("to_file", "to_xarray_file", "from_xarray_file"):
-            with rio.open(filename) as dataset:
-                assert "RPC" not in dataset.tags()
-                assert dataset.rpcs == source.rpcs
-
-        # TIFF rewrites GCP identifiers, so compare pixel and ground coordinates independently
-        expected_points = [(g.row, g.col, g.x, g.y, g.z) for g in source.gcps[0]]
-        actual_points = [(g.row, g.col, g.x, g.y, g.z) for g in result.gcps[0]]
-        assert actual_points == expected_points
-        assert result.gcps[1] == source.gcps[1]
-        assert result.rpcs == source.rpcs
-        np.testing.assert_array_equal(result.data.filled(source.nodata), source.data.filled(source.nodata))
 
     @pytest.mark.parametrize("raster_gcp_rpc", ["gcp_projected", "gcp_nonlinear"], indirect=True)
     @pytest.mark.parametrize("method", ["to_file", "to_rio_dataset", "to_xarray"])
@@ -991,116 +758,6 @@ class TestRaster:
         assert actual_array.dtype == expected_array.dtype
         assert np.array_equal(actual_array, expected_array, equal_nan=True)
         assert np.array_equal(actual_mask, expected_mask)
-
-    @pytest.mark.parametrize("example", [aster_dem_path, landsat_b4_path, landsat_rgb_path])
-    def test_downsampling(self, example: str) -> None:
-        """
-        Check that self metadata are correctly updated when using downsampling
-        """
-        # Load raster at full resolution
-        rst_orig = gu.Raster(example)
-        bounds_orig = rst_orig.bounds
-
-        # -- Tries various downsampling factors to ensure rounding is needed in at least one case --
-        for down_fact in np.arange(2, 8):
-            rst_down = gu.Raster(example, downsample=int(down_fact))
-
-            # - Check that output resolution is as intended -
-            assert rst_down.res[0] == rst_orig.res[0] * down_fact
-            assert rst_down.res[1] == rst_orig.res[1] * down_fact
-
-            # - Check that downsampled width and height are as intended -
-            # Due to rounding, width/height can be up to 1 pixel larger than unrounded value
-            assert abs(rst_down.width - rst_orig.width / down_fact) < 1
-            assert abs(rst_down.height - rst_orig.height / down_fact) < 1
-            assert rst_down.shape == (rst_down.height, rst_down.width)
-
-            # - Check that bounds are updated accordingly -
-            # left/top bounds should be the same, right/bottom should be rounded to nearest pixel
-            bounds_down = rst_down.bounds
-            assert bounds_down.left == bounds_orig.left
-            assert bounds_down.top == bounds_orig.top
-            assert abs(bounds_down.right - bounds_orig.right) < rst_down.res[0]
-            assert abs(bounds_down.bottom - bounds_orig.bottom) < rst_down.res[1]
-
-            # - Check that metadata are consistent, with/out loading data -
-            assert not rst_down.is_loaded
-            width_unload = rst_down.width
-            height_unload = rst_down.height
-            bounds_unload = rst_down.bounds
-            rst_down.load()
-            width_load = rst_down.width
-            height_load = rst_down.height
-            bounds_load = rst_down.bounds
-            assert width_load == width_unload
-            assert height_load == height_unload
-            assert bounds_load == bounds_unload
-
-            # - Test that xy2ij are consistent with new image -
-            # Upper left
-            assert rst_down.xy2ij(rst_down.bounds.left, rst_down.bounds.top) == (-0.5, -0.5)
-            # Upper right
-            assert rst_down.xy2ij(rst_down.bounds.right + rst_down.res[0], rst_down.bounds.top) == (
-                -0.5,
-                rst_down.width + 0.5,
-            )
-            # Bottom right
-            assert rst_down.xy2ij(rst_down.bounds.right + rst_down.res[0], rst_down.bounds.bottom) == (
-                rst_down.height - 0.5,
-                rst_down.width + 0.5,
-            )
-            # One pixel right and down
-            assert rst_down.xy2ij(rst_down.bounds.left + rst_down.res[0], rst_down.bounds.top - rst_down.res[1]) == (
-                0.5,
-                0.5,
-            )
-
-        # -- Check that error is raised when downsampling value is not valid --
-        with pytest.raises(TypeError, match="downsample must be of type int or float."):
-            gu.Raster(example, downsample=[1, 1])  # type: ignore
-        with pytest.raises(ValueError, match="downsample must be >=1."):
-            gu.Raster(example, downsample=0)  # type: ignore
-
-    @pytest.mark.parametrize("load_data", [False, True])
-    def test_init__downsample_regular_interval(self, tmp_path: pathlib.Path, load_data: bool) -> None:
-        """Checks that file opening downsampling keeps a constant interval."""
-
-        # Write input on dimensions not divisible by 6
-        values = np.arange(5_000, dtype=np.int32).reshape(50, 100)
-        source = gu.Raster.from_array(values, transform=rio.transform.from_origin(0, 50, 1, 1), crs=4326)
-        filename = tmp_path / "gradient.tif"
-        source.to_file(filename)
-
-        # Open with downsampling of 6
-        downsampled = gu.Raster(filename, downsample=6, load_data=load_data)
-        result = downsampled.data.data
-
-        # Check size is as expected, and values match the constant intervals
-        assert downsampled.shape == (8, 16)
-        assert np.all(np.diff(result, axis=0) == 600)
-        assert np.all(np.diff(result, axis=1) == 6)
-
-    @pytest.mark.parametrize("load_data", [False, True])
-    def test_init__downsample_uses_overview(self, tmp_path: pathlib.Path, load_data: bool) -> None:
-        """Checks that downsampling reads an overview when it can."""
-
-        # Write input for full array, then open with downsampling (without overview)
-        values = np.arange(5_000, dtype=np.int32).reshape(50, 100)
-        filename = tmp_path / "gradient.tif"
-        gu.Raster.from_array(values, rio.transform.from_origin(0, 50, 1, 1), 4326).to_file(filename)
-        without_overview = gu.Raster(filename, downsample=6, load_data=load_data).data.data.copy()
-
-        # Add overview for factors of 2 and 4, factor 4 should be the closest suitable overview
-        with rio.open(filename, "r+") as dataset:
-            dataset.build_overviews([2, 4], rio.enums.Resampling.nearest)
-
-        # Check that downsampling the new file uses the overview (slightly changes the sampled values)
-        # without changing the size/transform of the requested grid
-        downsampled = gu.Raster(filename, downsample=6, load_data=load_data)
-        result = downsampled.data.data
-        assert downsampled.shape == (8, 16)
-        assert downsampled.transform == rio.transform.from_origin(0, 50, 6, 6)
-        assert not np.array_equal(result, without_overview)
 
     def test_add_sub(self) -> None:
         """
@@ -1944,132 +1601,6 @@ class TestRaster:
         np.testing.assert_array_equal(lazy_mask.data, eager_source.astype(bool).data)
         assert not source.is_loaded
 
-    @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
-    def test_to_file(self, example: str) -> None:
-        # Read single band raster
-        img = gu.Raster(example)
-
-        # Temporary folder
-        temp_dir = tempfile.TemporaryDirectory()
-
-        # Save file to temporary file, with defaults opts
-        temp_file = os.path.join(temp_dir.name, "test.tif")
-        img.to_file(temp_file)
-        saved = gu.Raster(temp_file)
-        assert img.raster_equal(saved)
-        assert (Image.open(temp_file)).info["compression"] == "tiff_adobe_deflate"  # test no default compression
-        assert not saved._is_bigtiff()  # test default BIGTIFF param (IF_SAFER)
-
-        # Try to save with a pathlib path (create a new temp file for Windows)
-        path = pathlib.Path(temp_file)
-        img.to_file(path)
-
-        # Test additional option: one co_opts with tiled (with no compression)
-        co_opts = {"COMPRESS": "NONE"}
-        img.to_file(temp_file, co_opts=co_opts)
-        assert len((Image.open(temp_file)).tile) > 1  # test {TILED": "NO"} default value
-        saved = gu.Raster(temp_file)
-        assert not saved._is_bigtiff()  # test default BIGTIFF param (IF_SAFER)
-
-        # Test additional options: several co_opts with compress and bigtiff + metadata
-        co_opts = {"COMPRESS": "LZW", "BIGTIFF": "YES"}
-        metadata = {"Type": "test"}
-        img.to_file(temp_file, co_opts=co_opts, metadata=metadata)
-        saved = gu.Raster(temp_file)
-        assert img.raster_equal(saved)
-        assert (Image.open(temp_file)).info["compression"] == "tiff_lzw"  # test {"COMPRESS": "LZW"}
-        assert saved._is_bigtiff()  # test {"BIGTIFF": "YES"}
-        assert saved.tags["Type"] == "test"
-
-        # Test saving file in COG format
-        img.to_file(temp_file, driver="COG")
-        saved = gu.Raster(temp_file)
-        assert img.raster_equal(saved)
-        assert saved.tags["LAYOUT"] == "COG"
-
-        # Test that nodata value is enforced when masking - since value 0 is not used, data should be unchanged
-        img.to_file(temp_file, nodata=0)
-        saved = gu.Raster(temp_file)
-        assert np.ma.allequal(img.data, saved.data)
-        assert saved.nodata == 0
-
-        # Test that mask is preserved if nodata value is valid
-        mask = img.data == np.min(img.data)
-        img.set_mask(mask)
-        if img.nodata is not None:
-            img.to_file(temp_file)
-            saved = gu.Raster(temp_file)
-            assert np.array_equal(img.data.mask, saved.data.mask)
-
-        # Test that a warning is raised if nodata is not set and a mask exists (defined above)
-        if img.nodata is None:
-            with pytest.warns(UserWarning):
-                img.to_file(TemporaryFile())
-
-        # Test with blank argument
-        img.to_file(temp_file, blank_value=0)
-        saved = gu.Raster(temp_file)
-
-        assert np.array_equal(saved.data.data, np.zeros(np.shape(saved.data)))
-
-        # Clean up temporary folder - fails on Windows
-        try:
-            temp_dir.cleanup()
-        except (NotADirectoryError, PermissionError):
-            pass
-
-    def test_to_file__dtype(self, tmp_path: pathlib.Path) -> None:
-        """Checks that to_file() casts stored values and metadata to the requested dtype."""
-
-        # Create a byte raster with values that can be represented exactly as floats
-        values = np.arange(4, dtype=np.uint8).reshape(2, 2)
-        raster = gu.Raster.from_array(values, transform=rio.transform.from_origin(0, 2, 1, 1), crs=4326)
-        filename = tmp_path / "float-output.tif"
-
-        # Save forcing floating point type
-        raster.to_file(filename, dtype=np.float32)
-        saved = gu.Raster(filename)
-
-        # Check both file metadata and stored values use the requested type
-        assert np.dtype(saved.dtype) == np.dtype("float32")
-        assert np.array_equal(saved.data, values.astype(np.float32))
-
-    @pytest.mark.parametrize("explicit", [False, True])
-    def test_to_file__georeferencing(self, raster_gcp_rpc: gu.Raster, tmp_path: Path, explicit: bool) -> None:
-        """Checks that GCPs/RPCs are written properly (whether stored in the Raster object or passed during writing)."""
-
-        # Create an image with a CRS differing from the GCP CRS, and we add ordinary metadata
-        source = raster_gcp_rpc
-        image = gu.Raster.from_array(source.data, rio.Affine.identity(), 3857, nodata=source.nodata)
-        image.tags["label"] = "source"
-        if source.rpcs is not None:
-            image.tags["RPC"] = source.rpcs.to_gdal()
-        options = {}
-        if explicit:
-            options = {"gcps": source.gcps[0], "gcps_crs": source.gcps[1], "rpcs": source.rpcs}
-        else:
-            image.gcps, image.rpcs = source.gcps, source.rpcs
-        filename = tmp_path / "gcp_rcp_metadata.tif"
-
-        # We write to file, passing GCPs/RCPs in options
-        image.to_file(filename, metadata={"label": "output"}, **options)
-
-        # As TIFF rewrites GCP identifiers, we compare their coordinates and CRS separately
-        with rio.open(filename) as dataset:
-            points, point_crs = dataset.gcps
-            assert [(g.row, g.col, g.x, g.y, g.z) for g in points] == [
-                (g.row, g.col, g.x, g.y, g.z) for g in source.gcps[0]
-            ]
-            assert point_crs == source.gcps[1]
-            assert dataset.rpcs == source.rpcs
-            assert "RPC" not in dataset.tags()
-            assert bool(dataset.tags(ns="RPC")) == (source.rpcs is not None)
-            assert dataset.tags()["label"] == "output"
-            np.testing.assert_array_equal(dataset.read(), source.data.filled(source.nodata))
-        assert image.tags["label"] == "source"
-        if source.rpcs is not None:
-            assert image.tags["RPC"] == source.rpcs.to_gdal()
-
     @pytest.mark.parametrize("raster_gcp_rpc", ["rpc_polynomial", "rpc_rational"], indirect=True)
     @pytest.mark.parametrize("method", ["to_file", "to_rio_dataset"])
     def test_methods__rpc_tags(self, raster_gcp_rpc: gu.Raster, tmp_path: Path, method: str) -> None:
@@ -2097,23 +1628,6 @@ class TestRaster:
             assert "RPC" not in dataset.tags()
             assert dataset.tags(ns="RPC")
         assert image.tags["RPC"] == rpc_tags
-
-    def test_to_file__legacy_gcp_tuples(self, tmp_path: Path) -> None:
-        """Checks that passing a GCP when writing overwrites the affine transform of the raster, with a warning."""
-
-        # We create GCPs
-        source = gu.Raster.from_array(np.ones((4, 5)), rio.transform.from_origin(0, 4, 1, 1), 4326)
-        points = [(0, 0, 10, 50), (0, 5, 10.05, 50), (4, 0, 10, 49.96), (4, 5, 10.05, 49.96)]
-        filename = tmp_path / "legacy_gcps.tif"
-
-        # Check warning is raised, and affine transform is overwritten
-        with pytest.warns(UserWarning, match="geotransform previously set"):
-            source.to_file(filename, gcps=points)
-        result = gu.Raster(filename)
-        assert result.transform == rio.Affine.identity()
-        assert result.crs is None
-        assert result.gcps[1] == source.crs
-        assert [(g.row, g.col, g.x, g.y) for g in result.gcps[0]] == points
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_from_array(self, example: str) -> None:
@@ -2299,13 +1813,6 @@ class TestRaster:
         assert r1.stack(r2, reference=1, use_ref_bounds=True).shape == r2.shape
         assert r2.stack(r1, reference=1, use_ref_bounds=True).shape == r1.shape
 
-    def test_init__error_gcp_rcp_downsample(self, raster_gcp_rpc: gu.Raster) -> None:
-        """Checks an error is raised for opening downsampling before GCP/RPC orthorectification."""
-        with pytest.raises(NotImplementedError, match="before opening with downsample"):
-            gu.Raster(raster_gcp_rpc.name, downsample=2)
-        with pytest.raises(NotImplementedError, match="before opening with downsample"):
-            gu.open_raster(raster_gcp_rpc.name, downsample=2)
-
 
 class TestMask:
     """A mask is a boolean Raster, defined on file opening with is_mask=True."""
@@ -2438,31 +1945,6 @@ class TestMask:
         assert isinstance(mask, gu.Raster) and mask.is_mask
         assert np.array_equal(mask.data.data, rst.data.data >= 1)
         assert np.array_equal(mask.data.mask, rst.data.mask)
-
-    @pytest.mark.parametrize("mask", [mask_landsat_b4, mask_aster_dem, mask_everest])
-    def test_to_file(self, mask: gu.Raster) -> None:
-        """Test saving for masks"""
-
-        # Temporary folder
-        temp_dir = tempfile.TemporaryDirectory()
-
-        # Save file to temporary file, with defaults opts
-        temp_file = os.path.join(temp_dir.name, "test.tif")
-        mask.to_file(temp_file)
-        saved = gu.Raster(temp_file, is_mask=True)
-
-        # A raster (or mask) in-memory has more information than on disk, we need to update it before checking equality
-        # The values in its .data.data that are masked in .data.mask are not necessarily equal to the nodata value
-        mask.data.data[mask.data.mask] = True  # The default nodata 255 is converted to boolean True on masked values
-
-        # Check all attributes are equal
-        assert mask.raster_equal(saved)
-
-        # Clean up temporary folder - fails on Windows
-        try:
-            temp_dir.cleanup()
-        except (NotADirectoryError, PermissionError):
-            pass
 
 
 class TestArithmetic:

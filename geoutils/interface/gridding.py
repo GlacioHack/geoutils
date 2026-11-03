@@ -59,7 +59,7 @@ from geoutils.operators.nodata import (
     _resolve_nodata_handling,
 )
 from geoutils.operators.reducer import _IRREGULAR_REDUCER_TYPES, IrregularReductionMethod, Reducer
-from geoutils.pointcloud.loading import (
+from geoutils.pointcloud.io import (
     _concat_point_parts,
     _filter_dask_points_by_bounds,
     _load_pointcloud_bounds,

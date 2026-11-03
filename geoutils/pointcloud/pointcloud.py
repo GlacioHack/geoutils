@@ -41,10 +41,15 @@ from shapely.geometry.base import BaseGeometry
 
 from geoutils import profiler
 from geoutils._dispatch import is_dask_array, is_dask_dataframe
-from geoutils._misc import _deprecate_keyword, _validate_downsample
+from geoutils._misc import _deprecate_keyword
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.multiproc import MultiprocConfig
 from geoutils.pointcloud.base import GeometryPointCloudBase, PointCloudBase
+from geoutils.pointcloud.io import (
+    PointCloudDownsampleOptions,
+    _check_input_pointcloud_downsample,
+    _check_input_pointcloud_level,
+)
 from geoutils.pointcloud.las import (
     _is_laspy_supported,
     _load_laspy_data,
@@ -52,6 +57,7 @@ from geoutils.pointcloud.las import (
     _load_laspy_data_partitions,
     _load_laspy_metadata,
     _point_partition_size,
+    _select_copc_nodes,
     _write_laspy,
 )
 from geoutils.pointcloud.parquet import _is_parquet_supported
@@ -203,18 +209,64 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
         self,
         filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry,
         data_name: str | None = None,
-        downsample: Number = 1,
+        downsample: Number | PointCloudDownsampleOptions = 1,
+        *,
+        level: int | range | None = None,
+        filesystem: Any = None,
+        storage_options: dict[str, Any] | None = None,
     ):
         """
         Instantiate a point cloud from either a data attribute name and a vector (filename, GeoPandas dataframe or
         series, or a Shapely geometry), or only with a point cloud file type.
 
+        LAS, LAZ and COPC files are read with LasPy, GeoParquet files and partition directories with PyArrow, and other
+        point vector formats with GeoPandas.
+
+        Use ``downsample`` to select a random subsample, interpreted as a downsampling factor from total point size. For
+        example, ``downsample=2`` returns half the points. Alternatively, select an exact size with
+        ``downsample={"size": 1000}``. With a COPC file, only necessary levels of details (overview-equivalent of point
+        clouds) are loaded from coarse to fine until they contain enough points, then downsampled to the requested size.
+
+        Use ``level`` to select COPC levels of detail explicitly. Each point belongs to one level:
+        level 0 holds a coarse sample, with higher levels adding more and more points. Selected levels are combined into
+        one point cloud. An integer selects only that level, ``level=range(3)`` combines levels 0 through 2. Thus,
+        ``level`` cannot be combined with ``downsample``.
+
+        See :ref:`scalability-downsampling` for examples.
+
+        To open a remote file, pass an HTTPS URL or S3 address, such as ``"https://example.org/data.copc.laz"`` or
+        ``"s3://bucket/data.copc.laz"``.
+
+        Use ``storage_options`` to pass a dictionary of connection settings, such as credentials or a custom
+        server address. GeoUtils creates a Fsspec filesystem for you, which handles access to files on that service.
+        For example, ``storage_options={"anon": True}`` reads a public S3 bucket without login credentials.
+
+        Use ``filesystem`` if you already have a Fsspec filesystem object and want to reuse its connection
+        settings across files. Both options are optional and cannot be combined.
+
+        These settings are preserved for deferred and chunked reads.
+        For vector formats, these options require the optional Fiona backend.
+        See :ref:`scalability-formats` for supported formats and authentication.
+
         :param filename_or_dataset: Path to vector file, or GeoPandas dataframe or series, or Shapely geometry.
-        :param data_name: Name of main data attribute defining the point cloud (not required for LAS/LAZ formats).
-        :param downsample: Factor by which to reduce the number of points when data are loaded. For example, 2 keeps
-            up to ``ceil(N / 2)`` points selected by a deterministic random sample. The default 1 keeps all points.
+        :param data_name: Attribute containing point values. Defaults to Z for LAS, the saved active attribute for
+            GeoParquet, or geometry elevations when no attribute is selected in other vector formats.
+        :param downsample: A downsampling factor, or a dictionary containing exactly one of "factor" or "size".
+            For example, passing 2 is equivalent to {"factor": 2} and selects ceil(N / 2) points.
+            Passing {"size": 1000} reads exactly 1000 maximum points. Default 1 reads all points.
+        :param level: COPC level of detail, starting at 0 for the coarsest, or a range of levels such as range(3). The
+            default None uses all levels, loading the full point cloud.
+        :param filesystem: An existing Fsspec filesystem object whose connection settings are used to open files.
+            Cannot be combined with storage_options.
+        :param storage_options: Dictionary of connection settings used to create a Fsspec filesystem from the file URL,
+            such as credentials or a custom server address. Cannot be combined with filesystem.
         """
 
+        from geoutils._io import _resolve_filesystem
+
+        filename_or_dataset, self._filesystem = _resolve_filesystem(
+            filename_or_dataset, filesystem, storage_options, remote_default=False
+        )
         self._ds: gpd.GeoDataFrame | None = None
         self._name: str | None = None
         self._crs: CRS | None = None
@@ -228,15 +280,23 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
         self._nb_points: int
         self.__nongeo_columns: pd.Index
         self._is_las = False
-        self._downsample = _validate_downsample(downsample)
+        self._downsample = _check_input_pointcloud_downsample(downsample)
         self._downsample_applied = False
+        self._level = level
+
+        # Check opening options before reading file metadata
+        _check_input_pointcloud_level(level, self._downsample)
+        if level is not None and (
+            not isinstance(filename_or_dataset, (str, pathlib.Path)) or not _is_laspy_supported(filename_or_dataset)
+        ):
+            raise ValueError("Argument 'level' is only supported for COPC files.")
 
         # If PointCloud is passed, simply point back to PointCloud
         if isinstance(filename_or_dataset, PointCloud):
             for key in filename_or_dataset.__dict__:
                 setattr(self, key, filename_or_dataset.__dict__[key])
             if downsample != 1:
-                self._downsample = _validate_downsample(downsample)
+                self._downsample = _check_input_pointcloud_downsample(downsample)
                 self._downsample_applied = False
                 if self.is_loaded:
                     self._apply_downsample()
@@ -250,20 +310,28 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
                     data_name = "Z"
                 # Load only metadata, and not the data
                 fn = os.fspath(filename_or_dataset)
-                metadata = _load_laspy_metadata(fn)
+                metadata = _load_laspy_metadata(fn, filesystem=self._filesystem)
+                if level is not None and not metadata.is_copc:
+                    raise ValueError("Argument 'level' is only supported for COPC files.")
                 self._name = fn
                 self._crs = metadata.crs
                 self._nb_points = metadata.point_count
+                if level is not None:
+                    # Hierarchy entries provide selected counts without reading point records
+                    nodes = _select_copc_nodes(fn, level, target_count=None, filesystem=self._filesystem)
+                    self._nb_points = sum(node.point_count for node in nodes)
                 self.__nongeo_columns = metadata.columns
                 self._bbox = metadata.bounds
                 self._columns = pd.Index(list(metadata.columns) + ["geometry"])
-                self._feature_count = metadata.point_count
+                self._feature_count = self._nb_points
                 self._geometry_type = "Point"
                 self._ds = None
-            elif isinstance(filename_or_dataset, (str, pathlib.Path)) and _is_parquet_supported(filename_or_dataset):
+            elif isinstance(filename_or_dataset, (str, pathlib.Path)) and _is_parquet_supported(
+                filename_or_dataset, filesystem=self._filesystem
+            ):
                 from geoutils.pointcloud.parquet import _point_parquet_metadata
 
-                parquet_metadata = _point_parquet_metadata(filename_or_dataset)
+                parquet_metadata = _point_parquet_metadata(filename_or_dataset, filesystem=self._filesystem)
                 self._name = os.fspath(filename_or_dataset)
                 self._crs = parquet_metadata["crs"]
                 self._nb_points = parquet_metadata["point_count"]
@@ -284,7 +352,7 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
                     )
             # Check on filename are done with Vector.__init__
             else:
-                super().__init__(filename_or_dataset)
+                super().__init__(filename_or_dataset, filesystem=self._filesystem)
                 if not self.is_loaded:
                     if self._geometry_type is not None and "Point" not in self._geometry_type:
                         raise ValueError(
@@ -350,7 +418,7 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
         # Overriding method in Vector in case dataset is not loaded
         if self.is_loaded:
             return super().columns
-        if self.name is not None and _is_parquet_supported(self.name):
+        if self.name is not None and _is_parquet_supported(self.name, filesystem=self._filesystem):
             return self._columns
         if self._is_las:
             # Return columns on disk (adding a placeholder geometry to replace X/Y)
@@ -393,10 +461,12 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
                 "Cannot load as filename is not set anymore. Did you manually update the filename attribute?"
             )
 
-        if _is_parquet_supported(self.name):
+        if _is_parquet_supported(self.name, filesystem=self._filesystem):
             from geoutils.pointcloud.parquet import _open_point_parquet
 
-            points = _open_point_parquet(self.name, data_name=self.data_name, columns="all")
+            points = _open_point_parquet(
+                self.name, data_name=self.data_name, columns="all", filesystem=self._filesystem
+            )
             self._ds = points.pc.to_geoutils().gdf
             self._ds = _apply_crop_filters(self._ds, self._crop_filters)
             self._crop_filters = []
@@ -413,19 +483,26 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
             self._apply_downsample()
             return
 
-        # Match accessor level selection before sampling a COPC file
-        if self._downsample > 1 and not self._crop_filters and _load_laspy_metadata(self.name).is_copc:
-            from geoutils.pointcloud.loading import open_pointcloud
+        # Match accessor level selection before reading COPC point records
+        if (self._level is not None or (self._downsample != 1 and not self._crop_filters)) and _load_laspy_metadata(
+            self.name, filesystem=self._filesystem
+        ).is_copc:
+            from geoutils.pointcloud.io import open_pointcloud
 
             self._ds = open_pointcloud(
                 self.name,
                 data_name=self.data_name,
                 columns=columns,
-                downsample=self._downsample,
+                downsample=self._downsample if self._level is None else 1,
+                level=self._level,
                 as_object_type="geodataframe",
                 load=True,
+                filesystem=self._filesystem,
             )
-            self._downsample_applied = True
+            self._ds = _apply_crop_filters(self._ds, self._crop_filters)
+            self._crop_filters = []
+            self._downsample_applied = self._level is None
+            self._apply_downsample()
             return
 
         if columns == "all":
@@ -443,10 +520,13 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
                 columns=columns_to_load,
                 bounds=read_bbox,
                 data_name=self.data_name,
+                filesystem=self._filesystem,
             )
             ds = _apply_crop_filters(ds, self._crop_filters)
         elif mp_config is None:
-            ds = _load_laspy_data(filename=self.name, columns=columns_to_load, data_name=self.data_name)
+            ds = _load_laspy_data(
+                filename=self.name, columns=columns_to_load, data_name=self.data_name, filesystem=self._filesystem
+            )
         else:
             ds = _load_laspy_data_partitions(
                 filename=self.name,
@@ -454,18 +534,19 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
                 point_count=self._nb_points,
                 partition_size=_point_partition_size(mp_config),
                 mp_config=mp_config,
+                filesystem=self._filesystem,
             )
         self._ds = ds
         self._crop_filters = []
         self._apply_downsample()
 
     def _apply_downsample(self) -> None:
-        """Apply the opening downsampling factor once to the loaded point rows."""
+        """Apply the opening downsampling request once to the loaded point rows."""
 
         if self._downsample_applied or self._downsample == 1:
             return
 
-        from geoutils.pointcloud.loading import _downsample_open_pointcloud
+        from geoutils.pointcloud.io import _downsample_open_pointcloud
 
         # Share row selection with accessors, including rows with missing measurements
         source_name = self._name
@@ -542,6 +623,8 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
         chunks: int | None = None,
         mp_config: MultiprocConfig | None = None,
         laz_chunk_size: int | None = None,
+        filesystem: Any = None,
+        storage_options: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> None:
         """
@@ -555,6 +638,8 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
         :param chunks: Optional number of points per write chunk.
         :param mp_config: Optional multiprocessing configuration for chunked writing.
         :param laz_chunk_size: Number of points per compressed LAZ disk chunk. Requires Lazrs; None uses its default.
+        :param filesystem: Filesystem used to open the destination. Cannot be combined with storage_options.
+        :param storage_options: Fsspec settings for the destination URL. Cannot be combined with filesystem.
         :param kwargs: Other keyword arguments to set the LAS file header (e.g., "offsets", "scales").
         """
 
@@ -569,6 +654,8 @@ class PointCloud(GeometryPointCloudBase, Vector):  # type: ignore[misc]
             chunks=chunks,
             mp_config=mp_config,
             laz_chunk_size=laz_chunk_size,
+            filesystem=filesystem,
+            storage_options=storage_options,
             **kwargs,
         )
 

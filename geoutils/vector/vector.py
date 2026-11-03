@@ -40,16 +40,17 @@ from typing import (
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import pyogrio
 import rasterio as rio
 from pandas._typing import WriteBuffer
 from pyproj import CRS
 from shapely.geometry.base import BaseGeometry
 
 from geoutils import profiler
+from geoutils._io import _resolve_filesystem
 from geoutils._misc import copy_doc
 from geoutils.vector.base import VectorBase
 from geoutils.vector.base import VectorLike as VectorLike  # noqa: F401
+from geoutils.vector.io import _read_vector_file, _read_vector_info, _write_vector_file
 from geoutils.vector.transformation import _apply_crop_filters, _crop_read_bbox
 
 if TYPE_CHECKING:
@@ -88,16 +89,40 @@ class Vector(VectorBase):
         self,
         filename_or_dataset: str | pathlib.Path | gpd.GeoDataFrame | gpd.GeoSeries | BaseGeometry | dict[str, Any],
         layer: str | int | None = None,
+        *,
+        filesystem: Any = None,
+        storage_options: dict[str, Any] | None = None,
     ) -> None:
         """
         Instantiate a vector from either a filename, a GeoPandas dataframe or series, or a Shapely geometry.
 
+        To open a remote file, pass an HTTPS URL or S3 address, such as ``"https://example.org/data.gpkg"`` or
+        ``"s3://bucket/data.gpkg"``.
+
+        Use ``storage_options`` to pass a dictionary of connection settings, such as credentials or a custom
+        server address. GeoUtils creates a Fsspec filesystem for you, which handles access to files on that service.
+        For example, ``storage_options={"anon": True}`` reads a public S3 bucket without login credentials.
+
+        Use ``filesystem`` if you already have a Fsspec filesystem object and want to reuse its connection
+        settings across files. Both options are optional and cannot be combined.
+
+        These settings are preserved for deferred and chunked reads.
+        Using these options requires the optional Fiona backend.
+        See :ref:`scalability-formats` for supported formats and authentication.
+
         :param filename_or_dataset: Path to file, or GeoPandas dataframe or series, or Shapely geometry.
         :param layer: Layer name or index to read from a file containing multiple layers.
+        :param filesystem: An existing Fsspec filesystem object whose connection settings are used to open files.
+            Cannot be combined with storage_options.
+        :param storage_options: Dictionary of connection settings used to create a Fsspec filesystem from the file URL,
+            such as credentials or a custom server address. Cannot be combined with filesystem.
         """
 
         self._name: str | None = None
         self._layer = layer
+        filename_or_dataset, self._filesystem = _resolve_filesystem(
+            filename_or_dataset, filesystem, storage_options, remote_default=False
+        )
         self._ds: gpd.GeoDataFrame | None = None
         self._crs: CRS | None = None
         self._bbox: rio.coords.BoundingBox | None = None
@@ -174,7 +199,7 @@ class Vector(VectorBase):
     def _set_metadata_from_file(self, filename: str, layer: str | int | None = None) -> None:
         """Read lightweight vector metadata for one file layer without loading the full GeoDataFrame."""
 
-        info = pyogrio.read_info(filename, layer=layer)
+        info = _read_vector_info(filename, layer=layer, filesystem=self._filesystem)
         crs = info.get("crs")
         total_bounds = info.get("total_bounds")
 
@@ -225,7 +250,7 @@ class Vector(VectorBase):
             read_kwargs["bbox"] = read_bbox
 
         # Read, then apply each crop in order without changing any geometry
-        ds = gpd.read_file(self.name, **read_kwargs)
+        ds = _read_vector_file(self.name, filesystem=self._filesystem, **read_kwargs)
         ds = _apply_crop_filters(ds, self._crop_filters)
 
         # Store the selected rows and clear the filters now that they have been applied
@@ -950,10 +975,41 @@ class Vector(VectorBase):
 
         return cls(gpd.GeoDataFrame.from_dict(data=data, geometry=geometry, crs=crs, **kwargs))
 
-    @copy_doc(gpd.GeoDataFrame, "Vector")
-    def to_file(self, filename: str, driver: Any = None, schema: Any = None, index: Any = None, **kwargs: Any) -> None:
+    def to_file(
+        self,
+        filename: str,
+        driver: Any = None,
+        schema: Any = None,
+        index: Any = None,
+        *,
+        filesystem: Any = None,
+        storage_options: dict[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Write vector features to a vector file or GeoParquet.
 
-        return self.gdf.to_file(filename=filename, driver=driver, schema=schema, index=index, **kwargs)
+        :param filename: Destination file or dataset.
+        :param driver: Output driver, inferred from the filename when omitted.
+        :param schema: Field schema for vector formats. Unsupported for GeoParquet.
+        :param index: Whether to write the dataframe index.
+        :param filesystem: An existing Fsspec filesystem object whose connection settings are used to write files.
+            Cannot be combined with storage_options.
+        :param storage_options: Dictionary of connection settings used to create a Fsspec filesystem from the
+            destination URL, such as credentials or a custom server address. Cannot be combined with filesystem.
+        :param kwargs: Options passed to the format writer.
+        :returns: None.
+        """
+        return _write_vector_file(
+            self.gdf,
+            filename=filename,
+            driver=driver,
+            schema=schema,
+            index=index,
+            filesystem=filesystem,
+            storage_options=storage_options,
+            **kwargs,
+        )
 
     @copy_doc(gpd.GeoDataFrame, "Vector")
     def to_feather(
@@ -964,13 +1020,37 @@ class Vector(VectorBase):
             path=path, index=index, compression=compression, schema_version=schema_version, **kwargs
         )
 
-    @copy_doc(gpd.GeoDataFrame, "Vector")
     def to_parquet(
-        self, path: Any, index: Any = None, compression: Any = "snappy", schema_version: Any = None, **kwargs: Any
+        self,
+        path: Any,
+        index: Any = None,
+        compression: Any = "snappy",
+        schema_version: Any = None,
+        *,
+        filesystem: Any = None,
+        storage_options: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> None:
+        """
+        Write vector features and their CRS to GeoParquet.
 
+        :param path: Destination file.
+        :param index: Whether to write the dataframe index.
+        :param compression: Parquet compression codec.
+        :param schema_version: GeoParquet schema version, or None for the backend default.
+        :param filesystem: Filesystem used to open the destination. Cannot be combined with storage_options.
+        :param storage_options: Fsspec settings for the destination URL. Cannot be combined with filesystem.
+        :param kwargs: Options passed to GeoPandas to_parquet().
+        :returns: None.
+        """
+        path, filesystem = _resolve_filesystem(path, filesystem, storage_options, remote_default=False)
         return self.gdf.to_parquet(
-            path=path, index=index, compression=compression, schema_version=schema_version, **kwargs
+            path=path,
+            index=index,
+            compression=compression,
+            schema_version=schema_version,
+            filesystem=filesystem,
+            **kwargs,
         )
 
     @copy_doc(gpd.GeoDataFrame, "Vector")

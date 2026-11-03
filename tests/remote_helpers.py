@@ -7,10 +7,13 @@ import json
 import multiprocessing
 from base64 import b64encode
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import dataclass
+from functools import wraps
 from multiprocessing.connection import Connection
+from multiprocessing.pool import Pool
 from pathlib import Path
+from typing import Any
 from xml.etree import ElementTree
 
 import pytest
@@ -29,6 +32,52 @@ class RemoteFiles:
         """List requests received by the mock server, including requests for missing files."""
 
         return [tuple(json.loads(line)) for line in self.request_log.read_text().splitlines()]
+
+
+@contextmanager
+def _remote_filesystem_sessions(fsspec: Any) -> Iterator[None]:
+    """Close HTTP and S3 sessions created during a remote file test."""
+
+    from fsspec.asyn import sync
+
+    # Track construction so uncached filesystems are closed properly
+    instances = []
+    with pytest.MonkeyPatch.context() as patch:
+        for protocol in ("http", "s3"):
+            filesystem_class = fsspec.get_filesystem_class(protocol)
+
+            @wraps(filesystem_class.__init__)
+            def record_filesystem(
+                filesystem: Any,
+                *args: Any,
+                _initialize: Callable[..., None] = filesystem_class.__init__,
+                **kwargs: Any,
+            ) -> None:
+                """Record a newly initialized filesystem for session cleanup."""
+
+                _initialize(filesystem, *args, **kwargs)
+                instances.append(filesystem)
+
+            patch.setattr(filesystem_class, "__init__", record_filesystem)
+
+        try:
+            yield
+        finally:
+            # Await every close while the server is still available, even if another close fails
+            with ExitStack() as cleanup:
+                for filesystem in instances:
+                    s3_context = getattr(filesystem, "_s3creator", None)
+                    http_session = getattr(filesystem, "_session", None)
+                    if s3_context is not None:
+                        cleanup.callback(sync, filesystem.loop, s3_context.__aexit__, None, None, None, timeout=10)
+                    elif http_session is not None:
+                        cleanup.callback(sync, filesystem.loop, http_session.close, timeout=10)
+
+                    # Remove only owned instances from the cache so later tests cannot reuse closed sessions
+                    cache = type(filesystem)._cache
+                    for token, cached in tuple(cache.items()):
+                        if cached is filesystem:
+                            del cache[token]
 
 
 def _serve_files(
@@ -67,7 +116,9 @@ def _serve_files(
 
         # List matching files so readers can find datasets split across several files
         # Response fields follow https://docs.aws.amazon.com/AmazonS3/latest/API/API_ListObjectsV2.html
-        if "list-type" in request.query:
+        # GDAL 3.12 in Python 3.14 CI uses ListObjects to check GeoPackage companion files
+        # Its requests have a prefix but no list-type parameter
+        if "list-type" in request.query or "prefix" in request.query:
             prefix = request.query.get("prefix", "")
             bucket = directory / "bucket"
             listing = ElementTree.Element("ListBucketResult", xmlns="http://s3.amazonaws.com/doc/2006-03-01/")
@@ -91,7 +142,16 @@ def _serve_files(
             # Return the file list (aiohttp handles requests to read individual files)
             ElementTree.SubElement(listing, "KeyCount").text = str(count)
             return web.Response(body=ElementTree.tostring(listing), content_type="application/xml")
-        return web.FileResponse(directory / request.path.lstrip("/"))
+
+        # List files and subdirectories for HTTP readers
+        path = directory / request.path.lstrip("/")
+        if path.is_dir():
+            listing = ElementTree.Element("html")
+            for candidate in sorted(path.iterdir()):
+                name = candidate.name + ("/" if candidate.is_dir() else "")
+                ElementTree.SubElement(listing, "a", href=name).text = name
+            return web.Response(body=ElementTree.tostring(listing, method="html"), content_type="text/html")
+        return web.FileResponse(path)
 
     async def run_server() -> None:
         """Start the mock server and wait for the test fixture to stop it."""
@@ -119,7 +179,11 @@ def _serve_files(
 
 @contextmanager
 def mock_remote_files(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, basic_auth: tuple[str, str] | None = None
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    basic_auth: tuple[str, str] | None = None,
+    pool: Pool | None = None,
 ) -> Iterator[RemoteFiles]:
     """
     Start the local HTTP/S3 server used by tests and documentation.
@@ -131,6 +195,7 @@ def mock_remote_files(
     :param tmp_path: Existing temporary directory in which to create the bucket and request log.
     :param monkeypatch: Pytest settings manager belonging to the test or an explicit MonkeyPatch.context().
     :param basic_auth: Optional username and password for the private subdirectory.
+    :param pool: Optional worker pool to reuse the server process between tests.
     :returns: The directory, server address and request history available inside the context.
     """
 
@@ -148,52 +213,64 @@ def mock_remote_files(
     # Give each test its own server address to avoid interference between tests
     context = multiprocessing.get_context("spawn")
     connection, child_connection = context.Pipe()
-    process = context.Process(
-        target=_serve_files, args=(tmp_path, request_log, child_connection, basic_auth), daemon=True
-    )
-    process.start()
-    child_connection.close()
-    try:
-        if not connection.poll(20):
-            raise RuntimeError("The remote file test server did not start.")
-        port = connection.recv()
-        files = RemoteFiles(directory=directory, endpoint=f"http://127.0.0.1:{port}", request_log=request_log)
+    pool_context = nullcontext(pool) if pool is not None else context.Pool(processes=1)
+    with pool_context as server_pool:
+        server = server_pool.apply_async(_serve_files, (tmp_path, request_log, child_connection, basic_auth))
+        try:
+            if not connection.poll(20):
+                raise RuntimeError("The remote file test server did not start.")
+            port = connection.recv()
+            child_connection.close()
+            files = RemoteFiles(directory=directory, endpoint=f"http://127.0.0.1:{port}", request_log=request_log)
 
-        # Read without credentials, limit wait times, and restore settings after each test
-        options = {
-            "AWS_S3_ENDPOINT": f"127.0.0.1:{port}",
-            "AWS_HTTPS": "NO",
-            "AWS_VIRTUAL_HOSTING": "FALSE",
-            "AWS_NO_SIGN_REQUEST": "YES",
-            # Discard cached S3 contents on close because tests reuse the same bucket paths
-            "CPL_VSIL_CURL_NON_CACHED": "/vsis3/bucket/",
-            "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
-            "GDAL_HTTP_TIMEOUT": "5",
-            "GDAL_HTTP_MAX_RETRY": "0",
-            "NO_PROXY": "127.0.0.1,localhost",
-            "no_proxy": "127.0.0.1,localhost",
-        }
-        for name, value in options.items():
-            monkeypatch.setenv(name, value)
+            with _remote_filesystem_sessions(fsspec):
+                # Read without credentials, limit wait times, and restore settings after each test
+                options = {
+                    "AWS_S3_ENDPOINT": f"127.0.0.1:{port}",
+                    "AWS_HTTPS": "NO",
+                    "AWS_VIRTUAL_HOSTING": "FALSE",
+                    "AWS_NO_SIGN_REQUEST": "YES",
+                    # Discard cached S3 contents on close because tests reuse the same bucket paths
+                    "CPL_VSIL_CURL_NON_CACHED": "/vsis3/bucket/",
+                    "GDAL_DISABLE_READDIR_ON_OPEN": "EMPTY_DIR",
+                    "GDAL_HTTP_TIMEOUT": "5",
+                    "GDAL_HTTP_MAX_RETRY": "0",
+                    "NO_PROXY": "127.0.0.1,localhost",
+                    "no_proxy": "127.0.0.1,localhost",
+                }
+                for name, value in options.items():
+                    monkeypatch.setenv(name, value)
 
-        # Configure point cloud readers to use the same local storage through fsspec
-        s3_options = {"anon": True, "endpoint_url": files.endpoint}
-        monkeypatch.setitem(fsspec.config.conf, "s3", s3_options)
-        monkeypatch.setenv("FSSPEC_S3", json.dumps(s3_options))
-        yield files
-    finally:
-        # Stop the mock server after the test, including when setup or reading failed
-        if process.is_alive():
-            connection.send("stop")
-        process.join(timeout=5)
-        if process.is_alive():
-            process.terminate()
-            process.join(timeout=5)
-        connection.close()
+                # Configure point cloud readers to use the same local storage through fsspec
+                s3_options = {"anon": True, "endpoint_url": files.endpoint}
+                monkeypatch.setitem(fsspec.config.conf, "s3", s3_options)
+                monkeypatch.setenv("FSSPEC_S3", json.dumps(s3_options))
+                yield files
+        finally:
+            # Stop this listener before another test uses the same process
+            try:
+                if not server.ready():
+                    connection.send("stop")
+                server.get(timeout=5)
+            except multiprocessing.TimeoutError:
+                server_pool.terminate()
+                raise RuntimeError("The remote file test server did not stop.") from None
+            finally:
+                child_connection.close()
+                connection.close()
+
+
+@pytest.fixture(scope="module")
+def remote_pool() -> Iterator[Pool]:
+    """Reuse a spawned server process without sharing files or listeners between tests."""
+
+    pytest.importorskip("aiohttp")
+    with multiprocessing.get_context("spawn").Pool(processes=1) as pool:
+        yield pool
 
 
 @pytest.fixture
-def remote_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[RemoteFiles]:
+def remote_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, remote_pool: Pool) -> Iterator[RemoteFiles]:
     """
     Mock remote storage for tests using temporary local files.
 
@@ -207,7 +284,7 @@ def remote_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Re
     A real local server tests file reads made by GDAL as well as Python libraries.
     This follows GDAL's S3 tests: https://github.com/OSGeo/gdal/blob/master/autotest/gcore/vsis3.py
     """
-    with mock_remote_files(tmp_path, monkeypatch) as files:
+    with mock_remote_files(tmp_path, monkeypatch, pool=remote_pool) as files:
         yield files
 
 
@@ -219,3 +296,60 @@ def remote_url(request: pytest.FixtureRequest, remote_files: RemoteFiles) -> Cal
     if query:
         (remote_files.directory.parent / "required-token").write_text("local-test")
     return lambda filename: f"{prefix}/{filename}{query}"
+
+
+@pytest.fixture
+def file_access(
+    request: pytest.FixtureRequest, filename: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, remote_pool: Pool
+) -> Iterator[tuple[Path, str, dict[str, Any]]]:
+    """Write test data and provide HTTP or S3 access options."""
+
+    import numpy as np
+    import rasterio as rio
+    from rasterio.transform import from_origin
+
+    import geoutils as gu
+
+    fsspec = pytest.importorskip("fsspec")
+    if filename.endswith(".gpkg"):
+        pytest.importorskip("fiona")
+    with mock_remote_files(tmp_path, monkeypatch, basic_auth=("demo", "geoutils"), pool=remote_pool) as files:
+        # Write test data
+        path = files.directory / "private" / filename
+        path.parent.mkdir()
+        if filename.endswith(".tif"):
+            values = np.ma.array(np.arange(96, dtype=np.int16).reshape(8, 12), mask=False)
+            values.mask[0, 0] = True
+            gu.Raster.from_array(values, from_origin(0, 8, 1, 1), 32633, nodata=-9999).to_file(path)
+            with rio.open(path, "r+") as raster:
+                raster.build_overviews([2, 4], rio.enums.Resampling.average)
+        else:
+            points = gu.PointCloud.from_xyz(
+                np.arange(7.0), np.arange(7.0) + 1, np.arange(7.0) + 10, 32633, data_name="height"
+            )
+            if filename.endswith((".las", ".laz")):
+                points.to_las(path)
+            else:
+                points.gdf["quality"] = np.arange(7)
+                points.gdf["label"] = ["ground", "tree"] * 3 + ["ground"]
+                if filename.endswith(".gpkg"):
+                    points.to_file(path)
+                else:
+                    points.to_parquet(path, chunks=3, partitioned=filename == "parts")
+
+        # Set access options
+        protocol, option = request.param.split("-")
+        options: dict[str, Any]
+        if protocol == "http":
+            source = f"{files.endpoint}/bucket/private/{path.name}"
+            options = {"headers": {"Authorization": "Basic ZGVtbzpnZW91dGlscw=="}}
+        else:
+            (files.directory / path.name).write_bytes(path.read_bytes())
+            monkeypatch.delitem(fsspec.config.conf, "s3", raising=False)
+            monkeypatch.delenv("FSSPEC_S3", raising=False)
+            source = f"bucket/{path.name}"
+            options = {"anon": True, "endpoint_url": files.endpoint}
+            if option == "storage_options":
+                source = "s3://" + source
+        value = fsspec.filesystem(protocol, **options) if option == "filesystem" else options
+        yield path, source, {option: value}

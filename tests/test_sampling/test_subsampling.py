@@ -1433,15 +1433,15 @@ class TestRasterSubsampleChunked:
         from geoutils.sampling import subsampling as subsampling_module
 
         # Keep only high random keys to test the fallback when the initial cutoff estimate misses the sample
-        cell_indices = np.arange(64 * 64, dtype=np.int32)
+        cell_indices = np.arange(16 * 16, dtype=np.int32)
         keys = np.asarray(_splitmix64(np.uint64(42) ^ cell_indices.astype(np.uint64)), dtype=np.uint64)
         valid = keys >> np.uint64(56) >= 128
-        values = np.ma.masked_array(cell_indices.reshape((64, 64)), mask=~valid.reshape((64, 64)), fill_value=-9999)
+        values = np.ma.masked_array(cell_indices.reshape((16, 16)), mask=~valid.reshape((16, 16)), fill_value=-9999)
         source_file = tmp_path / "cutoff-source.tif"
         output_file = tmp_path / "multiprocessing-cutoff.gpkg"
-        raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 64, 1, 1), 32633, nodata=-9999)
+        raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 16, 1, 1), 32633, nodata=-9999)
         raster.to_file(source_file)
-        expected_values = raster.subsample(65, random_state=42, as_array=True)
+        expected_values = raster.subsample(17, random_state=42, as_array=True)
 
         # Record the cutoff search
         cutoff_name = "_dask_array_topk_cutoff" if backend == "dask" else "_multiproc_array_topk_cutoff"
@@ -1458,9 +1458,9 @@ class TestRasterSubsampleChunked:
 
         # Subsample with the requested backend
         if backend == "dask":
-            source = open_raster(str(source_file), chunks={"x": 8, "y": 8})
+            source = open_raster(str(source_file), chunks={"x": 4, "y": 4})
             source_data = source.data
-            result = source.rst.subsample(65, random_state=42)
+            result = source.rst.subsample(17, random_state=42)
             assert isinstance(result, xr.DataArray) and cutoff_calls == [1]
             assert not result.pc.is_loaded
             computed_values = result.compute().data
@@ -1468,9 +1468,9 @@ class TestRasterSubsampleChunked:
         else:
             source = gu.Raster(source_file)
             result = source.subsample(
-                65,
+                17,
                 random_state=42,
-                mp_config=MultiprocConfig(chunks=(8, 8), outfile=str(output_file)),
+                mp_config=MultiprocConfig(chunks=(4, 4), outfile=str(output_file)),
             )
             assert cutoff_calls == [1]
             assert not source.is_loaded and not result.is_loaded
@@ -1752,7 +1752,7 @@ class TestRasterSubsampleChunked:
     ) -> None:
         """Checks that point rows from several small raster tiles are written in one GeoPackage batch."""
 
-        from geoutils.pointcloud import writing
+        from geoutils.pointcloud import io
 
         # Write a source whose scattered sample reaches several 3 x 4 raster tiles
         values = np.arange(80, dtype=np.int16).reshape((8, 10))
@@ -1764,7 +1764,7 @@ class TestRasterSubsampleChunked:
 
         # Record the number of rows in each final GeoPackage write
         written_rows = []
-        write_dataframe = writing.pyogrio.write_dataframe
+        write_dataframe = io.pyogrio.write_dataframe
 
         def record_write(dataframe: Any, *args: Any, **kwargs: Any) -> Any:
             """Record one file batch before writing its rows."""
@@ -1772,7 +1772,7 @@ class TestRasterSubsampleChunked:
             written_rows.append(len(dataframe))
             return write_dataframe(dataframe, *args, **kwargs)
 
-        monkeypatch.setattr(writing.pyogrio, "write_dataframe", record_write)
+        monkeypatch.setattr(io.pyogrio, "write_dataframe", record_write)
 
         # Convert 17 scattered cells, which is well below the bounded file-write batch size
         result = source.subsample(

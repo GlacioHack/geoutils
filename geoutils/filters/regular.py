@@ -821,6 +821,9 @@ def _filter_base(
 
     if isinstance(method, Reducer):
         return _filter_grid(array, method, **kwargs)
+    if array.ndim == 3:
+        # Apply spatial filters independently to each band
+        return np.stack([_filter_base(band, method, size=size, **kwargs) for band in array])
     if np.issubdtype(array.dtype, np.integer):
         array = array.astype(np.float32)
     if np.ma.isMaskedArray(array):
