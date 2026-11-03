@@ -1420,6 +1420,35 @@ class TestErrorStructureEstimationErrors:
         with pytest.raises(ValueError, match=message):
             getattr(structure, method)()
 
+    @pytest.mark.parametrize("method", ["refit", "refit_variogram"])
+    @pytest.mark.parametrize("models", ["spherical+spherical", ["spherical", "spherical"]])
+    def test_refit_methods__error_number_of_components(self, method: str, models: str | list[str]) -> None:
+        """Checks an error is raised for two models on one estimated component, with guidance to estimate again."""
+
+        pytest.importorskip("skgstat")
+        rows, columns = np.indices((24, 24))
+        values = np.sin(rows / 2) + np.cos(columns / 3)
+        source = gu.Raster.from_array(values, Affine(10, 0, 0, 0, -10, 240), 32631)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            structure = gu.ErrorStructure.estimate(
+                source,
+                components={"spatial": {"magnitude": "constant", "correlation": "spherical"}},
+                n_pairs=1_000,
+                n_lags=8,
+                fit_kwargs={"min_count": 1},
+                random_state=42,
+            )
+
+        with pytest.raises(ValueError) as error:
+            getattr(structure, method)(models)
+
+        assert str(error.value) == (
+            "The previous estimate has 1 correlated component, but you supplied 2 correlation models. "
+            "Refitting requires one model per existing correlated component. "
+            "To change the number of components, call ErrorStructure.estimate() again with a new components definition."
+        )
+
     @pytest.mark.parametrize(
         "bins,categories,message",
         [

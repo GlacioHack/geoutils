@@ -1466,14 +1466,14 @@ class Variogram:
 
         # Label intermediate distances only when the logarithmic range is narrow
         ax.set_xscale(xscale)
-        from geoutils.vector.plotting import _reduce_tick_label_overlap, _spaced_tick_locator
+        from geoutils.vector.plotting import _reduce_tick_label_overlap
 
         if xscale == "log":
             from matplotlib.ticker import LogLocator, NullFormatter, ScalarFormatter
 
             lower, upper = ax.get_xlim()
             tick_multipliers = (1, 2, 5) if np.log10(upper / lower) <= 2 else (1,)
-            ax.xaxis.set_major_locator(_spaced_tick_locator(LogLocator(base=10, subs=tick_multipliers, numticks=12)))
+            ax.xaxis.set_major_locator(LogLocator(base=10, subs=tick_multipliers, numticks=12))
             formatter = ScalarFormatter()
             formatter.set_scientific(False)
             formatter.set_useOffset(False)

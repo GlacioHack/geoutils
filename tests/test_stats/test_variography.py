@@ -1063,32 +1063,6 @@ class TestVariogramConversion:
         np.testing.assert_allclose(fitted_curve.get_ydata(), result.variogram(fitted_curve.get_xdata()))
         pyplot.close(axes.figure)
 
-    @pytest.mark.parametrize("xscale", ["log", "linear"])
-    @pytest.mark.parametrize("show_counts", [False, True])
-    def test_plot__tick_spacing(self, xscale: Literal["log", "linear"], show_counts: bool) -> None:
-        """Checks that variogram and count ticks remain readable after resizing on either distance scale."""
-
-        plt = pytest.importorskip("matplotlib.pyplot")
-        variogram = gu.Variogram(
-            lags=np.geomspace(20, 20_000, 12),
-            semivariance=np.linspace(0.1, 1, 12),
-            counts=np.full(12, 300_000),
-        )
-        figure, ax = plt.subplots(figsize=(5, 4))
-
-        variogram.plot(ax=ax, xscale=xscale, show_counts=show_counts)
-
-        for width in [5, 3]:
-            figure.set_size_inches(width, 4)
-            figure.canvas.draw()
-            for panel in figure.axes:
-                for axis in (panel.xaxis, panel.yaxis):
-                    labels = [label for label in axis.get_ticklabels() if label.get_visible() and label.get_text()]
-                    bounds = [label.get_window_extent() for label in labels]
-                    assert all(not first.overlaps(second) for first, second in zip(bounds[:-1], bounds[1:]))
-        assert ax.get_xscale() == xscale
-        plt.close(figure)
-
     def test_combine__flattens_nested_sum_and_uses_one_nugget(self) -> None:
         """Checks that combining a summed model adds its components properly, including nugget."""
 

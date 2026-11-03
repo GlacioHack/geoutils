@@ -611,31 +611,6 @@ class TestGroupedStats:
         assert colorbar.xaxis.label.get_rotation() == 0
         plt.close("all")
 
-    def test_plot_grouped_stats__count_tick_spacing(self) -> None:
-        """Checks that count ticks stay readable in narrow panels after resizing."""
-
-        plt = pytest.importorskip("matplotlib.pyplot")
-        index = pd.MultiIndex.from_product([np.arange(4), np.arange(4)], names=["x", "y"])
-        columns = pd.MultiIndex.from_tuples([("error", "mean"), ("error", "count")], names=["value", "statistic"])
-        table = pd.DataFrame(np.column_stack((np.arange(16), np.full(16, 30_000))), index=index, columns=columns)
-        figure, frame = plt.subplots(figsize=(5, 4))
-
-        axes = gu.stats.plot_grouped_stats(table, statistic="mean", ax=frame)
-
-        # Count totals have long labels in small histogram panels
-        for width in [5, 3]:
-            figure.set_size_inches(width, 4)
-            figure.canvas.draw()
-            for axis in (axes["count_x"].yaxis, axes["count_y"].xaxis):
-                labels = [label for label in axis.get_ticklabels() if label.get_visible() and label.get_text()]
-                bounds = [label.get_window_extent() for label in labels]
-                assert labels
-                assert all(not first.overlaps(second) for first, second in zip(bounds[:-1], bounds[1:]))
-                ticks = axis.get_majorticklocs()
-                assert np.all(ticks > 0)
-                np.testing.assert_array_equal(ticks, np.round(ticks))
-        plt.close(figure)
-
     @pytest.mark.parametrize("reverse_order", [False, True])
     @pytest.mark.parametrize("plot_kind", ["auto", "line", "heatmap"])
     def test_plot_grouped_stats__mixed_predictors(

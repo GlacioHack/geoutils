@@ -1584,8 +1584,6 @@ def _plot_count_histogram(
 
     from matplotlib.ticker import MaxNLocator
 
-    from geoutils.vector.plotting import _spaced_tick_locator
-
     # Match each bar to its bin and use neutral colors beside the main diagnostic
     widths = upper_edges - lower_edges
     bar_options = {"align": "edge", "color": "0.78", "edgecolor": "white", "linewidth": 0.6}
@@ -1607,9 +1605,7 @@ def _plot_count_histogram(
 
     # Leave room for the main panel's tick labels across the small gap
     count_scale = ax.xaxis if horizontal else ax.yaxis
-    count_scale.set_major_locator(
-        _spaced_tick_locator(MaxNLocator(nbins=2 if horizontal else 3, integer=True, prune="lower"))
-    )
+    count_scale.set_major_locator(MaxNLocator(nbins=2 if horizontal else 3, integer=True, prune="lower"))
     for spine in ax.spines.values():
         spine.set_visible(True)
 

@@ -54,90 +54,15 @@ def _create_colorbar_axes(ax: matplotlib.axes.Axes) -> matplotlib.axes.Axes:
     return ax.inset_axes((1.02, 0, 0.05, 1))
 
 
-def _spaced_tick_locator(locator: Any) -> Any:
-    """Thin a locator's ticks to fit their formatted labels on every draw."""
-
-    from copy import copy
-
-    import numpy as np
-    from matplotlib.ticker import Locator
-
-    class SpacedLocator(Locator):  # type: ignore[misc]
-        """Adapt tick spacing to the axis scale, formatted text and available space."""
-
-        def set_axis(self, axis: Any) -> None:
-            """Attach both locators to the same axis."""
-
-            super().set_axis(axis)
-            locator.set_axis(axis)
-
-        def set_params(self, **kwargs: Any) -> None:
-            """Pass tick options to the original locator."""
-
-            locator.set_params(**kwargs)
-
-        def view_limits(self, vmin: float, vmax: float) -> Any:
-            """Use the original locator's automatic limits."""
-
-            return locator.view_limits(vmin, vmax)
-
-        def nonsingular(self, vmin: float, vmax: float) -> Any:
-            """Expand degenerate limits using the original locator's scale."""
-
-            return locator.nonsingular(vmin, vmax)
-
-        def __call__(self) -> Any:
-            """Choose ticks for the current view limits."""
-
-            return self.tick_values(*self.axis.get_view_interval())
-
-        def tick_values(self, vmin: float, vmax: float) -> Any:
-            """Reduce candidate ticks until their formatted labels fit along the axis."""
-
-            ticks = np.asarray(locator.tick_values(vmin, vmax))
-            ticks = ticks[np.isfinite(ticks) & (ticks >= min(vmin, vmax)) & (ticks <= max(vmin, vmax))]
-            if ticks.size < 2:
-                return ticks
-            axis = self.axis
-            horizontal = axis.axis_name == "x"
-            bounds = axis.axes.get_window_extent()
-            transform = axis.get_transform()
-            limits = transform.transform([vmin, vmax])
-            pixels_per_unit = (bounds.width if horizontal else bounds.height) / abs(limits[1] - limits[0])
-
-            # Measure a copy of the tick text without changing the labels or triggering another draw
-            renderer = axis.axes.figure._get_renderer()
-            label = copy(axis.majorTicks[0].label1)
-            padding = label.get_fontsize() * axis.axes.figure.dpi / 144
-            for stride in range(1, len(ticks)):
-                candidates = ticks[::stride]
-                sizes = []
-                for text in axis.get_major_formatter().format_ticks(candidates):
-                    label.set_text(text)
-                    text_bounds = label.get_window_extent(renderer=renderer)
-                    sizes.append(text_bounds.width if horizontal else text_bounds.height)
-
-                # Compare neighboring label widths with their separation in display coordinates
-                required = (np.asarray(sizes[:-1]) + sizes[1:]) / 2 + padding
-                spacing = np.abs(np.diff(transform.transform(candidates))) * pixels_per_unit
-                if np.all(spacing >= required):
-                    return candidates
-
-            # A very narrow panel may only have room for one labeled tick
-            return ticks[-1:]
-
-    return SpacedLocator()
-
-
 def _reduce_tick_label_overlap(ax: matplotlib.axes.Axes) -> None:
-    """Choose automatic ticks from their label widths and the available space on every draw."""
+    """Limit automatic axes to a few evenly spaced ticks."""
 
-    from matplotlib.ticker import AutoLocator
+    from matplotlib.ticker import AutoLocator, MaxNLocator
 
-    # Leave explicitly supplied locators unchanged
+    # Use sparse ticks while preserving caller-supplied locators
     for axis in (ax.xaxis, ax.yaxis):
         if isinstance(axis.get_major_locator(), AutoLocator):
-            axis.set_major_locator(_spaced_tick_locator(axis.get_major_locator()))
+            axis.set_major_locator(MaxNLocator(nbins=3, min_n_ticks=2))
 
 
 def _get_reference_bbox(reference: Any) -> rio.coords.BoundingBox | None:

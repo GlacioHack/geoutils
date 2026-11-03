@@ -103,47 +103,6 @@ class TestPlot:
             np.testing.assert_array_equal(ax.images[0].get_array(), np.flip(raster.data, axis=0))
         plt.close(figure)
 
-    def test_plot__projected_tick_spacing(self) -> None:
-        """Checks that long projected coordinates do not overlap on a narrow plot."""
-
-        # Create one narrow panel with six-digit easting labels like those in documentation figures
-        raster = gu.Raster.from_array(
-            np.ones((10, 10)),
-            Affine(4_000, 0, 470_000, 0, -4_000, 3_120_000),
-            32632,
-        )
-        fig, axes = plt.subplots(1, 3, figsize=(4, 3))
-
-        # Plot in the first panel and compare the rendered bounds of neighboring labels
-        raster.plot(ax=axes[0], max_pixels=None, add_cbar=False)
-        fig.canvas.draw()
-        labels = [label for label in axes[0].get_xticklabels() if label.get_visible() and label.get_text()]
-        label_boxes = [label.get_window_extent() for label in labels]
-
-        assert all(not first.overlaps(second) for first, second in zip(label_boxes[:-1], label_boxes[1:]))
-        plt.close(fig)
-
-    @pytest.mark.parametrize("layout", ["tight", "constrained"])
-    @pytest.mark.parametrize("dpi", [100, 600])
-    def test_plot__tick_spacing_after_layout(self, layout: str, dpi: int) -> None:
-        """Checks that map ticks stay readable across panels after layout changes and figure resizing."""
-
-        raster = gu.Raster.from_array(np.ones((10, 14)), Affine(2_000, 0, 500_000, 0, -2_000, 8_670_000), 32632)
-        figure, axes = plt.subplots(1, 3, figsize=(11, 3.5), dpi=dpi, layout=layout)
-        for ax in axes:
-            raster.plot(ax=ax, cbar_title="Elevation (m)", title="Reference DEM", max_pixels=None)
-
-        # Later panels and resizing can shrink maps after their first plot call
-        for width in [11, 7]:
-            figure.set_size_inches(width, 3.5)
-            figure.canvas.draw()
-            for ax in axes:
-                for axis in (ax.xaxis, ax.yaxis):
-                    labels = [label for label in axis.get_ticklabels() if label.get_visible() and label.get_text()]
-                    bounds = [label.get_window_extent() for label in labels]
-                    assert all(not first.overlaps(second) for first, second in zip(bounds[:-1], bounds[1:]))
-        plt.close(figure)
-
     def test_plot__custom_tick_locator(self) -> None:
         """Checks that plot() preserves explicitly supplied tick positions and labels."""
 

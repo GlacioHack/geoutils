@@ -1087,7 +1087,14 @@ def _refit_error_structure_correlation(
         requested = models
     model_count = len(requested)
     if model_count != expected:
-        raise ValueError(f"correlation_models must contain {expected} model(s).")
+        component_word = "component" if expected == 1 else "components"
+        model_word = "model" if model_count == 1 else "models"
+        raise ValueError(
+            f"The previous estimate has {expected} correlated {component_word}, "
+            f"but you supplied {model_count} correlation {model_word}. "
+            "Refitting requires one model per existing correlated component. "
+            "To change the number of components, call ErrorStructure.estimate() again with a new components definition."
+        )
 
     # Fit a nugget when the structure contains a spatially uncorrelated component
     options = dict(fit_kwargs or {})
