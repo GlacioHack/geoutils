@@ -55,7 +55,7 @@ jobs:
         path: ${{ env.CONDA }}/envs
         key: conda-${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.dep-level }}-${{ env.cache_date }}-${{ hashFiles('dev-environment.yml') }}-${{ env.CACHE_NUMBER }}
       env:
-        CACHE_NUMBER: 4 # Increase this value to reset cache if environment.yml has not changed
+        CACHE_NUMBER: 5 # Increase this value to reset cache if environment.yml has not changed
       id: cache
 
     # The trick below is necessary because the generic environment file does not specify a Python version, and ONLY
@@ -67,8 +67,10 @@ jobs:
       env:
         # Fiona 1.10.1 has no Python 3.14 wheels, so install it with Conda
         # Use Conda's OpenMP runtime for PyTorch and its numerical dependencies
+        # PDAL 2.8 shares compatible PROJ and GDAL versions with Python 3.10's PyProj and Fiona
         CI_EXTRA_DEPS: >-
-          gdal<3.13.3,pdal>=2.10,python-pdal${{ matrix.dep-level != 'base' && ',fiona>=1.10' || '' }}${{
+          gdal<3.13.3,pdal${{ matrix.python-version == '3.10' && '=2.8' || '>=2.10' }},python-pdal${{
+          matrix.dep-level != 'base' && ',fiona>=1.10' || '' }}${{
           runner.os != 'Linux' && matrix.dep-level != 'base' && ',pytorch-cpu>=2,gpytorch>=1.11' || '' }}
       run: |
         mamba install pyyaml python=${{ matrix.python-version }}
