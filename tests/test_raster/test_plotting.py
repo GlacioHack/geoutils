@@ -7,13 +7,14 @@ import tempfile
 from collections.abc import Iterator
 from importlib.util import find_spec
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from affine import Affine
 
 import geoutils as gu
 from geoutils import examples
+
+plt = pytest.importorskip("matplotlib.pyplot")
 
 
 @pytest.fixture(autouse=True)

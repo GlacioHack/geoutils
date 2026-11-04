@@ -28,6 +28,7 @@ from scipy.ndimage import distance_transform_edt
 
 from geoutils._typing import NDArrayBool, NDArrayNum
 from geoutils.multiproc import MultiprocConfig, map_overlap
+from geoutils.raster.io import _copy_preferred_chunks
 from geoutils.raster.referencing import _default_nodata
 
 if TYPE_CHECKING:
@@ -155,7 +156,7 @@ def _proximity_from_target_mask(
 def _build_proximity_output(raster: RasterType, proximity: Any) -> Any:
     """Create a raster output with floating nodata and the source georeferencing."""
 
-    return raster.from_array(
+    result = raster.from_array(
         data=proximity,
         transform=raster.transform,
         crs=raster.crs,
@@ -163,6 +164,8 @@ def _build_proximity_output(raster: RasterType, proximity: Any) -> Any:
         area_or_point=raster.area_or_point,
         tags=dict(raster.tags),
     )
+    _copy_preferred_chunks(raster, result)
+    return result
 
 
 #####################

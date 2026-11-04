@@ -130,6 +130,48 @@ class TestRasterVectorInterface:
         with pytest.raises(InvalidGridError, match="Either 'ref' or 'crs' must be provided"):
             vct.rasterize(rst, crs=3857)
 
+    @pytest.mark.parametrize("output_type", ["dataarray", "dataset"])
+    @pytest.mark.parametrize("fractional", [False, True])
+    def test_rasterize__preferred_chunks(
+        self, monkeypatch: pytest.MonkeyPatch, output_type: str, fractional: bool
+    ) -> None:
+        """Checks that rasterize() copies only spatial chunk hints from the reference encoding."""
+
+        # Use named spatial axes and distinct storage settings
+        reference = gu.Raster.from_array(np.zeros((2, 5, 7)), (1, 0, 0, 0, -1, 5), 32631).to_xarray()
+        reference = reference.rename({"y": "latitude", "x": "longitude"})
+        reference.encoding.update(
+            preferred_chunks={"band": 1, "latitude": 3, "longitude": 2},
+            dtype="uint8",
+            _FillValue=255,
+            scale_factor=0.5,
+            add_offset=100,
+            source="reference.tif",
+            driver="GTiff",
+            _filesystem=None,
+            _downsample=2,
+            _overview_level=0,
+        )
+        encoding = reference.encoding.copy()
+        vector = gpd.GeoDataFrame(geometry=[box(1, 1, 3, 3)], crs=32631)
+        monkeypatch.setitem(gu.config, "raster_return_type", output_type)
+
+        # Rasterize the vector
+        result = vector.vct.rasterize(reference, fractional=fractional, out_dtype="float32", nodata=-9999)
+        variable = result["raster"] if output_type == "dataset" else result
+
+        # Check values and preferred chunks
+        assert variable.encoding == {"grid_mapping": "spatial_ref", "preferred_chunks": {"y": 3, "x": 2}}
+        assert variable.rst.nodata == -9999
+        assert variable.dtype == np.float32
+        expected = np.zeros((5, 7), dtype=np.float32)
+        expected[2:4, 1:3] = 1
+        np.testing.assert_array_equal(variable.values.squeeze(), expected)
+
+        # Output hints must not share a mutable dictionary with the reference
+        variable.encoding["preferred_chunks"]["y"] = 1
+        assert reference.encoding == encoding
+
     def test_rasterize__fractional_feature_and_union_layers(self) -> None:
         """Checks that overlapping polygons produce separate coverage layers or one layer for their union."""
 
@@ -549,7 +591,55 @@ class TestRasterVectorInterface:
 
 
 class TestRasterizationChunked:
-    """Test module for feature order at polygon overlaps in Dask and multiprocessing rasterization."""
+    """Test module for chunk hints, laziness and feature order in Dask and multiprocessing rasterization."""
+
+    @pytest.mark.parametrize("chunked_reference", [False, True])
+    @pytest.mark.parametrize("chunksizes", [None, (2, 3)])
+    @pytest.mark.parametrize("method,fractional", [("rasterize", False), ("rasterize", True), ("create_mask", False)])
+    def test_methods__preferred_chunks(
+        self, chunked_reference: bool, chunksizes: tuple[int, int] | None, method: str, fractional: bool
+    ) -> None:
+        """Checks that rasterize() and create_mask() copy spatial chunk hints and preserve laziness and values."""
+
+        pytest.importorskip("dask.array")
+        from dask.callbacks import Callback
+
+        # Create data and preferred chunks
+        reference = gu.Raster.from_array(np.zeros((5, 7)), (1, 0, 0, 0, -1, 5), 32631).to_xarray().squeeze()
+        reference.encoding["preferred_chunks"] = {"band": 1, "y": 2, "x": 3}
+        vector = gpd.GeoDataFrame(geometry=[box(1, 1, 3, 3)], crs=32631)
+        options = {"fractional": fractional} if method == "rasterize" else {}
+
+        # Run with eager data
+        eager = getattr(vector.vct, method)(reference, **options)
+        assert eager.encoding["preferred_chunks"] == {"y": 2, "x": 3}
+        if chunked_reference:
+            # Uneven chunks distinguish execution from preferred chunks
+            reference = reference.chunk({"y": 3, "x": 4})
+
+        # Run with Dask
+        with Callback(pretask=lambda *args: pytest.fail("Rasterization must stay lazy")):
+            result = getattr(vector.vct, method)(reference, **options, dask=True, chunksizes=chunksizes)
+
+        # Check loading and expected chunks
+        assert not reference.rst.is_loaded
+        assert not result.rst.is_loaded
+        assert result.encoding["preferred_chunks"] == {"y": 2, "x": 3}
+        expected_chunks: tuple[tuple[int, ...], ...]
+        if chunksizes is not None:
+            expected_chunks = ((2, 2, 1), (3, 3, 1))
+        elif chunked_reference:
+            expected_chunks = ((3, 2), (4, 3))
+        else:
+            expected_chunks = ((5,), (7,))
+        assert result.chunks[-2:] == expected_chunks
+
+        # Check equality and loading
+        np.testing.assert_array_equal(result.compute().values, eager.values)
+        assert result.rst.crs == eager.rst.crs
+        assert result.rst.transform == eager.rst.transform
+        assert not result.rst.is_loaded
+        assert not reference.rst.is_loaded
 
     @pytest.mark.parametrize("execution", ["dask", "multiprocessing"])
     @pytest.mark.parametrize("all_touched", [False, True])

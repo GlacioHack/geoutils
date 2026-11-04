@@ -75,6 +75,8 @@ class TestRasterOpening:
             if data_name is not None:
                 assert variable.name == data_name
         assert variable._in_memory is is_mask
+        assert result.encoding["driver"] == "GTiff"
+        assert variable.encoding["driver"] == "GTiff"
 
         # Then we check proper metadata attribute, and equal data
         expected = values[0] if bands == 1 and squeeze else values
@@ -480,6 +482,7 @@ class TestRasterOpening:
             if key not in ("overview_selected_level", "overview_selected_factor"):
                 assert reduced.attrs[key] == value
         assert reduced.encoding["source"] == original.encoding["source"]
+        assert reduced.encoding["driver"] == original.encoding["driver"] == "GTiff"
         assert reduced.rst.driver == original.rst.driver
         with rio.open(filename) as source:
             expected = source.read(1, out_shape=(3, 4), masked=masked)

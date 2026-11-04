@@ -464,6 +464,46 @@ def _prepare_variogram_fit_models(
     return definitions
 
 
+def _variogram_fit_starts(
+    definitions: Sequence[_VariogramFitModel],
+    lags: NDArrayNum,
+    semivariance: NDArrayNum,
+    use_nugget: bool,
+) -> list[NDArrayNum]:
+    """Choose initial parameters that span the measured correlation distances."""
+
+    # Preserve the linear start and also explore short ranges in summed models
+    model_count = len(definitions)
+    maximum_lag = float(np.max(lags))
+    maximum_variance = float(np.max(semivariance))
+    if maximum_variance <= 0:
+        maximum_variance = 1.0
+    range_starts = [np.linspace(maximum_lag / model_count, maximum_lag, model_count)]
+    positive_lags = lags[lags > 0]
+
+    # Logarithmic spacing covers ranges separated by orders of magnitude
+    if model_count > 1 and positive_lags.size and np.min(positive_lags) < maximum_lag:
+        minimum_lag = float(np.min(positive_lags))
+        range_starts.extend(
+            [
+                np.geomspace(minimum_lag, maximum_lag, model_count + 2)[1:-1],
+                np.geomspace(minimum_lag, maximum_lag, model_count + 1)[1:],
+            ]
+        )
+
+    # Divide the initial variance between components and start optional shapes at one
+    starts = []
+    for ranges in range_starts:
+        parameters = []
+        for distance, definition in zip(ranges, definitions):
+            parameters.extend((float(distance), maximum_variance / model_count))
+            parameters.extend([1.0] * (definition.parameter_count - 2))
+        if use_nugget:
+            parameters.append(maximum_variance * 0.05)
+        starts.append(np.asarray(parameters, dtype=float))
+    return starts
+
+
 ################################
 # 2/ RESULTS FROM OTHER PACKAGES
 ################################
@@ -907,17 +947,21 @@ class Variogram:
         """
         Fit one or more summed theoretical models to the measured bins.
 
-        Finite, positive sampling errors are used as weights. The returned copy retains only fitted parameters and
-        the small covariance matrix produced by the optimizer.
+        _prepare_variogram_fit_models() resolves the functions and their parameters. When p0 is omitted,
+        _variogram_fit_starts() supplies initial ranges across the sampled distances for summed models. We fit each
+        start and select the smallest weighted squared error. Finite, positive sampling errors supply the weights.
+        The returned copy stores the fitted parameters and the optimizer's small covariance matrix.
 
         :param models: Model name, SciKit-GStat model function or sequence ordered from short to long range.
             A custom function receives distance, effective range, partial sill and any extra fitted parameters.
         :param use_nugget: Whether to fit a shared non-negative nugget.
         :param min_count: Minimum sampled pairs required for a distance bin to enter the fit.
             Bins below this count remain in the returned empirical arrays.
-        :param bounds: Lower and upper bound for every fitted parameter.
+        :param bounds: Lower and upper bound for every fitted parameter. Default stable shapes are at most two,
+            so the fitted covariance is valid.
         :param p0: Initial parameter values in range/sill order, followed by optional model shape and nugget.
-        :param maxfev: Maximum number of model evaluations.
+            None selects automatic starting values and tries several range combinations for summed models.
+        :param maxfev: Maximum number of model evaluations for each initial parameter set.
         :returns: New variogram containing fitted model parameters in the shared form.
         """
 
@@ -927,7 +971,6 @@ class Variogram:
 
         # Turn short names, model functions, or a sequence into standard model names
         definitions = _prepare_variogram_fit_models(models, p0, use_nugget)
-        model_names = [definition.name for definition in definitions]
         parameter_counts = [definition.parameter_count for definition in definitions]
 
         # Fit only bins with measured values and require more bins than fitted parameters
@@ -949,23 +992,16 @@ class Variogram:
                 values += np.where(np.asarray(distance) > 0, parameters[position], 0.0)
             return values
 
-        # Choose starting range and variance values from the measured distances and semivariances
+        # Choose initial values from the usable bins unless the caller supplies them
         maximum_lag = float(np.nanmax(self.lags[valid]))
-        maximum_variance = float(np.nanmax(self.semivariance[valid]))
-        if maximum_variance <= 0:
-            maximum_variance = 1.0
         if p0 is None:
-            guesses: list[float] = []
-            for index, count in enumerate(parameter_counts, start=1):
-                guesses.extend((index * maximum_lag / len(model_names), maximum_variance / len(model_names)))
-                guesses.extend([1.0] * (count - 2))
-            if use_nugget:
-                guesses.append(maximum_variance * 0.05)
-            p0 = guesses
+            starting_values = _variogram_fit_starts(definitions, self.lags[valid], self.semivariance[valid], use_nugget)
+        else:
+            starting_values = [np.asarray(p0, dtype=float)]
 
         # Check optional starting values and limits against the number of fitted parameters
         expected = sum(parameter_counts) + int(use_nugget)
-        if len(p0) != expected:
+        if any(len(start) != expected for start in starting_values):
             raise ValueError(f"Argument ``p0`` must contain {expected} parameters for the selected models.")
 
         # Keep fitted parameters nonnegative unless the caller supplies other limits
@@ -974,7 +1010,12 @@ class Variogram:
             for definition in definitions:
                 count = definition.parameter_count
                 model_bounds.extend(((float(np.finfo(float).eps), maximum_lag), (0.0, np.inf)))
-                extra_bounds = (-np.inf, np.inf) if definition.custom else (float(np.finfo(float).eps), np.inf)
+                if definition.custom:
+                    extra_bounds = (-np.inf, np.inf)
+                elif definition.name == "stable":
+                    extra_bounds = (float(np.finfo(float).eps), 2.0)
+                else:
+                    extra_bounds = (float(np.finfo(float).eps), np.inf)
                 model_bounds.extend([extra_bounds] * (count - 2))
             if use_nugget:
                 model_bounds.append((0.0, np.inf))
@@ -982,6 +1023,10 @@ class Variogram:
         if len(bounds) != expected:
             raise ValueError(f"Argument ``bounds`` must contain {expected} lower/upper pairs for the selected models.")
         lower, upper = np.asarray(bounds, dtype=float).T
+
+        # Automatic starts must also respect narrower caller-supplied bounds
+        if p0 is None:
+            starting_values = [np.clip(start, lower, upper) for start in starting_values]
 
         # Give bins with smaller measured errors more influence when usable errors exist
         errors = None
@@ -992,18 +1037,43 @@ class Variogram:
                 replacement = float(np.nanmedian(candidate_errors[positive]))
                 errors = np.where(positive, candidate_errors, replacement)
 
-        # Fit all summed components together so their parameters can adjust to one another
-        coefficients, covariance = curve_fit(
-            summed_model,
-            self.lags[valid],
-            self.semivariance[valid],
-            p0=np.asarray(p0, dtype=float),
-            bounds=(lower, upper),
-            sigma=errors,
-            absolute_sigma=errors is not None,
-            method="trf",
-            maxfev=maxfev,
-        )
+        # Fit all components together, balancing range and variance parameter scales
+        best_fit = None
+        best_loss = np.inf
+        last_error = None
+        for start in starting_values:
+            try:
+                candidate = curve_fit(
+                    summed_model,
+                    self.lags[valid],
+                    self.semivariance[valid],
+                    p0=start,
+                    bounds=(lower, upper),
+                    sigma=errors,
+                    absolute_sigma=errors is not None,
+                    method="trf",
+                    x_scale="jac",
+                    maxfev=maxfev,
+                )
+            except (RuntimeError, ValueError, FloatingPointError) as error:
+                last_error = error
+                continue
+
+            # Compare the same weighted residuals minimized by the optimizer
+            residuals = summed_model(self.lags[valid], *candidate[0]) - self.semivariance[valid]
+            if errors is not None:
+                residuals = residuals / errors
+            loss = float(np.sum(residuals**2))
+            if loss < best_loss:
+                best_fit = candidate
+                best_loss = loss
+
+        # Failed starts do not discard a successful fit from another distance scale
+        if best_fit is None:
+            if last_error is not None:
+                raise last_error
+            raise RuntimeError("Variogram fitting did not find finite residuals.")
+        coefficients, covariance = best_fit
 
         # Split SciPy's fitted numbers back into the shared component model objects
         components: list[VariogramModel] = []

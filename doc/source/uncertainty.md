@@ -697,7 +697,7 @@ summary.info()
 And {meth}`~geoutils.PropagationSummary.interval` for estimating **95% uncertainty bounds**:
 
 ```{code-cell} ipython3
-summary.interval(0.95)
+print(summary.interval(0.95))
 ```
 
 These attributes have the **same shape as the operation's output**. For a raster or point cloud, they also share the output coordinates, with an uncertainty for each cell or point.
