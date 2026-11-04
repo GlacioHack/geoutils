@@ -193,6 +193,23 @@ class TestPointCloud:
             grid_coords[0][0] += 1
             Raster.from_pointcloud_regular(pc, grid_coords=grid_coords)  # type: ignore
 
+    def test_grid__preferred_chunks(self) -> None:
+        """Checks that grid() copies spatial preferred chunks without copying reference value encoding."""
+
+        # Create points and a reference
+        x, y = np.meshgrid([0.5, 1.5], [0.5, 1.5])
+        points = gpd.GeoDataFrame({"z": np.arange(4)}, geometry=gpd.points_from_xy(x.ravel(), y.ravel()), crs=32610)
+        points.pc.set_data_name("z")
+        reference = Raster.from_array(np.zeros((2, 2)), (1, 0, 0, 0, -1, 2), 32610).to_xarray().squeeze()
+        reference.encoding["preferred_chunks"] = {"band": 1, "y": 1, "x": 2}
+
+        # Grid the points
+        result = points.pc.grid(ref=reference, resampling="nearest")
+
+        # Check values and preferred chunks
+        assert result.encoding == {"grid_mapping": "spatial_ref", "preferred_chunks": {"y": 1, "x": 2}}
+        np.testing.assert_array_equal(result.values, [[2, 3], [0, 1]])
+
     @pytest.mark.parametrize(
         ("resampling", "spread", "expected_invalid"),
         [
@@ -967,6 +984,8 @@ class TestGridChunked:
             else PointCloud(self.points, data_name="z")
         )
         raster = gu.open_raster(str(raster_file), chunks={"x": 2, "y": 2}) if raster_dask else reference
+        if raster_dask:
+            raster.encoding["preferred_chunks"] = {"band": 1, "y": 1, "x": 3}
         expected = PointCloud(self.points, data_name="z").grid(
             ref=reference,
             resampling="nearest",
@@ -1000,6 +1019,9 @@ class TestGridChunked:
             assert isinstance(raster.data, da.Array)
             assert not raster._in_memory
             assert output.data.chunks == raster.data.chunks
+            assert output.encoding["preferred_chunks"] == {
+                axis: raster.encoding["preferred_chunks"][axis] for axis in ("y", "x")
+            }
 
         # Grid coordinates coincide with source points; raster rows reverse the points' increasing Y order
         expected_values = self.points["z"].to_numpy().reshape(3, 3)[::-1]

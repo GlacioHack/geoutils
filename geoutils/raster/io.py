@@ -348,7 +348,7 @@ def open_raster(
         Passing {"shape": (64, 128)} reads 64 rows and 128 columns. Only "nearest" selection can be supported for
         downsample reads, use ``reproject()`` instead of other resamplings. "factor" and "res" preserve exact
         pixel spacing and can thus trim extent, while "shape" adjusts pixel spacing and thus preserves extent.
-         Default 1 reads the full grid.
+        Default 1 reads the full grid.
     :param squeeze: Remove the band dimension when it contains one band. Spatial dimensions are never removed.
     :param masked: Replace missing values with NaNs, promoting integer values to floating point. If False,
         numeric nodata values remain in the data and operations expecting NaNs may return incorrect results.
@@ -425,7 +425,6 @@ def open_raster(
                 reduced_options = {**kwargs, "opener": reduced_filesystem}
                 ds = rioxr.open_rasterio(reduced_filesystem.name, chunks=chunks, masked=masked, **reduced_options)
             ds.encoding["source"] = str(filename) if filesystem is not None else source.name
-            ds.encoding["driver"] = source.driver
 
     # Xarray conversions can drop the source close callback
     opened_array = ds
@@ -439,6 +438,7 @@ def open_raster(
         else rio.open(open_filename, **source_options)
     )
     with source_context as source:
+        ds.encoding["driver"] = source.driver
         # Store overview metadata
         overview_metadata = _raster_overview_metadata(source, overview_level)
         disk_metadata = {"block_shape": tuple(source.block_shapes[0])}
@@ -564,6 +564,29 @@ def _load_rio(
 ##############
 # 3/ WRITING
 ##############
+
+
+def _copy_preferred_chunks(ref: Any, result: Any) -> None:
+    """Copy spatial preferred chunks from a reference to Xarray raster results."""
+
+    # Accept a DataArray or its raster accessor
+    ref = getattr(ref, "_obj", ref)
+    if not isinstance(ref, xr.DataArray) or not isinstance(result, (xr.DataArray, xr.Dataset)):
+        return
+    preferred_chunks = ref.encoding.get("preferred_chunks", {})
+    if not preferred_chunks:
+        return
+
+    # Exclude band chunks because the result can have different layers
+    spatial_chunks = {
+        axis: preferred_chunks[dimension]
+        for axis, dimension in (("y", ref.rio.y_dim), ("x", ref.rio.x_dim))
+        if dimension in preferred_chunks
+    }
+    if spatial_chunks:
+        variables = [result] if isinstance(result, xr.DataArray) else result.rst.compatible_variables.values()
+        for variable in variables:
+            variable.encoding["preferred_chunks"] = spatial_chunks.copy()
 
 
 def _set_raster_encoding(

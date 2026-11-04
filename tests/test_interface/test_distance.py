@@ -71,6 +71,26 @@ class TestDistance:
     everest_outlines_path = gu.examples.get_path_test("everest_rgi_outlines")
     aster_dem_path = gu.examples.get_path_test("exploradores_aster_dem")
 
+    @pytest.mark.parametrize("from_vector", [False, True])
+    def test_proximity__preferred_chunks(self, from_vector: bool) -> None:
+        """Checks that raster and vector proximity copy spatial preferred chunks into distance rasters."""
+
+        # Create data with preferred chunks ecnoding
+        reference = gu.Raster.from_array(np.ones((3, 4)), (1, 0, 0, 0, -1, 3), 32610).to_xarray().squeeze()
+        reference.encoding["preferred_chunks"] = {"band": 1, "y": 2, "x": 3}
+
+        # Calculate proximity
+        if from_vector:
+            polygon = Polygon([(0, 0), (4, 0), (4, 3), (0, 3)])
+            vector = gpd.GeoDataFrame(geometry=[polygon], crs=32610)
+            result = vector.vct.proximity(raster=reference.rst)
+        else:
+            result = reference.rst.proximity()
+
+        # Check preferred chunks
+        assert result.encoding == {"grid_mapping": "spatial_ref", "preferred_chunks": {"y": 2, "x": 3}}
+        np.testing.assert_array_equal(result.values, np.zeros((3, 4)))
+
     def test_proximity_vector(self) -> None:
         """
         The core functionality is already tested against GDAL in test_raster: just verify the vector-specific behaviour.
@@ -309,8 +329,12 @@ class TestDistanceChunked:
         options = {"target_values": [1], "distance_unit": distance_unit, "max_distance": max_distance}
         expected = source.proximity(**options)
         dask_source = gu.open_raster(str(source_path), chunks={"y": 4, "x": 5})
+        dask_source.encoding["preferred_chunks"] = {"band": 1, "y": 3, "x": 4}
         multiproc_source = gu.Raster(source_path)
         dask_result = dask_source.rst.proximity(**options)
+        assert dask_result.encoding["preferred_chunks"] == {
+            axis: dask_source.encoding["preferred_chunks"][axis] for axis in ("y", "x")
+        }
         mp_config = MultiprocConfig(chunks=(4, 5), outfile=str(tmp_path / "proximity_multiproc.tif"))
         multiproc_result = multiproc_source.proximity(**options, mp_config=mp_config)
 
@@ -350,8 +374,12 @@ class TestDistanceChunked:
         options = {"distance_unit": "pixel", "max_distance": 3.0}
         expected = boundary.proximity(raster=source, **options)
         dask_source = gu.open_raster(str(source_path), chunks={"y": 4, "x": 5})
+        dask_source.encoding["preferred_chunks"] = {"band": 1, "y": 3, "x": 4}
         multiproc_source = gu.Raster(source_path)
         dask_result = boundary.proximity(raster=dask_source.rst, **options)
+        assert dask_result.encoding["preferred_chunks"] == {
+            axis: dask_source.encoding["preferred_chunks"][axis] for axis in ("y", "x")
+        }
         mp_config = MultiprocConfig(chunks=(4, 5), outfile=str(tmp_path / "vector_proximity_multiproc.tif"))
         multiproc_result = boundary.proximity(raster=multiproc_source, **options, mp_config=mp_config)
 

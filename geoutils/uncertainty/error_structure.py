@@ -425,6 +425,27 @@ class ErrorMagnitude:
         return float(np.median(finite))
 
 
+def _magnitude_bin_values(magnitude: ErrorMagnitude) -> NDArray[np.float64]:
+    """Predict finite error magnitudes at supported bin centers."""
+
+    table = magnitude.grouped_statistics
+    if table is None:
+        raise AssertionError("A variable magnitude must contain grouped statistics.")
+    spread = table[(magnitude.value_name, magnitude.statistic)].to_numpy(dtype=float)
+    counts = table[(magnitude.value_name, "count")].to_numpy(dtype=float)
+    valid = np.isfinite(spread) & (counts >= magnitude.min_count)
+
+    # Summarize the fitted error at observed bin centers, including each category
+    predictors = {}
+    for name in magnitude.predictor_names:
+        coordinates = table.index.get_level_values(name)[valid]
+        if isinstance(coordinates, pd.IntervalIndex):
+            coordinates = coordinates.mid
+        predictors[name] = coordinates.to_numpy()
+    values = np.asarray(magnitude.predict(predictors), dtype=float)
+    return values[np.isfinite(values)]
+
+
 def _plot_label(name: str, attributes: Mapping[str, Any]) -> str:
     """Format a descriptive variable name and any supplied units for a plot label."""
 
@@ -1396,8 +1417,9 @@ class ErrorStructure:
         *,
         component: str | None = None,
         min_count: int | None = None,
-        show_model: bool = True,
+        show_model: bool | None = None,
         plot_kind: Literal["auto", "line", "bar", "heatmap"] = "auto",
+        crop_valid: bool = True,
         title: str = "Error variability",
         xlabel: str | None = None,
         ylabel: str | None = None,
@@ -1411,13 +1433,16 @@ class ErrorStructure:
 
         Labels use the input long_name and units metadata saved during estimation.
         Pass label arguments to override them.
+        Heatmap legends identify the empirical estimator and magnitude model even when the model is not drawn.
 
         :param component: Variable component to plot, inferred when there is only one.
         :param min_count: Smallest count shown, defaulting to the fitted threshold.
         :param show_model: Whether to overlay the fitted magnitude model on the empirical groups.
+            None shows the model on curves and bars, and omits it on heatmaps.
         :param plot_kind: "auto" draws bars for one categorical predictor, curves for continuous predictors or a
             categorical/continuous pair, and a heatmap for two continuous predictors. Use "line", "bar", or "heatmap"
             to select the layout explicitly. Bars require one predictor and heatmaps require two.
+        :param crop_valid: Crop heatmaps and their count panels to finite magnitude bins meeting min_count.
         :param title: Title above the plot and its count histograms.
         :param xlabel: Horizontal predictor label, inferred from its name and units when omitted.
         :param ylabel: Magnitude label for bars and curves, or the second predictor's label for a heatmap.
@@ -1425,7 +1450,7 @@ class ErrorStructure:
         :param count_label: Sample count label on each histogram.
         :param empirical_label: Legend label for the empirical groups, defaulting to their spread estimator.
         :param model_label: Legend label for the fitted magnitude model.
-        :param kwargs: Keyword arguments passed to plot_grouped_stats().
+        :param kwargs: Keyword arguments passed to plot_grouped_stats(). Heatmaps use the Purples colormap by default.
         :returns: Named plotting axes.
         """
 
@@ -1450,9 +1475,6 @@ class ErrorStructure:
 
         # Apply the fitted component's scale and allocated variance to its observed bins
         magnitude = selected.magnitude
-        if model_label is None:
-            name = "linear interpolation" if magnitude.model == "piecewise_linear" else magnitude.model_name
-            model_label = f"Model ({name})"
         if magnitude.grouped_statistics is None:
             raise AssertionError("A variable magnitude must contain statistics.")
         table = magnitude.grouped_statistics.copy(deep=True)
@@ -1464,6 +1486,7 @@ class ErrorStructure:
 
         # Apply the error labels before saving the completed figure
         table, layout = _prepare_grouped_plot(table, plot_kind)
+        kwargs.setdefault("cmap", "Purples")
         savefig_fname = kwargs.pop("savefig_fname", None)
         axes = stats.plot_grouped_stats(
             table,
@@ -1471,6 +1494,7 @@ class ErrorStructure:
             statistic=cast(str, magnitude.statistic),
             min_count=magnitude.min_count if min_count is None else min_count,
             plot_kind=layout,
+            crop_valid=crop_valid,
             **kwargs,
         )
         estimator = cast(str, magnitude.statistic)
@@ -1533,10 +1557,30 @@ class ErrorStructure:
         count_axis.set_ylabel(count_label)
         if "count_y" in axes:
             axes["count_y"].set_xlabel(count_label)
+        if show_model is None:
+            show_model = "colorbar" not in axes
+        if empirical_label is None:
+            empirical_label = f"Empirical ({estimator_label})"
+        if model_label is None:
+            name = "linear interpolation" if magnitude.model == "piecewise_linear" else magnitude.model_name
+            visibility = "; not shown" if "colorbar" in axes and not show_model else ""
+            model_label = f"Model ({name}{visibility})"
         if show_model:
-            if empirical_label is None:
-                empirical_label = f"Empirical ({estimator_label})"
             _plot_magnitude_fit(magnitude, table, axes, empirical_label, model_label)
+        elif "colorbar" in axes:
+            from matplotlib.lines import Line2D
+
+            # Name the hidden model without drawing a sample contour in the legend
+            empirical = Line2D([], [], marker="s", linestyle="none", color="0.5")
+            hidden_model = Line2D([], [], color="none")
+            statistic_axis.legend(
+                handles=[empirical, hidden_model],
+                labels=[empirical_label, model_label],
+                loc="upper right",
+                fontsize="small",
+                handlelength=1,
+                framealpha=0.8,
+            )
 
         if savefig_fname is not None:
             statistic_axis.figure.savefig(savefig_fname, bbox_inches="tight")
@@ -1550,6 +1594,7 @@ class ErrorStructure:
         show_components: bool = False,
         plot_kind: Literal["auto", "line", "bar", "heatmap"] = "auto",
         return_axes: Literal[False] = False,
+        magnitude_kwargs: Mapping[str, Any] | None = None,
         **kwargs: Any,
     ) -> None: ...
 
@@ -1561,6 +1606,7 @@ class ErrorStructure:
         show_components: bool = False,
         plot_kind: Literal["auto", "line", "bar", "heatmap"] = "auto",
         return_axes: Literal[True],
+        magnitude_kwargs: Mapping[str, Any] | None = None,
         **kwargs: Any,
     ) -> Mapping[str, Any]: ...
 
@@ -1572,6 +1618,7 @@ class ErrorStructure:
         show_components: bool = False,
         plot_kind: Literal["auto", "line", "bar", "heatmap"] = "auto",
         return_axes: bool,
+        magnitude_kwargs: Mapping[str, Any] | None = None,
         **kwargs: Any,
     ) -> Mapping[str, Any] | None: ...
 
@@ -1582,6 +1629,7 @@ class ErrorStructure:
         show_components: bool = False,
         plot_kind: Literal["auto", "line", "bar", "heatmap"] = "auto",
         return_axes: bool = False,
+        magnitude_kwargs: Mapping[str, Any] | None = None,
         **kwargs: Any,
     ) -> Mapping[str, Any] | None:
         """
@@ -1597,6 +1645,8 @@ class ErrorStructure:
         :param show_components: Whether to add each component's variance-weighted contribution to the fitted curve.
         :param plot_kind: Magnitude layout: "auto", "line", "bar", or "heatmap", as in plot_magnitude().
         :param return_axes: Whether to return the named plotting axes instead of None.
+        :param magnitude_kwargs: Options passed to plot_magnitude(), including xlabel, ylabel and cbar_title.
+            For constant magnitudes, ylabel overrides the component variance label.
         :param kwargs: Keyword arguments passed to plot_correlation(), or to the model curve when no empirical
             variogram is stored. Both accept kind, xscale and title; counts and sampling errors require empirical data.
         :returns: None, or a mapping naming the variance, magnitude and correlation axes when return_axes=True.
@@ -1637,10 +1687,12 @@ class ErrorStructure:
         axes: dict[str, Any] = {}
         for component, panel in zip(variable_components, panel_axes):
             axes[f"magnitude:{component.name}"] = self.plot_magnitude(
-                component=component.name, ax=panel, plot_kind=plot_kind
+                component=component.name, ax=panel, plot_kind=plot_kind, **(magnitude_kwargs or {})
             )
         if constant_magnitudes:
             _plot_constant_variances(self, panel_axes[0])
+            if magnitude_kwargs is not None and "ylabel" in magnitude_kwargs:
+                panel_axes[0].set_ylabel(magnitude_kwargs["ylabel"])
             axes["variance"] = panel_axes[0]
         if has_correlation:
             kwargs.setdefault("kind", "correlation")
@@ -1716,17 +1768,8 @@ class ErrorStructure:
                 counts = table[(magnitude.value_name, "count")].to_numpy(dtype=float)
                 valid = np.isfinite(spread) & (counts >= magnitude.min_count)
 
-                # Summarize the fitted error at observed bin centers, including each category
-                predictors = {}
-                for name in magnitude.predictor_names:
-                    coordinates = table.index.get_level_values(name)[valid]
-                    if isinstance(coordinates, pd.IntervalIndex):
-                        coordinates = coordinates.mid
-                    predictors[name] = coordinates.to_numpy()
-
                 # Summarize component magnitudes after allocating variance to the other components
-                values = np.asarray(magnitude.predict(predictors), dtype=float)
-                values = values[np.isfinite(values)]
+                values = _magnitude_bin_values(magnitude)
                 if values.size:
                     lines.append(
                         f"    Error range (±1σ): {np.min(values):.4g} to {np.max(values):.4g}{unit_suffix} "

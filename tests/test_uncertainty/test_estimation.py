@@ -521,6 +521,85 @@ class TestErrorStructureEstimation:
         assert short.correlation.effective_range < long.correlation.effective_range
         assert predicted[1] > predicted[0]
 
+    @pytest.mark.parametrize("model", ["piecewise_linear", "linear"])
+    @pytest.mark.parametrize("fixed_fraction", [0.05, 0.9])
+    @pytest.mark.parametrize("with_nugget", [False, True])
+    def test_estimate__component_variances_preserve_magnitude(
+        self,
+        model: Literal["piecewise_linear", "linear"],
+        fixed_fraction: float,
+        with_nugget: bool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Checks that estimation and refitting preserve local total magnitudes when allocating constant variance."""
+
+        pytest.importorskip("skgstat")
+
+        # Balanced signs give exact spreads, with a sparse low-error group excluded
+        counts = [40, 40, 40, 2]
+        quality = np.repeat(np.arange(4.0), counts)
+        values = np.concatenate(
+            [np.tile([-spread, spread], count // 2) for spread, count in zip([1, 2, 4, 0.1], counts)]
+        )
+        source = gu.PointCloud.from_xyz(np.arange(len(values)), np.zeros(len(values)), values, crs=32631)
+        nugget = fixed_fraction / 4 if with_nugget else 0
+        correlation = VariogramModel.sum(
+            [
+                VariogramModel("gaussian", effective_range=2, partial_sill=1 - fixed_fraction),
+                VariogramModel("spherical", effective_range=20, partial_sill=fixed_fraction - nugget),
+            ],
+            nugget=nugget,
+        )
+
+        def fit(empirical: gu.Variogram, *args: Any, **kwargs: Any) -> gu.Variogram:
+            """Return controlled variance shares with the measured bins."""
+
+            return replace(empirical, model=correlation, counts=np.maximum(empirical.counts, 100))
+
+        monkeypatch.setattr(gu.Variogram, "fit", fit)
+        components: dict[str, dict[str, str | None]] = {
+            "short": {"magnitude": "heteroscedastic", "correlation": "gaussian"},
+            "long": {"magnitude": "constant", "correlation": "spherical"},
+        }
+        if with_nugget:
+            components["noise"] = {"magnitude": "constant", "correlation": None}
+
+        structure = gu.ErrorStructure.estimate(
+            source,
+            predictors={"quality": quality},
+            bins={"quality": [-0.5, 0.5, 1.5, 2.5, 3.5]},
+            components=components,
+            magnitude_model=model,
+            spread_estimator=np.std,
+            min_count=10,
+            n_pairs=500,
+            pair_sampling="random_xy",
+            n_lags=6,
+            max_lag=80,
+            random_state=42,
+        )
+
+        # Recombined variance follows the total model throughout its supported predictor range
+        predictors = {"quality": np.linspace(0, 2, 31)}
+        total = structure.metadata["total_magnitude"]
+        expected = total.predict(predictors)
+        for result in (structure, structure.refit_variogram()):
+            np.testing.assert_allclose(result.predict_magnitude(predictors), expected)
+            assert np.all(result.predict_magnitude(predictors, component="short") > 0)
+            constant_variance = sum(
+                item.predict_magnitude() ** 2 for name, item in result.components.items() if name != "short"
+            )
+            assert constant_variance <= np.min(expected) ** 2
+
+            # The sparse group cannot reduce the cap, and an already small share stays unchanged
+            # Valid spreads are 1, 2, 4, whose affine fit starts at 5/6
+            minimum = 1 if model == "piecewise_linear" else 5 / 6
+            expected_constant = 0.05 * 2**2 if fixed_fraction == 0.05 else 0.95 * minimum**2
+            assert constant_variance == pytest.approx(expected_constant)
+            if with_nugget:
+                ratio = result.components["long"].predict_magnitude() / result.components["noise"].predict_magnitude()
+                assert ratio**2 == pytest.approx(3)
+
     def test_estimate_error_structure__two_inputs_fit_correlation(self) -> None:
         """Checks that a two-raster fit recovers the same magnitude and correlation as a scaled difference proxy."""
 
@@ -1340,6 +1419,35 @@ class TestErrorStructureEstimationErrors:
 
         with pytest.raises(ValueError, match=message):
             getattr(structure, method)()
+
+    @pytest.mark.parametrize("method", ["refit", "refit_variogram"])
+    @pytest.mark.parametrize("models", ["spherical+spherical", ["spherical", "spherical"]])
+    def test_refit_methods__error_number_of_components(self, method: str, models: str | list[str]) -> None:
+        """Checks an error is raised for two models on one estimated component, with guidance to estimate again."""
+
+        pytest.importorskip("skgstat")
+        rows, columns = np.indices((24, 24))
+        values = np.sin(rows / 2) + np.cos(columns / 3)
+        source = gu.Raster.from_array(values, Affine(10, 0, 0, 0, -10, 240), 32631)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            structure = gu.ErrorStructure.estimate(
+                source,
+                components={"spatial": {"magnitude": "constant", "correlation": "spherical"}},
+                n_pairs=1_000,
+                n_lags=8,
+                fit_kwargs={"min_count": 1},
+                random_state=42,
+            )
+
+        with pytest.raises(ValueError) as error:
+            getattr(structure, method)(models)
+
+        assert str(error.value) == (
+            "The previous estimate has 1 correlated component, but you supplied 2 correlation models. "
+            "Refitting requires one model per existing correlated component. "
+            "To change the number of components, call ErrorStructure.estimate() again with a new components definition."
+        )
 
     @pytest.mark.parametrize(
         "bins,categories,message",

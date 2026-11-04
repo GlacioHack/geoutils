@@ -65,7 +65,7 @@ jobs:
         run: |
           mamba install pyyaml python=${{ env.PYTHON_VERSION }}
           python .github/scripts/generate_yml_env_fixed_py.py \
-            --pyv ${{ env.PYTHON_VERSION }} --add "gdal<3.13.3" environment.yml
+            --pyv ${{ env.PYTHON_VERSION }} --add "gdal<3.13.3,pdal>=2.10,python-pdal" environment.yml
           mamba env update -n geoutils-dev -f environment-ci-py${{ env.PYTHON_VERSION }}.yml
 
       - name: Install GeoUtils and test dependencies

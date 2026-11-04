@@ -773,8 +773,10 @@ class TestFilterChunked:
     Kernel accuracy and SciPy/Numba comparisons are covered in test_operators/test_reducer.py.
     """
 
-    @pytest.mark.parametrize("operator", [Mean(), Sum(), SourceIndexSum()])
-    @pytest.mark.parametrize("fractional", [False, True])
+    @pytest.mark.parametrize(
+        "operator,fractional",
+        [(Mean(), False), (Sum(), False), (SourceIndexSum(), False), (Mean(), True), (Sum(), True)],
+    )
     def test_filter__reducer_chunks(
         self, tmp_path: Any, operator: Reducer, fractional: bool, mp_cluster: MpCluster
     ) -> None:
@@ -783,8 +785,6 @@ class TestFilterChunked:
         from geoutils._misc import import_optional
 
         da = import_optional("dask").array
-        if fractional and isinstance(operator, SourceIndexSum):
-            pytest.skip("SourceIndexSum does not accept area weights.")
 
         # Distinct bands and shorter final chunks reveal band mixing and missing edge windows
         values = np.random.default_rng(42).normal(size=(2, 13, 17))

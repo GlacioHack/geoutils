@@ -649,7 +649,10 @@ class TestGroupedStats:
         plt.close(axes["statistic"].figure)
 
     @pytest.mark.parametrize("plot_kind", ["auto", "line", "heatmap"])
-    def test_plot_grouped_stats__continuous_predictors(self, plot_kind: Literal["auto", "line", "heatmap"]) -> None:
+    @pytest.mark.parametrize("cmap", [None, "viridis"])
+    def test_plot_grouped_stats__continuous_predictors(
+        self, plot_kind: Literal["auto", "line", "heatmap"], cmap: str | None
+    ) -> None:
         """Checks that continuous groups default to a heatmap and can be drawn as separate curves."""
 
         plt = pytest.importorskip("matplotlib.pyplot")
@@ -657,11 +660,100 @@ class TestGroupedStats:
         columns = pd.MultiIndex.from_tuples([("error", "mean"), ("error", "count")], names=["value", "statistic"])
         table = pd.DataFrame([[1, 10], [2, 20], [3, 30], [4, 40]], index=index, columns=columns)
 
-        axes = gu.stats.plot_grouped_stats(table, statistic="mean", plot_kind=plot_kind)
+        axes = gu.stats.plot_grouped_stats(table, statistic="mean", plot_kind=plot_kind, cmap=cmap)
 
+        # Avoid crowded labels beside the narrow row histogram
+        count_axis = axes["count_y"]
+        lower, upper = count_axis.get_xlim()
+        ticks = count_axis.get_xticks()
+        assert np.count_nonzero((ticks >= lower) & (ticks <= upper)) <= 2
         assert ("colorbar" in axes) == (plot_kind != "line")
         if plot_kind == "line":
             np.testing.assert_array_equal([line.get_ydata() for line in axes["statistic"].lines], [[1, 3], [2, 4]])
+        else:
+            colormap = axes["statistic"].collections[0].cmap
+            assert not np.allclose(colormap(0)[:3], [1, 1, 1])
+            assert colormap.get_bad()[-1] == 0
+            if cmap is not None:
+                assert colormap.name == cmap
+        plt.close(axes["statistic"].figure)
+
+    @pytest.mark.parametrize(
+        "min_count,limits_x,limits_y",
+        [
+            (0, (0, 30), (-10, 10)),
+            (5, (0, 30), (-2, 3)),
+            (6, (-5, 60), (-10, 10)),
+        ],
+    )
+    def test_plot_grouped_stats__heatmap_trimmed_edges(
+        self, min_count: int, limits_x: tuple[float, float], limits_y: tuple[float, float]
+    ) -> None:
+        """Checks that heatmaps trim unsupported edges, align counts and preserve gaps after min_count filtering."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+
+        # Create sparse outer bins
+        bins_x = pd.IntervalIndex.from_breaks([-5, 0, 10, 30, 60], name="x")
+        bins_y = pd.IntervalIndex.from_breaks([-10, -2, 0, 3, 10], name="y")
+        index = pd.MultiIndex.from_product([bins_x, bins_y])
+        columns = pd.MultiIndex.from_product([["error"], ["mean", "count"]], names=["value", "statistic"])
+        values = np.ones((4, 4))
+        values[[0, -1], :] = np.nan
+        values[2, 2] = np.nan
+        counts = np.ones((4, 4))
+        counts[1:3, 1:3] = 5
+        table = pd.DataFrame(np.column_stack((values.ravel(), counts.ravel())), index=index, columns=columns)
+        original = table.copy(deep=True)
+
+        axes = gu.stats.plot_grouped_stats(table, statistic="mean", min_count=min_count)
+
+        # Clip to valid bin bounds, using all bins when no estimates remain
+        assert axes["statistic"].get_xlim() == limits_x
+        assert axes["statistic"].get_ylim() == limits_y
+        assert axes["count_x"].get_xlim() == limits_x
+        assert axes["count_y"].get_ylim() == limits_y
+        expected_mask = ~np.isfinite(values) | (counts < min_count)
+        np.testing.assert_array_equal(np.ma.getmaskarray(axes["statistic"].collections[0].get_array()), expected_mask.T)
+        np.testing.assert_array_equal([bar.get_height() for bar in axes["count_x"].patches], counts.sum(axis=1))
+        np.testing.assert_array_equal([bar.get_width() for bar in axes["count_y"].patches], counts.sum(axis=0))
+        pd.testing.assert_frame_equal(table, original)
+        plt.close(axes["statistic"].figure)
+
+    @pytest.mark.parametrize("crop_valid", [None, False, True])
+    @pytest.mark.parametrize("empty", [False, True])
+    @pytest.mark.parametrize("categorical", [False, True])
+    def test_plot_grouped_stats__crop_valid(self, crop_valid: bool | None, empty: bool, categorical: bool) -> None:
+        """Checks that heatmaps crop empty outer bins while preserving gaps, counts and an all-missing grid."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+        edges = np.array([0, 1, 3, 7, 8, 10])
+        level = pd.CategoricalIndex(list("abcde")) if categorical else pd.IntervalIndex.from_breaks(edges)
+        index = pd.MultiIndex.from_product([level, level], names=["x", "y"])
+        columns = pd.MultiIndex.from_tuples([("error", "mean"), ("error", "count")], names=["value", "statistic"])
+
+        # The outer estimate has too few observations and the middle rows contain gaps
+        values = np.full((5, 5), np.nan)
+        values[1, 1], values[3, 3], values[0, 4] = 2, 4, 99
+        counts = np.zeros((5, 5))
+        counts[1, 1], counts[3, 3], counts[0, 4], counts[4, 0] = 10, 20, 1, 7
+        if empty:
+            values[:] = np.nan
+        table = pd.DataFrame({("error", "mean"): values.ravel(), ("error", "count"): counts.ravel()}, index=index)
+        table.columns = columns
+        options: dict[str, Any] = {} if crop_valid is None else {"crop_valid": crop_valid}
+
+        axes = gu.stats.plot_grouped_stats(table, statistic="mean", min_count=2, **options)
+
+        expected_edges = np.arange(6) if categorical else edges
+        expected_limits = expected_edges[[0, -1]] if empty or crop_valid is False else expected_edges[[1, 4]]
+        np.testing.assert_array_equal(axes["statistic"].get_xlim(), expected_limits)
+        np.testing.assert_array_equal(axes["statistic"].get_ylim(), expected_limits)
+        np.testing.assert_array_equal(axes["count_x"].get_xlim(), expected_limits)
+        np.testing.assert_array_equal(axes["count_y"].get_ylim(), expected_limits)
+        np.testing.assert_array_equal([bar.get_height() for bar in axes["count_x"].patches], counts.sum(axis=1))
+        np.testing.assert_array_equal([bar.get_width() for bar in axes["count_y"].patches], counts.sum(axis=0))
+        assert axes["statistic"].collections[0].get_array().mask[2, 2]
         plt.close(axes["statistic"].figure)
 
     @pytest.mark.parametrize(

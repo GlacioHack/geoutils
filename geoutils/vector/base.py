@@ -54,6 +54,7 @@ from geoutils.projtools import (
     _get_footprint_projected,
     _get_utm_ups_crs,
 )
+from geoutils.raster.io import _copy_preferred_chunks
 from geoutils.vector.geometric import _buffer_metric, _buffer_without_overlap
 from geoutils.vector.testing import _vector_allclose, _vector_equal
 from geoutils.vector.transformation import _clip, _crop, _reproject
@@ -765,7 +766,10 @@ class VectorBase(ABC):
         if has_geo_attr(output, "data_name"):
             return self._cast_pointcloud_output(output)
         if has_geo_attr(output, "transform") and has_geo_attr(output, "shape"):
-            return self._cast_raster_output(output)
+            result = self._cast_raster_output(output)
+            if mp_config is None:
+                _copy_preferred_chunks(ref, result)
+            return result
         return output
 
     # Keep the Rasterio-style name as an equivalent public alias
@@ -868,7 +872,13 @@ class VectorBase(ABC):
             fractional_by=fractional_by,
             overlap_backend=overlap_backend,
         )
-        return self._cast_raster_output(raster)
+        result = self._cast_raster_output(raster)
+
+        # Copy spatial chunk hints only when the result has no output file layout
+        if mp_config is None:
+            _copy_preferred_chunks(ref, result)
+
+        return result
 
     @classmethod
     def from_bounds_projected(

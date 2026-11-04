@@ -1605,7 +1605,7 @@ def _plot_count_histogram(
 
     # Leave room for the main panel's tick labels across the small gap
     count_scale = ax.xaxis if horizontal else ax.yaxis
-    count_scale.set_major_locator(MaxNLocator(nbins=3, integer=True, prune="lower"))
+    count_scale.set_major_locator(MaxNLocator(nbins=2 if horizontal else 3, integer=True, prune="lower"))
     for spine in ax.spines.values():
         spine.set_visible(True)
 
@@ -1617,9 +1617,10 @@ def plot_grouped_stats(
     statistic: str = "nmad",
     min_count: int = 0,
     plot_kind: Literal["auto", "line", "bar", "heatmap"] = "auto",
-    cmap: Any = "viridis",
+    cmap: Any = None,
     vmin: float | None = None,
     vmax: float | None = None,
+    crop_valid: bool = True,
     ax: Any | None = None,
     savefig_fname: str | None = None,
 ) -> Mapping[str, Any]:
@@ -1630,7 +1631,8 @@ def plot_grouped_stats(
     With two grouping variables, a categorical and a continuous variable produce one curve per category.
     Two continuous variables produce a colored heatmap. Both layouts show count histograms above and to the right.
 
-    Passing ``min_count`` hides estimates without removing observations from the count panels.
+    Passing ``min_count`` hides estimates while counts include all observations.
+    Heatmaps trim outer rows and columns without finite estimates after this filtering.
 
     :param table: Grouped dataframe returned by stats() or an object stats() method.
     :param value: Selected value column. It may be omitted when the table contains one value.
@@ -1640,8 +1642,10 @@ def plot_grouped_stats(
         categorical/continuous groups, and a heatmap otherwise. Use "line", "bar", or "heatmap" to choose explicitly.
         Bars require one grouping variable and heatmaps require two.
     :param cmap: Matplotlib colormap used for a two-dimensional statistic grid.
+        None uses a sequential purple scale with a colored low end.
     :param vmin: Lower color limit for a two-dimensional statistic grid.
     :param vmax: Upper color limit for a two-dimensional statistic grid.
+    :param crop_valid: Crop heatmaps and their count panels to the outermost finite cells meeting min_count.
     :param ax: Optional Matplotlib axes whose area is divided into the plot panels.
     :param savefig_fname: Optional path used to save the completed figure.
     :returns: Mapping naming the Matplotlib axes created for each panel.
@@ -1731,7 +1735,25 @@ def plot_grouped_stats(
         counts = table[(value, "count")].reindex(full_index).unstack(level=1)
         plotted = table[(value, statistic)].where(table[(value, "count")] >= min_count)
         plotted = plotted.reindex(full_index).unstack(level=1)
+        limits_x = edges_x[[0, -1]]
+        limits_y = edges_y[[0, -1]]
         if layout == "heatmap":
+            # Trim unsupported outer bins while preserving gaps within the valid grid
+            if crop_valid:
+                valid = np.isfinite(plotted.to_numpy(dtype=float))
+                valid_x = np.flatnonzero(np.any(valid, axis=1))
+                valid_y = np.flatnonzero(np.any(valid, axis=0))
+                if valid_x.size and valid_y.size:
+                    limits_x = edges_x[[valid_x[0], valid_x[-1] + 1]]
+                    limits_y = edges_y[[valid_y[0], valid_y[-1] + 1]]
+
+            # Distinguish small values from transparent missing cells
+            if cmap is None:
+                from matplotlib.colors import LinearSegmentedColormap
+
+                colors = plt.get_cmap("Purples")(np.linspace(0.2, 1, 256))
+                cmap = LinearSegmentedColormap.from_list("Purples_trimmed", colors)
+
             mesh = statistic_axis.pcolormesh(
                 edges_x,
                 edges_y,
@@ -1753,21 +1775,21 @@ def plot_grouped_stats(
         counts_y = counts.sum(axis=0, skipna=True).to_numpy(dtype=float)
         _plot_count_histogram(count_x_axis, edges_x[:-1], edges_x[1:], counts_x)
         _plot_count_histogram(count_y_axis, edges_y[:-1], edges_y[1:], counts_y, horizontal=True)
-        count_x_axis.set_xlim(edges_x[0], edges_x[-1])
-        count_y_axis.set_ylim(edges_y[0], edges_y[-1])
+        count_x_axis.set_xlim(limits_x)
+        count_y_axis.set_ylim(limits_y)
 
         # Align predictor positions with their count panels
         statistic_axis.set(
-            xlim=(edges_x[0], edges_x[-1]),
             xlabel=table.index.names[0],
             ylabel=table.index.names[1] if layout == "heatmap" else statistic,
         )
-        if layout == "heatmap":
-            statistic_axis.set_ylim(edges_y[0], edges_y[-1])
         if labels_x is not None:
             statistic_axis.set_xticks(centers_x, labels_x, rotation=45, ha="right")
         if layout == "heatmap" and labels_y is not None:
             statistic_axis.set_yticks(centers_y, labels_y)
+        statistic_axis.set_xlim(limits_x)
+        if layout == "heatmap":
+            statistic_axis.set_ylim(limits_y)
 
         # Expose all created axes so callers can adapt the finished figure
         axes = {
@@ -1779,7 +1801,7 @@ def plot_grouped_stats(
             from matplotlib.ticker import MaxNLocator
 
             # Place the color scale in the empty corner above the row counts
-            colorbar_axis = frame.inset_axes((0.74, 0.88, 0.24, 0.05))
+            colorbar_axis = frame.inset_axes((0.74, 0.93, 0.24, 0.05))
             colorbar = figure.colorbar(mesh, cax=colorbar_axis, label=statistic, orientation="horizontal")
             colorbar.locator = MaxNLocator(nbins=3)
             colorbar.update_ticks()

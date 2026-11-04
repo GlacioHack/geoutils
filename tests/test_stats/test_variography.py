@@ -280,6 +280,28 @@ class TestVariogramPlot:
         assert not any("e" in label.get_text().lower() or "^" in label.get_text() for label in axis.get_xticklabels())
         plt.close(figure)
 
+    def test_plot__wide_log_scale(self) -> None:
+        """Checks that plot() labels powers of ten without overlapping across a wide distance range."""
+
+        plt = pytest.importorskip("matplotlib.pyplot")
+        variogram = gu.Variogram(
+            lags=np.array([1, 10, 100, 1000, 10000]),
+            semivariance=np.array([0.1, 0.3, 0.6, 0.9, 1.0]),
+            counts=np.ones(5, dtype=int),
+        )
+        figure, axis = plt.subplots(figsize=(5, 4))
+        axis.set_xlim(1, 10000)
+
+        variogram.plot(ax=axis, show_counts=False)
+        figure.canvas.draw()
+
+        ticks = axis.get_xticks()
+        np.testing.assert_allclose(ticks[(ticks >= 1) & (ticks <= 10000)], [1, 10, 100, 1000, 10000])
+        labels = [label for value, label in zip(ticks, axis.get_xticklabels()) if 1 <= value <= 10000]
+        bounds = [label.get_window_extent() for label in labels]
+        assert all(left.x1 < right.x0 for left, right in zip(bounds, bounds[1:]))
+        plt.close(figure)
+
     @pytest.mark.parametrize("kind", ["semivariance", "correlation"])
     def test_plot__model_values(
         self, fitted_variogram: gu.Variogram, kind: Literal["semivariance", "correlation"]
@@ -586,6 +608,20 @@ class TestVariogramEstimation:
         assert restored.fit_result["min_count"] == min_count
         assert empirical.model is None
 
+    @pytest.mark.parametrize("p0", [None, [7, 1]])
+    def test_fit__bounded_initial_values(self, p0: list[float] | None) -> None:
+        """Checks that automatic and supplied initial values fit within explicit parameter bounds."""
+
+        pytest.importorskip("skgstat")
+        lags = np.linspace(1, 20, 20)
+        model = VariogramModel("gaussian", effective_range=8, partial_sill=2)
+        empirical = gu.Variogram(lags=lags, semivariance=model.variogram(lags), counts=np.full(lags.size, 200))
+
+        # The largest lag lies outside the allowed range, so an automatic start needs adjustment
+        fitted = empirical.fit("gaussian", bounds=[(4, 10), (0.5, 3)], p0=p0)
+
+        np.testing.assert_allclose(fitted.fit_result["coefficients"], [8, 2], rtol=1e-6)
+
     @pytest.mark.parametrize("use_nugget", [False, True])
     def test_fit__custom_variogram(self, use_nugget: bool, monkeypatch: pytest.MonkeyPatch) -> None:
         """Checks that custom variograms recover every fitted parameter without importing SciKit-GStat."""
@@ -635,6 +671,33 @@ class TestVariogramEstimation:
         assert fitted.model.components[0].function is stretched_variogram
         assert fitted.model.components[1].model_name == "spherical"
         np.testing.assert_allclose(fitted.variogram(lags), values, rtol=1e-6)
+
+    @pytest.mark.parametrize("distance_scale", [0.001, 1, 1000])
+    def test_fit__separated_correlation_ranges(self, distance_scale: float) -> None:
+        """Checks that default fitting recovers short and long correlation ranges in different distance units."""
+
+        pytest.importorskip("skgstat")
+
+        # Exact values identify a 100 m Gaussian component and a 14 km stable component
+        lags = np.geomspace(10, 30000, 60) * distance_scale
+        model = VariogramModel.sum(
+            [
+                VariogramModel("gaussian", effective_range=100 * distance_scale, partial_sill=0.2),
+                VariogramModel("stable", effective_range=14000 * distance_scale, partial_sill=1.2, shape=0.7),
+            ]
+        )
+        values = model.variogram(lags)
+        empirical = gu.Variogram(lags=lags, semivariance=values, counts=np.full(lags.size, 200))
+
+        fitted = empirical.fit(["gaussian", "stable"])
+
+        # Both scales must be recovered instead of assigning both components to the long range
+        assert fitted.model is not None
+        ranges = np.array([component.effective_range for component in fitted.model.components], dtype=float)
+        np.testing.assert_allclose(ranges, np.array([100, 14000]) * distance_scale, rtol=1e-5)
+        np.testing.assert_allclose(fitted.variogram(lags), values, rtol=1e-6)
+        assert fitted.model.components[1].shape == pytest.approx(0.7, rel=1e-5)
+        assert empirical.model is None
 
     def test_pointcloud_variogram_and_advanced_pairs_share_api(self) -> None:
         """Checks that PointCloud exposes both pair samples and their reduced variogram values."""
@@ -1705,6 +1768,17 @@ class TestVariogramErrors:
 
         with pytest.raises(ValueError, match="At least two finite empirical lag classes with at least 100 pairs"):
             empirical.fit(min_count=100)
+
+    def test_fit__error_no_converged_start(self) -> None:
+        """Checks an error is raised when no automatic start converges within the evaluation limit."""
+
+        pytest.importorskip("skgstat")
+        lags = np.geomspace(1, 100, 20)
+        model = VariogramModel("gaussian", effective_range=20, partial_sill=2)
+        empirical = gu.Variogram(lags=lags, semivariance=model.variogram(lags), counts=np.full(lags.size, 200))
+
+        with pytest.raises(RuntimeError, match="maximum number of function evaluations"):
+            empirical.fit(["gaussian", "stable"], maxfev=1)
 
     @pytest.mark.parametrize(
         "kind,model,message",

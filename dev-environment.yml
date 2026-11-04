@@ -61,6 +61,7 @@ dependencies:
   - pdal>=2.10  # To benchmark functionalities against PDAL
 
   # Test dependencies
+  - python-pdal # For COPC test files and PDAL reference comparisons
   - pytest>=8,<10
   - pytest-xdist
   - pytest-lazy-fixtures

@@ -54,47 +54,15 @@ def _create_colorbar_axes(ax: matplotlib.axes.Axes) -> matplotlib.axes.Axes:
     return ax.inset_axes((1.02, 0, 0.05, 1))
 
 
-def _tick_labels_overlap(ax: matplotlib.axes.Axes, axis_name: Literal["x", "y"]) -> bool:
-    """Check whether adjacent visible tick labels overlap along an axes dimension."""
-
-    labels = ax.get_xticklabels() if axis_name == "x" else ax.get_yticklabels()
-    visible_labels = [label for label in labels if label.get_visible() and label.get_text()]
-    if len(visible_labels) < 2:
-        return False
-
-    # Compare neighboring labels in display coordinates, where their rendered text size is known
-    renderer = ax.figure.canvas.get_renderer()
-    label_boxes = [label.get_window_extent(renderer=renderer) for label in visible_labels]
-    coordinate = "x0" if axis_name == "x" else "y0"
-    label_boxes.sort(key=lambda box: getattr(box, coordinate))
-    return any(first.overlaps(second) for first, second in zip(label_boxes[:-1], label_boxes[1:]))
-
-
 def _reduce_tick_label_overlap(ax: matplotlib.axes.Axes) -> None:
-    """Reduce automatic major tick frequency until adjacent labels no longer overlap."""
+    """Limit automatic axes to a few evenly spaced ticks."""
 
-    from matplotlib.ticker import AutoLocator, LinearLocator, MaxNLocator
+    from matplotlib.ticker import AutoLocator, MaxNLocator
 
-    # Lay out the artists without rasterizing the complete map whenever Matplotlib supports it
-    draw_figure = getattr(ax.figure, "draw_without_rendering", ax.figure.canvas.draw)
-    draw_figure()
-    axis_names: tuple[Literal["x", "y"], ...] = ("x", "y")
-    for axis_name, axis in zip(axis_names, (ax.xaxis, ax.yaxis)):
-        if not isinstance(axis.get_major_locator(), AutoLocator):
-            continue
-
-        # Try progressively fewer intervals while keeping at least two labeled positions
-        visible_labels = [label for label in axis.get_ticklabels() if label.get_visible() and label.get_text()]
-        for maximum_intervals in range(len(visible_labels) - 2, 0, -1):
-            if not _tick_labels_overlap(ax, axis_name):
-                break
-            axis.set_major_locator(MaxNLocator(nbins=maximum_intervals, min_n_ticks=2))
-            draw_figure()
-
-        # MaxNLocator may keep three rounded ticks even with one requested interval; fall back to the two limits
-        if _tick_labels_overlap(ax, axis_name):
-            axis.set_major_locator(LinearLocator(numticks=2))
-            draw_figure()
+    # Use sparse ticks while preserving caller-supplied locators
+    for axis in (ax.xaxis, ax.yaxis):
+        if isinstance(axis.get_major_locator(), AutoLocator):
+            axis.set_major_locator(MaxNLocator(nbins=3, min_n_ticks=2))
 
 
 def _get_reference_bbox(reference: Any) -> rio.coords.BoundingBox | None:

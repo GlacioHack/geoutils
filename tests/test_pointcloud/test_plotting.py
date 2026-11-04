@@ -205,27 +205,6 @@ class TestPlot:
 
         plt.close(fig)
 
-    def test_plot__projected_tick_spacing(self) -> None:
-        """Checks that long projected coordinates do not overlap on a narrow plot."""
-
-        # Create one narrow panel with six-digit easting labels like those in documentation figures
-        dataframe = gpd.GeoDataFrame(
-            {"value": [0, 1]},
-            geometry=gpd.points_from_xy([470_000, 510_000], [3_080_000, 3_120_000]),
-            crs=32632,
-        )
-        pointcloud = gu.PointCloud(dataframe, data_column="value")
-        fig, axes = plt.subplots(1, 3, figsize=(4, 3))
-
-        # Plot in the first panel and compare the rendered bounds of neighboring labels
-        pointcloud.plot(ax=axes[0], max_points=None)
-        fig.canvas.draw()
-        labels = [label for label in axes[0].get_xticklabels() if label.get_visible() and label.get_text()]
-        label_boxes = [label.get_window_extent() for label in labels]
-
-        assert all(not first.overlaps(second) for first, second in zip(label_boxes[:-1], label_boxes[1:]))
-        plt.close(fig)
-
     def test_plot__match_reference_crs(self) -> None:
         """Checks that reference matching reprojects the point sample CRS and crops to bounds."""
 

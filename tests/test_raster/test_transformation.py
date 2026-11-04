@@ -1510,6 +1510,7 @@ class TestTransformationChunked:
         np.testing.assert_array_equal(values, expected.data.filled(np.nan))
         assert not source.is_loaded
 
+    @pytest.mark.parametrize("raster_gcp_rpc", ["rpc_polynomial", "rpc_rational"], indirect=True)
     @pytest.mark.skipif(
         Version(rio.__version__) < Version("1.5.0"),
         reason="Exact GCP/RPC reprojection comparisons require Rasterio 1.5 or newer.",
@@ -1521,8 +1522,6 @@ class TestTransformationChunked:
         # RPCs use ground height to locate image pixels, so supplying this DEM through RPC_DEM should give
         # the same reprojection as RPC_HEIGHT=80, which sets the height directly without an elevation file
         source = raster_gcp_rpc
-        if source.rpcs is None:
-            pytest.skip("RPC elevation options do not apply to GCPs")
         dem_file = tmp_path / "elevation.tif"
         dem = gu.Raster.from_array(
             np.full((200, 200), 80, dtype="float32"), rio.transform.from_origin(9, 51, 0.01, 0.01), 4326
@@ -1545,6 +1544,7 @@ class TestTransformationChunked:
         assert not lazy.rst.is_loaded
         assert not source.is_loaded
 
+    @pytest.mark.parametrize("raster_gcp_rpc", ["gcp_projected", "gcp_nonlinear"], indirect=True)
     @pytest.mark.skipif(
         Version(rio.__version__) < Version("1.5.0"),
         reason="Exact GCP/RPC reprojection comparisons require Rasterio 1.5 or newer.",
@@ -1556,8 +1556,6 @@ class TestTransformationChunked:
         # This bends the image smoothly through the control points
         # Dask must use this mapping both to find the source chunks and to reproject their pixels
         source = raster_gcp_rpc
-        if not source.gcps[0]:
-            pytest.skip("Thin plate splines do not apply to RPCs")
         options = {"SRC_METHOD": "GCP_TPS"}
         expected = gu.Raster(source.name).reproject(crs=3857, resampling="nearest", transformer_options=options)
         lazy = gu.open_raster(source.name, chunks={"y": 7, "x": 9})

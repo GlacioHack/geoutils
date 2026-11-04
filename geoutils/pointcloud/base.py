@@ -69,6 +69,7 @@ from geoutils.pointcloud.dataframe import (
     _set_dataframe_attrs,
 )
 from geoutils.pointcloud.testing import _georeferenced_coords_equal
+from geoutils.raster.io import _copy_preferred_chunks
 from geoutils.sampling.subsampling import _subsample_pointcloud
 from geoutils.stats.stats import stats as _stats
 from geoutils.stats.variography import variogram as _variogram
@@ -1151,7 +1152,10 @@ class PointCloudBase(ABC):
             dask=self._is_dask,
             n_threads=n_threads,
         )
-        return self._cast_raster_output(output)
+        result = self._cast_raster_output(output)
+        if mp_config is None:
+            _copy_preferred_chunks(ref, result)
+        return result
 
     @_deprecate_keyword("data_column", "data_name")
     def krige(

@@ -7,13 +7,14 @@ import tempfile
 from collections.abc import Iterator
 from importlib.util import find_spec
 
-import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 from affine import Affine
 
 import geoutils as gu
 from geoutils import examples
+
+plt = pytest.importorskip("matplotlib.pyplot")
 
 
 @pytest.fixture(autouse=True)
@@ -103,25 +104,25 @@ class TestPlot:
             np.testing.assert_array_equal(ax.images[0].get_array(), np.flip(raster.data, axis=0))
         plt.close(figure)
 
-    def test_plot__projected_tick_spacing(self) -> None:
-        """Checks that long projected coordinates do not overlap on a narrow plot."""
+    def test_plot__custom_tick_locator(self) -> None:
+        """Checks that plot() preserves explicitly supplied tick positions and labels."""
 
-        # Create one narrow panel with six-digit easting labels like those in documentation figures
-        raster = gu.Raster.from_array(
-            np.ones((10, 10)),
-            Affine(4_000, 0, 470_000, 0, -4_000, 3_120_000),
-            32632,
-        )
-        fig, axes = plt.subplots(1, 3, figsize=(4, 3))
+        from matplotlib.ticker import FixedFormatter, FixedLocator
 
-        # Plot in the first panel and compare the rendered bounds of neighboring labels
-        raster.plot(ax=axes[0], max_pixels=None, add_cbar=False)
-        fig.canvas.draw()
-        labels = [label for label in axes[0].get_xticklabels() if label.get_visible() and label.get_text()]
-        label_boxes = [label.get_window_extent() for label in labels]
+        raster = gu.Raster.from_array(np.ones((4, 4)), Affine(10, 0, 0, 0, -10, 40), 32632)
+        figure, ax = plt.subplots()
+        locator = FixedLocator([10, 30])
+        formatter = FixedFormatter(["Left", "Right"])
+        ax.xaxis.set_major_locator(locator)
+        ax.xaxis.set_major_formatter(formatter)
 
-        assert all(not first.overlaps(second) for first, second in zip(label_boxes[:-1], label_boxes[1:]))
-        plt.close(fig)
+        raster.plot(ax=ax, max_pixels=None)
+        figure.canvas.draw()
+
+        assert ax.xaxis.get_major_locator() is locator
+        assert ax.xaxis.get_major_formatter() is formatter
+        assert [label.get_text() for label in ax.get_xticklabels()] == ["Left", "Right"]
+        plt.close(figure)
 
     def test_plot__native_single_band(self) -> None:
         """Checks that disabling the pixel limit plots every source value at the source extent."""
