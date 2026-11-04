@@ -704,6 +704,8 @@ class TestPairSampleChunked:
 
         pytest.importorskip("distributed")
         from distributed import Client, LocalCluster
+        from distributed.compatibility import asyncio_run
+        from distributed.config import get_loop_factory
 
         values = np.arange(27 * 27, dtype=np.float32).reshape(27, 27)
         source = gu.DataArrayRasterAccessor.from_array(
@@ -757,6 +759,8 @@ class TestPairSampleChunked:
                 return result.compute()
 
         async def run_cluster() -> xr.Dataset:
+            """Sample pairs and await client and cluster shutdown."""
+
             async with LocalCluster(
                 n_workers=2,
                 threads_per_worker=1,
@@ -768,8 +772,9 @@ class TestPairSampleChunked:
                 async with Client(cluster, asynchronous=True) as client:
                     return await asyncio.to_thread(sample_pairs, client)
 
+        # Let Dask choose a compatible event loop on Windows
         # Await graceful cluster shutdown...
-        computed = asyncio.run(run_cluster())
+        computed = asyncio_run(run_cluster(), loop_factory=get_loop_factory())
 
         # Check equality
         expected = gu.Raster.from_array(values, source.transform, source.crs).pairsample(
