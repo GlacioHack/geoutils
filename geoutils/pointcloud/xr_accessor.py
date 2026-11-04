@@ -151,7 +151,12 @@ class DataArrayPointCloudAccessor(PointCloudBase):
 
     @property
     def is_loaded(self) -> bool:
-        return all(value.variable._in_memory for value in (self._dataset, *self._dataset.coords.values()))
+        # The point index can store just a start, stop and step, to describe the index of the X/Y/Z points
+        # So a non-expanded point index alone should be considered NOT loaded
+        coordinates = (
+            coordinate for name, coordinate in self._dataset.coords.items() if name not in self._dataset.xindexes
+        )
+        return self._dataset.variable._in_memory and all(coordinate.variable._in_memory for coordinate in coordinates)
 
     @property
     def bounds(self) -> BoundingBox:
