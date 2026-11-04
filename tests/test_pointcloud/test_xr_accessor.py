@@ -367,6 +367,25 @@ class TestDataArrayPointCloudAccessor:
         assert isinstance(raster, xr.DataArray)
         assert isinstance(raster.rst.to_geoutils(), gu.Raster)
 
+    @pytest.mark.parametrize("point_count", [0, 1, 3])
+    @pytest.mark.parametrize("representation", ["dataarray", "dataset"])
+    def test_is_loaded__range_index(self, point_count: int, representation: str) -> None:
+        """
+        Checks that loaded points with compact indexes (a RangeIndex with a start/stop/step to denote the position
+        of X/Y/Z) is considered loaded, including Dataset views, even though the index itself is lightweight.
+        """
+
+        # Create point cloud with a range index as coordinate labels
+        values = np.arange(point_count, dtype=float)
+        labels = pd.RangeIndex(5, 5 + point_count)
+        points = gu.pointcloud.from_xyz(values, values, values, 32633, "height").assign_coords(point=labels)
+        if representation == "dataset":
+            points = points.to_dataset().height
+
+        # The point cloud should still be considered loaded
+        assert isinstance(points.indexes["point"], pd.RangeIndex)
+        assert points.pc.is_loaded
+
     @pytest.mark.parametrize("points", [xr.DataArray([1, 2]), xr.DataArray(np.ones((2, 2)), dims=("y", "x"))])
     def test_accessor__error_invalid_coordinates(self, points: xr.DataArray) -> None:
         """Checks an error is raised for arrays without one X/Y coordinate per point row."""
@@ -1157,6 +1176,42 @@ class TestDatasetPointCloudAccessor:
         expected = getattr(eager.pc, method)(**options)
         assert_xarray_equal(result.compute(), expected)
         assert lazy.height.chunks and lazy.point.chunks
+
+
+class TestDataArrayPointCloudAccessorChunked:
+    """Test module for loading point values, coordinates and row labels stored in Dask arrays."""
+
+    @pytest.mark.parametrize("variable", ["height", "x", "y", "quality", "point"])
+    def test_is_loaded__lazy_variable(self, variable: str) -> None:
+        """Checks that any lazy point variable reports as unloaded until computed, without loading its source."""
+
+        da = pytest.importorskip("dask.array")
+        from dask.callbacks import Callback
+
+        # Use chunks of two so five points have a shorter final chunk
+        values = np.arange(5, dtype=float)
+        eager = gu.pointcloud.from_xyz(values, values, values, 32633, "height", auxiliary={"quality": values})
+        eager = eager.assign_coords(point=pd.RangeIndex(5))
+        selected = eager if variable == "height" else eager.coords[variable]
+        chunked = da.from_array(selected.to_numpy(), chunks=2)
+        if variable == "height":
+            source = eager.copy(data=chunked)
+        else:
+            coordinates = xr.Coordinates({variable: ("point", chunked)}, indexes={})
+            source = eager.assign_coords(coordinates)
+
+        # Inspect loading without running Dask tasks
+        with Callback(pretask=lambda *args: pytest.fail("Checking loading must not compute tasks")):
+            assert eager.pc.is_loaded
+            assert not source.pc.is_loaded
+
+        computed = source.compute()
+
+        # Computed row labels remain unindexed
+        expected = eager.drop_indexes("point") if variable == "point" else eager
+        xr.testing.assert_identical(computed, expected)
+        assert computed.pc.is_loaded
+        assert not source.pc.is_loaded
 
 
 class TestDatasetPointCloudAccessorChunked:
