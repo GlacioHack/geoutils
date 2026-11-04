@@ -114,11 +114,14 @@ repos:
         files: ^geoutils/
         require_serial: true
 
-#        # Add license header to the source files
-#        - repo: local
-#          hooks:
-#            - id: add-license_header
-#              name: Add License Header
-#              entry: python .github/scripts/apply_license_header.py
-#              language: python
-#              files: \.py$
+  # Ensure we check license headers in source files (we can then add manually by copy/paste)
+  # It accepts GeoUtils developers/CNES copyrights with any date
+  - repo: local
+    hooks:
+      - id: check-license-header
+        name: Check license headers
+        entry: python .github/scripts/check_license_header.py
+        language: python
+        types: [python]
+        files: ^geoutils/
+        exclude: ^geoutils/_version\.py$
