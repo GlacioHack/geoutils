@@ -126,10 +126,30 @@ jobs:
         PYTHONUNBUFFERED: "1"
       run: |
         $PSNativeCommandUseErrorActionPreference = $false
+        $debugger = "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\cdb.exe"
+        if (-not (Test-Path $debugger)) {
+          throw "Windows Debugging Tools are missing: $debugger"
+        }
+        # Catch DLL crashes after Python has removed its fault handler
+        $debuggerCommands = 'sxd -c2 ".ecxr; ~* kb; lmf; .dump /m /o pytest-crash.dmp; q" av; g'
         $testStartTime = Get-Date
-        python .github/scripts/run_pytest_diagnostics.py -ra --durations=30 --cov=geoutils/ --cov-report=lcov
-        $testExitCode = $LASTEXITCODE
+        $testProcess = Start-Process -FilePath (Get-Command python).Source -NoNewWindow -PassThru -ArgumentList @(
+          '.github/scripts/run_pytest_diagnostics.py', '-ra', '--durations=30', '--cov=geoutils/', '--cov-report=lcov'
+        )
+        # Hold the process handle so its exit code remains available after the debugger exits
+        $null = $testProcess.Handle
+        & $debugger -G -hd -logo pytest-debugger.log -p $testProcess.Id -c $debuggerCommands
+        $debuggerExitCode = $LASTEXITCODE
+        if ($debuggerExitCode -ne 0 -and -not $testProcess.HasExited) {
+          Stop-Process -Id $testProcess.Id -Force
+        }
+        $testProcess.WaitForExit()
+        $testExitCode = $testProcess.ExitCode
         Write-Host "[pytest diagnostics] Python process exit code: $testExitCode"
+        # Quitting the debugger after a crash can replace the Python exit code
+        if ($testExitCode -eq 0 -and ($debuggerExitCode -ne 0 -or (Test-Path pytest-crash.dmp))) {
+          $testExitCode = 1
+        }
         if ($testExitCode -ne 0) {
           # Windows records the faulting DLL even after Python's fault handler shuts down
           $crashes = Get-WinEvent -FilterHashtable @{
@@ -143,6 +163,17 @@ jobs:
           }
         }
         exit $testExitCode
+
+    - name: Upload Windows crash diagnostics
+      if: ${{ failure() && runner.os == 'Windows' }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: windows-crash-python-${{ matrix.python-version }}-${{ matrix.dep-level }}
+        path: |
+          pytest-debugger.log
+          pytest-crash.dmp
+        if-no-files-found: ignore
+        retention-days: 7
 
     - name: Upload coverage to Coveralls
       uses: coverallsapp/github-action@v2
