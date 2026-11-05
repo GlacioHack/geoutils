@@ -60,6 +60,17 @@ def main() -> int:
     # Preserve pytest arguments and its return code while exposing the final cleanup stages
     result = pytest.main(sys.argv[1:], plugins=[ExitDiagnostics()])
     _print_stage(f"pytest.main() returned: {int(result)}")
+
+    # Close cached files before Python shuts down Rasterio's filesystem callbacks
+    from xarray.backends.file_manager import FILE_CACHE
+
+    _print_stage(f"Closing cached Xarray files: {len(FILE_CACHE)}")
+    for key in list(FILE_CACHE):
+        dataset = FILE_CACHE.pop(key)
+        _print_stage(f"Closing cached file: {getattr(dataset, 'name', type(dataset).__name__)}")
+        dataset.close()
+    _print_stage("Cached Xarray files closed")
+
     threads = [(thread.name, thread.daemon, thread.ident) for thread in threading.enumerate()]
     _print_stage(f"Threads before shutdown (name, daemon, ident): {threads}")
 
