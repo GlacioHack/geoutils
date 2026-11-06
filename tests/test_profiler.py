@@ -15,6 +15,7 @@ import geoutils as gu
 import geoutils.profiler as profiler_module
 from geoutils import examples
 from geoutils.profiler import ProfileMetrics, Profiler, profile, profile_call
+from tests.dask_helpers import run_with_dask_client
 
 
 @pytest.mark.filterwarnings("ignore:get_stats\\(\\) is deprecated:DeprecationWarning")
@@ -132,35 +133,39 @@ class TestProfiling:
         pytest.importorskip("plotly")
 
         import dask.array as da
-        from distributed import Client, LocalCluster
 
-        with LocalCluster(
+        def calculate(client: Any) -> tuple[Any, ...]:
+            """Profile direct and decorated calculations with an active distributed client."""
+
+            arr = da.ones((64, 64), chunks=(16, 16), dtype="float32")
+            result, metrics = profile_call(lambda: float(arr.mean().compute()), interval=0.001, client=client)
+
+            Profiler.enable(save_raw_data=True)
+
+            @profile("decorated Dask computation", memprof=True, interval=0.001)
+            def decorated_dask_computation() -> float:
+                return float(arr.mean().compute())
+
+            @profile("decorated Dask call", memprof=True, interval=0.001)
+            def decorated_dask_call() -> float:
+                return decorated_dask_computation()
+
+            decorated_result = decorated_dask_call()
+            decorated_call = Profiler.get_profiling_info("decorated Dask call").iloc[0]
+            decorated_computation = Profiler.get_profiling_info("decorated Dask computation").iloc[0]
+            return result, metrics, decorated_result, decorated_call, decorated_computation
+
+        result, metrics, decorated_result, decorated_call, decorated_computation = run_with_dask_client(
+            calculate,
             n_workers=1,
             threads_per_worker=1,
             processes=False,
             dashboard_address=":0",
             scheduler_kwargs={"dashboard": False},
             local_directory=tmp_path,
-        ) as cluster:
-            with Client(cluster) as client:
-                arr = da.ones((64, 64), chunks=(16, 16), dtype="float32")
-                result, metrics = profile_call(lambda: float(arr.mean().compute()), interval=0.001, client=client)
-
-                Profiler.enable(save_raw_data=True)
-
-                @profile("decorated Dask computation", memprof=True, interval=0.001)
-                def decorated_dask_computation() -> float:
-                    return float(arr.mean().compute())
-
-                @profile("decorated Dask call", memprof=True, interval=0.001)
-                def decorated_dask_call() -> float:
-                    return decorated_dask_computation()
-
-                decorated_result = decorated_dask_call()
-                decorated_call = Profiler.get_profiling_info("decorated Dask call").iloc[0]
-                decorated_metrics = decorated_call["metrics"]
-                decorated_computation = Profiler.get_profiling_info("decorated Dask computation").iloc[0]
-                computation_metrics = decorated_computation["metrics"]
+        )
+        decorated_metrics = decorated_call["metrics"]
+        computation_metrics = decorated_computation["metrics"]
 
         assert result == 1.0
         assert metrics.peak_client_mem_mb > 0

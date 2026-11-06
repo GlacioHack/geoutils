@@ -55,7 +55,7 @@ jobs:
         path: ${{ env.CONDA }}/envs
         key: conda-${{ matrix.os }}-${{ matrix.python-version }}-${{ matrix.dep-level }}-${{ env.cache_date }}-${{ hashFiles('dev-environment.yml') }}-${{ env.CACHE_NUMBER }}
       env:
-        CACHE_NUMBER: 5 # Increase this value to reset cache if environment.yml has not changed
+        CACHE_NUMBER: 6 # Increase this value to reset cache if environment.yml has not changed
       id: cache
 
     # The trick below is necessary because the generic environment file does not specify a Python version, and ONLY
@@ -68,8 +68,11 @@ jobs:
         # Fiona 1.10.1 has no Python 3.14 wheels, so install it with Conda
         # Use Conda's OpenMP runtime for PyTorch and its numerical dependencies
         # PDAL 2.8 shares compatible PROJ and GDAL versions with Python 3.10's PyProj and Fiona
+        # Share Conda's HDF5 and Arrow libraries with GDAL/PDAL on Windows
         CI_EXTRA_DEPS: >-
           gdal<3.13.3,pdal${{ matrix.python-version == '3.10' && '=2.8' || '>=2.10' }},python-pdal${{
+          runner.os == 'Windows' && ',netcdf4' || '' }}${{
+          runner.os == 'Windows' && matrix.dep-level != 'base' && ',pyarrow>=14' || '' }}${{
           matrix.dep-level != 'base' && ',fiona>=1.10' || '' }}${{
           runner.os != 'Linux' && matrix.dep-level != 'base' && ',pytorch-cpu>=2,gpytorch>=1.11' || '' }}
       run: |
@@ -123,10 +126,54 @@ jobs:
         PYTHONUNBUFFERED: "1"
       run: |
         $PSNativeCommandUseErrorActionPreference = $false
-        python .github/scripts/run_pytest_diagnostics.py -ra --durations=30 --cov=geoutils/ --cov-report=lcov
-        $testExitCode = $LASTEXITCODE
+        $debugger = "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\cdb.exe"
+        if (-not (Test-Path $debugger)) {
+          throw "Windows Debugging Tools are missing: $debugger"
+        }
+        # Catch DLL crashes after Python has removed its fault handler
+        $debuggerCommands = 'sxd -c2 ".ecxr; ~* kb; lmf; .dump /m /o pytest-crash.dmp; q" av; g'
+        $testStartTime = Get-Date
+        $testProcess = Start-Process -FilePath (Get-Command python).Source -NoNewWindow -PassThru -ArgumentList @(
+          '.github/scripts/run_pytest_diagnostics.py', '-ra', '--durations=30', '--cov=geoutils/', '--cov-report=lcov'
+        )
+        # Hold the process handle so its exit code remains available after the debugger exits
+        $null = $testProcess.Handle
+        & $debugger -G -hd -logo pytest-debugger.log -p $testProcess.Id -c $debuggerCommands
+        $debuggerExitCode = $LASTEXITCODE
+        if ($debuggerExitCode -ne 0 -and -not $testProcess.HasExited) {
+          Stop-Process -Id $testProcess.Id -Force
+        }
+        $testProcess.WaitForExit()
+        $testExitCode = $testProcess.ExitCode
         Write-Host "[pytest diagnostics] Python process exit code: $testExitCode"
+        # Quitting the debugger after a crash can replace the Python exit code
+        if ($testExitCode -eq 0 -and ($debuggerExitCode -ne 0 -or (Test-Path pytest-crash.dmp))) {
+          $testExitCode = 1
+        }
+        if ($testExitCode -ne 0) {
+          # Windows records the faulting DLL even after Python's fault handler shuts down
+          $crashes = Get-WinEvent -FilterHashtable @{
+            LogName = 'Application'
+            ProviderName = 'Application Error'
+            Id = 1000
+            StartTime = $testStartTime
+          } -ErrorAction SilentlyContinue
+          $crashes | Where-Object { $_.Message -match '(?i)python[^\s]*\.exe' } | ForEach-Object {
+            Write-Host "[pytest diagnostics] Windows crash report:`n$($_.Message)"
+          }
+        }
         exit $testExitCode
+
+    - name: Upload Windows crash diagnostics
+      if: ${{ failure() && runner.os == 'Windows' }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: windows-crash-python-${{ matrix.python-version }}-${{ matrix.dep-level }}
+        path: |
+          pytest-debugger.log
+          pytest-crash.dmp
+        if-no-files-found: ignore
+        retention-days: 7
 
     - name: Upload coverage to Coveralls
       uses: coverallsapp/github-action@v2

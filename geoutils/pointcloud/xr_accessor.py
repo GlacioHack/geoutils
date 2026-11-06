@@ -488,9 +488,10 @@ class DataArrayPointCloudAccessor(PointCloudBase):
 
         if mp_config is not None:
             raise ValueError("Array point clouds use Dask chunks rather than mp_config for clipping.")
-        geometry = _clip_geometry(mask, target_crs=self.crs)
+        # Rebuild the geometry per chunk because Shapely prepares it and GEOS mutates its cached indexes
+        geometry_wkb = _clip_geometry(mask, target_crs=self.crs).wkb
         selected = xr.apply_ufunc(
-            lambda x, y: shapely.intersects_xy(geometry, x, y),
+            lambda x, y: shapely.intersects_xy(shapely.from_wkb(geometry_wkb), x, y),
             self._dataset.coords["x"],
             self._dataset.coords["y"],
             dask="parallelized",

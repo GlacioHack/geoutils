@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import warnings
 from contextlib import ExitStack
 from importlib.util import find_spec
@@ -21,6 +20,7 @@ from geoutils._typing import NDArrayNum
 from geoutils.multiproc import ClusterGenerator, MultiprocConfig
 from geoutils.multiproc.cluster import MpCluster
 from geoutils.sampling.pairsampling import _PointPairSampler, _RasterPairSampler
+from tests.dask_helpers import run_with_dask_client
 
 
 @pytest.fixture
@@ -703,9 +703,6 @@ class TestPairSampleChunked:
         from dask.callbacks import Callback
 
         pytest.importorskip("distributed")
-        from distributed import Client, LocalCluster
-        from distributed.compatibility import asyncio_run
-        from distributed.config import get_loop_factory
 
         values = np.arange(27 * 27, dtype=np.float32).reshape(27, 27)
         source = gu.DataArrayRasterAccessor.from_array(
@@ -758,23 +755,11 @@ class TestPairSampleChunked:
                 assert isinstance(result.value.data, da.Array)
                 return result.compute()
 
-        async def run_cluster() -> xr.Dataset:
-            """Sample pairs and await client and cluster shutdown."""
-
-            async with LocalCluster(
-                n_workers=2,
-                threads_per_worker=1,
-                processes=False,
-                memory_limit=0,
-                dashboard_address=None,
-                asynchronous=True,
-            ) as cluster:
-                async with Client(cluster, asynchronous=True) as client:
-                    return await asyncio.to_thread(sample_pairs, client)
-
         # Let Dask choose a compatible event loop on Windows
         # Await graceful cluster shutdown...
-        computed = asyncio_run(run_cluster(), loop_factory=get_loop_factory())
+        computed = run_with_dask_client(
+            sample_pairs, n_workers=2, threads_per_worker=1, processes=False, memory_limit=0, dashboard_address=None
+        )
 
         # Check equality
         expected = gu.Raster.from_array(values, source.transform, source.crs).pairsample(
@@ -1507,7 +1492,7 @@ class TestPairOutputChunked:
 
         da = pytest.importorskip("dask.array")
         pytest.importorskip("distributed")
-        from distributed import Client, Event, LocalCluster
+        from distributed import Event
 
         values = np.arange(23 * 27.0).reshape(23, 27)
         transform = from_origin(0, 23, 1, 1)
@@ -1533,31 +1518,43 @@ class TestPairOutputChunked:
             Event(f"{namespace}-started").set()
             Event(f"{namespace}-release").wait(timeout=10)
 
-        # Queue reads and delete the original dataset
-        with LocalCluster(n_workers=1, threads_per_worker=1, processes=True, dashboard_address=None) as cluster:
-            with Client(cluster, set_as_default=set_as_default) as client:
-                blocked = client.submit(hold_worker)
-                assert Event(f"{namespace}-started", client=client).wait(timeout=10)
-                selected = result[["value", "distance"]]
-                if derived:
-                    selected = selected + 1
-                persisted = client.persist(selected)
-                del result, selected
-                gc.collect()
-                assert directory.exists()
-                Event(f"{namespace}-release", client=client).set()
-                blocked.result()
-                np.testing.assert_array_equal(persisted.value.compute(scheduler=client), expected.value + int(derived))
-                np.testing.assert_array_equal(
-                    persisted.distance.compute(scheduler=client), expected.distance + int(derived)
-                )
-                assert source.is_loaded
+        def check_pending_reads(client: Any) -> None:
+            """Check that persisted reads own their files after the original dataset is deleted."""
 
-                # Check files are removed after pending reads finish
-                deadline = time.monotonic() + 5
-                while directory.exists() and time.monotonic() < deadline:
-                    time.sleep(0.01)
-                assert not directory.exists()
+            nonlocal result
+
+            # Queue reads and delete the original dataset
+            blocked = client.submit(hold_worker)
+            assert Event(f"{namespace}-started", client=client).wait(timeout=10)
+            selected = result[["value", "distance"]]
+            if derived:
+                selected = selected + 1
+            persisted = client.persist(selected)
+            del result, selected
+            gc.collect()
+            assert directory.exists()
+            Event(f"{namespace}-release", client=client).set()
+            blocked.result()
+            np.testing.assert_array_equal(persisted.value.compute(scheduler=client), expected.value + int(derived))
+            np.testing.assert_array_equal(
+                persisted.distance.compute(scheduler=client), expected.distance + int(derived)
+            )
+            assert source.is_loaded
+
+            # Check files are removed after pending reads finish
+            deadline = time.monotonic() + 5
+            while directory.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert not directory.exists()
+
+        run_with_dask_client(
+            check_pending_reads,
+            client_options={"set_as_default": set_as_default},
+            n_workers=1,
+            threads_per_worker=1,
+            processes=True,
+            dashboard_address=None,
+        )
 
     @pytest.mark.parametrize("persist", [False, True])
     def test_pairsample__disk_cleanup(self, tmp_path: Path, persist: bool) -> None:
@@ -1567,7 +1564,7 @@ class TestPairOutputChunked:
 
         da = pytest.importorskip("dask.array")
         pytest.importorskip("distributed")
-        from distributed import Client, Event, LocalCluster, wait
+        from distributed import Event, wait
 
         # Create disk output with a shorter final batch
         values = np.arange(100.0).reshape(10, 10)
@@ -1592,26 +1589,31 @@ class TestPairOutputChunked:
             Event(f"{namespace}-started").set()
             Event(f"{namespace}-release").wait(timeout=10)
 
-        # Leave one thread busy while another can finish pair reads
-        with LocalCluster(n_workers=1, threads_per_worker=2, processes=False, dashboard_address=None) as cluster:
-            with Client(cluster) as client:
-                blocked = client.submit(hold_worker)
-                assert Event(f"{namespace}-started", client=client).wait(timeout=10)
-                try:
-                    if persist:
-                        saved = client.persist(result.value.data + 1)
-                        wait(saved)
-                        np.testing.assert_array_equal(saved.compute(), expected.value.data + 1)
+        def check_cleanup(client: Any) -> None:
+            """Check pair file cleanup while an unrelated worker task is still pending."""
 
-                    # Release the graph while the unrelated task is still running
-                    del result
-                    gc.collect()
-                    assert not directory.exists()
-                    assert blocked.status == "pending"
-                    assert source.is_loaded
-                finally:
-                    Event(f"{namespace}-release", client=client).set()
-                    blocked.result()
+            nonlocal result
+
+            # Leave one thread busy while another can finish pair reads
+            blocked = client.submit(hold_worker)
+            assert Event(f"{namespace}-started", client=client).wait(timeout=10)
+            try:
+                if persist:
+                    saved = client.persist(result.value.data + 1)
+                    wait(saved)
+                    np.testing.assert_array_equal(saved.compute(), expected.value.data + 1)
+
+                # Release the graph while the unrelated task is still running
+                del result
+                gc.collect()
+                assert not directory.exists()
+                assert blocked.status == "pending"
+                assert source.is_loaded
+            finally:
+                Event(f"{namespace}-release", client=client).set()
+                blocked.result()
+
+        run_with_dask_client(check_cleanup, n_workers=1, threads_per_worker=2, processes=False, dashboard_address=None)
 
 
 class TestPairSampleErrors:

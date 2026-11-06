@@ -21,6 +21,7 @@ from geoutils._typing import NDArrayNum
 from geoutils.multiproc import MultiprocConfig
 from geoutils.operators import LocalData, Reducer
 from geoutils.operators.reducer import Count, Mean
+from tests.dask_helpers import run_with_dask_client
 
 
 @pytest.fixture
@@ -2201,7 +2202,7 @@ class TestGroupedStatsChunked:
         from dask.callbacks import Callback
 
         pytest.importorskip("distributed")
-        from distributed import Client, LocalCluster, get_task_stream
+        from distributed import get_task_stream
 
         # Create 4 groups crossing different blocks, with NaNs
         values = np.arange(30, dtype=float)
@@ -2236,12 +2237,10 @@ class TestGroupedStatsChunked:
             if key in read_keys:
                 local_reads.append(key)
 
-        # Run statistics with cluster/scheduler
-        assert all(isinstance(array, da.Array) for array in lazy_values.values())
-        with LocalCluster(
-            n_workers=1, threads_per_worker=1, processes=False, memory_limit=0, dashboard_address=None
-        ) as cluster:
-            with Client(cluster) as client, dask.config.set(scheduler=scheduler), Callback(pretask=record_read):
+        def calculate(client: Any) -> tuple[pd.DataFrame, list[dict[str, Any]]]:
+            """Calculate grouped statistics and record the tasks submitted to the cluster."""
+
+            with dask.config.set(scheduler=scheduler), Callback(pretask=record_read):
                 with get_task_stream(client=client) as tasks:
                     result = gu.stats.stats(
                         lazy_values,
@@ -2250,16 +2249,23 @@ class TestGroupedStatsChunked:
                         statistics=statistics,
                         method="groupwise",
                     )
+            return result, tasks.data
+
+        # Run statistics with cluster/scheduler
+        assert all(isinstance(array, da.Array) for array in lazy_values.values())
+        result, tasks = run_with_dask_client(
+            calculate, n_workers=1, threads_per_worker=1, processes=False, memory_limit=0, dashboard_address=None
+        )
 
         # Check cluster batches read once
         pd.testing.assert_frame_equal(result, expected, check_exact=True)
         assert all(isinstance(array, da.Array) for array in lazy_values.values())
         if scheduler == "distributed":
-            cluster_reads = [task["key"] for task in tasks.data if task["key"] in read_keys]
+            cluster_reads = [task["key"] for task in tasks if task["key"] in read_keys]
             assert sorted(cluster_reads) == sorted(read_keys)
             assert not local_reads
         else:
-            assert not tasks.data
+            assert not tasks
             assert sorted(set(local_reads)) == sorted(read_keys)
 
     @pytest.mark.parametrize("engine", ["numpy", "numba", "flox"])

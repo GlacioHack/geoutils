@@ -24,6 +24,7 @@ from geoutils.multiproc import MultiprocConfig
 from geoutils.multiproc.cluster import MpCluster
 from geoutils.sampling.pairsampling import _RasterPairSource
 from geoutils.stats.variography import VariogramModel
+from tests.dask_helpers import run_with_dask_client
 
 
 def stretched_variogram(distance: Any, effective_range: float, partial_sill: float, exponent: float) -> Any:
@@ -1576,7 +1577,6 @@ class TestVariogramReductionChunked:
         pytest.importorskip("flox")
         da = pytest.importorskip("dask.array")
         pytest.importorskip("distributed")
-        from distributed import Client, LocalCluster
 
         distances = np.tile([1.0, 3.0, 5.0], 17)
         differences = distances.copy()
@@ -1589,15 +1589,21 @@ class TestVariogramReductionChunked:
         )
         eager = gu.Variogram.from_pairs(pairs, estimator="dowd", bins=[1, 2, 4, 6, 8])
         lazy = pairs.chunk({"pair": 7, "endpoint": 1})
-        with LocalCluster(n_workers=2, threads_per_worker=1, processes=True, dashboard_address=None) as cluster:
-            with Client(cluster):
-                result = gu.Variogram.from_pairs(
-                    lazy,
-                    estimator="dowd",
-                    bins=[1, 2, 4, 6, 8],
-                    reduction_backend=backend,
-                    method="map-reduce",
-                )
+
+        def calculate(client: Any) -> gu.Variogram:
+            """Estimate the variogram while the distributed client is active."""
+
+            return gu.Variogram.from_pairs(
+                lazy,
+                estimator="dowd",
+                bins=[1, 2, 4, 6, 8],
+                reduction_backend=backend,
+                method="map-reduce",
+            )
+
+        result = run_with_dask_client(
+            calculate, n_workers=2, threads_per_worker=1, processes=True, dashboard_address=None
+        )
 
         # Check equality and loading
         assert isinstance(lazy.value.data, da.Array)
