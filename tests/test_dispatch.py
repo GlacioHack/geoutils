@@ -90,7 +90,11 @@ class TestGeoInterface:
 
         interface = get_geo_interface(source, "rasterize")
 
-        assert interface is (frame.vct if representation == "geodataframe" else source)
+        if representation == "geodataframe":
+            assert isinstance(interface, gu.GeoDataFrameVectorAccessor)
+            assert interface.ds is frame
+        else:
+            assert interface is source
         assert interface.bbox == (0, 0, 2, 3)
         assert interface.crs == pyproj.CRS(32633)
 
@@ -116,12 +120,14 @@ class TestGeoInterface:
         if representation == "dataarray":
             assert interface is array.pc
         elif representation == "geodataframe":
-            assert interface is points.gdf.pc
+            assert isinstance(interface, gu.GeoDataFramePointCloudAccessor)
+            assert interface.ds is points.gdf
         else:
             assert interface is sources[representation]
         assert interface.point_count == 3
         assert interface.bbox == (0, 0, 2, 2)
         assert interface.crs == pyproj.CRS(32633)
+
 
 class TestClipGeometry:
     """Test module for preserving clipping features and matching their coordinate reference system."""
