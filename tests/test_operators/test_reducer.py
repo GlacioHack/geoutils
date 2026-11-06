@@ -37,6 +37,7 @@ from geoutils.operators.reducer import (
     StandardDeviation,
     Sum,
 )
+from geoutils.projtools import _affine_matmul
 from tests.operator_helpers import SupportMassReducer
 
 
@@ -1032,7 +1033,9 @@ class TestRasterReducerReferences:
             crs=32632,
             nodata=-9999,
         )
-        destination_transform = Affine.translation(3, 17) * Affine.rotation(11) * Affine.scale(2, -2)
+        destination_transform = _affine_matmul(
+            _affine_matmul(Affine.translation(3, 17), Affine.rotation(11)), Affine.scale(2, -2)
+        )
         reference = gu.Raster.from_array(
             np.zeros((5, 5)),
             destination_transform,
@@ -1072,7 +1075,9 @@ class TestRasterReducerReferences:
             crs=32632,
             nodata=-9999,
         )
-        destination_transform = Affine.translation(0.4, 5.4) * Affine.rotation(13) * Affine.scale(2.2, -2.2)
+        destination_transform = _affine_matmul(
+            _affine_matmul(Affine.translation(0.4, 5.4), Affine.rotation(13)), Affine.scale(2.2, -2.2)
+        )
         reference = gu.Raster.from_array(np.zeros((2, 2)), destination_transform, crs=32632, nodata=-9999)
 
         # Compare direct ExactExtract statistics with reductions calculated from Shapely intersection areas
@@ -1172,7 +1177,7 @@ class TestReducerUncertainty:
             ref=reference,
             resampling=operator,
             engine=engine,
-            dist_nodata_pixel=30,
+            radius=30,
             nodata_handling="ignore",
             error_structure=errors,
         )
@@ -1183,7 +1188,7 @@ class TestReducerUncertainty:
                 "ref": reference,
                 "resampling": operator,
                 "engine": engine,
-                "dist_nodata_pixel": 30,
+                "radius": 30,
                 "nodata_handling": "ignore",
             },
         )

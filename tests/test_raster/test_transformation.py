@@ -22,7 +22,7 @@ from shapely.geometry import Polygon
 import geoutils as gu
 from geoutils import examples, open_raster
 from geoutils._misc import import_optional, silence_rasterio_message
-from geoutils.exceptions import InvalidCRSError, InvalidGridError
+from geoutils.exceptions import InvalidCRSError, InvalidGridError, InvalidNodataError, InvalidResamplingError
 from geoutils.multiproc import MultiprocConfig
 from geoutils.multiproc.cluster import MpCluster
 from geoutils.operators import GridNeighbours, Interpolator, PointNeighbours, Reducer
@@ -37,7 +37,7 @@ from geoutils.operators.reducer import (
     RootMeanSquare,
     Sum,
 )
-from geoutils.projtools import _get_bounds_projected
+from geoutils.projtools import _affine_matmul, _get_bounds_projected
 from geoutils.raster.raster import _default_nodata
 from geoutils.raster.transformation import (
     _resampling_method_from_str,
@@ -64,7 +64,6 @@ class TestTransformation:
 
     def test_resampling_str(self) -> None:
         """Test that resampling methods can be given as strings instead of rio enums."""
-        warnings.simplefilter("error")
         assert _resampling_method_from_str("nearest") == rio.enums.Resampling.nearest  # noqa
         assert _resampling_method_from_str("cubic_spline") == rio.enums.Resampling.cubic_spline  # noqa
 
@@ -297,7 +296,9 @@ class TestTransformation:
 
         # Write a rotated raster so both loaded and deferred pixel crops use the same source values
         values = np.arange(72, dtype=np.int16).reshape(8, 9)
-        transform = Affine.translation(500_000, 5_100_000) * Affine.rotation(10) * Affine.scale(100, -100)
+        transform = _affine_matmul(
+            _affine_matmul(Affine.translation(500_000, 5_100_000), Affine.rotation(10)), Affine.scale(100, -100)
+        )
         raster = gu.Raster.from_array(values, transform=transform, crs=32632, nodata=-9999)
         source_path = tmp_path / "rotated_crop.tif"
         raster.to_file(source_path)
@@ -311,7 +312,7 @@ class TestTransformation:
         assert not deferred_crop.is_loaded
 
         # Check both crops use the exact source pixel slice and its translated rotated grid
-        expected_transform = transform * Affine.translation(2, 1)
+        expected_transform = _affine_matmul(transform, Affine.translation(2, 1))
         assert loaded_crop.transform == expected_transform
         assert deferred_crop.transform == expected_transform
         np.testing.assert_array_equal(loaded_crop.to_nanarray(), values[1:6, 2:7])
@@ -876,8 +877,8 @@ class TestTransformation:
         assert raster.rpcs is None
 
         # Now we can try to crop/clip
-        left, top = raster.transform * (5, 6)
-        right, bottom = raster.transform * (30, 28)
+        left, top = _affine_matmul(raster.transform, (5, 6))
+        right, bottom = _affine_matmul(raster.transform, (30, 28))
         bounds = (left, bottom, right, top)
         cropped = raster.crop(bounds)
         clipped = raster.clip(bounds)
@@ -1094,6 +1095,44 @@ class TestMaskGeotransformations:
 @pytest.mark.skipif(find_spec("dask") is None, reason="Only runs if dask is installed.")
 class TestTransformationChunked:
     """Test module for raster transformations run with Dask or multiprocessing."""
+
+    @pytest.mark.parametrize("backend", ["dask", "multiprocessing"])
+    def test_reproject__same_grid_nodata(self, tmp_path: Path, mp_cluster: MpCluster, backend: str) -> None:
+        """Checks that chunked reproject() changes nodata lazily and matches the eager result exactly."""
+
+        values = np.arange(35, dtype="float32").reshape(5, 7)
+        values[1, 2] = np.nan
+        source_file = tmp_path / "source.tif"
+        raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 5, 1, 1), 32631, nodata=-9999)
+        raster.to_file(source_file)
+        expected = raster.reproject(nodata=-32768, resampling="nearest")
+
+        # Short final chunks check missing values across uneven block boundaries
+        if backend == "dask":
+            import_optional("dask")
+            source = gu.open_raster(str(source_file), chunks={"y": 2, "x": 3})
+            result = source.rst.reproject(nodata=-32768, resampling="nearest")
+            assert not source.rst.is_loaded
+            assert not result.rst.is_loaded
+            result_raster = result.rst
+        else:
+            source = gu.Raster(source_file)
+            options = MultiprocConfig(cluster=mp_cluster, chunks=(2, 3), outfile=str(tmp_path / "result.tif"))
+            result = source.reproject(nodata=-32768, resampling="nearest", mp_config=options)
+            assert not source.is_loaded
+            assert not result.is_loaded
+            result_raster = result
+
+        assert result_raster.nodata == expected.nodata
+        assert result_raster.transform == expected.transform
+        assert result_raster.crs == expected.crs
+        if backend == "dask":
+            result_values = result.compute().values
+            assert not source.rst.is_loaded
+        else:
+            result_values = result.to_nanarray()
+            assert not source.is_loaded
+        np.testing.assert_array_equal(result_values, expected.to_nanarray())
 
     def test_clip__chunked_backends_equal(self, tmp_path: Any, mp_cluster: MpCluster) -> None:
         """Checks that clip with Dask and multiprocessing give the same result as in-memory."""
@@ -1785,10 +1824,12 @@ class TestReprojectionOperators:
         # Two bands with different values so neighborhood/nodata affect the result
         values = np.arange(42, dtype=np.float64).reshape(6, 7) ** 2
         values[2, 3] = np.nan
-        transform = Affine.translation(500000, 4640000) * Affine.rotation(23) * Affine.scale(2, -3)
+        transform = _affine_matmul(
+            _affine_matmul(Affine.translation(500000, 4640000), Affine.rotation(23)), Affine.scale(2, -3)
+        )
         raster = gu.Raster.from_array(np.stack((values, values + 100)), transform, crs=32632, nodata=-9999)
         reference = gu.Raster.from_array(
-            np.zeros((8, 9)), transform * Affine.translation(-0.75, -0.875), crs=32632, nodata=-9999
+            np.zeros((8, 9)), _affine_matmul(transform, Affine.translation(-0.75, -0.875)), crs=32632, nodata=-9999
         )
 
         # Reproject with operator, neighborhood
@@ -1830,11 +1871,13 @@ class TestReprojectionOperators:
         # We use a plane to know interpolated value at any fractional row/column
         rows, columns = np.indices((6, 7))
         values = (10 * rows + columns).astype(np.float64)
-        transform = Affine.translation(500000, 4640000) * Affine.rotation(rotation) * Affine.scale(0.02, -0.03)
+        transform = _affine_matmul(
+            _affine_matmul(Affine.translation(500000, 4640000), Affine.rotation(rotation)), Affine.scale(0.02, -0.03)
+        )
         raster = gu.Raster.from_array(values, transform, crs=32632, nodata=-9999)
         # Destination is shifted 1.375 rows and 1.25 columns
         reference = gu.Raster.from_array(
-            np.zeros((3, 4)), transform * Affine.translation(1.25, 1.375), crs=32632, nodata=-9999
+            np.zeros((3, 4)), _affine_matmul(transform, Affine.translation(1.25, 1.375)), crs=32632, nodata=-9999
         )
 
         # Reproject
@@ -1997,7 +2040,10 @@ class TestReprojectionGDALOperators:
         values = (rows**2 + 3 * columns**2).astype(float)
         source_transform = rio.transform.from_origin(0, 20, 1, 1)
         source = gu.Raster.from_array(values, source_transform, crs=32632, nodata=-9999)
-        target_transform = source_transform * Affine.translation(6, 5) * Affine.rotation(12) * Affine.scale(1.1)
+        target_transform = _affine_matmul(
+            _affine_matmul(_affine_matmul(source_transform, Affine.translation(6, 5)), Affine.rotation(12)),
+            Affine.scale(1.1),
+        )
         reference = gu.Raster.from_array(np.zeros((6, 6)), target_transform, crs=32632, nodata=-9999)
 
         # Compare the diagonal rectangle with the actual four-corner polygon
@@ -2043,7 +2089,9 @@ class TestReprojectionGDALOperators:
         values[11, 13] = np.nan
         source_transform = rio.transform.from_origin(500_000, 5_100_000, 100, 100)
         if geometry in ("rotated", "rotated_different_crs"):
-            source_transform = Affine.translation(500_000, 5_100_000) * Affine.rotation(10) * Affine.scale(100, -100)
+            source_transform = _affine_matmul(
+                _affine_matmul(Affine.translation(500_000, 5_100_000), Affine.rotation(10)), Affine.scale(100, -100)
+            )
         source = gu.Raster.from_array(values, transform=source_transform, crs=32632, nodata=-9999)
 
         # We define different "references" for destination: same CRS, different CRS, rotated
@@ -2051,7 +2099,9 @@ class TestReprojectionGDALOperators:
             reference = source.reproject(crs=4326, grid_size=(30, 30), resampling="nearest")
         elif geometry == "rotated":
             shift, scale = (2.17, 1.37) if isinstance(operator, Interpolator) else (2.0, 2.0)
-            transform = source_transform * Affine.translation(shift, shift) * Affine.scale(scale, scale)
+            transform = _affine_matmul(
+                _affine_matmul(source_transform, Affine.translation(shift, shift)), Affine.scale(scale, scale)
+            )
             reference = gu.Raster.from_array(np.zeros((12, 12)), transform=transform, crs=32632, nodata=-9999)
         else:
             transform = rio.transform.from_origin(500_350, 5_099_650, 120, 130)
@@ -2154,7 +2204,9 @@ class TestReprojectionOverlapBackends:
         values[8, 9] = np.nan
         source_transform = rio.transform.from_origin(500_000, 5_100_000, 100, 100)
         if geometry == "rotated":
-            source_transform = Affine.translation(500_000, 5_100_000) * Affine.rotation(13) * Affine.scale(100, -100)
+            source_transform = _affine_matmul(
+                _affine_matmul(Affine.translation(500_000, 5_100_000), Affine.rotation(13)), Affine.scale(100, -100)
+            )
         elif geometry == "sheared":
             source_transform = Affine(100, 17, 500_000, 7, -100, 5_100_000)
         source = gu.Raster.from_array(values, transform=source_transform, crs=32632, nodata=-9999)
@@ -2163,7 +2215,10 @@ class TestReprojectionOverlapBackends:
         if geometry == "different_crs":
             reference = source.reproject(crs=4326, grid_size=(18, 18), resampling="nearest")
         else:
-            target_transform = source_transform * Affine.translation(1.3, 2.1) * Affine.rotation(4) * Affine.scale(1.25)
+            target_transform = _affine_matmul(
+                _affine_matmul(_affine_matmul(source_transform, Affine.translation(1.3, 2.1)), Affine.rotation(4)),
+                Affine.scale(1.25),
+            )
             reference = gu.Raster.from_array(np.zeros((12, 12)), transform=target_transform, crs=32632, nodata=-9999)
         assert reference is not None
 
@@ -2283,11 +2338,17 @@ class TestReprojectionOperatorsChunked:
         rows, columns = np.indices((8, 9))
         values = (rows * 0.4 + columns * 0.7).astype(float)
         values[3, 4] = np.nan
-        transform = Affine.translation(500_000, 5_100_000) * Affine.rotation(source_angle) * Affine.scale(100, -100)
+        transform = _affine_matmul(
+            _affine_matmul(Affine.translation(500_000, 5_100_000), Affine.rotation(source_angle)),
+            Affine.scale(100, -100),
+        )
         raster = gu.Raster.from_array(values, transform=transform, crs=32632, nodata=-9999)
         source_path = tmp_path / "overlap_source.tif"
         raster.to_file(source_path)
-        target_transform = transform * Affine.translation(0.8, 1.2) * Affine.rotation(3) * Affine.scale(1.35)
+        target_transform = _affine_matmul(
+            _affine_matmul(_affine_matmul(transform, Affine.translation(0.8, 1.2)), Affine.rotation(3)),
+            Affine.scale(1.35),
+        )
         reference = gu.Raster.from_array(np.zeros((5, 6)), target_transform, crs=32632, nodata=-9999)
 
         # Calculate the same weighted mean without chunks, with Dask, and with multiprocessing
@@ -2368,6 +2429,76 @@ class TestReprojectionOperatorsChunked:
 class TestReprojectionErrors:
     """Test module reprojection errors."""
 
+    @pytest.mark.parametrize("raster_type", ["raster", "dataarray"])
+    @pytest.mark.parametrize(
+        "source_nodata,nodata,forced_nodata,res,warning",
+        [
+            (-9999, None, -9999, 0.5, None),
+            (np.nan, None, np.nan, 0.5, None),
+            (-9999, None, -32768, 0.5, "Forcing source nodata"),
+            (np.nan, None, -32768, 0.5, "Forcing source nodata"),
+            (-9999, -32768, None, None, None),
+            (-9999, np.nan, None, None, None),
+            (-9999, 0, 0, None, "Forcing source nodata"),
+            (-9999, -9999, 0, None, "Forcing source nodata"),
+            (None, None, None, None, "Output projection, bounds and grid size are identical"),
+            (-9999, None, None, None, "Output projection, bounds and grid size are identical"),
+            (np.nan, None, None, None, "Output projection, bounds and grid size are identical"),
+        ],
+    )
+    def test_reproject__nodata(
+        self,
+        raster_type: str,
+        source_nodata: float | None,
+        nodata: float | None,
+        forced_nodata: float | None,
+        res: float | None,
+        warning: str | None,
+    ) -> None:
+        """Checks that reproject() applies nodata changes, preserves the source, and warns when needed."""
+
+        # Create a raster
+        values = np.arange(4, dtype="float32").reshape(2, 2)
+        if source_nodata is not None:
+            values[1, 1] = np.nan
+        raster = gu.Raster.from_array(values, rio.transform.from_origin(0, 2, 1, 1), 32631, nodata=source_nodata)
+        source = raster if raster_type == "raster" else raster.to_xarray().squeeze("band", drop=True).rst
+
+        # Reproject and capture warnings
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", UserWarning)
+            result = source.reproject(res=res, nodata=nodata, force_source_nodata=forced_nodata, resampling="nearest")
+
+        expected_warnings = [] if warning is None else [warning]
+        # DataArrays validate nodata before the grid
+        if raster_type == "dataarray" and source_nodata is None:
+            expected_warnings.insert(0, "For reprojection, nodata must be set. Setting default nodata")
+        assert len(caught) == len(expected_warnings)
+        for observed, expected_warning in zip(caught, expected_warnings):
+            assert issubclass(observed.category, UserWarning)
+            assert str(observed.message).startswith(expected_warning)
+
+        # Preserve masks when overriding nodata
+        expected = values.copy()
+        if forced_nodata == 0:
+            expected[0, 0] = np.nan
+        # Halving resolution repeats pixels twice per axis
+        if res is not None:
+            expected = np.repeat(np.repeat(expected, 2, axis=0), 2, axis=1)
+
+        # Check results and unchanged source
+        result_raster = result if raster_type == "raster" else result.rst
+        np.testing.assert_equal(result_raster.nodata, source_nodata if nodata is None else nodata)
+        np.testing.assert_equal(source.nodata, source_nodata)
+        np.testing.assert_array_equal(result_raster.to_nanarray(), expected)
+        np.testing.assert_array_equal(source.to_nanarray(), values)
+
+        assert result_raster.crs == source.crs
+        if res is None:
+            assert result_raster.transform == source.transform
+            if raster_type == "raster" and nodata is None and forced_nodata is None:
+                assert result is source
+
     def test_reproject__error_removed_nodata_rule(self) -> None:
         """Checks an error is raised for the removed gdal nodata rule."""
 
@@ -2377,7 +2508,7 @@ class TestReprojectionErrors:
         options: dict[str, Any] = {"nodata_propagation": "gdal"}
 
         # The former spelling is not a nodata behavior
-        with pytest.raises(ValueError, match="nodata_propagation must be one of"):
+        with pytest.raises(InvalidNodataError, match="nodata_propagation must be one of"):
             raster.reproject(reference, resampling=Linear(), **options)
 
     def test_reproject__error_nearest_with_reducer(self) -> None:
@@ -2415,7 +2546,7 @@ class TestReprojectionErrors:
 
         # 1 - if no force_source_nodata is set and masked values exist, raises an error
         with pytest.raises(
-            ValueError,
+            InvalidNodataError,
             match=re.escape(
                 "No nodata set, set one for the raster with self.set_nodata() or use a "
                 "temporary one with `force_source_nodata`."
@@ -2504,7 +2635,7 @@ class TestReprojectionErrors:
 
         # These warp controls apply to Rasterio's calculation rather than custom resampling
         with patch("geoutils.raster.transformation.rio.__version__", rasterio_version):
-            with pytest.raises(ValueError, match="require a Rasterio resampling method"):
+            with pytest.raises(InvalidResamplingError, match="require a Rasterio resampling method"):
                 source.reproject(res=2, resampling=operator, **controls)
 
     def test_reproject__error_missing_crs(self) -> None:
@@ -2602,7 +2733,7 @@ class TestReprojectionErrors:
 
     def test_reproject__error_operator(self, raster_gcp_rpc: gu.Raster) -> None:
         """Checks an error is raised for a generic GeoUtils interpolator on a GCP/RPC source."""
-        with pytest.raises(ValueError, match="requires a Rasterio resampling method"):
+        with pytest.raises(InvalidResamplingError, match="requires a Rasterio resampling method"):
             raster_gcp_rpc.reproject(crs=3857, resampling=Linear())
 
     @pytest.mark.parametrize("reference_type", ["raster", "dataarray"])

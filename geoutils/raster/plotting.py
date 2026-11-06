@@ -29,6 +29,7 @@ from rasterio.enums import Resampling
 
 from geoutils._dispatch import get_geo_attr, has_geo_attr, is_dask_array
 from geoutils._misc import import_optional
+from geoutils.exceptions import InvalidCRSError
 from geoutils.raster.referencing import _default_nodata
 from geoutils.vector.plotting import _create_colorbar_axes, _get_reference_bbox, _reduce_tick_label_overlap
 
@@ -72,7 +73,7 @@ def _default_grid_size(source: RasterBase, target_crs: CRS | None) -> tuple[int,
     if target_crs is None:
         return source.width, source.height
     if source.crs is None:
-        raise ValueError("A raster without a CRS cannot be plotted in a reference CRS.")
+        raise InvalidCRSError("A raster without a CRS cannot be plotted in a reference CRS.")
     if CRS.from_user_input(source.crs) == target_crs:
         return source.width, source.height
 

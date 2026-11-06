@@ -27,6 +27,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from geoutils._typing import NDArrayBool, NDArrayNum
+from geoutils.exceptions import InvalidNodataError, InvalidShapeError
 from geoutils.operators.nodata import NodataHandling
 
 ################
@@ -79,8 +80,16 @@ class LocalData:
 
         # We check optional arrays too (one row per observation, one column per coordinate dimension)
         coordinates = None if self.coordinates is None else np.asarray(self.coordinates)
-        if coordinates is not None and (coordinates.ndim != 2 or len(coordinates) != len(values)):
-            raise ValueError("LocalData coordinates must have shape (n_observations, n_dimensions).")
+        if coordinates is not None:
+            from geoutils._dispatch import _check_same_shape
+
+            if coordinates.ndim != 2:
+                raise InvalidShapeError("LocalData coordinates must have shape (n_observations, n_dimensions).")
+            _check_same_shape(
+                coordinates.shape,
+                (len(values), coordinates.shape[1]),
+                "LocalData coordinates must have shape (n_observations, n_dimensions).",
+            )
         for name in ("distances", "sample_weights", "support_weights", "interpolation_weights"):
             array = getattr(self, name)
             if array is not None and (np.asarray(array).ndim != 1 or len(array) != len(values)):
@@ -209,7 +218,7 @@ class LocalData:
         if isinstance(minimum_inputs, bool) or not isinstance(minimum_inputs, int) or minimum_inputs < 0:
             raise ValueError("minimum_inputs must be a non-negative integer.")
         if nodata_handling not in ("ignore", "propagate"):
-            raise ValueError("nodata handling must be 'ignore' or 'propagate'.")
+            raise InvalidNodataError("nodata handling must be 'ignore' or 'propagate'.")
 
         # Masked and non-finite values are nodata even when their validity flag says otherwise
         valid = self._valid_values()

@@ -26,6 +26,7 @@ import xarray as xr
 from numpy.typing import NDArray
 
 from geoutils._dispatch import (
+    _check_same_shape,
     _get_pointcloud_interface,
     _get_raster_interface,
     _is_pointcloud,
@@ -233,8 +234,9 @@ def _normalize_grouped_array_inputs(
     arrays: dict[str, Any] = {}
     for name, raw_values in named_values.items():
         array = da.asarray(raw_values) if use_dask else np.asanyarray(raw_values)
-        if tuple(array.shape) != shape:
-            raise ValueError(f"Value {name!r} must match the shape of the other selected values.")
+        _check_same_shape(
+            tuple(array.shape), shape, f"Value {name!r} must match the shape of the other selected values."
+        )
         if not np.issubdtype(array.dtype, np.number):
             raise TypeError(f"Value {name!r} must contain numeric data.")
         arrays[name] = array.reshape(shape)
@@ -289,8 +291,8 @@ def _normalize_grouped_inputs_mp(
     raw_groupers = [grouper.values for grouper in by.values()]
     if any(is_dask_array(value) for value in [*arrays.values(), *raw_groupers, mask]):
         raise ValueError("Dask inputs cannot be combined with Multiprocessing grouped statistics.")
-    if any(tuple(value.shape) != shape for value in arrays.values()):
-        raise ValueError("Selected values must have matching shapes.")
+    for value in arrays.values():
+        _check_same_shape(value.shape, shape, "Selected values must have matching shapes.")
     for name, value in arrays.items():
         if not np.issubdtype(value.dtype, np.number):
             raise TypeError(f"Value {name!r} must contain numeric data.")
@@ -303,8 +305,9 @@ def _normalize_grouped_inputs_mp(
             group_values = _as_array(group_values)
             if prepared.encoded and group_values.ndim == 1 and group_values.size == math.prod(shape):
                 group_values = group_values.reshape(shape)
-        if tuple(group_values.shape) != shape:
-            raise ValueError(f"Grouper {name!r} must match the shape of the selected values.")
+        _check_same_shape(
+            tuple(group_values.shape), shape, f"Grouper {name!r} must match the shape of the selected values."
+        )
         if not isinstance(prepared.definition.groups, pd.CategoricalIndex) and not pd.api.types.is_numeric_dtype(
             group_values.dtype
         ):

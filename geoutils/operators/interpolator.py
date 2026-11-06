@@ -31,6 +31,7 @@ from scipy.spatial import cKDTree
 
 from geoutils._misc import import_optional
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
+from geoutils.exceptions import InvalidResamplingError
 from geoutils.operators.base import LinearCoefficients, LocalData
 from geoutils.operators.neighbours import (
     _GRID_QUERY_ROWS,
@@ -47,7 +48,6 @@ from geoutils.operators.nodata import (
     NodataSpread,
     _nodata_mask_distance,
     _nodata_spread_distance,
-    _validate_nodata_propagation,
 )
 from geoutils.operators.weighting import _local_error_data
 
@@ -486,11 +486,11 @@ class ScipyInterpolator(Interpolator):
         """
 
         if method not in ("nearest", "linear", "cubic", "quintic", "slinear", "pchip", "splinef2d"):
-            raise ValueError("Unknown SciPy interpolation method.")
+            raise InvalidResamplingError("Unknown SciPy interpolation method.")
         # A subclass can replace predict(), so only built-in classes impose SciPy's neighborhood restrictions
         is_builtin = type(self) in (ScipyInterpolator, Linear, Cubic)
         if is_builtin and isinstance(neighborhood, PointNeighbours) and method not in ("nearest", "linear", "cubic"):
-            raise ValueError("PointNeighbours requires a nearest, linear, or cubic SciPy method.")
+            raise InvalidResamplingError("PointNeighbours requires a nearest, linear, or cubic SciPy method.")
         self.method = method
         self.interpolation_order = INTERPOLATION_ORDERS[method]
         super().__init__(neighborhood=neighborhood)
@@ -535,7 +535,7 @@ class ScipyInterpolator(Interpolator):
                 engine=engine,
             )
         if engine == "numba":
-            raise ValueError(f"The Numba gridding engine does not support resampling={self.method!r}.")
+            raise InvalidResamplingError(f"The Numba gridding engine does not support resampling={self.method!r}.")
         return _grid_triangulation_scipy(
             points,
             values,
@@ -763,7 +763,7 @@ class RasterConvolution(Interpolator):
         """
 
         if kernel not in ("cubic", "cubic_spline", "lanczos"):
-            raise ValueError("Raster convolution kernel must be 'cubic', 'cubic_spline', or 'lanczos'.")
+            raise InvalidResamplingError("Raster convolution kernel must be 'cubic', 'cubic_spline', or 'lanczos'.")
         super().__init__()
         self.kernel = kernel
         self.radius = 3 if kernel == "lanczos" else 2
@@ -814,7 +814,7 @@ def _resolve_interpolator(method: ScipyInterpolationMethod | Interpolator) -> In
         return Cubic()
     if method in INTERPOLATION_ORDERS:
         return ScipyInterpolator(method=cast(ScipyInterpolationMethod, method))
-    raise ValueError(f"Unknown interpolation method: {method!r}.")
+    raise InvalidResamplingError(f"Unknown interpolation method: {method!r}.")
 
 
 def _regular_interpolation_method(method: ScipyInterpolationMethod | Interpolator) -> ScipyInterpolationMethod | None:
@@ -842,9 +842,13 @@ def _resolve_irregular_interpolator(
         method.validate_geospatial_support(2)
     if isinstance(method, Interpolator):
         if isinstance(method, RasterConvolution):
-            raise ValueError("Point gridding does not support raster convolution; a regular raster grid is required.")
+            raise InvalidResamplingError(
+                "Point gridding does not support raster convolution; a regular raster grid is required."
+            )
         if type(method) is ScipyInterpolator and method.method not in ("nearest", "linear", "cubic"):
-            raise ValueError(f"Point gridding does not support the regular-grid SciPy method {method.method!r}.")
+            raise InvalidResamplingError(
+                f"Point gridding does not support the regular-grid SciPy method {method.method!r}."
+            )
         return method
 
     # IDW exponent from grid(); other names share the regular interpolation classes
@@ -1074,9 +1078,11 @@ def _interpn_interpolator(
     https://github.com/scipy/scipy/blob/44e4ebaac992fde33f04638b99629d23973cb9b2/scipy/interpolate/_rgi.py#L743.
     """
 
+    from geoutils._dispatch import _check_nodata_propagation
+
     # Select the mask from the chosen nodata rule or distance
     order = INTERPOLATION_ORDERS[method]
-    propagation = _validate_nodata_propagation(nodata_propagation)
+    propagation = _check_nodata_propagation(nodata_propagation)
     mask_distance = _nodata_mask_distance(
         order=order,
         nodata_propagation=propagation,
@@ -1514,7 +1520,7 @@ def _as_fitted_variogram(model: Variogram | VariogramModel) -> Variogram:
 
     if isinstance(model, Variogram):
         if model.model is None:
-            raise ValueError("Kriging requires a fitted Variogram model.")
+            raise InvalidResamplingError("Kriging requires a fitted Variogram model.")
         return model
     if not isinstance(model, VariogramModel):
         raise TypeError("Kriging model must be a fitted Variogram or VariogramModel.")
@@ -1587,7 +1593,7 @@ class Kriging(Interpolator):
         self.variogram = _as_fitted_variogram(model)
         assert self.variogram.model is not None
         if backend not in {"gstools", "gpytorch"}:
-            raise ValueError("Kriging backend must be 'gstools' or 'gpytorch'.")
+            raise InvalidResamplingError("Kriging backend must be 'gstools' or 'gpytorch'.")
         if max_overlap is not None and (
             isinstance(max_overlap, (bool, np.bool_)) or not np.isfinite(max_overlap) or max_overlap <= 0
         ):

@@ -20,7 +20,6 @@
 
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Iterable, Literal, Sequence
 
@@ -42,8 +41,9 @@ from geoutils._dispatch import (
     has_geo_attr,
     is_dask_geodataframe,
 )
-from geoutils._misc import import_optional
+from geoutils._misc import import_optional, silence_rasterio_message
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
+from geoutils.exceptions import GeoUtilsInputError, InvalidNodataError
 from geoutils.multiproc.chunked import (
     ChunkedGeoGrid,
     GeoGrid,
@@ -353,27 +353,27 @@ def _rasterio_rasterize_burn(
     :param dtype: Output dtype.
     :param all_touched: Rasterio rasterize option.
     """
-    warnings.filterwarnings("ignore", category=rio.errors.NotGeoreferencedWarning)
-    if values is None:
+    with silence_rasterio_message(ignore_georeferencing=True):
+        if values is None:
+            return features.rasterize(
+                shapes=geoms,
+                out_shape=out_shape,
+                transform=transform,
+                fill=fill,
+                default_value=default_value,
+                all_touched=all_touched,
+                dtype=dtype,
+            )
+
+        shapes = ((geoms[i], values[i]) for i in range(len(geoms)))
         return features.rasterize(
-            shapes=geoms,
+            shapes=shapes,
             out_shape=out_shape,
             transform=transform,
             fill=fill,
-            default_value=default_value,
             all_touched=all_touched,
             dtype=dtype,
         )
-
-    shapes = ((geoms[i], values[i]) for i in range(len(geoms)))
-    return features.rasterize(
-        shapes=shapes,
-        out_shape=out_shape,
-        transform=transform,
-        fill=fill,
-        all_touched=all_touched,
-        dtype=dtype,
-    )
 
 
 def _rasterize_selected_on_geogrid(
@@ -844,7 +844,7 @@ def _rasterize(
     # Define output nodata value
     dtype = np.dtype(_make_dtype(out_value=out_value, burn=burn, out_dtype=out_dtype))
     if nodata is not None and not np.isfinite(nodata):
-        raise ValueError("nodata must be finite.")
+        raise InvalidNodataError("nodata must be finite.")
     if nodata is None and not np.isfinite(out_value):
         nodata = _default_nodata(dtype)
     nodata = _cast_nodata(dtype, nodata)
@@ -1111,7 +1111,7 @@ def _create_mask(
             crs=crs,
         )
         is_ref_raster = True
-    except ValueError as e:
+    except GeoUtilsInputError as e:
         is_ref_raster = False
         err_rast = e
 
@@ -1127,7 +1127,7 @@ def _create_mask(
                 points=point_ref,
             )
             is_ref_points = True
-    except ValueError as e:
+    except GeoUtilsInputError as e:
         is_ref_points = False
         err_points = e
 
@@ -1135,7 +1135,7 @@ def _create_mask(
     if not (is_ref_raster or is_ref_points):
         # Prefer to chain the raster error (or the points one if raster not triggered)
         cause = err_rast or err_points
-        raise ValueError(
+        raise GeoUtilsInputError(
             "Input arguments must define a valid raster or point cloud. Pass either a raster or point cloud "
             "reference 'ref', or at least 'res'/'shape' for a raster mask, or 'points' for a point cloud mask."
         ) from cause

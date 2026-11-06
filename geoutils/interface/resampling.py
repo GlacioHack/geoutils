@@ -20,7 +20,6 @@
 
 from __future__ import annotations
 
-import warnings
 from copy import copy
 from typing import TYPE_CHECKING, Any, Callable, Literal, cast, overload
 
@@ -30,9 +29,15 @@ import pandas as pd
 import rasterio as rio
 
 from geoutils._config import config
-from geoutils._dispatch import _check_match_points, _get_pointcloud_interface, is_dask_geodataframe
+from geoutils._dispatch import (
+    _check_match_points,
+    _check_nodata_propagation,
+    _get_pointcloud_interface,
+    is_dask_geodataframe,
+)
 from geoutils._misc import import_optional
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
+from geoutils.exceptions import InvalidResamplingError, _warn
 from geoutils.multiproc import MultiprocConfig
 from geoutils.multiproc.chunked import cached_cumsum, normalize_chunks
 from geoutils.multiproc.mparray import block_bounds_from_chunks
@@ -62,7 +67,6 @@ from geoutils.operators.nodata import (
     NodataChoice,
     NodataPropagation,
     _resolve_nodata_handling,
-    _validate_nodata_propagation,
 )
 from geoutils.operators.reducer import Mean, Reducer, _CallableReducer
 from geoutils.operators.weighting import _with_error_structure
@@ -139,8 +143,8 @@ def _interpolate_array(
     resolved_dst_shape = (source.shape[-2], source.shape[-1]) if dst_shape is None else dst_shape
     normalized_method: Literal["nearest", "linear"] = "linear" if method == "bilinear" else method
     if normalized_method not in ("nearest", "linear"):
-        raise ValueError(f"Unknown interpolation method: {method!r}.")
-    propagation = _validate_nodata_propagation(nodata_propagation)
+        raise InvalidResamplingError(f"Unknown interpolation method: {method!r}.")
+    propagation = _check_nodata_propagation(nodata_propagation)
     src_rows, src_cols = _destination_pixel_indices(src_transform, dst_transform, resolved_dst_shape)
 
     # Interpolate each band independently because nodata locations can differ between bands
@@ -289,7 +293,7 @@ def _interp_points_base(
         array = array.filled(np.nan)
 
     # Check the public missing-data option before passing it to a built-in or custom method
-    propagation = _validate_nodata_propagation(nodata_propagation)
+    propagation = _check_nodata_propagation(nodata_propagation)
 
     if isinstance(method, RasterConvolution):
         # GDAL-style kernels use source pixel spacing, including on a rotated raster grid
@@ -607,17 +611,24 @@ def _dask_resample_points(
 
     # Expand dask array for overlapping computations
     depths = (min(depth, darr.shape[0]), min(depth, darr.shape[1]))
-    expanded = da.overlap.overlap(darr, depth={0: depths[0], 1: depths[1]}, boundary="nearest")
+    expanded = da.overlap.overlap(darr, depth={0: depths[0], 1: depths[1]}, boundary="none")
 
     # Recover core chunk boundaries after any automatic merging required for overlap
-    core_chunks = [tuple(size - 2 * depths[index] for size in axis) for index, axis in enumerate(expanded.chunks)]
+    core_chunks = []
+    for axis, axis_depth in zip(expanded.chunks, depths):
+        # Edge blocks overlap only with their existing neighbors
+        core_chunks.append(
+            tuple(size - axis_depth * ((index > 0) + (index < len(axis) - 1)) for index, size in enumerate(axis))
+        )
     starts = [cached_cumsum(axis, initial_zero=True) for axis in core_chunks]
+    row_starts = np.maximum(0, np.asarray(starts[0][:-1]) - depths[0])
+    col_starts = np.maximum(0, np.asarray(starts[1][:-1]) - depths[1])
     num_chunks = expanded.numblocks
 
     # Get samples indices per blocks
     ind_per_block = _get_interp_indices_per_block(
-        points_arr[0, :],
-        points_arr[1, :],
+        left + np.clip(src_cols, 0, darr.shape[1] - 1) * res[0],
+        top - np.clip(src_rows, 0, darr.shape[0] - 1) * res[1],
         starts,
         num_chunks,
         res[0],
@@ -633,8 +644,8 @@ def _dask_resample_points(
     indexes_yi, indexes_xi = np.unravel_index(np.arange(len(blocks)), shape=(num_chunks[0], num_chunks[1]))
     block_ids = [
         {
-            "xstart": left + (starts[1][indexes_xi[i]] - depths[1]) * res[0],
-            "ystart": top - (starts[0][indexes_yi[i]] - depths[0]) * res[1],
+            "xstart": left + col_starts[indexes_xi[i]] * res[0],
+            "ystart": top - row_starts[indexes_yi[i]] * res[1],
             "xres": res[0],
             "yres": res[1],
         }
@@ -649,16 +660,16 @@ def _dask_resample_points(
         block_kwargs = kwargs.copy()
         method_name = None if isinstance(kwargs["method"], Reducer) else _regular_interpolation_method(kwargs["method"])
         if method_name in ("nearest", "linear"):
-            row_offset = starts[0][indexes_yi[i]] - depths[0]
-            col_offset = starts[1][indexes_xi[i]] - depths[1]
+            row_offset = row_starts[indexes_yi[i]]
+            col_offset = col_starts[indexes_xi[i]]
             block_kwargs["array_indices"] = (
                 src_rows[ind_per_block[i]] - row_offset,
                 src_cols[ind_per_block[i]] - col_offset,
             )
         elif isinstance(kwargs["method"], (Interpolator, Reducer)):
             block_kwargs["source_index_offset"] = (
-                starts[0][indexes_yi[i]] - depths[0],
-                starts[1][indexes_xi[i]] - depths[1],
+                row_starts[indexes_yi[i]],
+                col_starts[indexes_xi[i]],
             )
             block_kwargs["source_shape"] = darr.shape
         list_interp.append(
@@ -687,7 +698,7 @@ def _dask_resample_points(
     # Join into one array using a floating type whenever source values cannot represent NaN
     interp_points = da.from_delayed(joined, shape=(len(points[0]),), dtype=output_dtype)
 
-    # Padded edge chunks repeat their outer cells, so restore the bounds of the complete source raster
+    # Restore the point bounds of the complete source raster
     margin = 0 if isinstance(kwargs["method"], Reducer) else 0.5
     inside = (src_rows >= -margin) & (src_rows < darr.shape[0] - margin)
     inside &= (src_cols >= -margin) & (src_cols < darr.shape[1] - margin)
@@ -1036,7 +1047,7 @@ def _multiproc_resample_points(
 
     # Select the requested band for worker reads, restoring it after calculation or failure
     original_bands = rst.bands
-    rst._bands = (band,)
+    rst._bands = (original_bands[band - 1],)
     try:
         # Create tasks for multiprocessing
         tasks = []
@@ -1180,7 +1191,7 @@ def _prepare_resampling_options(
         if nodata_handling is None:
             nodata_handling = "ignore"
         elif isinstance(nodata_handling, str) and nodata_handling.lower() == "nearest":
-            raise ValueError("Nearest-source nodata handling requires an Interpolator.")
+            raise InvalidResamplingError("Nearest-source nodata handling requires an Interpolator.")
     else:
         if window is not None or window_shape is not None:
             raise ValueError("Window reduction requires a Reducer or callable.")
@@ -1281,7 +1292,7 @@ def _prepare_resampling_points(
 
         # Warn before returning missing values for an entirely outside interpolation request
         if warn_outside and not np.any(~ind_outofbounds) and isinstance(operator, Interpolator):
-            warnings.warn("All provided points were outside of raster bounds, returning only NaNs.")
+            _warn("All provided points were outside of raster bounds, returning only NaNs.")
         return (x, y), ~ind_outofbounds, input_scalar
     return None, np.empty(0, dtype=bool), input_scalar
 

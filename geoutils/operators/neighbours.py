@@ -19,7 +19,6 @@
 
 from __future__ import annotations
 
-import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from enum import Enum
@@ -32,6 +31,7 @@ from numpy.typing import NDArray
 from scipy.spatial import cKDTree
 
 from geoutils._typing import NDArrayBool, NDArrayNum, Number
+from geoutils.exceptions import InvalidResamplingError, _warn
 from geoutils.operators.base import LocalData
 from geoutils.operators.nodata import NodataHandling
 from geoutils.operators.overlap import (
@@ -384,10 +384,8 @@ def _check_regular_grid_neighbours(
             f"GridNeighbours does not contain the natural {method} interpolation stencil: {sorted(required)}."
         )
     if warn and supplied != required:
-        warnings.warn(
+        _warn(
             f"Raster {method} interpolation uses its natural stencil; extra GridNeighbours offsets are ignored.",
-            UserWarning,
-            stacklevel=3,
         )
 
 
@@ -407,7 +405,9 @@ def _compute_resampling_overlap(method: ScipyInterpolationMethod | Interpolator 
         return INTERPOLATION_ORDERS[method_name] + 1
     if isinstance(operator.default_neighborhood, GridNeighbours):
         return max(operator.default_neighborhood.overlap) + 1
-    raise ValueError("Chunked raster resampling requires a built-in method or a GridNeighbours neighborhood.")
+    raise InvalidResamplingError(
+        "Chunked raster resampling requires a built-in method or a GridNeighbours neighborhood."
+    )
 
 
 ##########################
@@ -910,7 +910,7 @@ def _prepare_point_gridding_data(
     if getattr(interface, "_is_xr", False):
         x, y, active_values = interface.to_xyz()
         values = active_values if data_name in (None, interface.data_name) else pc.coords[data_name].data
-        points = np.column_stack((x, y))
+        points = np.column_stack((np.asarray(x), np.asarray(y)))
         values = np.asarray(values)
     else:
         values = np.asarray(pc[data_name].values if data_name is not None else pc.geometry.z.values)
@@ -953,7 +953,7 @@ def _prepare_point_operator_data(
         x, y, active_values = interface.to_xyz()
         raw_values = active_values if data_name in (None, interface.data_name) else pc.coords[data_name].data
         raw_values = np.asarray(raw_values)
-        raw_points = np.column_stack((x, y))
+        raw_points = np.column_stack((np.asarray(x), np.asarray(y)))
     else:
         raw_values = np.asarray(pc[data_name].values if data_name is not None else pc.geometry.z.values)
         raw_points = np.column_stack((pc.geometry.x.values, pc.geometry.y.values))

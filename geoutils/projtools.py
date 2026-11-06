@@ -23,11 +23,13 @@ Functionalities to manipulate metadata in different coordinate reference systems
 from __future__ import annotations
 
 import warnings
+from collections.abc import Sequence
 from math import ceil, floor
 from typing import Any, Iterable, Literal
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import pyproj
 import rasterio as rio
 import shapely.geometry
@@ -38,6 +40,7 @@ from shapely.geometry.polygon import Polygon
 
 from geoutils._config import config
 from geoutils._typing import NDArrayNum, Number
+from geoutils.exceptions import InvalidBoundsError
 
 
 def _affine_matmul(transform: rio.transform.Affine, other: rio.transform.Affine | tuple[Any, Any]) -> Any:
@@ -199,22 +202,25 @@ def bounds2poly(
 
     :returns: Output polygon
     """
+    from geoutils._dispatch import _check_bounds
+
     # If bounds geometry is a vector object (warning, has both total_bounds and bounds attributes)
     if hasattr(bounds_geom, "total_bounds"):
-        xmin, ymin, xmax, ymax = bounds_geom.total_bounds  # type: ignore
+        bounds = bounds_geom.total_bounds
         in_crs = bounds_geom.crs  # type: ignore
     # If bounds geometry is a raster object
     elif hasattr(bounds_geom, "bounds"):
-        xmin, ymin, xmax, ymax = bounds_geom.bounds  # type: ignore
-        in_crs = bounds_geom.crs  # type: ignore
+        bounds = bounds_geom.bounds
+        in_crs = getattr(bounds_geom, "crs", None)
     # if a list of coordinates
-    elif isinstance(bounds_geom, (list, tuple)):
-        xmin, ymin, xmax, ymax = bounds_geom
+    elif isinstance(bounds_geom, (Sequence, np.ndarray, pd.DataFrame, dict)):
+        bounds = bounds_geom
     else:
-        raise ValueError(
+        raise InvalidBoundsError(
             "bounds_geom must a list/tuple of coordinates or an object with attributes bounds or total_bounds."
         )
 
+    xmin, ymin, xmax, ymax = _check_bounds(bounds)
     corners = np.array([(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)])
 
     if (in_crs is not None) & (out_crs is not None):
@@ -247,13 +253,17 @@ def merge_bounds(
     :returns: Output bounds (xmin, ymin, xmax, ymax) or empty tuple
     """
     # Check that bounds_list is a list of bounds objects
-    assert isinstance(bounds_list, (list, tuple)), "bounds_list must be a list/tuple"
+    if not isinstance(bounds_list, (list, tuple)) or not bounds_list:
+        raise InvalidBoundsError("bounds_list must be a non-empty list/tuple of bounds.")
+    if merging_algorithm not in ("union", "intersection"):
+        raise ValueError("merging_algorithm must be 'union' or 'intersection'")
 
     for bounds in bounds_list:
-        assert hasattr(bounds, "bounds") or hasattr(bounds, "total_bounds") or isinstance(bounds, (list, tuple)), (
-            "bounds_list must be a list of lists/tuples of coordinates or an object with attributes bounds "
-            "or total_bounds"
-        )
+        if not (hasattr(bounds, "bounds") or hasattr(bounds, "total_bounds") or isinstance(bounds, (list, tuple))):
+            raise InvalidBoundsError(
+                "bounds_list must be a list of lists/tuples of coordinates or an object with attributes bounds "
+                "or total_bounds"
+            )
 
     output_poly = bounds2poly(bounds_geom=bounds_list[0])
 
@@ -263,12 +273,12 @@ def merge_bounds(
 
         if merging_algorithm == "union":
             output_poly = output_poly.union(new_poly)
-        elif merging_algorithm == "intersection":
-            output_poly = output_poly.intersection(new_poly)
         else:
-            raise ValueError("merging_algorithm must be 'union' or 'intersection'")
+            output_poly = output_poly.intersection(new_poly)
 
     # Get merged bounds, write as dict to manipulate with resolution in the next step
+    if output_poly.is_empty:
+        return ()
     new_bounds = output_poly.bounds
     rio_bounds = {"left": new_bounds[0], "bottom": new_bounds[1], "right": new_bounds[2], "top": new_bounds[3]}
 
@@ -329,11 +339,16 @@ def reproject_points(
 
     :returns: Reprojected points of same shape as input points.
     """
-    assert len(points) == 2, "Points must be a tuple of N arrays"
+    from geoutils._dispatch import _check_crs, _check_point_coordinates
 
-    x, y = points
-    transformer = pyproj.Transformer.from_crs(in_crs, out_crs, always_xy=True)
-    xout, yout = transformer.transform(x, y)
+    x, y = _check_point_coordinates(points)
+    transformer = pyproj.Transformer.from_crs(_check_crs(in_crs), _check_crs(out_crs), always_xy=True)
+
+    # Preserve scalar output while passing normalized arrays to Pyproj for vector inputs
+    if x.ndim == 0:
+        xout, yout = transformer.transform(x.item(), y.item())
+    else:
+        xout, yout = transformer.transform(x, y)
     return xout, yout
 
 
@@ -397,11 +412,10 @@ def compare_proj(proj1: CRS, proj2: CRS) -> bool:
 
     :returns: True if the two projections are the same.
     """
-    assert all([isinstance(proj1, (pyproj.CRS, CRS)), isinstance(proj2, (pyproj.CRS, CRS))]), (
-        "proj1 and proj2 must be rasterio.crs.CRS objects."
-    )
-    proj1 = pyproj.CRS(proj1.to_string())
-    proj2 = pyproj.CRS(proj2.to_string())
+    from geoutils._dispatch import _check_crs
+
+    proj1 = pyproj.CRS(_check_crs(proj1).to_string())
+    proj2 = pyproj.CRS(_check_crs(proj2).to_string())
 
     same: bool = proj1.is_exact_same(proj2)
     return same

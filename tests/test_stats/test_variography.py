@@ -608,6 +608,38 @@ class TestVariogramEstimation:
         assert restored.fit_result["min_count"] == min_count
         assert empirical.model is None
 
+    @pytest.mark.parametrize("effective_range,expected_range", [(15, 15), (30, 20)])
+    @pytest.mark.parametrize("tail", ["none", "sparse", "missing"])
+    def test_fit__default_range_bound(
+        self, effective_range: float, expected_range: float, tail: Literal["none", "sparse", "missing"]
+    ) -> None:
+        """Checks that fit() limits effective ranges to twice the largest lag used for fitting."""
+
+        pytest.importorskip("skgstat")
+
+        # Create exact values with a range beyond the distances used for fitting
+        lags = np.linspace(1, 10, 20)
+        if tail != "none":
+            lags = np.r_[lags, 40]
+        model = VariogramModel("gaussian", effective_range=effective_range, partial_sill=2)
+        values = model.variogram(lags).copy()
+        counts = np.full(lags.size, 200)
+
+        # Sparse or missing tail bins must not extend the range bound
+        if tail == "sparse":
+            counts[-1] = 99
+        elif tail == "missing":
+            values[-1] = np.nan
+        empirical = gu.Variogram(lags=lags, semivariance=values, counts=counts)
+
+        fitted = empirical.fit("gaussian", min_count=100)
+
+        # A 15-unit range is recovered, while a 30-unit range reaches the 20-unit bound
+        assert fitted.model is not None
+        assert fitted.model.effective_range == pytest.approx(expected_range, rel=1e-6)
+        if effective_range == expected_range:
+            assert fitted.model.partial_sill == pytest.approx(2, rel=1e-6)
+
     @pytest.mark.parametrize("p0", [None, [7, 1]])
     def test_fit__bounded_initial_values(self, p0: list[float] | None) -> None:
         """Checks that automatic and supplied initial values fit within explicit parameter bounds."""

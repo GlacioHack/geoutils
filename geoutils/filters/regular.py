@@ -34,6 +34,7 @@ from rasterio.features import sieve as rio_sieve
 
 from geoutils._misc import import_optional
 from geoutils._typing import MArrayNum, NDArrayBool, NDArrayNum
+from geoutils.exceptions import InvalidShapeError
 from geoutils.multiproc import MultiprocConfig, map_overlap
 from geoutils.operators.neighbours import GridCoverage, GridNeighbours, _configure_grid_neighbours, _grid_window_kernel
 from geoutils.operators.neighbours import _create_circular_mask as _create_circular_mask
@@ -320,7 +321,7 @@ def median_filter(array: NDArrayNum, size: int, engine: Literal["scipy", "numba"
         return _apply_median_filter_2d(array, size, engine)
     elif array.ndim == 3:
         return np.stack([_apply_median_filter_2d(slice_, size, engine) for slice_ in array])
-    raise ValueError("Input array must be 2D or 3D.")
+    raise InvalidShapeError("Input array must be 2D or 3D.")
 
 
 def _apply_median_filter_2d(
@@ -397,7 +398,7 @@ def mean_filter(
     :returns: Filtered array, optionally with the finite counts and total kernel cell count.
     """
     if array.ndim != 2:
-        raise ValueError(f"Invalid array shape {array.shape}, expected 2D.")
+        raise InvalidShapeError(f"Invalid array shape {array.shape}, expected 2D.")
     _validate_filter_engine(engine)
 
     # Mask nodata values
@@ -526,7 +527,7 @@ def _extrema_filter(
 
     # Check that array dimension is 2 or 3
     if array.ndim not in [2, 3]:
-        raise ValueError(f"Invalid array shape given: {array.shape}. Expected 2D or 3D array.")
+        raise InvalidShapeError(f"Invalid array shape given: {array.shape}. Expected 2D or 3D array.")
     _validate_filter_engine(engine)
 
     fill_value = -np.inf if find_maximum else np.inf
@@ -713,7 +714,7 @@ def _filter_grid(
 
     bands = array[None] if array.ndim == 2 else array
     if bands.ndim != 3:
-        raise ValueError("Raster filtering requires a 2D array or a stack of bands.")
+        raise InvalidShapeError("Raster filtering requires a 2D array or a stack of bands.")
     global_shape = (array.shape[-2], array.shape[-1]) if source_shape is None else source_shape
     output = np.empty(bands.shape, dtype=float)
     handling = operator.default_nodata_propagation if nodata_handling is None else nodata_handling
@@ -1065,5 +1066,5 @@ def generic_filter(
     """
     # Check that array dimension is 2 or 3
     if array.ndim not in [2, 3]:
-        raise ValueError(f"Invalid array shape given: {array.shape}. Expected 2D or 3D array.")
+        raise InvalidShapeError(f"Invalid array shape given: {array.shape}. Expected 2D or 3D array.")
     return filter_function(array, **kwargs)

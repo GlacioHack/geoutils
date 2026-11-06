@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import logging
 import tempfile
-import warnings
 from collections.abc import Iterator
 from contextlib import contextmanager
 from numbers import Integral
@@ -33,9 +32,10 @@ from typing import TYPE_CHECKING, Any, Callable, Literal, overload
 import numpy as np
 import rasterio as rio
 
-from geoutils._dispatch import get_geo_attr, has_geo_attr
+from geoutils._dispatch import _check_same_shape, get_geo_attr, has_geo_attr
 from geoutils._misc import deprecate, import_optional
 from geoutils._typing import NDArrayNum
+from geoutils.exceptions import _warn
 from geoutils.multiproc.chunked import ChunkSpec, normalize_chunks
 from geoutils.multiproc.cluster import AbstractCluster, ClusterGenerator
 from geoutils.projtools import _affine_matmul
@@ -224,8 +224,8 @@ def compute_tiling(
     :raises ValueError: If overlap is negative.
     :raises TypeError: If overlap is not an integer.
     """
-    if ref_shape is not None and raster_shape != ref_shape:
-        raise Exception("Reference and secondary rasters do not have the same shape")
+    if ref_shape is not None:
+        _check_same_shape(raster_shape, ref_shape, "Reference and secondary rasters do not have the same shape")
     row_max, col_max = raster_shape
     row_split, col_split = _split_chunk_size(tile_size)
 
@@ -458,9 +458,8 @@ def map_overlap(
 
     # Warns user if output file is a BigTIFF
     if raster_output._is_bigtiff():
-        warnings.warn(
+        _warn(
             "Due to the size of the output raster, it has been saved with a BigTIFF format.",
-            category=UserWarning,
         )
 
     return raster_output

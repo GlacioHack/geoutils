@@ -32,7 +32,13 @@ from scipy.interpolate import RegularGridInterpolator, griddata
 from scipy.optimize import curve_fit
 from scipy.spatial import QhullError
 
-from geoutils._dispatch import _get_pointcloud_interface, _get_raster_interface, is_dask_array, is_dask_dataframe
+from geoutils._dispatch import (
+    _check_valid_data,
+    _get_pointcloud_interface,
+    _get_raster_interface,
+    is_dask_array,
+    is_dask_dataframe,
+)
 from geoutils._misc import import_optional
 from geoutils.projtools import _affine_matmul
 
@@ -288,8 +294,7 @@ def _categorical_grouped_interpolator(
                 fit_parameters[key] = parameters[()]
         else:
             models[key] = float(selected.iloc[0])
-    if not models:
-        raise ValueError(f"No finite {statistic!r} remains after applying min_count={min_count}.")
+    _check_valid_data(len(models), message=f"No finite {statistic!r} remains after applying min_count={min_count}.")
 
     def evaluate(predictors: Mapping[str, Any]) -> NDArray[np.float64]:
         """Select each observation's category before evaluating its continuous predictors."""
@@ -394,8 +399,9 @@ def _grouped_interpolator(
     points = np.column_stack([coordinate.ravel() for coordinate in coordinate_grid])
     flat_values = values.ravel()
     valid = np.isfinite(flat_values)
-    if not np.any(valid):
-        raise ValueError(f"No finite {statistic!r} remains after applying min_count={min_count}.")
+    _check_valid_data(
+        int(np.any(valid)), message=f"No finite {statistic!r} remains after applying min_count={min_count}."
+    )
 
     # Fit observed groups directly so filled gaps do not influence the model parameters
     if model != "piecewise_linear":

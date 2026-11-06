@@ -25,6 +25,7 @@ from geoutils.operators.neighbours import (
     _resolve_point_neighbours_for_interpolator,
 )
 from geoutils.operators.reducer import Mean
+from geoutils.projtools import _affine_matmul
 from geoutils.stats.variography import VariogramModel
 from tests.operator_helpers import LocalMeanInterpolator
 
@@ -295,7 +296,7 @@ class TestKrigingGridNeighbours:
         "transform",
         [
             pytest.param(Affine(2, 0, 10, 0, -1, 20), id="rectangular"),
-            pytest.param(Affine.rotation(30) * Affine.scale(2, -1), id="rotated"),
+            pytest.param(_affine_matmul(Affine.rotation(30), Affine.scale(2, -1)), id="rotated"),
             pytest.param(Affine(2, 1, 10, 0, -1, 20), id="skewed"),
         ],
     )
@@ -306,13 +307,13 @@ class TestKrigingGridNeighbours:
         # A radius of 2.1 fits comfortably inside this independent 11x11 candidate grid
         operator = Kriging(VariogramModel("gaussian", effective_range=3, partial_sill=1), max_overlap=2.1)
         candidates = [(row, column) for row in range(-5, 6) for column in range(-5, 6)]
-        coordinates = np.array([transform * (column + 0.5, row + 0.5) for row, column in candidates])
+        coordinates = np.array([_affine_matmul(transform, (column + 0.5, row + 0.5)) for row, column in candidates])
         shifts = [(0.0, 0.0)] if aligned_targets else [(-0.49, -0.49), (-0.49, 0.49), (0.49, -0.49), (0.49, 0.49)]
 
         # Measure distances in map coordinates, without using the inverse-transform search bounds
         expected = set()
         for row_shift, column_shift in shifts:
-            target = np.array(transform * (0.5 + column_shift, 0.5 + row_shift))
+            target = np.array(_affine_matmul(transform, (0.5 + column_shift, 0.5 + row_shift)))
             inside = np.linalg.norm(coordinates - target, axis=1) <= 2.1
             expected.update(offset for offset, selected in zip(candidates, inside) if selected)
 
@@ -680,7 +681,7 @@ class TestRadiusGridding:
         result = points.grid(
             ref=reference,
             resampling=method,
-            dist_nodata_pixel=0.1,
+            radius=0.1,
             nodata_handling="ignore",
             engine="scipy",
         )

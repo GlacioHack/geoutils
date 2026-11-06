@@ -22,6 +22,8 @@ from rasterio.transform import from_origin
 
 import geoutils as gu
 from geoutils import examples, open_raster
+from geoutils.exceptions import InvalidNodataError
+from geoutils.projtools import _affine_matmul
 from tests.accessor_helpers import assert_output_equal
 from tests.remote_helpers import RemoteFiles
 
@@ -431,7 +433,7 @@ class TestRasterOpening:
         raster = gu.Raster(filename, downsample=downsample)
         assert not variable.rst.is_loaded and not raster.is_loaded
         assert variable.rst.shape == raster.shape == shape
-        assert variable.rst.transform == raster.transform == transform * Affine.scale(*factors)
+        assert variable.rst.transform == raster.transform == _affine_matmul(transform, Affine.scale(*factors))
         np.testing.assert_array_equal(variable.values, expected)
         np.testing.assert_array_equal(raster.data, expected)
 
@@ -510,7 +512,7 @@ class TestRasterOpening:
             expected = reader.read(1, out_shape=shape)
         assert result.dims == ("y", "x")
         assert result.rst.shape == shape
-        assert result.rst.transform == transform * Affine.scale(20 / shape[1], 12 / shape[0])
+        assert result.rst.transform == _affine_matmul(transform, Affine.scale(20 / shape[1], 12 / shape[0]))
         np.testing.assert_array_equal(result.values, expected)
         result.close()
 
@@ -1046,7 +1048,8 @@ class TestRasterWriting:
         img.to_file(temp_file)
         saved = gu.Raster(temp_file)
         assert img.raster_equal(saved)
-        assert (Image.open(temp_file)).info["compression"] == "tiff_adobe_deflate"  # test no default compression
+        with Image.open(temp_file) as image:
+            assert image.info["compression"] == "tiff_adobe_deflate"  # test no default compression
         assert not saved._is_bigtiff()  # test default BIGTIFF param (IF_SAFER)
 
         # Try to save with a pathlib path (create a new temp file for Windows)
@@ -1056,7 +1059,8 @@ class TestRasterWriting:
         # Test additional option: one co_opts with tiled (with no compression)
         co_opts = {"COMPRESS": "NONE"}
         img.to_file(temp_file, co_opts=co_opts)
-        assert len((Image.open(temp_file)).tile) > 1  # test {TILED": "NO"} default value
+        with Image.open(temp_file) as image:
+            assert len(image.tile) > 1  # test {TILED": "NO"} default value
         saved = gu.Raster(temp_file)
         assert not saved._is_bigtiff()  # test default BIGTIFF param (IF_SAFER)
 
@@ -1066,7 +1070,8 @@ class TestRasterWriting:
         img.to_file(temp_file, co_opts=co_opts, metadata=metadata)
         saved = gu.Raster(temp_file)
         assert img.raster_equal(saved)
-        assert (Image.open(temp_file)).info["compression"] == "tiff_lzw"  # test {"COMPRESS": "LZW"}
+        with Image.open(temp_file) as image:
+            assert image.info["compression"] == "tiff_lzw"  # test {"COMPRESS": "LZW"}
         assert saved._is_bigtiff()  # test {"BIGTIFF": "YES"}
         assert saved.tags["Type"] == "test"
 
@@ -1092,8 +1097,8 @@ class TestRasterWriting:
 
         # Test that a warning is raised if nodata is not set and a mask exists (defined above)
         if img.nodata is None:
-            with pytest.warns(UserWarning):
-                img.to_file(TemporaryFile())
+            with TemporaryFile() as output_file, pytest.warns(UserWarning, match="No nodata set"):
+                img.to_file(output_file)
 
         # Test with blank argument
         img.to_file(temp_file, blank_value=0)
@@ -1713,8 +1718,8 @@ class TestRasterWritingChunked:
             ("translate", {"xoff": 10000, "yoff": 10000}),
             ("reproject", {"res": 0.5, "resampling": "nearest"}),
             ("reproject", {"res": 0.5, "resampling": "nearest", "backend": "scipy"}),
-            ("filter", {"method": "mean", "size": 3}),
-            ("filter", {"method": "median", "size": 3}),
+            ("filter", {"method": "mean", "window": 3}),
+            ("filter", {"method": "median", "window": 3}),
             ("fill_nodata", {"interpolation": "nearest"}),
         ],
     )
@@ -2082,7 +2087,7 @@ class TestRasterIOErrors:
         original = array.copy(deep=True)
 
         # Try each setter and check metadata is unchanged
-        with pytest.raises(ValueError, match="Nodata value.*incompatible"):
+        with pytest.raises(InvalidNodataError, match="Nodata value.*incompatible"):
             if setter == "property":
                 array.rst.nodata = -1
             else:

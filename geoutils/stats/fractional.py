@@ -28,7 +28,7 @@ import shapely
 from numpy.typing import NDArray
 from rasterio.transform import Affine
 
-from geoutils._dispatch import _is_raster, _is_vector, is_dask_array
+from geoutils._dispatch import _check_same_shape, _is_raster, _is_vector, is_dask_array
 from geoutils._misc import import_optional
 from geoutils.multiproc.chunked import iter_chunk_slices
 from geoutils.multiproc.cluster import _map_bounded
@@ -42,6 +42,7 @@ from geoutils.operators.overlap import (
     _union_geometries_by_label,
 )
 from geoutils.operators.reducer import Count, Mean, Reducer, Sum, _can_reduce_arrays, _combined_weights
+from geoutils.projtools import _affine_matmul
 from geoutils.sampling.support import _sampling_specification
 from geoutils.stats.reduction import _flox_groupby_reduce, _merge_blocks, _reducer_from_statistic
 from geoutils.vector.base import _as_geodataframe
@@ -224,10 +225,14 @@ def _fractional_mergeable_stats(
             raise ValueError("Mergeable fractional statistics require unmodified Sum(), Mean(), or Count() reducers.")
 
     # Check values and mask against the raster grid shape
-    if any(array.shape != support.shape for array in values.values()) or (
-        mask is not None and mask.shape != support.shape
-    ):
-        raise ValueError("Fractional statistic values and mask must match the raster support shape.")
+    for array in values.values():
+        _check_same_shape(
+            array.shape, support.shape, "Fractional statistic values and mask must match the raster support shape."
+        )
+    if mask is not None:
+        _check_same_shape(
+            mask.shape, support.shape, "Fractional statistic values and mask must match the raster support shape."
+        )
 
     # 2/ Prepare group geometries and matching raster chunks
 
@@ -267,10 +272,10 @@ def _fractional_mergeable_stats(
 
         for index, (rows, columns) in enumerate(tiles):
             # Calculate the chunk's footprint to find intersecting polygons
-            transform = support.transform * Affine.translation(columns.start, rows.start)
+            transform = _affine_matmul(support.transform, Affine.translation(columns.start, rows.start))
             height, width = rows.stop - rows.start, columns.stop - columns.start
             footprint = shapely.Polygon(
-                [transform * corner for corner in ((0, 0), (width, 0), (width, height), (0, height))]
+                [_affine_matmul(transform, corner) for corner in ((0, 0), (width, 0), (width, height), (0, height))]
             )
 
             # Skip chunks outside named groups, but include all chunks for inside/outside groups
@@ -456,8 +461,8 @@ def _fractional_vector_stats(
             mp_config,
         )
     eligibility = None if mask is None else np.asarray(mask, dtype=bool)
-    if eligibility is not None and eligibility.shape != support.shape:
-        raise ValueError("The statistics mask must match the raster support shape.")
+    if eligibility is not None:
+        _check_same_shape(eligibility.shape, support.shape, "The statistics mask must match the raster support shape.")
 
     # Calculate the covered cells once, then reuse them for every selected raster band and statistic
     _, labels, geometries, include_outside = _vector_fractional_groups(source, by, support, definitions)
@@ -478,8 +483,11 @@ def _fractional_vector_stats(
     observed_groups = np.zeros(overlap.geometry_count, dtype=bool)
     for value_index, (value_name, array) in enumerate(named_values.items()):
         values_array = np.asanyarray(array)
-        if values_array.shape != support.shape:
-            raise ValueError(f"Fractional statistic value {value_name!r} must match the raster support shape.")
+        _check_same_shape(
+            values_array.shape,
+            support.shape,
+            f"Fractional statistic value {value_name!r} must match the raster support shape.",
+        )
         local_inputs = _grid_intersection_local_data(
             values_array,
             support.transform,

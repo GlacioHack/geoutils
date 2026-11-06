@@ -22,6 +22,7 @@ import pandas as pd
 from numpy.typing import NDArray
 
 from geoutils._dispatch import (
+    _check_same_shape,
     _get_pointcloud_interface,
     _get_raster_interface,
     _is_pointcloud,
@@ -530,8 +531,8 @@ def _sample_and_mask_global_values(
         name: array if isinstance(array, _ValueReader) else _as_array(array) for name, array in named_values.items()
     }
     shape = next(iter(arrays.values())).shape
-    if any(array.shape != shape for array in arrays.values()):
-        raise ValueError("Selected values must have matching shapes.")
+    for array in arrays.values():
+        _check_same_shape(array.shape, shape, "Selected values must have matching shapes.")
 
     # Keep readers unloaded and reject two task schedulers in the same calculation
     mask = _normalize_reader_mask(mask, shape)

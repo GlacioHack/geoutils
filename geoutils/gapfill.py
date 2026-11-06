@@ -19,6 +19,7 @@ import numpy as np
 from rasterio.fill import fillnodata as rio_fillnodata
 
 from geoutils._typing import MArrayNum, NDArrayBool
+from geoutils.exceptions import InvalidResamplingError
 from geoutils.raster.array import _as_bands, _masked_raster_data, _processing_mask
 
 if TYPE_CHECKING:
@@ -43,7 +44,7 @@ def _fill_nodata(
     ):
         raise ValueError("Argument 'smoothing_iterations' must be a non-negative integer.")
     if interpolation not in ("inv_dist", "nearest"):
-        raise ValueError("Argument 'interpolation' must be 'inv_dist' or 'nearest'.")
+        raise InvalidResamplingError("Argument 'interpolation' must be 'inv_dist' or 'nearest'.")
 
     # Floating-point output can represent cells that remain unfilled as NaN
     source = _masked_raster_data(source_raster)

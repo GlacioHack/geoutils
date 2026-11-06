@@ -27,6 +27,7 @@ from scipy.spatial import cKDTree
 
 from geoutils._config import config
 from geoutils._typing import NDArrayBool, NDArrayNum
+from geoutils.exceptions import InvalidNodataError
 
 # Internal handling for nodata: for an interpolator or reducer
 # "ignore": exclude nodata before calculation
@@ -60,32 +61,16 @@ def _resolve_nodata_handling(
     if choice in ("nearest", "ignore", "propagate"):
         return cast(NodataPropagation, choice), None
     if isinstance(choice, str) and choice not in ("half_order_up", "half_order_down"):
-        raise ValueError(
+        raise InvalidNodataError(
             "nodata_handling must be 'nearest', 'ignore', 'propagate', 'half_order_up', "
             "'half_order_down' or a non-negative integer."
         )
     if isinstance(choice, bool) or not isinstance(choice, (str, int)) or (isinstance(choice, int) and choice < 0):
-        raise ValueError(
+        raise InvalidNodataError(
             "nodata_handling must be 'nearest', 'ignore', 'propagate', 'half_order_up', "
             "'half_order_down' or a non-negative integer."
         )
     return "ignore", _nodata_spread_distance(order=order, dist_nodata_spread=cast(NodataSpread, choice))
-
-
-def _validate_nodata_propagation(nodata_propagation: str) -> NodataPropagation:
-    """
-    Validate and normalize a nodata propagation rule.
-
-    :param nodata_propagation: Rule used to handle invalid source values.
-
-    :return: Normalized propagation rule.
-    """
-
-    # Lowercase string values so public methods accept the same spelling variants
-    normalized = nodata_propagation.lower()
-    if normalized not in ("nearest", "ignore", "propagate"):
-        raise ValueError("nodata_propagation must be one of 'nearest', 'ignore' or 'propagate'.")
-    return cast(NodataPropagation, normalized)
 
 
 def _nodata_spread_distance(order: int | None, dist_nodata_spread: NodataSpread) -> int:
@@ -101,16 +86,20 @@ def _nodata_spread_distance(order: int | None, dist_nodata_spread: NodataSpread)
     # For example, cubic interpolation has order 3: half-order gives 1 pixel (down) or 2 pixels (up)
     if isinstance(dist_nodata_spread, str):
         if order is None:
-            raise ValueError("Half-order nodata spreading requires an interpolation method with a known order.")
+            raise InvalidNodataError("Half-order nodata spreading requires an interpolation method with a known order.")
         if dist_nodata_spread == "half_order_up":
             return (order + 1) // 2
         if dist_nodata_spread == "half_order_down":
             return order // 2
-        raise ValueError("dist_nodata_spread must be 'half_order_up', 'half_order_down' or a non-negative integer.")
+        raise InvalidNodataError(
+            "dist_nodata_spread must be 'half_order_up', 'half_order_down' or a non-negative integer."
+        )
 
     # Reject booleans and negative distances before expanding a raster mask or point search
     if isinstance(dist_nodata_spread, bool) or not isinstance(dist_nodata_spread, int) or dist_nodata_spread < 0:
-        raise ValueError("dist_nodata_spread must be 'half_order_up', 'half_order_down' or a non-negative integer.")
+        raise InvalidNodataError(
+            "dist_nodata_spread must be 'half_order_up', 'half_order_down' or a non-negative integer."
+        )
     return dist_nodata_spread
 
 

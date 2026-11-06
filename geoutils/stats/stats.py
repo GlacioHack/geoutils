@@ -20,7 +20,6 @@
 
 from __future__ import annotations
 
-import warnings
 from collections.abc import Callable, Hashable, Iterable, Mapping
 from contextlib import ExitStack
 from copy import copy
@@ -31,6 +30,7 @@ import numpy as np
 from geoutils._dispatch import _is_pointcloud, _is_raster, is_dask_array
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike
+from geoutils.exceptions import _warn
 from geoutils.operators.base import LocalData
 from geoutils.operators.overlap import OverlapBackend
 from geoutils.operators.reducer import Reducer
@@ -432,10 +432,8 @@ def stats(
                 for value in spatial_inputs
             )
         ):
-            warnings.warn(
+            _warn(
                 "The Flox backend loads Raster and PointCloud inputs before calculating grouped statistics.",
-                category=UserWarning,
-                stacklevel=2,
             )
     if (
         by is None
@@ -443,7 +441,7 @@ def stats(
         and not isinstance(statistics, (str, Iterable, Reducer))
         and not callable(statistics)
     ):
-        warnings.warn(f"Statistic name {statistics} is a not recognized string", category=UserWarning)
+        _warn(f"Statistic name {statistics} is a not recognized string")
         return None
 
     # Validate statistics and group inputs

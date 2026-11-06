@@ -29,6 +29,7 @@ import numpy as np
 from geoutils._dispatch import is_dask_array
 from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
+from geoutils.exceptions import InvalidNodataError
 from geoutils.multiproc import MultiprocConfig
 from geoutils.operators.base import LocalData
 from geoutils.operators.methods import (
@@ -86,7 +87,7 @@ def _point_filter_nodata_handling(
     if nodata_propagation is None:
         return reducer.default_nodata_propagation
     if nodata_propagation not in ("ignore", "propagate"):
-        raise ValueError("Argument ``nodata_propagation`` must be 'ignore' or 'propagate'.")
+        raise InvalidNodataError("Argument ``nodata_propagation`` must be 'ignore' or 'propagate'.")
     return nodata_propagation
 
 
@@ -124,7 +125,7 @@ def _assign_filtered_point_values(
 
     output = dataframe.copy()
     if id_column is not None:
-        output.drop(columns=id_column, inplace=True)
+        output = output.drop(columns=id_column)
 
     # Write to the named data column, or rebuild the 3D geometry when the values are stored as elevation
     if data_name is not None:

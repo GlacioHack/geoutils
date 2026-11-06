@@ -21,9 +21,8 @@
 from __future__ import annotations
 
 import logging
-import warnings
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast, get_args
 
 import geopandas as gpd
 import numpy as np
@@ -34,23 +33,30 @@ import xarray as xr
 from shapely.geometry import box
 from shapely.geometry.base import BaseGeometry
 
-from geoutils._typing import NDArrayNum, Number
+from geoutils._typing import DTypeLike, NDArrayNum, Number, ResamplingMethod
 from geoutils.exceptions import (
+    CRSMismatchError,
+    GeoUtilsInputError,
+    GridMismatchError,
     IgnoredGridWarning,
     InvalidBoundsError,
     InvalidCRSError,
     InvalidGridError,
+    InvalidNodataError,
     InvalidPointsError,
+    InvalidResamplingError,
     InvalidResolutionError,
     InvalidShapeError,
+    NoValidDataError,
+    PointsMismatchError,
+    ShapeMismatchError,
+    _warn,
 )
-from geoutils.projtools import (
-    _get_bounds_projected,
-    reproject_points,
-)
+from geoutils.projtools import _get_bounds_projected, reproject_points
 from geoutils.raster.referencing import _cast_pixel_interpretation, _check_affine_georeferencing
 
 if TYPE_CHECKING:
+    from geoutils.operators.nodata import NodataPropagation
     from geoutils.pointcloud.pointcloud import PointCloudLike
     from geoutils.raster.base import RasterBase, RasterLike
     from geoutils.vector.vector import Vector, VectorLike
@@ -112,7 +118,7 @@ def get_geo_interface(obj: Any, attr_name: str, accessors: Sequence[str] = ("rst
     Return the object or accessor providing a requested geospatial operation, or None if absent.
 
     Arguments follow get_geo_attr(). Use this when several operations and metadata fields must come from the
-    same interface, avoiding collisions with native Xarray or Pandas names such as count and shape.
+    same interface, avoiding collisions with Xarray or Pandas attributes such as count and shape.
     """
 
     if hasattr(obj, attr_name):
@@ -200,6 +206,57 @@ def _is_vector(obj: Any) -> bool:
 ########################################
 
 
+def _check_nodata(nodata: Number | None, dtype: DTypeLike | None = None, *, allow_cast: bool = False) -> bool:
+    """Check nodata and return whether its value fits the requested dtype."""
+
+    if nodata is not None and not isinstance(nodata, (int, float, np.integer, np.floating)):
+        raise InvalidNodataError("Type of nodata not understood, must be float or int.")
+    if nodata is None or dtype is None:
+        return True
+
+    # Rasterio may probe an invalid cast before rejecting incompatible nodata
+    with np.errstate(invalid="ignore", over="ignore"):
+        compatible = bool(rio.dtypes.can_cast_dtype(nodata, dtype))
+    if not compatible and not allow_cast:
+        raise InvalidNodataError(f"Nodata value {nodata} incompatible with self.dtype {dtype}.")
+    return compatible
+
+
+def _check_resampling(
+    method: str,
+    allowed: Sequence[str] = get_args(ResamplingMethod),
+    name: str = "resampling method",
+) -> str:
+    """Check a resampling method or backend against its available names."""
+
+    if not isinstance(method, str) or method not in allowed:
+        raise InvalidResamplingError(f"Unknown {name}: {method!r}.")
+    return method
+
+
+def _check_valid_data(count: int, minimum: int = 1, message: str = "No finite values are available.") -> None:
+    """Check that an operation has enough valid observations."""
+
+    if count < minimum:
+        raise NoValidDataError(message)
+
+
+def _check_nodata_propagation(nodata_propagation: str) -> NodataPropagation:
+    """
+    Validate and normalize a nodata propagation rule.
+
+    :param nodata_propagation: Rule used to handle invalid source values.
+
+    :return: Normalized propagation rule.
+    """
+
+    # Lowercase string values so public methods accept the same spelling variants
+    normalized = nodata_propagation.lower() if isinstance(nodata_propagation, str) else None
+    if normalized not in ("nearest", "ignore", "propagate"):
+        raise InvalidNodataError("nodata_propagation must be one of 'nearest', 'ignore' or 'propagate'.")
+    return cast("NodataPropagation", normalized)
+
+
 def _check_crs(crs: Any) -> pyproj.CRS:
     """Function for checking input CRS consistently."""
 
@@ -212,10 +269,37 @@ def _check_crs(crs: Any) -> pyproj.CRS:
     return crs
 
 
+def _check_point_coordinates(points: Any, *, squeeze: bool = False) -> tuple[NDArrayNum, NDArrayNum]:
+    """Normalize numeric X/Y arrays with matching shapes, optionally removing singleton dimensions."""
+
+    # Normalize both axes together so invalid arrays receive a spatial input error
+    if not isinstance(points, (Sequence, np.ndarray)) or isinstance(points, (str, bytes)):
+        raise InvalidPointsError("Expected a sequence of two array-like objects (x, y).")
+    if (isinstance(points, np.ndarray) and points.ndim == 0) or len(points) != 2:
+        raise InvalidPointsError("Expected a sequence of two array-like objects (x, y).")
+    try:
+        x, y = (np.asarray(value, dtype=float) for value in points)
+    except (TypeError, ValueError, OverflowError) as exception:
+        raise InvalidPointsError("Point coordinates must be numeric array-like objects.") from exception
+
+    # Query points may contain NaNs or be empty, but both axes must identify the same locations
+    if squeeze:
+        x, y = x.squeeze(), y.squeeze()
+    if x.shape != y.shape:
+        raise InvalidPointsError("Point coordinates must have the same length and shape.")
+    return x, y
+
+
 def _check_bounds(
-    bbox: rio.coords.BoundingBox | tuple[Number, Number, Number, Number] | pd.DataFrame | dict[str, float],
+    bbox: rio.coords.BoundingBox | Sequence[Number] | NDArrayNum | pd.DataFrame | dict[str, Number],
+    *,
+    allow_empty: bool = True,
 ) -> tuple[Number, Number, Number, Number]:
-    """Helper function to check bounds value when provided as a sequence or bounding box object."""
+    """
+    Normalize finite, ordered bounds from the supported representations.
+
+    A point or line can have zero extent. Set allow_empty=False when constructing a target grid.
+    """
 
     # If rasterio bounding box, simply extract
     if isinstance(bbox, rio.coords.BoundingBox):
@@ -224,7 +308,8 @@ def _check_bounds(
     # If pandas dataframe (GeoPandas-like), extract if only one row
     elif isinstance(bbox, pd.DataFrame):
         if all(c in bbox.columns for c in ["minx", "maxx", "miny", "maxy"]) and len(bbox) == 1:
-            xmin, ymin, xmax, ymax = bbox["minx"][0], bbox["miny"][0], bbox["maxx"][0], bbox["maxy"][0]
+            row = bbox.iloc[0]
+            xmin, ymin, xmax, ymax = row["minx"], row["miny"], row["maxx"], row["maxy"]
         else:
             raise InvalidBoundsError(
                 f"Bounding box as a dataframe must contain columns 'minx', 'maxx', 'miny', "
@@ -238,50 +323,56 @@ def _check_bounds(
             raise InvalidBoundsError(f"Bounding box as dictionary should have keys {required}, got {set(bbox)}.")
 
         for k, v in bbox.items():
-            if not isinstance(v, (int, float)):
+            if isinstance(v, (bool, np.bool_)) or not isinstance(v, (int, float, np.integer, np.floating)):
                 raise InvalidBoundsError(
                     f"Bounding box dictionary value for {k!r} must be numeric, got {type(v).__name__}."
                 )
         xmin, ymin, xmax, ymax = bbox["left"], bbox["bottom"], bbox["right"], bbox["top"]
 
     # If bbox is an iterable with 4 coordinates (excluding strings and bytes)
-    elif isinstance(bbox, Sequence) and not isinstance(bbox, (str, bytes)):
+    elif isinstance(bbox, (Sequence, np.ndarray)) and not isinstance(bbox, (str, bytes)):
+        if isinstance(bbox, np.ndarray) and bbox.ndim != 1:
+            raise InvalidBoundsError("Bounding box must be a one-dimensional sequence of length 4.")
         if len(bbox) != 4:
             raise InvalidBoundsError(f"Bounding box must be a sequence of length 4, got a length of {len(bbox)}.")
-        # Normalize input as tuple (to accept lists, arrays, etc)
-        try:
-            bounds = tuple(float(x) for x in bbox)
-        except (TypeError, ValueError) as e:
-            raise InvalidBoundsError("Bounding box sequence must be numeric.") from e
-
-        xmin, ymin, xmax, ymax = bounds
-
-        # Check input relative order
-        if xmin >= xmax:
-            raise InvalidBoundsError(
-                f"Invalid bounding box xmin must be < xmax, got xmin={xmin}, xmax={xmax}. Did you pass the right "
-                f"sequence order (xmin, ymin, xmax, ymax)?"
-            )
-        if ymin >= ymax:
-            raise InvalidBoundsError(
-                f"Invalid bounding box: ymin must be < ymax, got ymin={ymin}, ymax={ymax}. Did you pass the right "
-                f"sequence order (xmin, ymin, xmax, ymax)?"
-            )
+        xmin, ymin, xmax, ymax = bbox
     else:
         raise InvalidBoundsError(
             f"Cannot interpret bounding box input from object of type {type(bbox).__name__!r}. "
             "Expected a sequence (xmin, ymin, xmax, ymax) or a rasterio BoundingBox."
         )
 
+    # Apply the same numeric and ordering checks to every representation
+    if any(isinstance(value, (bool, np.bool_)) for value in (xmin, ymin, xmax, ymax)):
+        raise InvalidBoundsError("Bounding box coordinates must be numeric, not booleans.")
+    try:
+        xmin, ymin, xmax, ymax = (float(value) for value in (xmin, ymin, xmax, ymax))
+    except (TypeError, ValueError, OverflowError) as exception:
+        raise InvalidBoundsError("Bounding box coordinates must be numeric.") from exception
+    if not np.all(np.isfinite((xmin, ymin, xmax, ymax))):
+        raise InvalidBoundsError("Bounding box coordinates must be finite.")
+
+    # A point or line can have zero extent, while a target grid needs an area
+    comparison = "<=" if allow_empty else "<"
+    if xmin > xmax or (not allow_empty and xmin == xmax):
+        raise InvalidBoundsError(f"Bounding box xmin must be {comparison} xmax, got xmin={xmin}, xmax={xmax}.")
+    if ymin > ymax or (not allow_empty and ymin == ymax):
+        raise InvalidBoundsError(f"Bounding box ymin must be {comparison} ymax, got ymin={ymin}, ymax={ymax}.")
     return xmin, ymin, xmax, ymax
 
 
-def _check_resolution(res: Number | tuple[Number, Number]) -> tuple[Number, Number]:
+def _check_resolution(res: Number | Sequence[Number] | NDArrayNum) -> tuple[Number, Number]:
     """Helper function on checking resolution input."""
 
     # Case 1: Single scalar resolution
+    if isinstance(res, (bool, np.bool_)):
+        raise InvalidResolutionError("Resolution must be a number or a sequence of two numbers, not a boolean.")
     if isinstance(res, (float, int, np.floating, np.integer)):
         # Should be finite value
+        try:
+            res = float(res)
+        except (ValueError, OverflowError) as exception:
+            raise InvalidResolutionError(f"Resolution must be a finite number, got {res!r}.") from exception
         if not np.isfinite(res):
             raise InvalidResolutionError(f"Resolution must be a finite number, got {res!r}.")
         # Should be strictly positive
@@ -290,7 +381,9 @@ def _check_resolution(res: Number | tuple[Number, Number]) -> tuple[Number, Numb
         return float(res), float(res)
 
     # Case 2: Sequence of two numbers for X and Y (xres, yres)
-    if isinstance(res, Sequence):
+    if isinstance(res, (Sequence, np.ndarray)) and not isinstance(res, (str, bytes)):
+        if isinstance(res, np.ndarray) and res.ndim != 1:
+            raise InvalidResolutionError("Resolution must be a one-dimensional sequence of two numbers.")
         # Should be a sequence of two
         if len(res) != 2:
             raise InvalidResolutionError(
@@ -298,9 +391,11 @@ def _check_resolution(res: Number | tuple[Number, Number]) -> tuple[Number, Numb
             )
 
         # Should be numeric values
+        if any(isinstance(value, (bool, np.bool_)) for value in res):
+            raise InvalidResolutionError("Resolution values must be numeric, not booleans.")
         try:
             xres, yres = (float(r) for r in res)
-        except (TypeError, ValueError) as e:
+        except (TypeError, ValueError, OverflowError) as e:
             raise InvalidResolutionError("Resolution values must be numeric.") from e
 
         # Should be finite values
@@ -321,24 +416,31 @@ def _check_resolution(res: Number | tuple[Number, Number]) -> tuple[Number, Numb
     )
 
 
-def _check_shape(shape: tuple[int, int]) -> tuple[int, int]:
-    """Helper function on checking resolution input."""
+def _check_shape(shape: Sequence[int | np.integer[Any]] | NDArrayNum, *, allow_empty: bool = True) -> tuple[int, int]:
+    """
+    Normalize a raster shape as two integer dimensions.
+
+    Empty arrays are allowed by default. Set allow_empty=False when constructing a target grid or downsample read.
+    """
 
     # Shape should be a sequence of two integers (exclude strings and bytes sequences)
-    if not isinstance(shape, Sequence) or isinstance(shape, (str, bytes)):
+    if not isinstance(shape, (Sequence, np.ndarray)) or isinstance(shape, (str, bytes)):
         raise InvalidShapeError(f"Shape must be a sequence of two integers, got {shape!r}.")
+    if isinstance(shape, np.ndarray) and shape.ndim != 1:
+        raise InvalidShapeError(f"Shape must be a one-dimensional sequence of two integers, got {shape!r}.")
     if len(shape) != 2:
         raise InvalidShapeError(f"Shape must have length 2, got length {len(shape)}.")
 
-    # Normalize any sequence into a tuple
-    try:
-        nrows, ncols = (int(x) for x in shape)
-    except (TypeError, ValueError) as e:
-        raise InvalidShapeError(f"Shape values must be integers, got {shape!r}.") from e
+    # Reject fractional sizes and booleans before converting NumPy integer scalars
+    if any(isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)) for value in shape):
+        raise InvalidShapeError(f"Shape values must be integers, got {shape!r}.")
+    nrows, ncols = (int(value) for value in shape)
 
     # Should be positive
     if nrows < 0 or ncols < 0:
         raise InvalidShapeError(f"Shape values must be non-negative, got {shape!r}.")
+    if not allow_empty and (nrows == 0 or ncols == 0):
+        raise InvalidShapeError(f"Target grid shape must contain two positive integers, got {shape!r}.")
 
     return nrows, ncols
 
@@ -349,7 +451,7 @@ def _as_1d_numeric_array(obj: Any, name: str) -> NDArrayNum:
     # Normalize to numeric array if supported.
     try:
         arr = np.asarray(obj, dtype=float)
-    except Exception as e:
+    except (TypeError, ValueError, OverflowError) as e:
         raise InvalidGridError(f"{name} coordinates must be numeric and array-like.") from e
 
     # Remove potential 1-size dimensions
@@ -362,6 +464,8 @@ def _as_1d_numeric_array(obj: Any, name: str) -> NDArrayNum:
     # Check size (at least 2 to define a grid)
     if arr.size < 2:
         raise InvalidGridError(f"{name} coordinates must contain at least 2 points, got size {arr.size}.")
+    if not np.all(np.isfinite(arr)):
+        raise InvalidGridError(f"{name} grid coordinates must be finite.")
 
     return arr
 
@@ -390,13 +494,86 @@ def _check_coords(coords: tuple[NDArrayNum, NDArrayNum]) -> tuple[tuple[NDArrayN
     y = _as_1d_numeric_array(coords[1], "Y")
 
     # Regularity check
-    dx = np.diff(x)
-    dy = np.diff(y)
+    with np.errstate(over="ignore", invalid="ignore"):
+        dx = np.diff(x)
+        dy = np.diff(y)
 
+    if not np.all(np.isfinite(dx)) or not np.all(np.isfinite(dy)):
+        raise InvalidGridError("Grid coordinate spacing must be finite.")
     if not (np.allclose(dx, dx[0]) and np.allclose(dy, dy[0])):
         raise InvalidGridError("Grid coordinates must be regular (equally spaced independently along x and y).")
+    if not ((np.all(dx > 0) or np.all(dx < 0)) and (np.all(dy > 0) or np.all(dy < 0))):
+        raise InvalidGridError("Grid coordinates must be strictly increasing or decreasing along each axis.")
 
     return (x, y), (dx[0], dy[0])
+
+
+# Checks for matching inputs
+########################################
+
+
+def _check_same_crs(
+    crs: Any,
+    other_crs: Any,
+    message: str = "Input coordinate reference systems differ.",
+    *,
+    ignore_axis_order: bool = False,
+) -> None:
+    """Compare CRSs using equality or ignoring axis order when requested."""
+
+    normalized_crs = _check_crs(crs) if crs is not None else None
+    normalized_other = _check_crs(other_crs) if other_crs is not None else None
+    if ignore_axis_order and normalized_crs is not None and normalized_other is not None:
+        same_crs = normalized_crs.equals(normalized_other, ignore_axis_order=True)
+    else:
+        same_crs = crs == other_crs
+    if not same_crs:
+        raise CRSMismatchError(message)
+
+
+def _check_same_shape(
+    shape: Sequence[int], other_shape: Sequence[int], message: str = "Input array shapes differ."
+) -> None:
+    """Check that input shapes have equal dimensions and sizes."""
+
+    if tuple(shape) != tuple(other_shape):
+        raise ShapeMismatchError(message)
+
+
+def _check_same_grid(raster: Any, other: Any, message: str = "Input raster grids differ.") -> None:
+    """Check raster grids using georeferenced_grid_equal() without loading pixels."""
+
+    raster_interface = _get_raster_interface(raster)
+    other_interface = _get_raster_interface(other)
+    if raster_interface is None or other_interface is None:
+        raise InvalidGridError("Grid comparison requires two rasters.")
+    if not raster_interface.georeferenced_grid_equal(other_interface):
+        raise GridMismatchError(message)
+
+
+def _check_same_points(
+    points: Any, other: Any, message: str = "Input point coordinates or their order differ."
+) -> None:
+    """
+    Compare point clouds with georeferenced_coords_equal() or compare coordinate arrays exactly.
+
+    Point cloud comparisons follow their existing CRS and partition rules. Coordinate arrays must already
+    describe the same axes and use the same CRS.
+    """
+
+    point_interface = _get_pointcloud_interface(points)
+    other_interface = _get_pointcloud_interface(other)
+    if point_interface is not None and other_interface is not None:
+        same_points = point_interface.georeferenced_coords_equal(other_interface)
+        if not same_points:
+            # Horizontal CRS differences prevent comparing point locations
+            crs = _check_crs(point_interface.crs).to_2d() if point_interface.crs is not None else None
+            other_crs = _check_crs(other_interface.crs).to_2d() if other_interface.crs is not None else None
+            _check_same_crs(crs, other_crs, message)
+    else:
+        same_points = np.array_equal(points, other)
+    if not same_points:
+        raise PointsMismatchError(message)
 
 
 # Level 1 checks: Can accept a reference object to match or manual input
@@ -426,8 +603,12 @@ def _check_match_points(
     if has_geo_attr(points, "geometry") and has_geo_attr(points, "crs"):
         crs = get_geo_attr(points, "crs")
         point_geometry = points.geometry  # type: ignore[union-attr]
+        try:
+            point_x, point_y = point_geometry.x.values, point_geometry.y.values
+        except ValueError as exception:
+            raise InvalidPointsError("Point reference geometry must contain only points.") from exception
         pts = reproject_points(
-            (point_geometry.x.values, point_geometry.y.values),
+            (point_x, point_y),
             in_crs=crs,
             out_crs=src.crs,
         )
@@ -440,38 +621,21 @@ def _check_match_points(
 
     # Or if points is a sequence of arrays (excluding strings and bytes)
     elif isinstance(points, Sequence) and not isinstance(points, (str, bytes)):
-        # Needs to be a sequence of length 2
-        if not isinstance(points, Sequence) or len(points) != 2:
-            raise InvalidPointsError(
-                f"Expected a sequence of two array-like objects (x, y), got object of type {type(points).__name__}."
-            )
-
-        # Get each member of the sequence of 2
-        x, y = points
         # Check that they are numeric, 1-dimension, same-length array-like
-        try:
-            x_arr = np.asarray(x, dtype=float).squeeze()
-            y_arr = np.asarray(y, dtype=float).squeeze()
-            # If inputs are scalars
-            if x_arr.ndim == 0 and y_arr.ndim == 0:
-                x_arr = x_arr.reshape(1)
-                y_arr = y_arr.reshape(1)
-                input_scalar = True
-            else:
-                input_scalar = False
+        x_arr, y_arr = _check_point_coordinates(points, squeeze=True)
 
-        except Exception as e:
-            raise InvalidPointsError("Point coordinates must be numeric array-like objects.") from e
+        # If inputs are scalars
+        if x_arr.ndim == 0 and y_arr.ndim == 0:
+            x_arr = x_arr.reshape(1)
+            y_arr = y_arr.reshape(1)
+            input_scalar = True
+        else:
+            input_scalar = False
 
         if x_arr.ndim != 1 or y_arr.ndim != 1:
             raise InvalidPointsError(
                 "Point coordinates must be a sequence of two 1-dimensional array-like objects, "
                 f"got dimensions of {x_arr.ndim} and {y_arr.ndim}."
-            )
-
-        if x_arr.shape[0] != y_arr.shape[0]:
-            raise InvalidPointsError(
-                f"Point coordinates must have the same length, got lengths of {x_arr.shape[0]} and {y_arr.shape[0]}."
             )
 
         pts = x_arr, y_arr
@@ -597,15 +761,17 @@ def _get_reproject_crs(
 
     # Require one way of defining the target CRS
     if (ref is not None and crs is not None) or (ref is None and crs is None):
-        raise ValueError("Either of `ref` or `crs` must be set. Not both.")
+        raise GeoUtilsInputError("Either of `ref` or `crs` must be set. Not both.")
 
     # Read the CRS from a geospatial reference when one is provided
     if ref is not None:
         if has_geo_attr(ref, "crs"):
-            return get_geo_attr(ref, "crs")
-        raise TypeError("Match-reference input must have a 'crs' attribute, such as a raster or vector.")
+            crs = get_geo_attr(ref, "crs")
+        else:
+            raise TypeError("Match-reference input must have a 'crs' attribute, such as a raster or vector.")
 
     # Normalize an explicit CRS through Rasterio, matching the existing transformation interfaces
+    _check_crs(crs)
     return rio.crs.CRS.from_user_input(crs)
 
 
@@ -615,12 +781,13 @@ def _grid_from_bounds_res(
     """Helper function to check and get grid transform and shape from bounds and resolution."""
 
     # Check and normalize input bounds
-    xmin, ymin, xmax, ymax = _check_bounds(bounds)
+    xmin, ymin, xmax, ymax = _check_bounds(bounds, allow_empty=False)
     # Check and normalize resolution
     res = _check_resolution(res)
 
     # Derive shape and transform
     shape = round((ymax - ymin) / res[1]), round((xmax - xmin) / res[0])
+    shape = _check_shape(shape, allow_empty=False)
     transform = rio.transform.from_origin(xmin, ymax, res[0], res[1])
     return shape, transform
 
@@ -630,8 +797,8 @@ def _grid_from_bounds_shape(
 ) -> tuple[tuple[int, int], rio.Affine]:
     """Helper function to get grid transform from bounds and shape."""
 
-    xmin, ymin, xmax, ymax = _check_bounds(bounds)
-    shape = _check_shape(shape)
+    xmin, ymin, xmax, ymax = _check_bounds(bounds, allow_empty=False)
+    shape = _check_shape(shape, allow_empty=False)
     # Careful, shape inverted (width, height in Rasterio; height, width in NumPy)
     transform = rio.transform.from_bounds(xmin, ymin, xmax, ymax, shape[1], shape[0])
     return shape, transform
@@ -661,7 +828,8 @@ def _grid_from_src(
             "This is a bug, please report it."
         )
     if shape is not None:
-        height, width = _check_shape(shape)  # Careful, height/width are inverted in Rasterio (width comes first)
+        # Careful, height/width are inverted in Rasterio (width comes first)
+        height, width = _check_shape(shape, allow_empty=False)
     else:
         height, width = None, None
     if res is not None:
@@ -669,7 +837,7 @@ def _grid_from_src(
     else:
         res = None
     if bounds is not None:
-        bounds = _check_bounds(bounds)
+        bounds = _check_bounds(bounds, allow_empty=False)
     else:
         bounds = None
 
@@ -842,9 +1010,10 @@ def _check_match_grid(
             _check_affine_georeferencing(raster_reference, "Reference grid")
 
             # Match the spatial grid even when a native Xarray reference includes a band dimension
-            dst_shape = get_geo_attr(ref, "shape")[-2:]
+            dst_shape = _check_shape(get_geo_attr(ref, "shape")[-2:], allow_empty=False)
             dst_transform = get_geo_attr(ref, "transform")
             dst_crs = get_geo_attr(ref, "crs")
+            _check_crs(dst_crs)
 
             logging.debug(
                 f"Match grid input: using reference object of type {type(src).__name__!r} "
@@ -866,7 +1035,7 @@ def _check_match_grid(
                     f"defines a complete grid, ignoring inputs {', '.join(used)}. "
                     "Pass only 'ref' input to silence this warning."
                 )
-                warnings.warn(category=IgnoredGridWarning, message=msg)
+                _warn(category=IgnoredGridWarning, message=msg)
 
             # If input has an area_or_point attribute, raise warning if inconsistent with source
             if has_geo_attr(ref, "area_or_point") and hasattr(src, "area_or_point"):
@@ -912,7 +1081,7 @@ def _check_match_grid(
                     f"define a complete grid, ignoring inputs 'coords'. Pass only 'ref' and ('res' or 'shape') to "
                     f"silence this warning."
                 )
-                warnings.warn(category=IgnoredGridWarning, message=msg)
+                _warn(category=IgnoredGridWarning, message=msg)
 
             # Resolution and shape: after the above, one or the other must not be None
             # (Note: Both are already defined in target CRS, so no need for projected calculations)
@@ -1001,7 +1170,7 @@ def _check_match_grid(
                     f"Grid coordinates 'coords' already defines a complete grid, ignoring inputs {', '.join(used)}. "
                     "Pass only 'coords' input to silence this warning."
                 )
-                warnings.warn(category=IgnoredGridWarning, message=msg)
+                _warn(category=IgnoredGridWarning, message=msg)
 
             logging.debug("Match grid input: using coordinates to derive grid.")
             # Coordinates should be in units of output CRS, no ambiguity bounds/res, can compute directly from

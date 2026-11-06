@@ -39,6 +39,7 @@ from geoutils.operators.interpolator import (
     _interpn_interpolator,
 )
 from geoutils.operators.nodata import NodataChoice
+from geoutils.projtools import _affine_matmul
 from geoutils.stats.variography import VariogramModel
 from tests.operator_helpers import LocalMeanInterpolator
 
@@ -494,7 +495,7 @@ class TestPointInterpolationAccuracy:
         result = points.grid(
             grid_coords=grid_coords,
             resampling=operator,
-            dist_nodata_pixel=1.1,
+            radius=1.1,
             nodata_handling="propagate",
             engine=engine,
         )
@@ -513,7 +514,7 @@ class TestPointInterpolationAccuracy:
         operator = InverseDistance(neighborhood=neighborhood)
 
         # IDW calculates six from the finite point, then the nearest-point rule masks the result
-        options: dict[str, Any] = {"grid_coords": grid_coords, "resampling": operator, "dist_nodata_pixel": 1.1}
+        options: dict[str, Any] = {"grid_coords": grid_coords, "resampling": operator, "radius": 1.1}
         nearest = points.grid(**options, nodata_handling="nearest").to_nanarray()
         ignored = points.grid(**options, nodata_handling="ignore").to_nanarray()
         propagated = points.grid(**options, nodata_handling="propagate").to_nanarray()
@@ -931,7 +932,7 @@ class TestRasterInterpolationGDAL:
         source[4, 4] = np.nan
         source[1:3, 6] = np.nan
         src_transform = rio.transform.from_origin(0, 9, 1, 1)
-        dst_transform = Affine.translation(*shift) * src_transform
+        dst_transform = _affine_matmul(Affine.translation(*shift), src_transform)
 
         # Rasterio calls the GDAL resampler with an explicit sentinel for source nodata
         expected = np.full(source.shape, np.nan, dtype=np.float32)
@@ -1067,7 +1068,7 @@ class TestRasterInterpolationGDAL:
         values[4, 4] = np.nan
         source = gu.Raster.from_array(values, rio.transform.from_origin(0, 9, 1, 1), crs=4326, nodata=-9999)
         reference = gu.Raster.from_array(
-            np.zeros((9, 9)), Affine.translation(*shift) * source.transform, crs=4326, nodata=-9999
+            np.zeros((9, 9)), _affine_matmul(Affine.translation(*shift), source.transform), crs=4326, nodata=-9999
         )
 
         # Compare complete arrays because GDAL changes cubic to bilinear at incomplete stencils
@@ -1394,7 +1395,7 @@ class TestPointInterpolationUncertainty:
                 grid_coords=coords,
                 resampling=InverseDistance(neighborhood=neighborhood),
                 min_points=3,
-                dist_nodata_pixel=2,
+                radius=2,
                 engine=engine,
                 nodata_handling="ignore",
                 error_structure=errors,
@@ -1406,7 +1407,7 @@ class TestPointInterpolationUncertainty:
                     "grid_coords": coords,
                     "resampling": InverseDistance(neighborhood=neighborhood),
                     "min_points": 3,
-                    "dist_nodata_pixel": 2,
+                    "radius": 2,
                     "engine": engine,
                     "nodata_handling": "ignore",
                 },

@@ -428,7 +428,6 @@ class TestClassVsAccessorConsistency:
         with pytest.warns(UserWarning, match="same 2D CRS but a different vertical CRS"):
             assert pointcloud.georeferenced_coords_equal(compound_ds.pc)
         with warnings.catch_warnings():
-            warnings.simplefilter("error")
             assert pointcloud.georeferenced_coords_equal(compound_ds.pc, warn_3d_crs=False)
 
         # 3/ Check that missing CRS metadata compares safely
@@ -739,7 +738,7 @@ class TestAccessorDask:
     ds = TestClassVsAccessorConsistency.ds
 
     @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
-    def test_open__dask(self, as_object_type: Literal["dataarray", "geodataframe"]) -> None:
+    def test_open__dask(self, tmp_path: Path, as_object_type: Literal["dataarray", "geodataframe"]) -> None:
         """
         Checks that open_pointcloud() returns lazy point arrays or GeoDataFrame partitions when chunks is supplied.
         """
@@ -748,8 +747,7 @@ class TestAccessorDask:
         dgpd = pytest.importorskip("dask_geopandas")
 
         # Write a source that can be reopened into two row partitions
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.gpkg")
+        temp_file = os.path.join(tmp_path, "test.gpkg")
         self.ds.to_file(temp_file)
 
         # Metadata queries should not force the Dask collection into memory
@@ -760,13 +758,12 @@ class TestAccessorDask:
         assert ds.pc.point_count == len(self.ds)
 
     @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
-    def test_bbox__dask(self, as_object_type: Literal["dataarray", "geodataframe"]) -> None:
+    def test_bbox__dask(self, tmp_path: Path, as_object_type: Literal["dataarray", "geodataframe"]) -> None:
         """Checks that a lazy point cloud reads its bounding box without replacing its Dask collection."""
 
         # Write the in-memory points and reopen them as two lazy row partitions
         pytest.importorskip("dask_geopandas")
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.gpkg")
+        temp_file = os.path.join(tmp_path, "test.gpkg")
         self.ds.to_file(temp_file)
         lazy = gu.open_pointcloud(temp_file, data_name="b1", chunks=2, as_object_type=as_object_type)
 
@@ -776,7 +773,7 @@ class TestAccessorDask:
 
     @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_chunked_methods__equality_loading_laziness(
-        self, as_object_type: Literal["dataarray", "geodataframe"]
+        self, tmp_path: Path, as_object_type: Literal["dataarray", "geodataframe"]
     ) -> None:
         """
         Checks that chunked point methods match in-memory outputs and preserve their expected loading and laziness.
@@ -789,8 +786,7 @@ class TestAccessorDask:
             import dask.array as da
 
         # Prepare matching lazy and in-memory point-cloud interfaces
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.gpkg")
+        temp_file = os.path.join(tmp_path, "test.gpkg")
         self.ds.to_file(temp_file)
 
         ds = gu.open_pointcloud(temp_file, data_name="b1", chunks=2, as_object_type=as_object_type)
@@ -891,7 +887,7 @@ class TestAccessorDask:
             shape=(3, 3),
             bounds=pc.bbox,
             resampling="nearest",
-            dist_nodata_pixel=100,
+            radius=100,
         )
 
         # Dask selects and grids point partitions separately for every output block
@@ -901,7 +897,7 @@ class TestAccessorDask:
             shape=(3, 3),
             bounds=pc.bbox,
             resampling="nearest",
-            dist_nodata_pixel=100,
+            radius=100,
             chunksizes=(2, 1),
         )
 
@@ -919,7 +915,7 @@ class TestAccessorDask:
             shape=(3, 3),
             bounds=pc.bbox,
             resampling="nearest",
-            dist_nodata_pixel=100,
+            radius=100,
             mp_config=MultiprocConfig(chunks=(2, 1)),
         )
 

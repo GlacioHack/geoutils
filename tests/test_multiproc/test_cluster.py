@@ -47,21 +47,21 @@ class TestClusterGenerator:
 
     def test_mp_cluster_task(self) -> None:
         # Test that tasks are launched asynchronously in MpCluster
-        cluster = ClusterGenerator("multiprocessing", nb_workers=2)
-        assert isinstance(cluster, MpCluster)
+        with ClusterGenerator("multiprocessing", nb_workers=2) as cluster:
+            assert isinstance(cluster, MpCluster)
 
-        future = cluster.submit(sample_function, 2, 3)
-        result = cluster.compute(future)
-        assert result == 5
+            future = cluster.submit(sample_function, 2, 3)
+            result = cluster.compute(future)
+            assert result == 5
 
     def test_mp_cluster_parallelism(self) -> None:
         # Test that multiple tasks are run in parallel
-        cluster = ClusterGenerator("multiprocessing", nb_workers=2)
-        assert isinstance(cluster, MpCluster)
+        with ClusterGenerator("multiprocessing", nb_workers=2) as cluster:
+            assert isinstance(cluster, MpCluster)
 
-        futures = [cluster.submit(long_running_task, i) for i in range(4)]
-        results = cluster.gather(futures)
-        assert results == [0, 2, 4, 6]
+            futures = [cluster.submit(long_running_task, i) for i in range(4)]
+            results = cluster.gather(futures)
+            assert results == [0, 2, 4, 6]
 
     def test_mp_cluster__default_start_method(self) -> None:
         """Checks that MpCluster uses "forkserver" when available, otherwise falls back to spawn."""

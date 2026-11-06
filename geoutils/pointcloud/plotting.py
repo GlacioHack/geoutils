@@ -30,6 +30,7 @@ from geoutils._dispatch import (
     has_geo_attr,
     is_dask_dataframe,
 )
+from geoutils.exceptions import InvalidCRSError
 from geoutils.projtools import _get_bounds_projected
 from geoutils.vector.plotting import (
     _create_axes,
@@ -105,7 +106,7 @@ def _prepare_display_pointcloud(
     match_reference_extent = False
     if ref is not None:
         if source_crs is None:
-            raise ValueError("A point cloud without a CRS cannot be plotted in a reference CRS.")
+            raise InvalidCRSError("A point cloud without a CRS cannot be plotted in a reference CRS.")
         if has_geo_attr(ref, "crs"):
             target_crs = CRS.from_user_input(get_geo_attr(ref, "crs"))
             reprojected = display.reproject(ref=ref)

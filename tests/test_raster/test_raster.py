@@ -20,6 +20,7 @@ from pyproj import CRS
 import geoutils as gu
 from geoutils import examples
 from geoutils._typing import DTypeLike, MArrayNum, NDArrayNum
+from geoutils.exceptions import GridMismatchError, InvalidNodataError
 from geoutils.raster.raster import _default_nodata, _default_rio_attrs
 
 DO_PLOT = False
@@ -51,20 +52,26 @@ class TestRaster:
         assert isinstance(r2, gu.Raster)
 
         # Fourth, rio.Dataset
-        ds = rio.open(example)
-        r3 = gu.Raster(ds)
-        assert isinstance(r3, gu.Raster)
-        assert r3.name is not None
+        with rio.open(example) as ds:
+            r3 = gu.Raster(ds)
+            assert isinstance(r3, gu.Raster)
+            assert r3.name is not None
 
         # Finally, as memoryfile
-        memfile = rio.MemoryFile(open(example, "rb"))
-        r4 = gu.Raster(memfile)
-        assert isinstance(r4, gu.Raster)
+        with rio.MemoryFile(path.read_bytes()) as memfile:
+            r4 = gu.Raster(memfile)
+            assert isinstance(r4, gu.Raster)
 
-        # All rasters should be equal
-        assert all(
-            [r0.raster_equal(r1), r0.raster_equal(r1), r0.raster_equal(r2), r0.raster_equal(r3), r0.raster_equal(r4)]
-        )
+            # All rasters should be equal
+            assert all(
+                [
+                    r0.raster_equal(r1),
+                    r0.raster_equal(r1),
+                    r0.raster_equal(r2),
+                    r0.raster_equal(r3),
+                    r0.raster_equal(r4),
+                ]
+            )
 
         # For re-instantiation via Raster (r2 above), we check the behaviour:
         # By default, raster were unloaded, and were loaded during raster_equal() independently
@@ -807,10 +814,10 @@ class TestRaster:
             rng.integers(0, 255, (height + 1, width)).astype("float32"), transform=transform, crs=None
         )
         expected_message = "Both rasters must have the same shape, transform and CRS."
-        with pytest.raises(ValueError, match=expected_message):
+        with pytest.raises(GridMismatchError, match=expected_message):
             r1.__add__(r2)
 
-        with pytest.raises(ValueError, match=expected_message):
+        with pytest.raises(GridMismatchError, match=expected_message):
             r1.__sub__(r2)
 
         # different CRS
@@ -820,10 +827,10 @@ class TestRaster:
             crs=rio.crs.CRS.from_epsg(4326),
         )
 
-        with pytest.raises(ValueError, match=expected_message):
+        with pytest.raises(GridMismatchError, match=expected_message):
             r1.__add__(r2)
 
-        with pytest.raises(ValueError, match=expected_message):
+        with pytest.raises(GridMismatchError, match=expected_message):
             r1.__sub__(r2)
 
         # different transform
@@ -832,10 +839,10 @@ class TestRaster:
             rng.integers(0, 255, (height, width)).astype("float32"), transform=transform2, crs=None
         )
 
-        with pytest.raises(ValueError, match=expected_message):
+        with pytest.raises(GridMismatchError, match=expected_message):
             r1.__add__(r2)
 
-        with pytest.raises(ValueError, match=expected_message):
+        with pytest.raises(GridMismatchError, match=expected_message):
             r1.__sub__(r2)
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path])
@@ -1227,7 +1234,6 @@ class TestRaster:
         assert intersection[3] == r.bounds[3]
 
         # -- Test with a non overlapping raster -- #
-        warnings.simplefilter("error")
         transform_shifted = (
             r.transform.a,
             r.transform.b,
@@ -1416,18 +1422,18 @@ class TestRaster:
         # -- Fifth, let's check that errors are raised when they should --
 
         # A ValueError if input nodata is neither a list, tuple, integer, floating
-        with pytest.raises(ValueError, match="Type of nodata not understood, must be float or int."):
+        with pytest.raises(InvalidNodataError, match="Type of nodata not understood, must be float or int."):
             r.set_nodata(new_nodata="this_should_not_work")  # type: ignore
 
         # A ValueError if nodata value is incompatible with dtype
         expected_message = r"Nodata value .* incompatible with self.dtype .*"
         if "int" in str(r.dtype):
-            with pytest.raises(ValueError, match=expected_message):
+            with pytest.raises(InvalidNodataError, match=expected_message):
                 # Feed a floating numeric to an integer type
                 r.set_nodata(0.5)
         elif "float" in str(r.dtype):
             # Feed a floating value not supported by our example data
-            with pytest.raises(ValueError, match=expected_message):
+            with pytest.raises(InvalidNodataError, match=expected_message):
                 r.set_nodata(np.finfo("longdouble").min)
 
         # -- Sixth, check the special behaviour with None
@@ -1672,7 +1678,7 @@ class TestRaster:
         rst.set_nodata(255)
 
         # Check that a not-compatible nodata will raise an error if casting is not true
-        with pytest.raises(ValueError, match="Nodata value*"):
+        with pytest.raises(InvalidNodataError, match="Nodata value*"):
             rst.from_array(data=rst.data, crs=rst.crs, transform=rst.transform, nodata=-99999, cast_nodata=False)
 
         # Otherwise it is re-cast automatically
@@ -2546,7 +2552,6 @@ class TestArithmetic:
     @pytest.mark.parametrize("dtype", ["float32", "uint8", "int32"])
     def test_numpy_functions(self, dtype: str) -> None:
         """Test how rasters can be used as/with numpy arrays."""
-        warnings.simplefilter("error")
         # Ignore the Affine 3.1 transition warning emitted inside Rasterio
         warnings.filterwarnings(
             "ignore",
@@ -2724,9 +2729,7 @@ class TestArrayInterface:
             com_dtype = np.dtype("O")
 
         # Catch warnings
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=RuntimeWarning)
-
+        with warnings.catch_warnings(), np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             # Check if our input dtype is possible on this ufunc, if yes check that outputs are identical
             if com_dtype in [str(np.dtype(t[0])) for t in ufunc.types]:  # noqa
                 # For a single output
@@ -2811,8 +2814,7 @@ class TestArrayInterface:
             com_dtype_tuple = (com_dtype1, com_dtype2)
 
         # Catch warnings
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=RuntimeWarning)
+        with warnings.catch_warnings(), np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             warnings.filterwarnings(
                 "ignore", category=UserWarning, message="Setting default nodata -99999 to mask non-finite values*"
             )
@@ -2902,9 +2904,7 @@ class TestArrayInterface:
         # com_dtype = np.find_common_type([dtype] + [arrfunc.types[0][0]], [])
 
         # Catch warnings
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=RuntimeWarning)
-
+        with warnings.catch_warnings(), np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             # Pass an argument for functions that require it (nanpercentile, percentile, quantile and nanquantile) and
             # define specific behaviour
             if "percentile" in arrfunc_str:
@@ -2998,9 +2998,7 @@ class TestArrayInterface:
         arrfunc = getattr(np, arrfunc_str)
 
         # Catch warnings
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=RuntimeWarning)
-
+        with warnings.catch_warnings(), np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             # Compute outputs
             output_rst = arrfunc(rst1, rst2)
             output_ma = arrfunc(rst1.data, rst2.data)

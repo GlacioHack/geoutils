@@ -24,6 +24,9 @@ import numpy as np
 import xarray as xr
 from pyproj import CRS
 
+from geoutils._dispatch import _check_same_crs
+from geoutils.exceptions import InvalidPointsError
+
 
 def _point_coordinates(points: xr.DataArray | xr.Dataset) -> tuple[str, str, str]:
     """Find one common point dimension using X/Y names or CF coordinate attributes."""
@@ -51,7 +54,7 @@ def _point_coordinates(points: xr.DataArray | xr.Dataset) -> tuple[str, str, str
     if not pairs:
         raise AttributeError("Point arrays require x/y coordinates along their point dimension.")
     if len(pairs) != 1 or any(len(names) != 1 for names in pairs[0][1].values()):
-        raise ValueError("Point coordinates are ambiguous; use one X/Y pair on a common point dimension.")
+        raise InvalidPointsError("Point coordinates are ambiguous; use one X/Y pair on a common point dimension.")
     dimension, coordinates = pairs[0]
     x_name, y_name = coordinates["x"][0], coordinates["y"][0]
     if isinstance(points, xr.DataArray) and points.dims != (dimension,):
@@ -72,8 +75,10 @@ def _point_crs(points: xr.DataArray) -> CRS | None:
             continue
         crs = CRS.from_user_input(value)
         # Point coordinates always store X/Y, including CF mappings without geographic axis order
-        if reference is not None and not reference.equals(crs, ignore_axis_order=True):
-            raise ValueError("Point values and X/Y coordinates must have the same CRS.")
+        if reference is not None:
+            _check_same_crs(
+                reference, crs, "Point values and X/Y coordinates must have the same CRS.", ignore_axis_order=True
+            )
         reference = crs
 
     # An explicitly referenced CF grid mapping also describes point support
@@ -82,7 +87,9 @@ def _point_crs(points: xr.DataArray) -> CRS | None:
         metadata = points.coords[mapping].attrs
         value = metadata.get("crs_wkt", metadata.get("spatial_ref"))
         crs = CRS.from_user_input(value) if value is not None else CRS.from_cf(metadata)
-        if reference is not None and not reference.equals(crs, ignore_axis_order=True):
-            raise ValueError("Point values and their grid mapping must have the same CRS.")
+        if reference is not None:
+            _check_same_crs(
+                reference, crs, "Point values and their grid mapping must have the same CRS.", ignore_axis_order=True
+            )
         reference = crs
     return reference

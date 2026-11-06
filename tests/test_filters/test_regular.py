@@ -53,11 +53,25 @@ class TestRasterFilters:
         raster = Raster.from_array(values, rio.transform.from_origin(0, 5, 1, 1), crs=32631)
 
         # Compare the center with the two NumPy window means
-        circular = raster.filter("mean", size=3, kernel_shape="circular")
-        square = raster.filter("mean", size=3, kernel_shape="square")
+        circular = raster.filter("mean", window=3, window_shape="circular")
+        square = raster.filter("mean", window=3, window_shape="square")
         cross = np.array([values[1, 2], values[2, 1], values[2, 2], values[2, 3], values[3, 2]])
         np.testing.assert_allclose(circular.data[2, 2], np.mean(cross))
         np.testing.assert_allclose(square.data[2, 2], np.mean(values[1:4, 1:4]))
+
+    @pytest.mark.parametrize(
+        "old_name,new_name,value", [("size", "window", 3), ("kernel_shape", "window_shape", "circular")]
+    )
+    def test_filter__deprecated_keywords(self, old_name: str, new_name: str, value: Any) -> None:
+        """Checks that deprecated filter keywords warn and give the same values as their replacements."""
+
+        values = np.arange(25, dtype=float).reshape(5, 5)
+        raster = Raster.from_array(values, rio.transform.from_origin(0, 5, 1, 1), crs=32631)
+
+        expected = raster.filter("mean", **{new_name: value})
+        with pytest.warns(DeprecationWarning, match=f"{old_name}.*deprecated.*{new_name}"):
+            actual = raster.filter("mean", **{old_name: value})
+        assert actual.raster_equal(expected)
 
     def test_raster_filter__invalid(self) -> None:
         """Checks that Raster.filter() rejects an unknown name and a value that is not callable."""
@@ -66,6 +80,15 @@ class TestRasterFilters:
             raster.filter("unknown_filter")
         with pytest.raises(TypeError, match="`method` must be a string or a callable"):
             raster.filter(12345)
+
+    @pytest.mark.parametrize("inplace", [False, True])
+    def test_filter__error_inplace(self, inplace: bool) -> None:
+        """Checks an error is raised when filter() receives the unsupported inplace argument."""
+
+        raster = Raster.from_array(np.ones((2, 2)), rio.transform.from_origin(0, 2, 1, 1), crs=4326)
+
+        with pytest.raises(TypeError, match=r"filter\(\) does not accept 'inplace'; assign the result"):
+            raster.filter("mean", window=3, inplace=inplace)
 
 
 class TestSyntheticsNansFilters:  # type: ignore
@@ -398,7 +421,7 @@ class TestReducerFilters:
         operator = Count(neighborhood=neighborhood)
 
         # Override the size without changing the reusable reducer
-        result = raster.filter(operator, size=3, preserve_nodata=False, boundless=False).to_nanarray()
+        result = raster.filter(operator, window=3, preserve_nodata=False, boundless=False).to_nanarray()
         masked = raster.filter(operator).to_nanarray()
         assert operator.default_neighborhood is neighborhood
 
@@ -795,7 +818,7 @@ class TestFilterChunked:
         lazy = gu.open_raster(path, chunks={"band": 1, "x": 7, "y": 5})
         source = gu.Raster(path)
         options = {
-            "size": 5,
+            "window": 5,
             "coverage": ("fractional" if fractional else "center"),
             "preserve_nodata": False,
             "boundless": False,
@@ -859,16 +882,16 @@ class TestFilterChunked:
 
         # 2/ Run in-memory filters and build chunked outputs
         # Compute in-memory references
-        base_rst = raster_base.filter(method=method, size=size)
+        base_rst = raster_base.filter(method=method, window=size)
         assert isinstance(base_rst, Raster)
-        base_xr = xr_base.rst.filter(method=method, size=size)
+        base_xr = xr_base.rst.filter(method=method, window=size)
         assert isinstance(base_xr, xr.DataArray)
 
         # Check unloaded MP output and lazy Dask output
-        mp_rst = raster_mp.filter(method=method, size=size, mp_config=mp_config)
+        mp_rst = raster_mp.filter(method=method, window=size, mp_config=mp_config)
         assert isinstance(mp_rst, Raster)
         assert not mp_rst.is_loaded
-        dask_rst = ds.rst.filter(method=method, size=size)
+        dask_rst = ds.rst.filter(method=method, window=size)
         assert isinstance(dask_rst, xr.DataArray)
         assert isinstance(dask_rst.data, da.Array)
 

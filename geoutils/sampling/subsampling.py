@@ -23,7 +23,6 @@ from __future__ import annotations
 import operator
 import pathlib
 import tempfile
-import warnings
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -36,9 +35,10 @@ import pandas as pd
 from numpy.typing import NDArray
 from rasterio.crs import CRS
 
-from geoutils._dispatch import is_dask_array
+from geoutils._dispatch import _check_same_grid, is_dask_array
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, DTypeLike, MArrayNum, NDArrayBool, NDArrayNum
+from geoutils.exceptions import _warn
 from geoutils.multiproc import MultiprocConfig, compute_tiling
 from geoutils.raster.array import get_mask_from_array
 from geoutils.raster.referencing import _ij2xy
@@ -101,11 +101,10 @@ def _get_subsample_size_from_user_input(
         # Use the number of valid points if larger than subsample asked by user
         npoints = min(int(subsample), total_nb_valids)
         if subsample > total_nb_valids:
-            warnings.warn(
+            _warn(
                 f"Argument ``subsample`` with value {subsample} is larger than the number of valid pixels of "
                 f"{total_nb_valids},"
                 f" using all valid pixels as a subsample.",
-                category=UserWarning,
             )
     else:
         raise ValueError("Argument ``subsample`` must be > 0.")
@@ -2322,8 +2321,9 @@ def _subsample(
             mask_raster = _get_raster_interface(mask)
             if mask_raster._chunks is not None:
                 raise ValueError("Cannot use Multiprocessing and Dask masks simultaneously.")
-            if not source_raster.georeferenced_grid_equal(mask_raster):
-                raise ValueError("Raster value ``mask`` does not share the selected support grid.")
+            _check_same_grid(
+                source_raster, mask_raster, "Raster value ``mask`` does not share the selected support grid."
+            )
             if not mask_raster.is_mask and not np.issubdtype(mask_raster.dtype, np.bool_):
                 raise ValueError("Argument ``mask`` must be boolean and contain one value per input location.")
             mask = mask_raster

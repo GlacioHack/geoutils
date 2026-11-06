@@ -2,6 +2,7 @@
 Test the dispatch functions used for checking and normalizing inputs.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -21,9 +22,18 @@ from geoutils._dispatch import (  # Level-1 checks (match reference object)
     _check_match_bbox,
     _check_match_grid,
     _check_match_points,
+    _check_nodata,
+    _check_nodata_propagation,
+    _check_resampling,
     _check_resolution,
+    _check_same_crs,
+    _check_same_grid,
+    _check_same_points,
+    _check_same_shape,
     _check_shape,
+    _check_valid_data,
     _clip_geodataframe,
+    _get_reproject_crs,
     _grid_from_bounds_res,
     _grid_from_bounds_shape,
     _grid_from_coords,
@@ -31,13 +41,21 @@ from geoutils._dispatch import (  # Level-1 checks (match reference object)
     get_geo_interface,
 )
 from geoutils.exceptions import (
+    CRSMismatchError,
+    GeoUtilsInputError,
+    GridMismatchError,
     IgnoredGridWarning,
     InvalidBoundsError,
     InvalidCRSError,
     InvalidGridError,
+    InvalidNodataError,
     InvalidPointsError,
+    InvalidResamplingError,
     InvalidResolutionError,
     InvalidShapeError,
+    NoValidDataError,
+    PointsMismatchError,
+    ShapeMismatchError,
 )
 
 
@@ -46,9 +64,9 @@ class TestGeoInterface:
 
     @pytest.mark.parametrize("representation", ["raster", "accessor", "dataarray"])
     def test_get_geo_interface__raster_metadata(self, representation: str) -> None:
-        """Checks that raster band count and spatial shape stay distinct from native Xarray methods and dimensions."""
+        """Checks that raster band count and spatial shape stay distinct from Xarray methods and dimensions."""
 
-        # Include two bands so native Xarray shape differs from the two-dimensional raster grid
+        # Include two bands so Xarray shape differs from the two-dimensional raster grid
         raster = gu.Raster.from_array(np.ones((2, 3, 4)), rio.transform.from_origin(0, 3, 1, 1), crs=32633)
         array = raster.to_xarray()
         source = {"raster": raster, "accessor": array.rst, "dataarray": array}[representation]
@@ -62,6 +80,48 @@ class TestGeoInterface:
         # Plain arrays have no spatial interface and cannot supply a reference grid
         assert get_geo_interface(np.ones((3, 4)), "ij2xy", accessors=("rst",)) is None
 
+    @pytest.mark.parametrize("representation", ["vector", "accessor", "geodataframe"])
+    def test_get_geo_interface__vector_metadata(self, representation: str) -> None:
+        """Checks that vector objects and GeoDataFrames provide the vector interface and its bounds and CRS."""
+
+        frame = gpd.GeoDataFrame(geometry=[Polygon([(0, 0), (2, 0), (2, 3), (0, 3)])], crs=32633)
+        vector = gu.Vector(frame)
+        source = {"vector": vector, "accessor": frame.vct, "geodataframe": frame}[representation]
+
+        interface = get_geo_interface(source, "rasterize")
+
+        assert interface is (frame.vct if representation == "geodataframe" else source)
+        assert interface.bbox == (0, 0, 2, 3)
+        assert interface.crs == pyproj.CRS(32633)
+
+    @pytest.mark.parametrize(
+        "representation", ["pointcloud", "accessor", "geodataframe", "dataarray_accessor", "dataarray"]
+    )
+    def test_get_geo_interface__point_metadata(self, representation: str) -> None:
+        """Checks that point objects, GeoDataFrames and DataArrays provide point count, bounds and CRS."""
+
+        points = gu.PointCloud.from_xyz([0, 1, 2], [2, 0, 1], [4, 5, 6], crs=32633)
+        array = points.to_xarray()
+        sources = {
+            "pointcloud": points,
+            "accessor": points.gdf.pc,
+            "geodataframe": points.gdf,
+            "dataarray_accessor": array.pc,
+            "dataarray": array,
+        }
+
+        # The point method distinguishes the pc accessor from the shared vector operations
+        interface = get_geo_interface(sources[representation], "georeferenced_coords_equal")
+
+        if representation == "dataarray":
+            assert interface is array.pc
+        elif representation == "geodataframe":
+            assert interface is points.gdf.pc
+        else:
+            assert interface is sources[representation]
+        assert interface.point_count == 3
+        assert interface.bbox == (0, 0, 2, 2)
+        assert interface.crs == pyproj.CRS(32633)
 
 class TestClipGeometry:
     """Test module for preserving clipping features and matching their coordinate reference system."""
@@ -130,9 +190,13 @@ class TestDispatchLevelZero:
         assert (xmin, ymin, xmax, ymax) == (1, 2, 3, 4)
 
         # Valid dataframe (bounding box of geodataframe)
-        bbox = pd.DataFrame(data={"minx": 0, "miny": 1, "maxx": 2, "maxy": 3}, index=[0])
+        bbox = pd.DataFrame(data={"minx": 0, "miny": 1, "maxx": 2, "maxy": 3}, index=[7])
         xmin, ymin, xmax, ymax = _check_bounds(bbox)
         assert (xmin, ymin, xmax, ymax) == (0, 1, 2, 3)
+
+        # Arrays and point extents use the same normalization
+        assert _check_bounds(np.array([0, 1, 2, 3])) == (0, 1, 2, 3)
+        assert _check_bounds((1, 2, 1, 2)) == (1, 2, 1, 2)
 
         # Valid dataframe (bounding box of geodataframe)
         bbox = {"left": 0, "bottom": 1, "right": 2, "top": 3}
@@ -143,8 +207,14 @@ class TestDispatchLevelZero:
         "bbox, match_text",
         [
             ([0, 1, 2], "length of 3"),  # Invalid length
-            ([5, 0, 2, 4], "xmin must be < xmax"),  # Invalid ordering, xmin >= xmax
-            ([0, 5, 4, 2], "ymin must be < ymax"),  # Invalid ordering, ymin >= ymax
+            ([5, 0, 2, 4], "xmin must be <= xmax"),  # Invalid ordering
+            ([0, 5, 4, 2], "ymin must be <= ymax"),  # Invalid ordering
+            (rio.coords.BoundingBox(5, 0, 2, 4), "xmin must be <= xmax"),
+            ({"left": 5, "bottom": 0, "right": 2, "top": 4}, "xmin must be <= xmax"),
+            (pd.DataFrame({"minx": [5], "miny": [0], "maxx": [2], "maxy": [4]}), "xmin must be <= xmax"),
+            ((0, 0, np.nan, 1), "must be finite"),
+            (rio.coords.BoundingBox(0, 0, 1, np.inf), "must be finite"),
+            (np.zeros((2, 2)), "one-dimensional"),
             (pd.DataFrame(data={"notgood": [1]}), "must contain columns"),  # Invalid columns in dataframe
             # Too lengthy inside dataframe
             (
@@ -158,10 +228,12 @@ class TestDispatchLevelZero:
         ],
     )
     def test_check_bounds__exceptions(self, bbox: Any, match_text: str) -> None:
-        """Check that invalid bounds input raise proper errors."""
+        """Checks an error is raised for invalid bounds in each supported representation."""
 
-        with pytest.raises(InvalidBoundsError, match=match_text):
+        with pytest.raises(GeoUtilsInputError, match=match_text) as error:
             _check_bounds(bbox)  # type: ignore
+        assert isinstance(error.value, InvalidBoundsError)
+        assert isinstance(error.value, ValueError)
 
     def test_check_resolution__valid(self) -> None:
         """Check that valid resolution input pass."""
@@ -171,6 +243,7 @@ class TestDispatchLevelZero:
 
         # Valid sequence resolution, normalized to tuple
         assert _check_resolution([1.0, 2.0]) == (1.0, 2.0)  # type: ignore
+        assert _check_resolution(np.array([1.0, 2.0])) == (1.0, 2.0)
 
     @pytest.mark.parametrize(
         "res, match_text",
@@ -183,6 +256,11 @@ class TestDispatchLevelZero:
             (0, "strictly positive"),  # Non-positive for scalar
             (np.inf, "finite number"),  # Non-finite for scalar
             ("wrong", "Resolution must be a number or a sequence"),  # Non-finite for scalar
+            ("12", "Resolution must be a number or a sequence"),
+            (True, "not a boolean"),
+            (np.bool_(True), "not a boolean"),
+            ((True, 2), "not booleans"),
+            (np.array(2), "one-dimensional"),
         ],
     )
     def test_check_resolution__exceptions(self, res: Any, match_text: str) -> None:
@@ -198,6 +276,8 @@ class TestDispatchLevelZero:
         assert _check_shape((10, 20)) == (10, 20)
         # Valid shape as other sequence
         assert _check_shape([10, 20]) == (10, 20)  # type: ignore
+        assert _check_shape((np.int64(10), np.int64(20))) == (10, 20)
+        assert _check_shape((0, 20)) == (0, 20)
 
     @pytest.mark.parametrize(
         "shape, match_text",
@@ -206,6 +286,13 @@ class TestDispatchLevelZero:
             ((10,), "length 1"),  # Wrong length
             ((-1, 5), "non-negative"),  # Negative
             (("a", 5), "must be integers"),  # Non-integer
+            ((2.8, 3), "must be integers"),
+            ((np.inf, 3), "must be integers"),
+            ((np.nan, 3), "must be integers"),
+            ((True, 3), "must be integers"),
+            ((np.bool_(True), 3), "must be integers"),
+            (("2", 3), "must be integers"),
+            (np.array(3), "one-dimensional"),
         ],
     )
     def test_check_shape__exceptions(self, shape: Any, match_text: str) -> None:
@@ -257,12 +344,186 @@ class TestDispatchLevelZero:
             (([0, 1, 3], [0, 1, 2]), "must be regular"),
             # Irregular spacing (y)
             (([0, 1, 2], [0, 1, 3]), "must be regular"),
+            (([0, 0, 0], [0, 1, 2]), "strictly increasing or decreasing"),
+            (([0, np.nan], [0, 1]), "must be finite"),
+            (([0, 1], [0, np.inf]), "must be finite"),
+            (([-1e308, 1e308], [0, 1]), "spacing must be finite"),
+            (([0, 1e-10, 0], [0, 1, 2]), "strictly increasing or decreasing"),
         ],
     )
     def test_check_coords__exceptions(self, coords: Any, match_text: str) -> None:
         """Check that invalid coordinate inputs raise proper errors."""
         with pytest.raises(InvalidGridError, match=match_text):
             _check_coords(coords)
+
+    @pytest.mark.parametrize(
+        "nodata,dtype,allow_cast,compatible",
+        [
+            (None, "uint8", False, True),
+            (255, "uint8", False, True),
+            (np.nan, "float32", False, True),
+            (np.float32(-9999), None, False, True),
+            (-1, "uint8", True, False),
+            (np.nan, "uint8", True, False),
+        ],
+    )
+    def test_check_nodata__dtype(self, nodata: Any, dtype: str | None, allow_cast: bool, compatible: bool) -> None:
+        """Checks that nodata compatibility accounts for NaN and allowed dtype changes."""
+
+        assert _check_nodata(nodata, dtype, allow_cast=allow_cast) is compatible
+
+    @pytest.mark.parametrize("method,allowed", [("nearest", ("nearest", "linear")), ("scipy", ("scipy", "numba"))])
+    def test_check_resampling__valid(self, method: str, allowed: tuple[str, ...]) -> None:
+        """Checks that available resampling methods and backends pass."""
+
+        assert _check_resampling(method, allowed) == method
+        assert _check_resampling("nearest") == "nearest"
+
+    @pytest.mark.parametrize("rule", ["nearest", "IGNORE", "Propagate"])
+    def test_check_nodata_propagation__valid(self, rule: str) -> None:
+        """Checks that nodata propagation rules are normalized to lowercase."""
+
+        assert _check_nodata_propagation(rule) == rule.lower()
+
+    @pytest.mark.parametrize("count,minimum", [(1, 1), (2, 2), (3, 2)])
+    def test_check_valid_data__minimum(self, count: int, minimum: int) -> None:
+        """Checks that enough valid observations pass validation."""
+
+        _check_valid_data(count, minimum)
+
+    @pytest.mark.parametrize("nodata,dtype", [("missing", None), ([0], None), (-1, "uint8"), (np.nan, "uint8")])
+    def test_check_nodata__error_invalid_value(self, nodata: Any, dtype: str | None) -> None:
+        """Checks an error is raised for invalid nodata or an incompatible dtype."""
+
+        with pytest.raises(InvalidNodataError, match="nodata|Nodata"):
+            _check_nodata(nodata, dtype)
+
+    @pytest.mark.parametrize("method", ["unknown", None, 1])
+    def test_check_resampling__error_unknown_method(self, method: Any) -> None:
+        """Checks an error is raised for an unknown resampling method."""
+
+        with pytest.raises(InvalidResamplingError, match="Unknown resampling method"):
+            _check_resampling(method)
+
+    @pytest.mark.parametrize("rule", ["gdal", "unknown", None, 1])
+    def test_check_nodata_propagation__error_invalid_rule(self, rule: Any) -> None:
+        """Checks an error is raised for an invalid nodata propagation rule."""
+
+        with pytest.raises(InvalidNodataError, match="nodata_propagation must be one of"):
+            _check_nodata_propagation(rule)
+
+    @pytest.mark.parametrize("count,minimum", [(0, 1), (1, 2)])
+    def test_check_valid_data__error_insufficient_observations(self, count: int, minimum: int) -> None:
+        """Checks an error is raised with the operation's message for too few valid observations."""
+
+        with pytest.raises(NoValidDataError, match="Too few observations"):
+            _check_valid_data(count, minimum, message="Too few observations")
+
+
+class TestMatchingInputs:
+    """Test module for checks on matching inputs."""
+
+    @pytest.mark.parametrize("crs", [None, pyproj.CRS(32631), rio.crs.CRS.from_epsg(32631)])
+    def test_check_same_crs__equal(self, crs: Any) -> None:
+        """Checks that equal CRSs and matching absent CRS metadata pass validation."""
+
+        _check_same_crs(crs, crs)
+
+    @pytest.mark.parametrize("shape", [(), (2,), (2, 3), (2, 3, 4)])
+    def test_check_same_shape__equal(self, shape: tuple[int, ...]) -> None:
+        """Checks that matching array shapes pass regardless of their number of dimensions."""
+
+        _check_same_shape(shape, shape)
+
+    @pytest.mark.parametrize("representation", ["coordinates", "pointcloud", "dataarray"])
+    def test_check_same_points__ordered_coordinates(self, representation: str) -> None:
+        """Checks that matching point coordinates pass and reordered points raise a mismatch error."""
+
+        coordinates = np.array([[0, 1], [2, 3], [4, 5]], dtype=float)
+        points: Any
+        other: Any
+        if representation == "coordinates":
+            points, other = coordinates, coordinates[::-1]
+        else:
+            points = gu.PointCloud.from_xyz(coordinates[:, 0], coordinates[:, 1], np.ones(3), crs=32631)
+            other = gu.PointCloud.from_xyz(coordinates[::-1, 0], coordinates[::-1, 1], np.ones(3), crs=32631)
+            if representation == "dataarray":
+                points, other = points.to_xarray(), other.to_xarray()
+
+        _check_same_points(points, points)
+        with pytest.raises(PointsMismatchError, match="Different points"):
+            _check_same_points(points, other, "Different points")
+
+    def test_check_same_crs__axis_order(self) -> None:
+        """Checks that CRS comparison ignores axis order only when requested."""
+
+        # EPSG:4326 and CRS84 use opposite axis orders
+        crs, other = pyproj.CRS(4326), pyproj.CRS("OGC:CRS84")
+        with pytest.raises(CRSMismatchError):
+            _check_same_crs(crs, other)
+        _check_same_crs(crs, other, ignore_axis_order=True)
+
+    def test_check_same_grid__unloaded(self, tmp_path: Path) -> None:
+        """Checks that matching grids are compared without loading raster pixels."""
+
+        # Write and open two unloaded rasters
+        path = tmp_path / "grid.tif"
+        gu.Raster.from_array(np.ones((2, 3)), rio.transform.from_origin(0, 2, 1, 1), 32631).to_file(path)
+        first, second = gu.Raster(path), gu.Raster(path)
+
+        _check_same_grid(first, second)
+
+        assert not first.is_loaded
+        assert not second.is_loaded
+
+    @pytest.mark.parametrize("representation", ["raster", "dataarray"])
+    def test_check_same_grid__error_mismatch(self, representation: str) -> None:
+        """Checks an error is raised for different grids through either raster interface."""
+
+        first = gu.Raster.from_array(np.ones((2, 3)), rio.transform.from_origin(0, 2, 1, 1), 32631)
+        second = first.translate(xoff=1, yoff=0)
+        other = second if representation == "raster" else second.to_xarray()
+
+        with pytest.raises(GridMismatchError, match="Different grids"):
+            _check_same_grid(first, other, "Different grids")
+
+    def test_check_same_crs__error_invalid_definition(self) -> None:
+        """Checks an error is raised for an invalid CRS before comparing inputs."""
+
+        with pytest.raises(InvalidCRSError):
+            _check_same_crs("invalid-crs", pyproj.CRS(32631))
+
+    @pytest.mark.parametrize("shapes", [((2,), (3,)), ((2, 3), (3, 2)), ((2, 3), (1, 2, 3))])
+    def test_check_same_shape__error_mismatch(self, shapes: tuple[tuple[int, ...], tuple[int, ...]]) -> None:
+        """Checks an error is raised for different array sizes or dimensions."""
+
+        with pytest.raises(ShapeMismatchError, match="Different shapes"):
+            _check_same_shape(*shapes, message="Different shapes")
+
+    def test_check_same_points__error_crs_mismatch(self) -> None:
+        """Checks an error is raised for different point CRSs even when X/Y values match."""
+
+        first = gu.PointCloud.from_xyz(np.arange(3), np.arange(3), np.ones(3), crs=32631)
+        second = gu.PointCloud.from_xyz(np.arange(3), np.arange(3), np.ones(3), crs=32632)
+
+        with pytest.raises(CRSMismatchError):
+            _check_same_points(first, second)
+
+    @pytest.mark.parametrize("object_type", ["raster", "pointcloud"])
+    def test_matching_inputs__vertical_crs_warning(self, object_type: str) -> None:
+        """Checks that equal horizontal coordinates with different vertical CRSs warn once and pass."""
+
+        first = gu.Raster.from_array(np.ones((2, 3)), rio.transform.from_origin(0, 2, 1, 1), 4326)
+        second = first.copy()
+        second.set_crs(4979)
+
+        # EPSG:4979 adds height to EPSG:4326
+        with pytest.warns(UserWarning, match="same 2D CRS") as caught:
+            if object_type == "raster":
+                _check_same_grid(first, second)
+            else:
+                _check_same_points(first.to_pointcloud(), second.to_pointcloud())
+        assert len(caught) == 1
 
 
 class TestDispatchGridHelpers:
@@ -338,6 +599,19 @@ class TestDispatchGridHelpers:
         shape2 = (5, 4)
         shape, tfm2 = _grid_from_bounds_shape(bounds, shape2)
         assert isinstance(tfm2, rio.Affine)
+
+    @pytest.mark.parametrize("shape", [(0, 3), (3, 0)])
+    def test_grid_from_bounds_shape__error_empty_grid(self, shape: tuple[int, int]) -> None:
+        """Checks an error is raised before constructing a target grid with an empty dimension."""
+
+        with pytest.raises(InvalidShapeError, match="positive integers"):
+            _grid_from_bounds_shape((0, 0, 3, 3), shape)
+
+    def test_grid_from_bounds_res__error_empty_grid(self) -> None:
+        """Checks an error is raised when the resolution would round a target grid down to zero cells."""
+
+        with pytest.raises(InvalidShapeError, match="positive integers"):
+            _grid_from_bounds_res((0, 0, 1, 1), 10)
 
     @pytest.mark.parametrize(
         "dst_crs,src_kind,shape,res,bounds,exp_shape,exp_same_tfm",
@@ -426,7 +700,6 @@ class TestDispatchGridHelpers:
 class TestDispatchLevelOne:
     """Level one user-input checks: match bbox, match points and match grid."""
 
-    # Raster and vector classes
     rast = gu.Raster.from_array(np.zeros((5, 5)), transform=rio.transform.from_bounds(0, 0, 10, 10, 5, 5), crs=4326)
     rast2 = gu.Raster.from_array(np.zeros((5, 5)), transform=rio.transform.from_bounds(0, 0, 5, 5, 5, 5), crs=4326)
     vect = gu.Vector(gpd.GeoDataFrame({"geometry": [Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])]}, crs="EPSG:4326"))
@@ -538,6 +811,10 @@ class TestDispatchLevelOne:
             # Invalid object
             (42, "Cannot interpret point input"),
             ("abc", "Cannot interpret point input"),
+            (
+                gu.Vector(gpd.GeoDataFrame(geometry=[Polygon([(0, 0), (1, 0), (1, 1)])], crs=4326)),
+                "must contain only points",
+            ),
         ],
     )
     def test_check_match_points__exceptions(self, points_input: Any, match_text: str) -> None:
@@ -692,3 +969,10 @@ class TestDispatchLevelOne:
                     _check_match_grid(**init_kwargs)
             else:
                 _check_match_grid(**init_kwargs)
+
+    @pytest.mark.parametrize("reference", [None, SimpleNamespace(crs=None), SimpleNamespace(crs="invalid-crs")])
+    def test_get_reproject_crs__error_invalid_crs(self, reference: Any) -> None:
+        """Checks an error is raised for invalid explicit CRSs and missing or invalid reference CRSs."""
+
+        with pytest.raises(InvalidCRSError):
+            _get_reproject_crs(ref=reference, crs="invalid-crs" if reference is None else None)

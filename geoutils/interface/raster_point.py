@@ -28,8 +28,9 @@ import numpy as np
 import rasterio as rio
 from rasterio.crs import CRS
 
-from geoutils._dispatch import _get_pointcloud_interface, get_geo_attr, has_geo_attr
+from geoutils._dispatch import _check_coords, _check_shape, _get_pointcloud_interface, get_geo_attr, has_geo_attr
 from geoutils._typing import NDArrayNum
+from geoutils.exceptions import InvalidGridError, PointsMismatchError
 from geoutils.raster.referencing import _default_nodata, _xy2ij
 from geoutils.sampling.subsampling import _subsample_raster
 
@@ -86,33 +87,26 @@ def _regular_pointcloud_to_raster(
             or not (isinstance(grid_coords[1], np.ndarray) and grid_coords[1].ndim == 1)
         ):
             raise TypeError("Input grid coordinates must be 1D arrays.")
-        if len(grid_coords[0]) < 2 or len(grid_coords[1]) < 2:
-            raise ValueError("Grid coordinates must contain at least two values along X and Y.")
-
-        diff_x = np.diff(grid_coords[0])
-        diff_y = np.diff(grid_coords[1])
-
-        if not np.allclose(diff_x, diff_x[0]) or not np.allclose(diff_y, diff_y[0]):
-            raise ValueError("Grid coordinates must be regular (equally spaced, independently along X and Y).")
-        if diff_x[0] <= 0 or diff_y[0] <= 0:
-            raise ValueError("Grid coordinates must increase along X and Y.")
+        grid_coords, (xres, yres) = _check_coords(grid_coords)
+        if xres <= 0 or yres <= 0:
+            raise InvalidGridError("Grid coordinates must increase along X and Y.")
 
         # Build the corner transform from the input cell centers
         out_transform = rio.transform.from_origin(
-            np.min(grid_coords[0]) - diff_x[0] / 2,
-            np.max(grid_coords[1]) + diff_y[0] / 2,
-            diff_x[0],
-            diff_y[0],
+            np.min(grid_coords[0]) - xres / 2,
+            np.max(grid_coords[1]) + yres / 2,
+            xres,
+            yres,
         )
         # Y is first axis, X is second axis
         out_shape = (len(grid_coords[1]), len(grid_coords[0]))
 
     elif transform is not None and shape is not None:
         out_transform = transform
-        out_shape = shape
+        out_shape = _check_shape(shape, allow_empty=False)
 
     else:
-        raise ValueError("Either grid coordinates or both geotransform and shape must be provided.")
+        raise InvalidGridError("Either grid coordinates or both geotransform and shape must be provided.")
 
     # Create raster from inputs, with placeholder data for now
     dtype = values.dtype
@@ -128,11 +122,11 @@ def _regular_pointcloud_to_raster(
 
     # If coordinates are not integer type (forced in xy2ij), then some points are not falling on exact coordinates
     if not np.issubdtype(i.dtype, np.integer) or not np.issubdtype(j.dtype, np.integer):
-        raise ValueError("Some point cloud coordinates differ from the grid coordinates.")
+        raise PointsMismatchError("Some point cloud coordinates differ from the grid coordinates.")
 
     # Reject positions outside the requested grid before NumPy can wrap negative indexes around an array edge
     if np.any(i < 0) or np.any(i >= out_shape[0]) or np.any(j < 0) or np.any(j >= out_shape[1]):
-        raise ValueError("Some point cloud coordinates fall outside the grid.")
+        raise PointsMismatchError("Some point cloud coordinates fall outside the grid.")
 
     # Set values
     mask = np.ones(np.shape(arr), dtype=bool)

@@ -279,7 +279,7 @@ class TestRasterPoint:
         irregular_x[1] += 0.25
         with pytest.raises(ValueError, match="Grid coordinates must be regular"):
             gu.Raster.from_pointcloud_regular(pointcloud, grid_coords=(irregular_x, irregular_y))
-        with pytest.raises(ValueError, match="at least two values"):
+        with pytest.raises(ValueError, match="at least 2 points"):
             gu.Raster.from_pointcloud_regular(pointcloud, grid_coords=(x_coords[:1], y_coords))
         with pytest.raises(ValueError, match="must increase"):
             gu.Raster.from_pointcloud_regular(pointcloud, grid_coords=(x_coords[::-1], y_coords))

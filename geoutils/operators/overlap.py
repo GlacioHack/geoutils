@@ -31,6 +31,7 @@ from numpy.typing import NDArray
 
 from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
+from geoutils.exceptions import InvalidShapeError
 from geoutils.operators.base import LocalData
 
 try:
@@ -174,11 +175,15 @@ def _grid_intersection_local_data(
     # Read the values and mask separately (masked values must still be reported to the reducer)
     source = np.asanyarray(np.ma.getdata(array))
     if source.ndim != 2:
-        raise ValueError("Grid-intersection reduction requires a two-dimensional source array.")
+        raise InvalidShapeError("Grid-intersection reduction requires a two-dimensional source array.")
     source_mask = np.ma.getmaskarray(array) if np.ma.isMaskedArray(array) else None
     eligibility = None if eligible is None else np.asarray(eligible, dtype=bool)
-    if eligibility is not None and eligibility.shape != source.shape:
-        raise ValueError("Grid-intersection eligibility must match the source array shape.")
+    if eligibility is not None:
+        from geoutils._dispatch import _check_same_shape
+
+        _check_same_shape(
+            eligibility.shape, source.shape, "Grid-intersection eligibility must match the source array shape."
+        )
     if targets is not None and (targets.ndim != 2 or len(targets) != overlap.geometry_count):
         raise ValueError("Grid-intersection targets must contain one coordinate per geometry.")
 
@@ -339,7 +344,7 @@ def _corners_are_grid_aligned(corners: NDArrayNum, transform: rio.transform.Affi
 
     corner_array = np.asarray(corners, dtype=np.float64)
     if corner_array.ndim != 3 or corner_array.shape[1:] != (4, 2):
-        raise ValueError("Grid-intersection corners must have shape (n_geometries, 4, 2).")
+        raise InvalidShapeError("Grid-intersection corners must have shape (n_geometries, 4, 2).")
     inverse = ~transform
     pixel_columns = inverse.a * corner_array[..., 0] + inverse.b * corner_array[..., 1] + inverse.c
     pixel_rows = inverse.d * corner_array[..., 0] + inverse.e * corner_array[..., 1] + inverse.f
@@ -780,7 +785,7 @@ def _grid_intersection_fractions(
 
     # Check the grid dimensions, batch size and requested library before expanding geometry bounds to cells
     if len(shape) != 2 or shape[0] < 0 or shape[1] < 0:
-        raise ValueError("Grid shape must contain non-negative height and width.")
+        raise InvalidShapeError("Grid shape must contain non-negative height and width.")
     if isinstance(batch_size, bool) or not isinstance(batch_size, (int, np.integer)) or batch_size < 1:
         raise ValueError("Grid-intersection batch size must be a positive integer.")
     if backend not in {"auto", "exactextract", "shapely"}:
@@ -966,7 +971,7 @@ def _grid_intersection_fractions_from_corners(
 
     corner_array = np.asarray(corners, dtype=np.float64)
     if corner_array.ndim != 3 or corner_array.shape[1:] != (4, 2):
-        raise ValueError("Grid-intersection corners must have shape (n_geometries, 4, 2).")
+        raise InvalidShapeError("Grid-intersection corners must have shape (n_geometries, 4, 2).")
     if backend not in ("auto", "numba", "exactextract", "shapely"):
         raise ValueError("Raster overlap backend must be 'auto', 'numba', 'exactextract' or 'shapely'.")
 

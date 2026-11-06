@@ -472,5 +472,7 @@ class TestVectorRemoteErrors:
         filename = remote_url("missing.gpkg")
         geopandas_http = reader is gu.open_vector and options.get("chunks") is None and filename.startswith("http://")
         error = HTTPError if geopandas_http else pyogrio.errors.DataSourceError
-        with pytest.raises(error):
+        with pytest.raises(error) as raised:
             reader(filename, **options)
+        if isinstance(raised.value, HTTPError):
+            raised.value.close()

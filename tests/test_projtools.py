@@ -3,6 +3,7 @@ Test projtools
 """
 
 import os.path
+from typing import Any
 
 import geopandas as gpd
 import numpy as np
@@ -13,6 +14,7 @@ from shapely.geometry import Point, Polygon
 import geoutils as gu
 import geoutils.projtools as pt
 from geoutils import examples
+from geoutils.exceptions import InvalidBoundsError, InvalidCRSError, InvalidPointsError
 
 
 class TestProjTools:
@@ -179,6 +181,15 @@ class TestProjTools:
         assert np.all(x == randx)
         assert np.all(y == randy)
 
+    @pytest.mark.parametrize("points", [(1.0, 2.0), (np.array([1.0]), np.array([2.0])), (np.array([]), np.array([]))])
+    def test_reproject_points__shape(self, points: Any) -> None:
+        """Checks that reprojection preserves scalars, single-point arrays and empty coordinate arrays."""
+
+        actual = pt.reproject_points(points, pyproj.CRS(4326), pyproj.CRS(4326))
+        for expected_axis, actual_axis in zip(points, actual):
+            assert np.shape(actual_axis) == np.shape(expected_axis)
+            np.testing.assert_array_equal(actual_axis, expected_axis)
+
     def test_merge_bounds(self) -> None:
         """
         Check that merge_bounds and bounds2poly work as expected for all kinds of bounds objects.
@@ -217,6 +228,12 @@ class TestProjTools:
         assert out_bounds[1] == min(img1.bounds.bottom, outlines.gdf.total_bounds[1])
         assert out_bounds[2] == max(img1.bounds.right, outlines.gdf.total_bounds[2])
         assert out_bounds[3] == max(img1.bounds.top, outlines.gdf.total_bounds[3])
+
+    def test_merge_bounds__empty_intersection(self) -> None:
+        """Checks that disjoint bounds return an empty intersection."""
+
+        bounds = [(0, 0, 1, 1), (2, 2, 3, 3)]
+        assert pt.merge_bounds(bounds, merging_algorithm="intersection") == ()
 
     # Try all vectors and rasters
     @pytest.mark.parametrize(
@@ -264,6 +281,30 @@ class TestProjTools:
 
 class TestProjToolsErrors:
     """Test module for errors/warnings in projtools functions."""
+
+    @pytest.mark.parametrize("bounds", [[], 42, [(0, 0, 1, 1), 42]])
+    def test_merge_bounds__error_invalid_bounds(self, bounds: Any) -> None:
+        """Checks an error is raised for empty bounds collections and unsupported bounds objects."""
+
+        with pytest.raises(InvalidBoundsError):
+            pt.merge_bounds(bounds)
+
+    @pytest.mark.parametrize("points", [42, (1,), ([1, 2], [3]), (["invalid"], [2])])
+    def test_reproject_points__error_invalid_points(self, points: Any) -> None:
+        """Checks an error is raised for malformed, nonnumeric or mismatched point coordinates."""
+
+        with pytest.raises(InvalidPointsError):
+            pt.reproject_points(points, pyproj.CRS(4326), pyproj.CRS(4326))
+
+    @pytest.mark.parametrize("operation", ["points", "compare"])
+    def test_methods__error_invalid_crs(self, operation: str) -> None:
+        """Checks an error is raised consistently for invalid CRSs in projection utilities."""
+
+        with pytest.raises(InvalidCRSError):
+            if operation == "points":
+                pt.reproject_points((1, 2), "invalid-crs", pyproj.CRS(4326))
+            else:
+                pt.compare_proj("invalid-crs", pyproj.CRS(4326))
 
     @pytest.mark.parametrize("center", [(np.nan, 0), (0, np.inf), (181, 0), (0, 91)])
     def test_get_metric_crs__error_invalid_center(self, center: tuple[float, float]) -> None:

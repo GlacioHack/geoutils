@@ -22,7 +22,6 @@ Functions for manipulating georeferencing of the raster objects.
 
 from __future__ import annotations
 
-import warnings
 from copy import deepcopy
 from typing import Any, Iterable, Literal
 
@@ -31,6 +30,7 @@ import rasterio as rio
 
 from geoutils._config import config
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayNum
+from geoutils.exceptions import InvalidGridError, _warn
 
 
 def _check_affine_georeferencing(raster: Any, operation: str) -> None:
@@ -40,7 +40,7 @@ def _check_affine_georeferencing(raster: Any, operation: str) -> None:
     gcps = getattr(raster, "gcps", ([], None))[0]
     rpcs = getattr(raster, "rpcs", None)
     if gcps or rpcs is not None:
-        raise ValueError(
+        raise InvalidGridError(
             f"{operation} requires an affine grid. Call reproject() first for rasters referenced by GCPs or RPCs."
         )
 
@@ -91,9 +91,7 @@ def _xy2ij(
 
     # Input checks
     if op not in [np.float32, np.float64, float]:
-        raise UserWarning(
-            "Operator is not of type float: rio.Dataset.index might return unreliable indexes due to rounding issues."
-        )
+        raise TypeError("Argument 'op' must be float, np.float32 or np.float64 to avoid rounding pixel coordinates.")
 
     i, j = rio.transform.rowcol(transform, x, y, op=op, precision=precision)
 
@@ -204,7 +202,9 @@ def _res(transform: rio.transform.Affine) -> tuple[float, float]:
 def _bbox(transform: rio.transform.Affine, shape: tuple[int, int]) -> rio.coords.BoundingBox:
     """See description of Raster.bbox."""
 
-    return rio.coords.BoundingBox(*rio.transform.array_bounds(height=shape[0], width=shape[1], transform=transform))
+    left, bottom, right, top = rio.transform.array_bounds(height=shape[0], width=shape[1], transform=transform)
+    # Order limits for grids with positive Y or negative X scales
+    return rio.coords.BoundingBox(min(left, right), min(bottom, top), max(left, right), max(bottom, top))
 
 
 def _cast_pixel_interpretation(
@@ -234,7 +234,7 @@ def _cast_pixel_interpretation(
             'warnings of pixel interpretation with geoutils.config["warn_area_or_point"]=False.'
         )
         if config["warn_area_or_point"]:
-            warnings.warn(message=msg, category=UserWarning)
+            _warn(message=msg)
 
     return area_or_point_out
 

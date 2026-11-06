@@ -36,7 +36,7 @@ from rasterio.crs import CRS
 from rioxarray.exceptions import MissingSpatialDimensionError
 from rioxarray.rioxarray import affine_to_coords
 
-from geoutils._dispatch import is_dask_array
+from geoutils._dispatch import _check_crs, is_dask_array
 from geoutils._misc import import_optional
 from geoutils._typing import DTypeLike, MArrayNum, NDArrayBool, NDArrayNum
 from geoutils._xarray import _rebuild_dataset, _select_dataset_variables
@@ -339,6 +339,11 @@ class DataArrayRasterAccessor(RasterBase):
         :param squeeze: Remove a singleton band dimension from the supplied data.
         :returns: A DataArray with the supplied values, georeferencing and metadata.
         """
+
+        # Validate the CRS before constructing arrays or writing metadata
+        if crs is not None:
+            _check_crs(crs)
+            crs = CRS.from_user_input(crs)
 
         # Add area_or_point
         if tags is None:

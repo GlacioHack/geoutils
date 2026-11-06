@@ -21,7 +21,6 @@
 from __future__ import annotations
 
 import os
-import warnings
 from contextlib import ExitStack
 from copy import copy
 from dataclasses import replace
@@ -42,9 +41,16 @@ from shapely.strtree import STRtree
 
 from geoutils import projtools
 from geoutils._config import config
-from geoutils._dispatch import _check_crs, _check_match_bbox, _check_match_grid, _clip_geodataframe
+from geoutils._dispatch import (
+    _check_crs,
+    _check_match_bbox,
+    _check_match_grid,
+    _check_nodata_propagation,
+    _clip_geodataframe,
+)
 from geoutils._misc import import_optional, silence_rasterio_message
 from geoutils._typing import DTypeLike, MArrayNum, NDArrayBool, NDArrayNum
+from geoutils.exceptions import InvalidNodataError, InvalidResamplingError, _warn
 from geoutils.interface.rasterization import (
     _normalize_burn_values,
     _partition_burn_by_geogrids,
@@ -82,7 +88,6 @@ from geoutils.operators.neighbours import (
 from geoutils.operators.nodata import (
     NodataHandling,
     NodataPropagation,
-    _validate_nodata_propagation,
 )
 from geoutils.operators.overlap import (
     GridIntersection,
@@ -156,7 +161,7 @@ def _resampling_method_from_str(method_str: str) -> rio.enums.Resampling:
             break
     # If no match was found, raise an error.
     else:
-        raise ValueError(
+        raise InvalidResamplingError(
             f"'{method_str}' is not a valid rasterio.enums.Resampling method. "
             f"Valid methods: {[method.name for method in rio.enums.Resampling]}"
         )
@@ -173,7 +178,7 @@ def _check_reproj_warp_options(
     if not np.isfinite(tolerance) or tolerance < 0:
         raise ValueError("tolerance must be a finite, non-negative number of source pixels.")
     if isinstance(resampling, (Interpolator, Reducer)) and (tolerance != 0 or apply_vertical):
-        raise ValueError("Positive tolerance and apply_vertical=True require a Rasterio resampling method.")
+        raise InvalidResamplingError("Positive tolerance and apply_vertical=True require a Rasterio resampling method.")
     if tolerance != 0 and Version(rio.__version__) < Version("1.5.0"):
         raise NotImplementedError("Setting tolerance requires Rasterio >= 1.5.")
 
@@ -225,7 +230,7 @@ def _check_reproj_georeferencing(
     grid_source: Any = source_raster
     if gcp_points or rpcs:
         if isinstance(resampling, (Interpolator, Reducer)):
-            raise ValueError("GCP/RPC reprojection requires a Rasterio resampling method.")
+            raise InvalidResamplingError("GCP/RPC reprojection requires a Rasterio resampling method.")
         georeferencing = {"gcps": gcp_points or None, "rpcs": rpcs}
         # Build a separate object because the raster's bounds property requires an affine transform
         # GDAL uses the image dimensions and GCPs/RPCs to calculate the area covered on the ground
@@ -269,8 +274,12 @@ def _check_reproj_nodata_dtype(
     else:
         src_nodata = force_source_nodata
         # Raise warning if a different nodata value exists for this raster than the forced one (not None)
-        if source_raster.nodata is not None:
-            warnings.warn(
+        existing_nodata = source_raster.nodata
+        same_nodata = src_nodata == existing_nodata
+        if existing_nodata is not None:
+            same_nodata = same_nodata or bool(np.isnan(src_nodata) and np.isnan(existing_nodata))
+        if existing_nodata is not None and not same_nodata:
+            _warn(
                 "Forcing source nodata value of {} despite an existing nodata value of {} in the raster. "
                 "To silence this warning, use self.set_nodata() before reprojection instead of forcing.".format(
                     force_source_nodata, source_raster.nodata
@@ -286,13 +295,13 @@ def _check_reproj_nodata_dtype(
             nodata = _default_nodata(dtype)
             # If nodata is already being used, raise a warning.
             if not source_raster.is_loaded:
-                warnings.warn(
+                _warn(
                     f"For reprojection, nodata must be set. Setting default nodata to {nodata}. You may "
                     f"set a different nodata with `nodata`."
                 )
 
             elif nodata in source_raster.data:
-                warnings.warn(
+                _warn(
                     f"For reprojection, nodata must be set. Default chosen value {nodata} exists in "
                     f"self.data. This may have unexpected consequences. Consider setting a different nodata with "
                     f"self.set_nodata()."
@@ -351,7 +360,7 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
 
     # Check reprojection is possible with nodata (boolean raster will be converted, so no need to check)
     if np.dtype(src_arr.dtype) != bool and (reproj_kwargs["src_nodata"] is None and np.sum(src_mask) > 0):
-        raise ValueError(
+        raise InvalidNodataError(
             "No nodata set, set one for the raster with self.set_nodata() or use a temporary one "
             "with `force_source_nodata`."
         )
@@ -365,7 +374,7 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
         if reproj_kwargs["resampling"] in [Resampling.nearest, "nearest"]:
             src_arr = src_arr.astype("uint8")  # type: ignore
         else:
-            warnings.warn(
+            _warn(
                 "Reprojecting a raster mask (boolean type) with a resampling method other than 'nearest', "
                 "results in the boolean array being converted to float during reprojection."
             )
@@ -422,13 +431,11 @@ def _rio_reproject(src_arr: NDArrayNum, reproj_kwargs: dict[str, Any]) -> NDArra
     reproj_kwargs.pop("dtype")
     reproj_kwargs.pop("dst_shape")
 
-    # Rasterio raises a warning that src_transform are not defined when multiple ones are passed during chunked ops
-    # (Dask/Multiproc), although this is not the case, maybe a bug upstream?
-    warnings.filterwarnings("ignore", category=rio.errors.NotGeoreferencedWarning)
-
     # XSCALE/YSCALE have been supported for a while, but not officially exposed in the API until Rasterio 1.5,
     # so we need to silence them in warnings to avoid noise for users
     with ExitStack() as stack:
+        # Rasterio can warn about missing transforms while using GCPs/RPCs in chunked operations
+        stack.enter_context(silence_rasterio_message(ignore_georeferencing=True))
         for option in ("SCALE", "RPC_", "SRC_METHOD", "MAX_GCP_ORDER", "APPLY_VERTICAL_SHIFT", "COORDINATE_OPERATION"):
             stack.enter_context(silence_rasterio_message(param_name=option))
         # Run reprojection
@@ -621,7 +628,7 @@ def _reproject_grid_operator(
         source_indices = (source_rows, source_cols)
 
     # Validate nodata handling and prepare outputs
-    propagation = _validate_nodata_propagation(nodata_propagation)
+    propagation = _check_nodata_propagation(nodata_propagation)
     output_bands: list[NDArrayNum] = []
     handling: NodataHandling | None = None
 
@@ -1102,7 +1109,7 @@ def _reproject_per_block(
 
     if isinstance(kwargs["resampling"], (Interpolator, Reducer)):
         operator = kwargs["resampling"]
-        propagation = _validate_nodata_propagation(kwargs.get("nodata_propagation", "nearest"))
+        propagation = _check_nodata_propagation(kwargs.get("nodata_propagation", "nearest"))
         # Error-model IDs refer to the full raster even when workers read a smaller source rectangle
         source_row, source_col = _xy2ij(
             src_transform.c,
@@ -1503,6 +1510,7 @@ def _reproject(
     )
 
     # 2/ Check user input for nodata and dtype
+    requested_nodata = nodata
     dtype, src_nodata, nodata = _check_reproj_nodata_dtype(
         source_raster=source_raster,
         nodata=nodata,
@@ -1520,8 +1528,8 @@ def _reproject(
         if nodata_propagation is None:
             nodata_propagation = "nearest" if isinstance(resampling, Interpolator) else "ignore"
         if isinstance(resampling, Reducer) and nodata_propagation.lower() == "nearest":
-            raise ValueError("Nearest-source nodata propagation requires an Interpolator.")
-        propagation = _validate_nodata_propagation(nodata_propagation)
+            raise InvalidResamplingError("Nearest-source nodata propagation requires an Interpolator.")
+        propagation = _check_nodata_propagation(nodata_propagation)
     if isinstance(resampling, Interpolator) and (
         window is not None or window_shape is not None or coverage is not None
     ):
@@ -1581,19 +1589,18 @@ def _reproject(
         reproj_kwargs.update(src_transform=None, **georeferencing)
 
     # 4/ Check if reprojection is needed, otherwise return source raster with warning
-    if not is_operator and _is_reproj_needed(src_shape=source_raster.shape, reproj_kwargs=reproj_kwargs):
-        original_nodata = source_raster.nodata if source_raster._is_xr and force_source_nodata is None else src_nodata
-        if (nodata == original_nodata) or (nodata is None):
+    if (
+        not is_operator
+        and force_source_nodata is None
+        and _is_reproj_needed(src_shape=source_raster.shape, reproj_kwargs=reproj_kwargs)
+    ):
+        original_nodata = source_raster.nodata
+        same_nodata = nodata == original_nodata
+        if nodata is not None and original_nodata is not None:
+            same_nodata = same_nodata or bool(np.isnan(nodata) and np.isnan(original_nodata))
+        if same_nodata or requested_nodata is None:
             if not silent:
-                warnings.warn("Output projection, bounds and grid size are identical -> returning self (not a copy!)")
-            return True, None, None, None, None
-
-        elif nodata is not None:
-            if not silent:
-                warnings.warn(
-                    "Only nodata is different, consider using the 'set_nodata()' method instead'\
-                ' -> returning self (not a copy!)"
-                )
+                _warn("Output projection, bounds and grid size are identical -> returning self (not a copy!)")
             return True, None, None, None, None
 
     # 5/ Perform reprojection
@@ -1904,9 +1911,8 @@ def _multiproc_clip(
     }
     output = _write_multiproc_result(tasks, mp_config, file_metadata, tags=dict(source_raster.tags))
     if output._is_bigtiff():
-        warnings.warn(
+        _warn(
             "Due to the size of the output raster, it has been saved with a BigTIFF format.",
-            category=UserWarning,
         )
     return output
 
@@ -1948,7 +1954,7 @@ def _clip(
         output_nodata = source_raster.nodata
         if output_nodata is None and not source_raster.is_mask:
             output_nodata = _default_nodata(source_raster.dtype)
-            warnings.warn(f"No nodata value is defined; multiprocessing clip() will use the default {output_nodata}.")
+            _warn(f"No nodata value is defined; multiprocessing clip() will use the default {output_nodata}.")
         return _multiproc_clip(
             cast("Raster", source_raster),
             clipping_vector,

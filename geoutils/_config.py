@@ -26,6 +26,7 @@ from numbers import Integral
 from typing import Any, get_args
 
 from geoutils._typing import ResamplingMethod
+from geoutils.exceptions import InvalidNodataError, InvalidResamplingError
 
 # The setup is inspired by that of Matplotlib and Geowombat
 # https://github.com/matplotlib/matplotlib/blob/main/lib/matplotlib/rcsetup.py
@@ -54,7 +55,7 @@ def validate_resampling_method(method: Any) -> str:
     valid_methods = get_args(ResamplingMethod)
     if isinstance(method, str) and method.lower() in valid_methods:
         return method.lower()
-    raise ValueError(f"'{method}' is not a valid resampling method. Valid methods: {valid_methods}")
+    raise InvalidResamplingError(f"'{method}' is not a valid resampling method. Valid methods: {valid_methods}")
 
 
 def validate_nodata_handling(nodata_handling: bool | str | int) -> str | int:
@@ -71,7 +72,7 @@ def validate_nodata_handling(nodata_handling: bool | str | int) -> str | int:
             return configured_distance
     elif not isinstance(nodata_handling, bool) and isinstance(nodata_handling, int) and nodata_handling >= 0:
         return nodata_handling
-    raise ValueError(
+    raise InvalidNodataError(
         f"'{nodata_handling}' is not a valid nodata_handling choice. Use {valid_choices} or a non-negative integer."
     )
 

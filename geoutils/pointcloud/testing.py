@@ -19,7 +19,6 @@
 
 from __future__ import annotations
 
-import warnings
 from typing import Any
 
 import geopandas as gpd
@@ -27,6 +26,7 @@ import numpy as np
 from pyproj import CRS
 
 from geoutils._dispatch import _get_pointcloud_interface, get_geo_attr
+from geoutils.exceptions import _warn
 from geoutils.vector.testing import (
     _compare_dataframes_partitionwise,
     _get_dataframe,
@@ -86,10 +86,9 @@ def _georeferenced_coords_equal(left_obj: Any, right_obj: Any, warn_3d_crs: bool
 
     # Report a vertical difference without treating it as different horizontal coordinates
     if same_coordinates and left_crs is not None and right_crs is not None and left_crs != right_crs and warn_3d_crs:
-        warnings.warn(
+        _warn(
             "The two point clouds have the same 2D CRS but a different vertical CRS: "
             f"{left_crs.name} and {right_crs.name}.",
-            category=UserWarning,
         )
 
     return same_coordinates
