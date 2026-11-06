@@ -130,34 +130,26 @@ def import_optional(import_name: str, package_name: str | None = None, extra_nam
 
     try:
         # Silence known dependency import warnings
-        if import_name in ("gpytorch", "laspy"):
+        if import_name == "gpytorch":
             with ExitStack() as stack:
                 if not getattr(sys.flags, "context_aware_warnings", False):
                     stack.enter_context(_warning_filter_lock)
                 stack.enter_context(warnings.catch_warnings())
-                if import_name == "gpytorch":
-                    warnings.filterwarnings(
-                        "ignore",
-                        message=r"^`torch\.jit\.script` is not supported in Python 3\.14\+ and may break\.",
-                        category=FutureWarning,
-                        module=r"^torch\.jit\._script$",
-                    )
-                    warnings.filterwarnings(
-                        "ignore",
-                        message=(
-                            r"^`torch\.jit\.script` is deprecated\. "
-                            r"Please switch to `torch\.compile` or `torch\.export`\.$"
-                        ),
-                        category=FutureWarning,
-                        module=r"^torch\.jit\._script$",
-                    )
-                else:
-                    warnings.filterwarnings(
-                        "ignore",
-                        message=r"^Due to '_pack_'.*",
-                        category=DeprecationWarning,
-                        module=r"^laspy\.vlrs\.known$",
-                    )
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r"^`torch\.jit\.script` is not supported in Python 3\.14\+ and may break\.",
+                    category=FutureWarning,
+                    module=r"^torch\.jit\._script$",
+                )
+                warnings.filterwarnings(
+                    "ignore",
+                    message=(
+                        r"^`torch\.jit\.script` is deprecated\. "
+                        r"Please switch to `torch\.compile` or `torch\.export`\.$"
+                    ),
+                    category=FutureWarning,
+                    module=r"^torch\.jit\._script$",
+                )
                 return __import__(import_name)
         return __import__(import_name)
     except ImportError as e:

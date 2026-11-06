@@ -75,6 +75,7 @@ class TestWarnings:
             UserWarning,
             DeprecationWarning,
             PendingDeprecationWarning,
+            ImportWarning,
             FutureWarning,
             RuntimeWarning,
             ResourceWarning,
@@ -85,6 +86,41 @@ class TestWarnings:
 
         with pytest.raises(category, match="Unexpected warning"):
             warnings.warn("Unexpected warning", category)
+
+    @pytest.mark.parametrize(
+        "module,category,warning_kind,ignored",
+        [
+            ("rasterio.transform", PendingDeprecationWarning, "affine", True),
+            ("rioxarray.rioxarray", PendingDeprecationWarning, "affine", True),
+            ("laspy.vlrs.known", DeprecationWarning, "layout", True),
+            # Pytest re-emits captured warnings without the package name
+            ("transform", PendingDeprecationWarning, "affine", True),
+            ("rasterio.transform", FutureWarning, "affine", False),
+            ("rasterio.transform", PendingDeprecationWarning, "other", False),
+            ("laspy.another_module", DeprecationWarning, "layout", False),
+            ("laspy.vlrs.known", FutureWarning, "layout", False),
+            ("laspy.vlrs.known", DeprecationWarning, "other", False),
+        ],
+    )
+    def test_warning_filters__known_dependency_warnings(
+        self, module: str, category: type[Warning], warning_kind: str, ignored: bool
+    ) -> None:
+        """Checks that pytest ignores known dependency warnings while other messages and categories remain errors."""
+
+        messages = {
+            "affine": "Use `@` matmul instead of `*` mul operator for matrix multiplication",
+            "layout": "Due to '_pack_', the 'ExtraBytesStruct' Structure will use memory layout compatible with MSVC.",
+            "other": "Unexpected dependency warning",
+        }
+        message = messages[warning_kind]
+
+        if ignored:
+            with warnings.catch_warnings(record=True) as emitted:
+                warnings.warn_explicit(message, category, filename="dependency.py", lineno=1, module=module)
+            assert not emitted
+        else:
+            with pytest.raises(category):
+                warnings.warn_explicit(message, category, filename="dependency.py", lineno=1, module=module)
 
     @pytest.mark.parametrize(
         "category, standard_category",

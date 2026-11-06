@@ -257,7 +257,7 @@ class TestMisc:
             ("gpytorch", "another_module", FutureWarning, "unsupported", False),
             ("gpytorch", "another_module", FutureWarning, "deprecated", False),
             ("gpytorch", "torch.jit._script", FutureWarning, "other", False),
-            ("laspy", "laspy.vlrs.known", DeprecationWarning, "layout", True),
+            ("laspy", "laspy.vlrs.known", DeprecationWarning, "layout", False),
             ("laspy", "another_module", DeprecationWarning, "layout", False),
             ("laspy", "laspy.vlrs.known", FutureWarning, "layout", False),
             ("gstools", "laspy.vlrs.known", DeprecationWarning, "layout", False),

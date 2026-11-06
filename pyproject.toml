@@ -29,7 +29,13 @@ disable_error_code = ["untyped-decorator"]
 
 [tool.pytest.ini_options]
 addopts = "-p no:doctest --import-mode=importlib"
-filterwarnings = ["error"]  # Raise error on any warning
+filterwarnings = [
+    "error",  # Raise errors for unexpected warnings
+    # Ignore Affine's multiplication deprecation in Rasterio and Rioxarray
+    'ignore:^Use `@` matmul instead of `\*` mul operator for matrix multiplication$:PendingDeprecationWarning',
+    # Ignore Laspy's ctypes layout deprecation on Python 3.14+
+    "ignore:^Due to '_pack_'.*:DeprecationWarning:^laspy\\.vlrs\\.known$",
+]
 log_level = "WARNING"
 testpaths = ["tests", "geoutils", "benchmarks/test_large_data.py"]
 markers = [

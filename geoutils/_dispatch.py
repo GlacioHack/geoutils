@@ -118,7 +118,7 @@ def get_geo_interface(obj: Any, attr_name: str, accessors: Sequence[str] = ("rst
     Return the object or accessor providing a requested geospatial operation, or None if absent.
 
     Arguments follow get_geo_attr(). Use this when several operations and metadata fields must come from the
-    same interface, avoiding collisions with Xarray or Pandas attributes such as count and shape.
+    same interface, avoiding collisions with Xarray or Pandas names such as count and shape.
     """
 
     if hasattr(obj, attr_name):
@@ -207,7 +207,7 @@ def _is_vector(obj: Any) -> bool:
 
 
 def _check_nodata(nodata: Number | None, dtype: DTypeLike | None = None, *, allow_cast: bool = False) -> bool:
-    """Check nodata and return whether its value fits the requested dtype."""
+    """Helper function to check nodata input and its compatibility with a data type."""
 
     if nodata is not None and not isinstance(nodata, (int, float, np.integer, np.floating)):
         raise InvalidNodataError("Type of nodata not understood, must be float or int.")
@@ -227,7 +227,7 @@ def _check_resampling(
     allowed: Sequence[str] = get_args(ResamplingMethod),
     name: str = "resampling method",
 ) -> str:
-    """Check a resampling method or backend against its available names."""
+    """Helper function to check resampling method or backend names."""
 
     if not isinstance(method, str) or method not in allowed:
         raise InvalidResamplingError(f"Unknown {name}: {method!r}.")
@@ -235,7 +235,7 @@ def _check_resampling(
 
 
 def _check_valid_data(count: int, minimum: int = 1, message: str = "No finite values are available.") -> None:
-    """Check that an operation has enough valid observations."""
+    """Check that enough valid observations are available for an operation."""
 
     if count < minimum:
         raise NoValidDataError(message)
@@ -243,7 +243,7 @@ def _check_valid_data(count: int, minimum: int = 1, message: str = "No finite va
 
 def _check_nodata_propagation(nodata_propagation: str) -> NodataPropagation:
     """
-    Validate and normalize a nodata propagation rule.
+    Check and normalize nodata propagation input.
 
     :param nodata_propagation: Rule used to handle invalid source values.
 
@@ -270,7 +270,7 @@ def _check_crs(crs: Any) -> pyproj.CRS:
 
 
 def _check_point_coordinates(points: Any, *, squeeze: bool = False) -> tuple[NDArrayNum, NDArrayNum]:
-    """Normalize numeric X/Y arrays with matching shapes, optionally removing singleton dimensions."""
+    """Helper function to check and normalize point coordinates as X/Y arrays."""
 
     # Normalize both axes together so invalid arrays receive a spatial input error
     if not isinstance(points, (Sequence, np.ndarray)) or isinstance(points, (str, bytes)):
@@ -296,9 +296,9 @@ def _check_bounds(
     allow_empty: bool = True,
 ) -> tuple[Number, Number, Number, Number]:
     """
-    Normalize finite, ordered bounds from the supported representations.
+    Helper function to check bounds value when provided as a sequence or bounding box object.
 
-    A point or line can have zero extent. Set allow_empty=False when constructing a target grid.
+    Set allow_empty=False to require positive width and height.
     """
 
     # If rasterio bounding box, simply extract
@@ -418,9 +418,9 @@ def _check_resolution(res: Number | Sequence[Number] | NDArrayNum) -> tuple[Numb
 
 def _check_shape(shape: Sequence[int | np.integer[Any]] | NDArrayNum, *, allow_empty: bool = True) -> tuple[int, int]:
     """
-    Normalize a raster shape as two integer dimensions.
+    Helper function on checking shape input.
 
-    Empty arrays are allowed by default. Set allow_empty=False when constructing a target grid or downsample read.
+    Set allow_empty=False to require positive height and width.
     """
 
     # Shape should be a sequence of two integers (exclude strings and bytes sequences)
@@ -519,7 +519,7 @@ def _check_same_crs(
     *,
     ignore_axis_order: bool = False,
 ) -> None:
-    """Compare CRSs using equality or ignoring axis order when requested."""
+    """Helper function to check that two CRSs match, optionally ignoring axis order."""
 
     normalized_crs = _check_crs(crs) if crs is not None else None
     normalized_other = _check_crs(other_crs) if other_crs is not None else None
@@ -534,14 +534,14 @@ def _check_same_crs(
 def _check_same_shape(
     shape: Sequence[int], other_shape: Sequence[int], message: str = "Input array shapes differ."
 ) -> None:
-    """Check that input shapes have equal dimensions and sizes."""
+    """Helper function to check that two array shapes match."""
 
     if tuple(shape) != tuple(other_shape):
         raise ShapeMismatchError(message)
 
 
 def _check_same_grid(raster: Any, other: Any, message: str = "Input raster grids differ.") -> None:
-    """Check raster grids using georeferenced_grid_equal() without loading pixels."""
+    """Helper function to check that two rasters have the same grid without loading pixels."""
 
     raster_interface = _get_raster_interface(raster)
     other_interface = _get_raster_interface(other)
@@ -555,10 +555,10 @@ def _check_same_points(
     points: Any, other: Any, message: str = "Input point coordinates or their order differ."
 ) -> None:
     """
-    Compare point clouds with georeferenced_coords_equal() or compare coordinate arrays exactly.
+    Check that two point inputs have the same ordered coordinates.
 
-    Point cloud comparisons follow their existing CRS and partition rules. Coordinate arrays must already
-    describe the same axes and use the same CRS.
+    For point clouds, compare the horizontal CRS and X/Y coordinates using georeferenced_coords_equal().
+    Coordinate arrays are compared exactly and must already use the same axes and CRS.
     """
 
     point_interface = _get_pointcloud_interface(points)
