@@ -379,14 +379,12 @@ class TestPointCloud:
         source_error = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
 
         # Request uncertainty with the mean method string and compare its raster with the usual gridding result
-        expected = points.grid(grid_coords=grid_coords, resampling="mean", dist_nodata_pixel=1.1)
-        nominal = points.grid(
-            grid_coords=grid_coords, resampling="mean", dist_nodata_pixel=1.1, error_structure=source_error
-        )
+        expected = points.grid(grid_coords=grid_coords, resampling="mean", radius=1.1)
+        nominal = points.grid(grid_coords=grid_coords, resampling="mean", radius=1.1, error_structure=source_error)
         summary = gu.uncertainty.propagate(
             points.grid,
             error_structure=source_error,
-            operation_kwargs={"grid_coords": grid_coords, "resampling": "mean", "dist_nodata_pixel": 1.1},
+            operation_kwargs={"grid_coords": grid_coords, "resampling": "mean", "radius": 1.1},
         )
         # The local weighted calculation and vectorized mean can differ by rounding in their summation order
         assert np.allclose(nominal.to_nanarray(), expected.to_nanarray(), equal_nan=True)
@@ -589,7 +587,7 @@ class TestGriddingOperators:
         reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(0, 1, 1, 1), crs=32631)
 
         # A two-pixel radius includes the finite point for the reducer; only interpolation masks the output
-        result = points.grid(ref=reference, resampling=operator, dist_nodata_pixel=2.0)
+        result = points.grid(ref=reference, resampling=operator, radius=2.0)
         value = result.to_nanarray()[0, 0]
         if interpolate:
             assert np.isnan(value)
@@ -636,13 +634,13 @@ class TestGriddingOperators:
         source_error = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 2)])
 
         # The configured point limits select only the first two observations, despite the larger pixel radius
-        usual = points.grid(ref=reference, resampling=Mean(), dist_nodata_pixel=30, nodata_handling="ignore")
+        usual = points.grid(ref=reference, resampling=Mean(), radius=30, nodata_handling="ignore")
         limited = points.grid(ref=reference, resampling="mean", radius=30, max_points=2)
         overridden = points.grid(ref=reference, resampling=reducer, max_points=1)
         reduced = points.grid(
             ref=reference,
             resampling=reducer,
-            dist_nodata_pixel=30,
+            radius=30,
             nodata_handling="ignore",
             error_structure=source_error,
         )
@@ -652,7 +650,7 @@ class TestGriddingOperators:
             operation_kwargs={
                 "ref": reference,
                 "resampling": reducer,
-                "dist_nodata_pixel": 30,
+                "radius": 30,
                 "nodata_handling": "ignore",
             },
         )
@@ -715,13 +713,13 @@ class TestGriddingOperators:
         full_radius = points.grid(
             ref=reference,
             resampling=InverseDistance(),
-            dist_nodata_pixel=30,
+            radius=30,
             nodata_handling="ignore",
         )
         nearest_two = points.grid(
             ref=reference,
             resampling=InverseDistance(neighborhood=PointNeighbours(max_points=2)),
-            dist_nodata_pixel=30,
+            radius=30,
             nodata_handling="ignore",
         )
         limited = points.grid(ref=reference, resampling="idw", radius=30, max_points=2)
@@ -747,7 +745,7 @@ class TestGridOperatorNodata:
         grid_coords = (np.array([0.0, 1.0]), np.array([0.0, 1.0]))
 
         # All calculations find five from finite points; only the interpolators then mask the missing center
-        options: dict[str, Any] = {"grid_coords": grid_coords, "resampling": method, "dist_nodata_pixel": 2.0}
+        options: dict[str, Any] = {"grid_coords": grid_coords, "resampling": method, "radius": 2.0}
         ignored = points.grid(**options, nodata_handling="ignore").to_nanarray()
         default = points.grid(**options).to_nanarray()
         assert ignored[1, 0] == pytest.approx(5.0)
@@ -914,7 +912,7 @@ class TestGridChunked:
         kwargs = {
             "grid_coords": self.grid_coords,
             "resampling": resampling,
-            "dist_nodata_pixel": 2,
+            "radius": 2,
         }
         expected = pointcloud.grid(**kwargs)
         accessor_output = point_accessor.pc.grid(**kwargs)
@@ -989,17 +987,17 @@ class TestGridChunked:
         expected = PointCloud(self.points, data_name="z").grid(
             ref=reference,
             resampling="nearest",
-            dist_nodata_pixel=2,
+            radius=2,
         )
 
         # Either lazy input selects Dask output, while two in-memory inputs return an in-memory raster
         output = (
-            points.pc.grid(ref=raster, resampling="nearest", dist_nodata_pixel=2)
+            points.pc.grid(ref=raster, resampling="nearest", radius=2)
             if point_dask
             else points.grid(
                 ref=raster,
                 resampling="nearest",
-                dist_nodata_pixel=2,
+                radius=2,
             )
         )
         if point_dask or raster_dask:
@@ -1043,7 +1041,7 @@ class TestGridChunked:
         kwargs = {
             "grid_coords": self.grid_coords,
             "resampling": resampling,
-            "dist_nodata_pixel": 2,
+            "radius": 2,
             "engine": "numba",
         }
 
@@ -1083,7 +1081,7 @@ class TestGridChunked:
         kwargs = {
             "grid_coords": self.grid_coords,
             "resampling": resampling,
-            "dist_nodata_pixel": 1.1,
+            "radius": 1.1,
             "nodata_handling": nodata_handling,
         }
 
@@ -1119,7 +1117,7 @@ class TestGridChunked:
 
         # We define a grid destination that is beyond the 1-pixel radius of every source point
         reference = Raster.from_array(np.zeros((3, 4)), rio.transform.from_origin(100, 3, 1, 1), crs=32631)
-        options = {"ref": reference, "resampling": "nearest", "dist_nodata_pixel": 1}
+        options = {"ref": reference, "resampling": "nearest", "radius": 1}
         expected = PointCloud(points, data_name="z").grid(**options)
         result = source.pc.grid(**options, chunksizes=(2, 3))
 
@@ -1215,7 +1213,7 @@ class TestGriddingOperatorsChunked:
         point_file = tmp_path / "custom-reducer-points.gpkg"
         points.to_file(point_file)
         grid_coords = (np.arange(3, dtype=float), np.arange(2, dtype=float))
-        options = {"grid_coords": grid_coords, "resampling": Median(), "dist_nodata_pixel": 1.1}
+        options = {"grid_coords": grid_coords, "resampling": Median(), "radius": 1.1}
 
         # Evaluate one complete grid and two grids whose output cells are split independently
         expected = gu.PointCloud(points, data_name="value").grid(**options)

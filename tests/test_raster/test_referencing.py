@@ -11,6 +11,7 @@ from rasterio.transform import xy
 
 import geoutils as gu
 from geoutils import examples
+from geoutils.projtools import _affine_matmul
 
 
 class TestReferencing:
@@ -20,6 +21,18 @@ class TestReferencing:
     aster_dem_path = examples.get_path_test("exploradores_aster_dem")
     landsat_rgb_path = examples.get_path_test("everest_landsat_rgb")
     landsat_b4_crop_path = examples.get_path_test("everest_landsat_b4_cropped")
+
+    @pytest.mark.parametrize("xscale", [-2, 2])
+    @pytest.mark.parametrize("yscale", [-3, 3])
+    def test_bbox__axis_directions(self, xscale: float, yscale: float) -> None:
+        """Checks that bounds stay ordered when raster axes are oriented in either direction."""
+
+        transform = Affine(xscale, 0, 10, 0, yscale, 20)
+        raster = gu.Raster.from_array(np.ones((2, 3)), transform, 4326)
+        x_edges = [10, 10 + 3 * xscale]
+        y_edges = [20, 20 + 2 * yscale]
+
+        assert raster.bbox == (min(x_edges), min(y_edges), max(x_edges), max(y_edges))
 
     @pytest.mark.parametrize("example", [landsat_b4_path, aster_dem_path, landsat_rgb_path])
     def test_ij2xy(self, example: str) -> None:
@@ -227,7 +240,7 @@ class TestReferencing:
         transform = Affine(2, 0.5, 10, 0.25, -2, 20)
         raster = gu.Raster.from_array(np.ones((2, 3)), transform=transform, crs=32606, area_or_point="Area")
         raster.set_area_or_point("Point", shift_half_pixel=True)
-        transform = transform * Affine.translation(0.5, 0.5)
+        transform = _affine_matmul(transform, Affine.translation(0.5, 0.5))
         rows, columns = np.indices(raster.shape)
 
         # Compare pixel center coordinates with Rasterio
@@ -246,7 +259,9 @@ class TestReferencing:
 
         # Create a rectangular grid
         values = np.arange(35, dtype=float).reshape(5, 7)
-        transform = Affine.translation(600000, 5100000) * Affine.rotation(rotation) * Affine.scale(10, -20)
+        transform = _affine_matmul(
+            _affine_matmul(Affine.translation(600000, 5100000), Affine.rotation(rotation)), Affine.scale(10, -20)
+        )
         raster = gu.Raster.from_array(values, transform, crs=32632, area_or_point=area_or_point)
 
         # Shift the grid if requested
@@ -254,7 +269,7 @@ class TestReferencing:
             raster.set_area_or_point("Area" if area_or_point == "Point" else "Point")
             raster.set_area_or_point(area_or_point, shift_half_pixel=True)
             shift = 0.5 if area_or_point == "Point" else -0.5
-            transform *= Affine.translation(shift, shift)
+            transform = _affine_matmul(transform, Affine.translation(shift, shift))
         assert raster.transform == transform
 
         # Compare coordinates with Rasterio
@@ -383,6 +398,15 @@ class TestReferencing:
 
 class TestReferencingErrors:
     """Test module for affine grid requirements in bounds, resolution and coordinate calculations."""
+
+    @pytest.mark.parametrize("op", [int, np.int32, np.int64])
+    def test_xy2ij__error_integer_operator(self, op: type) -> None:
+        """Checks an error is raised for an integer operator in xy2ij() to prevent coordinate rounding."""
+
+        raster = gu.Raster.from_array(np.ones((2, 2)), Affine(1, 0, 0, 0, -1, 2), crs=4326)
+
+        with pytest.raises(TypeError, match="Argument 'op' must be float"):
+            raster.xy2ij(0.5, 1.5, op=op)
 
     @pytest.mark.parametrize("raster_type", ["raster", "dataarray"])
     @pytest.mark.parametrize("property_name", ["res", "bbox", "bounds", "footprint"])

@@ -276,12 +276,14 @@ class TestClassVsAccessorConsistency:
 
         vector = Vector(self.ds)
         ds = self.ds.copy()
+        accessor = ds.vct
 
         output_vector = getattr(vector, method)(**kwargs)
-        output_ds = getattr(ds.vct, method)(**kwargs)
+        output_ds = getattr(accessor, method)(**kwargs)
 
         assert output_vector is None
         assert output_ds is None
+        assert accessor.ds is ds
         assert vector.vector_equal(Vector(ds))
 
     def test_info(self) -> None:
@@ -472,5 +474,7 @@ class TestVectorRemoteErrors:
         filename = remote_url("missing.gpkg")
         geopandas_http = reader is gu.open_vector and options.get("chunks") is None and filename.startswith("http://")
         error = HTTPError if geopandas_http else pyogrio.errors.DataSourceError
-        with pytest.raises(error):
+        with pytest.raises(error) as raised:
             reader(filename, **options)
+        if isinstance(raised.value, HTTPError):
+            raised.value.close()

@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import copy
 import pathlib
-import warnings
 from contextlib import ExitStack
 from typing import IO, Any, Callable, overload
 
@@ -40,6 +39,7 @@ from rasterio.crs import CRS
 
 import geoutils as gu
 from geoutils import profiler
+from geoutils._dispatch import _check_same_grid, _check_same_shape
 from geoutils._io import _filesystem_file_options, _resolve_filesystem
 from geoutils._misc import deprecate
 from geoutils._typing import (
@@ -49,6 +49,7 @@ from geoutils._typing import (
     NDArrayNum,
     Number,
 )
+from geoutils.exceptions import InvalidShapeError, _warn
 from geoutils.raster.base import RasterBase, RasterType
 from geoutils.raster.io import (
     RasterDownsampleOptions,
@@ -198,14 +199,13 @@ def _cast_numeric_array_raster(
         other_data: NDArrayNum | MArrayNum | Number = other.data
 
         # Check that both rasters have the same shape and georeferences
-        if raster.georeferenced_grid_equal(other):  # type: ignore
-            pass
-        else:
-            raise ValueError(
-                "Both rasters must have the same shape, transform and CRS for " + operation_name + ". "
-                "For example, use raster1 = raster1.reproject(raster2) to reproject raster1 on the "
-                "same grid and CRS than raster2."
-            )
+        _check_same_grid(
+            raster,
+            other,
+            "Both rasters must have the same shape, transform and CRS for " + operation_name + ". "
+            "For example, use raster1 = raster1.reproject(raster2) to reproject raster1 on the "
+            "same grid and CRS than raster2.",
+        )
 
     # If other is an array
     elif isinstance(other, np.ndarray):
@@ -217,16 +217,15 @@ def _cast_numeric_array_raster(
         nodata2 = None
         dtype2 = other.dtype
 
-        if raster.shape == other_data.shape:
-            pass
-        else:
-            raise ValueError(
-                "The raster and array must have the same shape for " + operation_name + ". "
-                "For example, if the array comes from another raster, use raster1 = "
-                "raster1.reproject(raster2) beforehand to reproject raster1 on the same grid and CRS "
-                "than raster2. Or, if the array does not come from a raster, define one with raster = "
-                "Raster.from_array(array, array_transform, array_crs, array_nodata) then reproject."
-            )
+        _check_same_shape(
+            raster.shape,
+            other_data.shape,
+            "The raster and array must have the same shape for " + operation_name + ". "
+            "For example, if the array comes from another raster, use raster1 = "
+            "raster1.reproject(raster2) beforehand to reproject raster1 on the same grid and CRS "
+            "than raster2. Or, if the array does not come from a raster, define one with raster = "
+            "Raster.from_array(array, array_transform, array_crs, array_nodata) then reproject.",
+        )
 
     # If other is a single number
     else:
@@ -564,7 +563,7 @@ class Raster(RasterBase):
             raise ValueError("New data must be a numpy array.")
 
         if new_data.ndim not in [2, 3]:
-            raise ValueError("Data array must have 2 or 3 dimensions.")
+            raise InvalidShapeError("Data array must have 2 or 3 dimensions.")
 
         # Squeeze 3D data if the band axis is of length 1
         if new_data.ndim == 3 and new_data.shape[0] == 1:
@@ -587,10 +586,11 @@ class Raster(RasterBase):
             dtype = str(new_data.dtype)
             orig_shape = new_data.shape
 
-        if new_data.shape != orig_shape:
-            raise ValueError(
-                f"New data must be of the same shape as existing data: {orig_shape}. Given: {new_data.shape}."
-            )
+        _check_same_shape(
+            new_data.shape,
+            orig_shape,
+            f"New data must be of the same shape as existing data: {orig_shape}. Given: {new_data.shape}.",
+        )
 
         # Cast nodata if the new array has incompatible dtype with the old nodata value
         # (we accept setting an array with new dtype to mirror NumPy behaviour)
@@ -608,10 +608,9 @@ class Raster(RasterBase):
             and self.nodata is None
             and np.count_nonzero(~np.isfinite(new_data.data[~new_data.mask])) > 0
         ):
-            warnings.warn(
+            _warn(
                 "Setting default nodata {:.0f} to mask non-finite values found in the array, as "
                 "no nodata value was defined.".format(_default_nodata(dtype)),
-                category=UserWarning,
             )
             self._nodata = _default_nodata(dtype)
 
@@ -655,8 +654,7 @@ class Raster(RasterBase):
         if np.count_nonzero(np.logical_and(~self._data.mask, self._data.data == self.nodata)) > 0:
             # This can happen during a numerical operation, especially for integer values that max out with a modulo
             # It can also happen with from_array()
-            warnings.warn(
-                category=UserWarning,
+            _warn(
                 message="Unmasked values equal to the nodata value found in data array. They are now masked.\n "
                 "If this happened when creating or updating the array, to silence this warning, "
                 "convert nodata values in the array to np.nan or mask them with np.ma.masked prior "
@@ -1172,7 +1170,7 @@ class Raster(RasterBase):
         if isinstance(index, Raster):
             if not index.is_mask:
                 ind = index.astype(bool)
-                warnings.warn(message="Input raster was cast to boolean for indexing.", category=UserWarning)
+                _warn(message="Input raster was cast to boolean for indexing.")
             else:
                 ind = index
             if self.count == 1:
@@ -1183,7 +1181,7 @@ class Raster(RasterBase):
         elif isinstance(index, np.ndarray):
             if str(index.dtype) != "bool":
                 index = index.astype(bool)
-                warnings.warn(message="Input array was cast to boolean for indexing.", category=UserWarning)
+                _warn(message="Input array was cast to boolean for indexing.")
             if self.count == 1:
                 return self.data[index]
             else:
@@ -1209,14 +1207,14 @@ class Raster(RasterBase):
         if isinstance(index, Raster):
             if not index.is_mask:
                 index = index.astype(bool)
-                warnings.warn(message="Input raster was cast to boolean for indexing.", category=UserWarning)
+                _warn(message="Input raster was cast to boolean for indexing.")
             ind = index.data.data
             use_all_bands = False
         # If input is array with the same shape
         elif isinstance(index, np.ndarray):
             if str(index.dtype) != "bool":
                 ind = index.astype(bool)
-                warnings.warn(message="Input array was cast to boolean for indexing.", category=UserWarning)
+                _warn(message="Input array was cast to boolean for indexing.")
             else:
                 ind = index
             use_all_bands = False
@@ -1656,10 +1654,9 @@ class Raster(RasterBase):
             else:
                 preserves_values = np.can_cast(self.dtype, target_dtype, casting="safe")
             if not preserves_values:
-                warnings.warn(
+                _warn(
                     f"Converting from {self.dtype} to {target_dtype} may alter values because the target dtype "
                     "cannot safely represent the source values.",
-                    category=UserWarning,
                 )
 
         # Keep file-backed rasters lazy by recording the type Rasterio should use at the next read
@@ -1722,10 +1719,10 @@ class Raster(RasterBase):
 
         if mask_arr.shape != orig_shape:
             # In case first dimension is more than one (several bands) and other dimensions match
-            if orig_shape[1:] == mask_arr.shape:
-                self.data[:, mask_arr > 0] = np.ma.masked
-            else:
-                raise ValueError(f"mask must be of the same shape as existing data: {orig_shape}.")
+            _check_same_shape(
+                orig_shape[1:], mask_arr.shape, f"mask must be of the same shape as existing data: {orig_shape}."
+            )
+            self.data[:, mask_arr > 0] = np.ma.masked
         else:
             self.data[mask_arr > 0] = np.ma.masked
 
@@ -1966,7 +1963,7 @@ class Raster(RasterBase):
                 if self.count == 1:
                     first_arg = args[0].data
                 else:
-                    warnings.warn("Applying np.gradient to first raster band only.", category=UserWarning)
+                    _warn("Applying np.gradient to first raster band only.")
                     first_arg = args[0].data[0, :, :]
 
             # Otherwise, we run the numpy function normally (most take masks into account)

@@ -39,6 +39,7 @@ from geoutils._dispatch import (
 )
 from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
+from geoutils.exceptions import InvalidGridError, InvalidResamplingError
 from geoutils.multiproc.chunked import ChunkedGeoGrid, GeoGrid, normalize_chunks
 from geoutils.multiproc.mparray import (
     MultiprocConfig,
@@ -99,7 +100,7 @@ def _resolve_gridding_operator(
         )
     if method in _IRREGULAR_REDUCER_TYPES:
         return _IRREGULAR_REDUCER_TYPES[cast(IrregularReductionMethod, method)]()
-    raise ValueError(f"Unknown gridding resampling method: {method!r}.")
+    raise InvalidResamplingError(f"Unknown gridding resampling method: {method!r}.")
 
 
 def _gridding_nodata_spread(method: GriddingMethod, nodata_handling: NodataChoice | None) -> int | None:
@@ -115,7 +116,7 @@ def _gridding_nodata_spread(method: GriddingMethod, nodata_handling: NodataChoic
         if nodata_handling is None:
             nodata_handling = "ignore"
         elif isinstance(nodata_handling, str) and nodata_handling.lower() == "nearest":
-            raise ValueError("Nearest-source nodata handling requires an Interpolator.")
+            raise InvalidResamplingError("Nearest-source nodata handling requires an Interpolator.")
     order = operator.interpolation_order if isinstance(operator, Interpolator) else None
     return _resolve_nodata_handling(nodata_handling=nodata_handling, order=order)[1]
 
@@ -131,14 +132,14 @@ def _grid_resolution(
     elif grid_res is not None:
         res_x = abs(grid_res[0])
     else:
-        raise ValueError("At least two X coordinates or an explicit grid resolution are required.")
+        raise InvalidGridError("At least two X coordinates or an explicit grid resolution are required.")
 
     if len(grid_coords[1]) > 1:
         res_y = float(np.abs(grid_coords[1][1] - grid_coords[1][0]))
     elif grid_res is not None:
         res_y = abs(grid_res[1])
     else:
-        raise ValueError("At least two Y coordinates or an explicit grid resolution are required.")
+        raise InvalidGridError("At least two Y coordinates or an explicit grid resolution are required.")
     return res_x, res_y
 
 
@@ -205,9 +206,9 @@ def _grid_pointcloud(
     engine_method = _get_builtin_gridding_method(operator, default_neighborhood_only=False)
     reducer_neighborhood = _resolve_point_neighbours_for_reducer(operator) if isinstance(operator, Reducer) else None
     if engine == "numba" and engine_method is None:
-        raise ValueError("The Numba gridding engine only supports built-in operators.")
+        raise InvalidResamplingError("The Numba gridding engine only supports built-in operators.")
     if engine == "numba" and engine_method in ("linear", "cubic", "average_distance_pts"):
-        raise ValueError(f"The Numba gridding engine does not support resampling={resampling!r}.")
+        raise InvalidResamplingError(f"The Numba gridding engine does not support resampling={resampling!r}.")
     if engine == "numba":
         # Fail before building a lazy graph if the requested optional engine is unavailable
         import_optional("numba")
@@ -224,7 +225,7 @@ def _grid_pointcloud(
         if nodata_handling is None:
             nodata_handling = "ignore"
         elif isinstance(nodata_handling, str) and nodata_handling.lower() == "nearest":
-            raise ValueError("Nearest-source nodata handling requires an Interpolator.")
+            raise InvalidResamplingError("Nearest-source nodata handling requires an Interpolator.")
     order = operator.interpolation_order if isinstance(operator, Interpolator) else None
     propagation, spread_distance = _resolve_nodata_handling(nodata_handling=nodata_handling, order=order)
 
@@ -669,7 +670,7 @@ def _grid_pointcloud_to_raster(
             and isinstance(nodata_handling, str)
             and nodata_handling.lower() == "nearest"
         ):
-            raise ValueError("Nearest-source nodata handling requires an Interpolator.")
+            raise InvalidResamplingError("Nearest-source nodata handling requires an Interpolator.")
         _gridding_nodata_spread(resampling, nodata_handling=nodata_handling)
 
     # In-memory calls can use SciPy threads while each parallel output task stays single-threaded

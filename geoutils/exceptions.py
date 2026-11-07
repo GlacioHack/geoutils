@@ -16,34 +16,103 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Functions for consistent input checks and dispatching."""
+"""Errors and warning categories used by GeoUtils."""
 
 from __future__ import annotations
 
+import sys
+import warnings
+from types import FrameType
 
-class InvalidBoundsError(ValueError):
+
+class GeoUtilsWarning(Warning):
+    """Base category for warnings issued by GeoUtils."""
+
+
+class GeoUtilsUserWarning(GeoUtilsWarning, UserWarning):
+    """Warning about a GeoUtils operation or its result."""
+
+
+class GeoUtilsDeprecationWarning(GeoUtilsWarning, DeprecationWarning):
+    """Warning about a deprecated GeoUtils API."""
+
+
+def _warn(message: str, category: type[GeoUtilsWarning] = GeoUtilsUserWarning) -> None:
+    """Emit a warning at the first caller outside GeoUtils, skipping internal helpers and decorators."""
+
+    # Skip stack frames so the warning points to the code that called GeoUtils
+    # Count them dynamically because internal helpers and decorators can change the call depth
+    frame: FrameType | None = sys._getframe(1)
+    stacklevel = 2
+    try:
+        while frame is not None and frame.f_globals.get("__name__", "").split(".")[0] == "geoutils":
+            frame = frame.f_back
+            stacklevel += 1
+    finally:
+        del frame
+
+    warnings.warn(message, category=category, stacklevel=stacklevel)
+
+
+class GeoUtilsInputError(ValueError):
+    """Base error for invalid inputs to GeoUtils operations."""
+
+
+class GeoUtilsMismatchError(GeoUtilsInputError):
+    """Base error for inputs that do not match each other."""
+
+
+class CRSMismatchError(GeoUtilsMismatchError):
+    """Raised when input coordinate reference systems differ."""
+
+
+class GridMismatchError(GeoUtilsMismatchError):
+    """Raised when input raster grids differ."""
+
+
+class PointsMismatchError(GeoUtilsMismatchError):
+    """Raised when input point coordinates or their order differ."""
+
+
+class ShapeMismatchError(GeoUtilsMismatchError):
+    """Raised when input array shapes differ."""
+
+
+class InvalidBoundsError(GeoUtilsInputError):
     """Raised when bound-type input is not recognized."""
 
 
-class InvalidPointsError(ValueError):
+class InvalidPointsError(GeoUtilsInputError):
     """Raised when point-type input is not recognized."""
 
 
-class InvalidCRSError(ValueError):
+class InvalidCRSError(GeoUtilsInputError):
     """Raised when CRS-type input is not recognized."""
 
 
-class InvalidGridError(ValueError):
+class InvalidGridError(GeoUtilsInputError):
     """Raised when grid-type input is not recognized."""
 
 
-class InvalidResolutionError(ValueError):
+class InvalidResolutionError(GeoUtilsInputError):
     """Raised when resolution-type input is not recognized."""
 
 
-class InvalidShapeError(ValueError):
-    """Raised when resolution-type input is not recognized."""
+class InvalidShapeError(GeoUtilsInputError):
+    """Raised when shape input is invalid."""
 
 
-class IgnoredGridWarning(UserWarning):
+class InvalidNodataError(GeoUtilsInputError):
+    """Raised when nodata values or handling rules are invalid."""
+
+
+class InvalidResamplingError(GeoUtilsInputError):
+    """Raised when a resampling method or its configuration is invalid."""
+
+
+class NoValidDataError(GeoUtilsInputError):
+    """Raised when an operation has too few valid observations."""
+
+
+class IgnoredGridWarning(GeoUtilsUserWarning):
     """Raised when grid-type input is ignored (because redundant with others)."""

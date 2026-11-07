@@ -1,6 +1,6 @@
 """Test raster construction from arrays."""
 
-from typing import Literal
+from typing import Any, Callable, Literal
 
 import numpy as np
 import pytest
@@ -8,6 +8,7 @@ import xarray as xr
 from affine import Affine
 
 import geoutils as gu
+from geoutils.exceptions import InvalidCRSError
 
 
 class TestRasterConstructors:
@@ -125,3 +126,20 @@ class TestRasterConstructorsErrors:
         transform = Affine(10, 0, 0, 0, -10, 20)
         with pytest.raises(ValueError, match="as_object_type"):
             gu.raster.from_array(values, transform, 32631, as_object_type="geodataframe")  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        "constructor", [gu.Raster.from_array, gu.raster.from_array, gu.DataArrayRasterAccessor.from_array]
+    )
+    def test_crs__error_invalid_input(self, constructor: Callable[..., Any]) -> None:
+        """Checks an error is raised for invalid CRSs during raster construction and assignment."""
+
+        values = np.ones((2, 3))
+        transform = Affine(10, 0, 0, 0, -10, 20)
+        with pytest.raises(InvalidCRSError):
+            constructor(values, transform, "invalid-crs")
+
+        raster = constructor(values, transform, None)
+        interface = raster if isinstance(raster, gu.Raster) else raster.rst
+        with pytest.raises(InvalidCRSError):
+            interface.set_crs("invalid-crs")
+        assert interface.crs is None

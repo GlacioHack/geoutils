@@ -17,6 +17,7 @@ from affine import Affine
 from scipy.ndimage import gaussian_filter
 
 import geoutils as gu
+from geoutils.exceptions import GeoUtilsUserWarning
 from geoutils.multiproc import MultiprocConfig
 from geoutils.stats.variography import VariogramModel
 
@@ -437,7 +438,11 @@ class TestErrorStructureEstimation:
         minimum = 100 if min_count is None else min_count
 
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
+            warnings.filterwarnings(
+                "ignore",
+                message="The longest correlation range is near or beyond twice the distance of the last variogram bin",
+                category=GeoUtilsUserWarning,
+            )
             structure = gu.ErrorStructure.estimate(
                 proxy,
                 components={"spatial": {"magnitude": "constant", "correlation": "gaussian"}},
@@ -492,7 +497,11 @@ class TestErrorStructureEstimation:
 
         # Fit default two-component model
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
+            warnings.filterwarnings(
+                "ignore",
+                message="The longest correlation range is near or beyond twice the distance of the last variogram bin",
+                category=GeoUtilsUserWarning,
+            )
             structure = gu.ErrorStructure.estimate(
                 proxy,
                 predictors={"quality": predictor_raster},
@@ -624,7 +633,11 @@ class TestErrorStructureEstimation:
 
         # Fit both routes under the same equal-precision assumption
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
+            warnings.filterwarnings(
+                "ignore",
+                message="The longest correlation range is near or beyond twice the distance of the last variogram bin",
+                category=GeoUtilsUserWarning,
+            )
             result = measured.estimate_error_structure(reference, other_precision="same", **options)
             expected = gu.ErrorStructure.estimate(scaled_difference, **options)
 
@@ -663,7 +676,11 @@ class TestErrorStructureEstimation:
 
         # Fit the same scaled difference through Raster and in-memory DataArray inputs
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
+            warnings.filterwarnings(
+                "ignore",
+                message="The longest correlation range is near or beyond twice the distance of the last variogram bin",
+                category=GeoUtilsUserWarning,
+            )
             expected = measured.estimate_error_structure(reference, predictors={"quality": predictor}, **options)
             result = measured.to_xarray().rst.estimate_error_structure(
                 reference.to_xarray(), predictors={"quality": predictor.to_xarray()}, **options
@@ -715,7 +732,11 @@ class TestErrorStructureEstimation:
 
         # Estimate the components, optionally refitting the stored empirical bins
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
+            warnings.filterwarnings(
+                "ignore",
+                message="The longest correlation range is near or beyond twice the distance of the last variogram bin",
+                category=GeoUtilsUserWarning,
+            )
             structure = gu.ErrorStructure.estimate(
                 proxy,
                 predictors={"quality": quality} if variable else {},
@@ -758,7 +779,11 @@ class TestErrorStructureEstimation:
 
         # Fit Gaussian correlation, then refit bins with spherical model
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
+            warnings.filterwarnings(
+                "ignore",
+                message="The longest correlation range is near or beyond twice the distance of the last variogram bin",
+                category=GeoUtilsUserWarning,
+            )
             structure = gu.ErrorStructure.estimate(
                 proxy,
                 components={"spatial": {"magnitude": "constant", "correlation": "gaussian"}},
@@ -886,7 +911,11 @@ class TestErrorStructureRefitting:
         predictor = gu.Raster.from_array(quality, transform, 32631)
 
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
+            warnings.filterwarnings(
+                "ignore",
+                message="The longest correlation range is near or beyond twice the distance of the last variogram bin",
+                category=GeoUtilsUserWarning,
+            )
             structure = gu.ErrorStructure.estimate(
                 source,
                 predictors={"quality": predictor},
@@ -922,7 +951,11 @@ class TestErrorStructureRefitting:
         rows, columns = np.indices((24, 24))
         source = gu.Raster.from_array(np.sin(columns / 4) + np.cos(rows / 6), Affine(10, 0, 0, 0, -10, 240), 32631)
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
+            warnings.filterwarnings(
+                "ignore",
+                message="The longest correlation range is near or beyond twice the distance of the last variogram bin",
+                category=GeoUtilsUserWarning,
+            )
             structure = gu.ErrorStructure.estimate(
                 source,
                 components={"spatial": {"correlation": initial_model}},
@@ -1106,7 +1139,11 @@ class TestErrorStructureEstimationChunked:
         if correlated:
             pytest.importorskip("skgstat")
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
+            warnings.filterwarnings(
+                "ignore",
+                message="The longest correlation range is near or beyond twice the distance of the last variogram bin",
+                category=GeoUtilsUserWarning,
+            )
             if other is None:
                 expected = gu.ErrorStructure.estimate(source, predictors=eager_predictors, **options)
             else:
@@ -1210,7 +1247,11 @@ class TestErrorStructureEstimationChunked:
             monkeypatch.setattr(cluster, "submit", record_submit)
 
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
+            warnings.filterwarnings(
+                "ignore",
+                message="The longest correlation range is near or beyond twice the distance of the last variogram bin",
+                category=GeoUtilsUserWarning,
+            )
             if chunked_other is None:
                 result = gu.ErrorStructure.estimate(
                     source_interface, predictors=chunked_predictors, mp_config=mp_config, **options
@@ -1287,8 +1328,10 @@ class TestErrorStructureEstimationWarnings:
         "ranges,messages",
         [
             ((20, 60), []),
-            ((20, 95), ["longest correlation range"]),
-            ((70, 95), ["ranges overlap", "longest correlation range"]),
+            ((20, 95), []),
+            ((70, 95), ["ranges overlap"]),
+            ((20, 200), ["longest correlation range"]),
+            ((150, 200), ["ranges overlap", "longest correlation range"]),
             ((60, 20), ["ranges crossed"]),
         ],
     )
@@ -1327,7 +1370,7 @@ class TestErrorStructureEstimationWarnings:
         expected_messages = messages if long_fraction >= 0.03 else []
         assert len(caught) == len(expected_messages)
         for warning, message in zip(caught, expected_messages):
-            assert warning.category is UserWarning
+            assert warning.category is GeoUtilsUserWarning
             assert message in str(warning.message)
         fractions = [component.metadata["initial_variance_fraction"] for component in result.components.values()]
         np.testing.assert_allclose(sorted(fractions), sorted([long_fraction, 1 - long_fraction]))
@@ -1372,12 +1415,26 @@ class TestErrorStructureEstimationWarnings:
 
     @pytest.mark.parametrize(
         "effective_range, tail_count, warn",
-        [(90, 100, False), (95, 100, False), (98, 100, True), (100, 100, True), (95, 99, True)],
+        [
+            (95, 100, False),
+            (100, 100, False),
+            (150, 100, False),
+            (196, 100, False),
+            (199.99, 100, False),
+            (199.99999, 100, True),
+            (200, 100, True),
+            (201, 100, True),
+            (179.99, 99, False),
+            (179.99999, 99, True),
+            (180, 99, True),
+            (190, 100, False),
+            (190, 99, True),
+        ],
     )
     def test_estimate__range_warning_uses_supported_lags(
         self, effective_range: float, tail_count: int, warn: bool, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Checks that range warnings require the fitted range to reach the supported lag limit."""
+        """Checks that range warnings start at twice the largest supported lag, allowing numerical tolerance."""
 
         pytest.importorskip("skgstat")
         proxy = gu.Raster.from_array(np.arange(144).reshape(12, 12), Affine(10, 0, 0, 0, -10, 120), 32631)
@@ -1398,11 +1455,14 @@ class TestErrorStructureEstimationWarnings:
         monkeypatch.setattr(gu.Variogram, "fit", fit)
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always", UserWarning)
-            gu.ErrorStructure.estimate(proxy, n_pairs=100, n_lags=6, max_lag=100, random_state=42)
+            result = gu.ErrorStructure.estimate(proxy, n_pairs=100, n_lags=6, max_lag=100, random_state=42)
 
         assert len(caught) == int(warn)
+        assert result.fit_diagnostics["identifiability"] == [str(warning.message) for warning in caught]
         if warn:
-            assert "usable lag limit" in str(caught[0].message)
+            assert caught[0].category is GeoUtilsUserWarning
+            assert "twice the distance of the last variogram bin used for fitting" in str(caught[0].message)
+            assert "sample pairs at longer distances" in str(caught[0].message)
 
 
 class TestErrorStructureEstimationErrors:
@@ -1430,7 +1490,11 @@ class TestErrorStructureEstimationErrors:
         values = np.sin(rows / 2) + np.cos(columns / 3)
         source = gu.Raster.from_array(values, Affine(10, 0, 0, 0, -10, 240), 32631)
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
+            warnings.filterwarnings(
+                "ignore",
+                message="The longest correlation range is near or beyond twice the distance of the last variogram bin",
+                category=GeoUtilsUserWarning,
+            )
             structure = gu.ErrorStructure.estimate(
                 source,
                 components={"spatial": {"magnitude": "constant", "correlation": "spherical"}},

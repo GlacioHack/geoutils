@@ -68,13 +68,15 @@ def _register_dask_vector_accessor() -> None:
 def _replace_geodataframe(target: gpd.GeoDataFrame, source: gpd.GeoDataFrame) -> None:
     """Replace a GeoDataFrame's contents in-place while keeping the same Python object."""
 
-    target.drop(index=target.index, inplace=True)
-    target.drop(columns=list(target.columns), inplace=True)
+    # Clear columns so the index can change length
+    # Use Pandas deletion to preserve the GeoDataFrame class while it has no geometry
+    for col in target.columns.unique():
+        pd.DataFrame.__delitem__(target, col)
+    target.index = source.index.copy()
 
     for col in source.columns:
         target[col] = source[col].copy()
 
-    target.index = source.index.copy()
     target.set_geometry(source.geometry.name, inplace=True)
     if source.crs is not None:
         target.set_crs(source.crs, allow_override=True, inplace=True)

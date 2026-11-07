@@ -20,7 +20,6 @@
 
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Generic, Literal, TypeVar, cast
 
@@ -33,8 +32,10 @@ from rasterio import features
 from shapely.geometry import box
 from shapely.ops import unary_union
 
+from geoutils._dispatch import _check_same_shape
 from geoutils._misc import import_optional, silence_rasterio_message
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
+from geoutils.exceptions import _warn
 from geoutils.multiproc.chunked import (
     ChunkedGeoGrid,
     GeoGrid,
@@ -75,8 +76,7 @@ def _canon_values(values: NDArrayNum, atol: float, *, out_dtype: DTypeLike = Non
 
     # Convert to float64 before snapped mapping, to ensure enough precision
     v64 = v.astype(np.float64, copy=False)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", category=RuntimeWarning)
+    with np.errstate(invalid="ignore", over="ignore"):
         q = np.rint(v64 / float(atol)).astype(np.int64)
 
     # Snap to tolerance grid, preserve dtype or follow user-input
@@ -140,8 +140,7 @@ def _polygonize_base(
     # Safety checks (should never be triggered at this stage)
     if values.ndim != 2 or mask.ndim != 2:
         raise ValueError("values and mask must be 2D arrays.")
-    if values.shape != mask.shape:
-        raise ValueError("values and mask must have identical shape.")
+    _check_same_shape(values.shape, mask.shape, "values and mask must have identical shape.")
 
     # If mask is empty, return empty but well-formed GeoDataFrame (important for chunked behaviour)
     m = np.asarray(mask, dtype=bool)
@@ -149,8 +148,12 @@ def _polygonize_base(
         return gpd.GeoDataFrame({data_name: [], value_column: []}, geometry=[], crs=crs)
 
     # Now, we let rasterio.features.shapes yield (geometry, value) pairs
-    warnings.filterwarnings("ignore", category=rio.errors.NotGeoreferencedWarning)
-    with silence_rasterio_message(param_name="MEM", warn_code="CPLE_AppDefined"):
+    with silence_rasterio_message(
+        param_name="MEM",
+        warn_code="CPLE_AppDefined",
+        ignore_georeferencing=True,
+        ignore_memory_driver_deprecation=True,
+    ):
         # We canonicalize values for float32 input (override Rasterio internal behaviour that is not exposed),
         # to ensure similar grouping behaviour in full-array or chunks
         v_arr = _canon_values(values, atol=float_tol)
@@ -284,9 +287,7 @@ def _polygonize_prepare(
         if not (isinstance(target_values, str) and target_values == "all") and (
             not isinstance(target_values, numeric_types) or target_values not in [0, 1]
         ):
-            import warnings
-
-            warnings.warn(
+            _warn(
                 "Raster mask (boolean type) passed, using target value of 1 (True) and ignoring target "
                 f"values input {target_values!r}."
             )
@@ -900,8 +901,7 @@ def _chunked_seam_pairs_from_strips(
     # Ensure 2D strips
     if l_lab.ndim != 2 or r_lab.ndim != 2:
         raise ValueError("Seam strips must be 2D arrays.")
-    if l_lab.shape != r_lab.shape:
-        raise ValueError("Left/right seam strips must have identical shape.")
+    _check_same_shape(l_lab.shape, r_lab.shape, "Left/right seam strips must have identical shape.")
 
     pairs: list[tuple[int, int]] = []
 
@@ -1286,8 +1286,12 @@ def _chunked_polygonize_block_labels(
     feats: list[dict[str, Any]] = []
     lab_raster = np.asarray(labels, dtype=np.int32, order="C")
 
-    warnings.filterwarnings("ignore", category=rio.errors.NotGeoreferencedWarning)
-    with silence_rasterio_message(param_name="MEM", warn_code="CPLE_AppDefined"):
+    with silence_rasterio_message(
+        param_name="MEM",
+        warn_code="CPLE_AppDefined",
+        ignore_georeferencing=True,
+        ignore_memory_driver_deprecation=True,
+    ):
         for geom, lab in features.shapes(lab_raster, mask=mm, transform=transform, connectivity=connectivity):
             lab_i = int(lab)
             if lab_i == 0:

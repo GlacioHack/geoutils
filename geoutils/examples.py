@@ -88,7 +88,10 @@ def download_examples(overwrite: bool = False) -> None:
 
         # Extract the tarball
         with tarfile.open(tar_path) as tar:
-            tar.extractall(tmp_dir)
+            if hasattr(tarfile, "data_filter"):
+                tar.extractall(tmp_dir, filter="data")
+            else:
+                tar.extractall(tmp_dir)
 
         # Find the first directory in the temp_dir (should only be one) and construct the example data dir paths.
         for dir_name in ["Everest_Landsat", "Exploradores_ASTER", "Coromandel_Lidar"]:

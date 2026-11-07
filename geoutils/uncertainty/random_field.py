@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from geoutils._dispatch import _get_pointcloud_interface, _get_raster_interface
+from geoutils._dispatch import _check_same_shape, _get_pointcloud_interface, _get_raster_interface
 from geoutils._misc import import_optional
 from geoutils.projtools import _affine_matmul
 from geoutils.uncertainty.error_structure import ErrorStructure
@@ -166,8 +166,7 @@ def _raster_spatial_mask(like: RasterBase) -> NDArray[np.bool_]:
     # A random field has one value per pixel, so mask a pixel only when every source band is invalid
     if mask.ndim == 3:
         mask = np.all(mask, axis=0)
-    if mask.shape != like.shape:
-        raise ValueError("Raster mask must match its two-dimensional spatial shape.")
+    _check_same_shape(mask.shape, like.shape, "Raster mask must match its two-dimensional spatial shape.")
     return np.asarray(mask, dtype=np.bool_)
 
 

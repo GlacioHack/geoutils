@@ -35,6 +35,10 @@ import pandas as pd
 import xarray as xr
 
 from geoutils._dispatch import (
+    _check_same_crs,
+    _check_same_grid,
+    _check_same_points,
+    _check_same_shape,
     _get_pointcloud_interface,
     _get_raster_interface,
     _is_pointcloud,
@@ -47,6 +51,7 @@ from geoutils._dispatch import (
 )
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, NDArrayNum
+from geoutils.exceptions import GridMismatchError
 from geoutils.raster.array import _selected_raster_data
 from geoutils.vector.base import _as_geodataframe
 
@@ -149,8 +154,9 @@ def _raster_from_input(
     array: Any = value if hasattr(value, "ndim") else np.asarray(value)
     if array.ndim == 3 and array.shape[0] == 1:
         array = array[0]
-    if array.ndim != 2 or tuple(array.shape) != tuple(input_raster.shape):
-        raise ValueError(f"Array {name!r} must match the shape of its native raster input.")
+    _check_same_shape(
+        array.shape, input_raster.shape, f"Array {name!r} must match the shape of its native raster input."
+    )
 
     # Replace masked entries with NaN using NumPy's dtype promotion so large integer values keep their precision
     if np.ma.isMaskedArray(array):
@@ -197,19 +203,20 @@ def _aligned_raster(
     # Use nearest-neighbor resampling for masks so interpolation does not turn booleans into fractions
     resampling = "nearest" if raster.is_mask else None
     if has_geo_attr(support, "georeferenced_grid_equal", ("rst",)):
-        if cast("RasterBase", support).georeferenced_grid_equal(raster):
-            return raster
-
-        # Reproject to the full output grid when allowed, or report the grid mismatch
-        if align == "reproject":
+        try:
+            _check_same_grid(support, raster, f"Raster value {name!r} does not share the selected support grid.")
+        except GridMismatchError:
+            # Reproject to the full output grid when allowed, or report the grid mismatch
+            if align != "reproject":
+                raise
             projected = raster.reproject(ref=support, resampling=resampling, silent=True, mp_config=mp_config)
             return _get_raster_interface(projected)
-        raise ValueError(f"Raster value {name!r} does not share the selected support grid.")
+        return raster
 
     # For point output, match only the CRS because the output points do not define a raster grid
     if raster.crs != support.crs:
         if align != "reproject":
-            raise ValueError(f"Raster value {name!r} does not share the point support CRS.")
+            _check_same_crs(raster.crs, support.crs, f"Raster value {name!r} does not share the point support CRS.")
         raster = raster.reproject(crs=support.crs, resampling=resampling, silent=True, mp_config=mp_config)
 
     # Return a raster or its accessor so later steps can call the same raster methods
@@ -255,8 +262,9 @@ def _mask_on_raster(
         values = values[0]
 
     # Require the mask to match the output grid and contain boolean values
-    if tuple(values.shape) != tuple(support.shape):
-        raise ValueError("A raster support mask must be boolean and match the support grid.")
+    _check_same_shape(
+        tuple(values.shape), tuple(support.shape), "A raster support mask must be boolean and match the support grid."
+    )
     return _normalize_mask_array(values, tuple(support.shape))
 
 
@@ -456,7 +464,7 @@ def _aligned_pointcloud(
     # Match the output CRS before gridding points or comparing their ordered coordinates
     if pointcloud.crs != support.crs:
         if align != "reproject":
-            raise ValueError(f"Point value {name!r} does not share the support CRS.")
+            _check_same_crs(pointcloud.crs, support.crs, f"Point value {name!r} does not share the support CRS.")
         point_config = None
         if mp_config is not None:
             # Preserve exact coordinates in a separate point file and adapt raster tiles to row partitions
@@ -470,8 +478,11 @@ def _aligned_pointcloud(
 
     # Require the same point coordinates in the same order when output locations are points
     if not _is_raster(support) and pointcloud is not support:
-        if not cast("PointCloudBase", support).georeferenced_coords_equal(pointcloud):
-            raise ValueError(f"Point value {name!r} does not share the ordered support coordinates.")
+        _check_same_points(
+            cast("PointCloudBase", support),
+            pointcloud,
+            f"Point value {name!r} does not share the ordered support coordinates.",
+        )
     return pointcloud
 
 

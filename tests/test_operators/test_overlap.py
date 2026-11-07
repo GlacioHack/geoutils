@@ -14,6 +14,7 @@ from geoutils.operators.overlap import (
     _grid_intersection_fractions,
     _grid_intersection_fractions_from_corners,
 )
+from geoutils.projtools import _affine_matmul
 
 
 class TestGridIntersection:
@@ -85,7 +86,9 @@ class TestGridIntersectionFractions:
         """Checks that intersection fractions use affine cell polygons for a rotated, non-square grid."""
 
         # Rotated grid with cell area six
-        transform = Affine.translation(100, 200) * Affine.rotation(23) * Affine.scale(2, -3)
+        transform = _affine_matmul(
+            _affine_matmul(Affine.translation(100, 200), Affine.rotation(23)), Affine.scale(2, -3)
+        )
         columns = np.array([1, 2, 2, 1])
         rows = np.array([1, 1, 2, 2])
         x = transform.a * columns + transform.b * rows + transform.c
@@ -134,7 +137,9 @@ class TestGridIntersectionFractions:
             pytest.importorskip(backend)
 
         # Large coordinates expose cancellation while unequal cell widths give several partial overlaps
-        transform = Affine.translation(500_000, 5_100_000) * Affine.rotation(angle) * Affine.scale(100, -150)
+        transform = _affine_matmul(
+            _affine_matmul(Affine.translation(500_000, 5_100_000), Affine.rotation(angle)), Affine.scale(100, -150)
+        )
         pixel_corners = np.array(
             [
                 [[1.2, 2.1], [3.4, 2.3], [3.1, 4.2], [1.0, 3.7]],
@@ -211,7 +216,7 @@ class TestExactExtract:
         pytest.importorskip("exactextract")
 
         # Check ExactExtract rejection of rotated grid
-        transform = Affine.translation(0, 4) * Affine.rotation(10) * Affine.scale(1, -1)
+        transform = _affine_matmul(_affine_matmul(Affine.translation(0, 4), Affine.rotation(10)), Affine.scale(1, -1))
         geometry = shapely.box(0, 0, 2, 2)
         with pytest.raises(ValueError, match="north-up grid"):
             _grid_intersection_fractions([geometry], transform, (4, 4), backend="exactextract")

@@ -14,6 +14,7 @@ from affine import Affine
 
 import geoutils as gu
 from geoutils._misc import import_optional
+from geoutils.exceptions import InvalidResamplingError
 from geoutils.operators.interpolator import Kriging, Linear
 from geoutils.operators.methods import ResamplingMethod
 from geoutils.operators.reducer import Mean, Median, Sum
@@ -153,7 +154,7 @@ class TestResamplingBackends:
             import_optional("numba")
         values = np.arange(49, dtype=float).reshape(7, 7)
         raster = gu.Raster.from_array(values, Affine(1, 0, 0, 0, -1, 7), 32631)
-        options: dict[str, Any] = {"size": 5, "kernel_shape": "circular", "coverage": "fractional"}
+        options: dict[str, Any] = {"window": 5, "window_shape": "circular", "coverage": "fractional"}
 
         # Compare the named mean with the advanced reducer and legacy engine keyword
         expected = raster.filter(Mean(), engine=backend, **options)
@@ -173,10 +174,8 @@ class TestResamplingBackends:
         points = reference.to_pointcloud()
 
         # Grid with the new name and the previously required reducer object
-        expected = points.grid(ref=reference, resampling=operator, dist_nodata_pixel=2, nodata_handling="ignore")
-        result = points.grid(
-            ref=reference, resampling=resampling, backend="scipy", dist_nodata_pixel=2, nodata_handling="ignore"
-        )
+        expected = points.grid(ref=reference, resampling=operator, radius=2, nodata_handling="ignore")
+        result = points.grid(ref=reference, resampling=resampling, backend="scipy", radius=2, nodata_handling="ignore")
 
         # The selected point neighborhoods and their statistics are unchanged
         np.testing.assert_array_equal(result.to_nanarray(), expected.to_nanarray())
@@ -330,6 +329,8 @@ class TestResamplingErrors:
     @pytest.mark.parametrize(
         "options, error",
         [
+            ({"resampling": "unknown"}, "Unknown resampling method"),
+            ({"resampling": "nearest", "backend": "unknown"}, "Unknown resampling backend"),
             ({"method": "linear", "resampling": "nearest"}, "Pass only one"),
             ({"resampling": "mean", "backend": "gdal"}, "unavailable"),
             ({"resampling": "quantile"}, "requires q"),
@@ -346,7 +347,7 @@ class TestResamplingErrors:
         point = raster.ij2xy(2, 2)
 
         # Request the invalid public keyword combination
-        with pytest.raises(ValueError, match=error):
+        with pytest.raises(InvalidResamplingError, match=error):
             raster.resample_at_points(point, as_array=True, **options)
 
     @pytest.mark.parametrize("resampling", ["cubic_convolution", "cubic_spline", "lanczos", "quintic"])
@@ -358,7 +359,7 @@ class TestResamplingErrors:
         points = reference.to_pointcloud()
 
         # Request a method whose convolution or spline requires a regular source grid
-        with pytest.raises(ValueError, match="regular"):
+        with pytest.raises(InvalidResamplingError, match="regular"):
             points.grid(ref=reference, resampling=resampling, backend="scipy")
 
     def test_filter__error_conflicting_backend_alias(self) -> None:
@@ -368,5 +369,5 @@ class TestResamplingErrors:
         raster = gu.Raster.from_array(np.ones((5, 5)), Affine(1, 0, 0, 0, -1, 5), 32631)
 
         # Select incompatible implementations through the new and legacy keywords
-        with pytest.raises(ValueError, match="Pass only one"):
-            raster.filter(method="mean", backend="scipy", engine="numba", size=3)
+        with pytest.raises(InvalidResamplingError, match="Pass only one"):
+            raster.filter(method="mean", backend="scipy", engine="numba", window=3)

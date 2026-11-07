@@ -28,7 +28,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
-from geoutils._dispatch import _get_pointcloud_interface, _get_raster_interface
+from geoutils._dispatch import _check_same_points, _get_pointcloud_interface, _get_raster_interface
+from geoutils.exceptions import PointsMismatchError
 from geoutils.projtools import _affine_matmul
 from geoutils.raster.array import get_mask_from_array
 from geoutils.raster.io import _open_raster_dataset
@@ -329,11 +330,12 @@ class _BlockReader:
             # Read point rows and check that a separate support file uses the same order
             dataframe = _read_point_rows(self.source, self.slices[0], self.selector)
             if self.support is not None:
-                from geoutils.pointcloud.testing import _point_coords_equal
-
                 reference = _read_point_rows(self.support, self.slices[0], None)
-                if not _point_coords_equal(dataframe, reference):
-                    raise ValueError("Point values do not share the ordered support coordinates.")
+                _check_same_points(
+                    (dataframe.geometry.x.to_numpy(), dataframe.geometry.y.to_numpy()),
+                    (reference.geometry.x.to_numpy(), reference.geometry.y.to_numpy()),
+                    "Point values do not share the ordered support coordinates.",
+                )
             values = np.asarray(dataframe.geometry.z if self.selector is None else dataframe[self.selector])
 
         # Apply the common mask while preserving integer values
@@ -585,7 +587,7 @@ def _reader_from_source(
                 config.chunks = math.prod(config.chunks)
             pointcloud = pointcloud.reproject(crs=support_points.crs, mp_config=config)
         if pointcloud.point_count != support_points.point_count:
-            raise ValueError("Point values do not share the ordered support coordinates.")
+            raise PointsMismatchError("Point values do not share the ordered support coordinates.")
         if pointcloud.is_loaded:
             return None
         reference = None if pointcloud is support_points else support_points

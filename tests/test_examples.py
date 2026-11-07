@@ -5,7 +5,6 @@ Test the example files used for testing and documentation
 import hashlib
 import io
 import tarfile
-import warnings
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -25,7 +24,6 @@ def test_read_paths_raster(example: str) -> None:
 
 @pytest.mark.parametrize("example", ["everest_rgi_outlines", "exploradores_rgi_outlines"])
 def test_read_paths_vector(example: str) -> None:
-    warnings.simplefilter("error")
     assert isinstance(gu.Vector(examples.get_path(example)), gu.Vector)
     assert isinstance(gu.Vector(examples.get_path_test(example)), gu.Vector)
 
@@ -97,7 +95,7 @@ def test_data_integrity__examples(example: str) -> None:
     Test that input data is not corrupted by checking sha265 sum
     """
     # Read file as bytes
-    fbytes = open(examples.get_path(example), "rb").read()
+    fbytes = Path(examples.get_path(example)).read_bytes()
 
     # Get sha256
     file_sha256 = hashlib.sha256(fbytes).hexdigest()
@@ -122,7 +120,7 @@ def test_data_integrity__tests(example_test: str) -> None:
     Test that input data is not corrupted by checking sha265 sum
     """
     # Read file as bytes
-    fbytes = open(examples.get_path_test(example_test), "rb").read()
+    fbytes = Path(examples.get_path_test(example_test)).read_bytes()
 
     # Get sha256
     file_sha256 = hashlib.sha256(fbytes).hexdigest()

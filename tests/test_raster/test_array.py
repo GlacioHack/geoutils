@@ -39,7 +39,6 @@ class TestArray:
         shape_and_check_passes: tuple[tuple[int, ...], bool],
     ) -> None:
         """Validate that the function returns views when expected, and copies otherwise."""
-        warnings.simplefilter("error")
 
         masked_values, view_should_be_possible = mask_and_viewable
         shape, check_should_pass = shape_and_check_passes

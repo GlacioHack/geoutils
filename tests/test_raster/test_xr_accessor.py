@@ -466,14 +466,14 @@ class TestDatasetRasterAccessor:
             ("crop", {"bbox": (1, 1, 5, 4)}, None, False),
             ("icrop", {"bbox": (1, 1, 5, 4)}, None, False),
             ("translate", {"xoff": 1, "yoff": 2}, None, False),
-            ("filter", {"method": "mean", "size": 3}, None, False),
-            ("filter", {"method": "mean", "size": 3}, ["dem"], False),
-            ("filter", {"method": "median", "size": 3}, None, False),
+            ("filter", {"method": "mean", "window": 3}, None, False),
+            ("filter", {"method": "mean", "window": 3}, ["dem"], False),
+            ("filter", {"method": "median", "window": 3}, None, False),
             ("sieve", {"size": 2}, ["regions"], False),
             ("fill_nodata", {"interpolation": "nearest"}, None, False),
             ("clip", {"mask": (1, 1, 5, 4)}, None, False),
             ("reproject", {"res": 2}, None, True),
-            ("filter", {"method": "mean", "size": 3}, ["dem"], True),
+            ("filter", {"method": "mean", "window": 3}, ["dem"], True),
         ],
     )
     def test_methods__raster_outputs(
@@ -1020,7 +1020,7 @@ class TestDatasetRasterAccessor:
     @pytest.mark.parametrize(
         "method,options,variables",
         [
-            ("filter", {"method": "mean", "size": 3}, ["dem"]),
+            ("filter", {"method": "mean", "window": 3}, ["dem"]),
             ("fill_nodata", {"interpolation": "nearest"}, ["dem"]),
             ("reproject", {"res": 2}, None),
         ],
@@ -1130,7 +1130,7 @@ class TestDatasetRasterAccessor:
         # 2/ Perform raster and point transformations
         tasks = []
         with Callback(pretask=lambda *args: tasks.append(1)):
-            result = lazy.rst.reproject(crs=4326, nodata=-99999).rst.filter("mean", size=3)
+            result = lazy.rst.reproject(crs=4326, nodata=-99999).rst.filter("mean", window=3)
             result = result.pc.subsample(17, random_state=7).pc.reproject(crs=4326)
 
         # Check that the transformations run no tasks and leave both inputs and outputs lazy
@@ -1140,7 +1140,7 @@ class TestDatasetRasterAccessor:
         assert result.sizes["point"] == 17
 
         # Run the same transformation eagerly
-        expected = eager.rst.reproject(crs=4326, nodata=-99999).rst.filter("mean", size=3)
+        expected = eager.rst.reproject(crs=4326, nodata=-99999).rst.filter("mean", window=3)
         expected = expected.pc.subsample(17, random_state=7).pc.reproject(crs=4326)
 
         # 3/ Compare computation/outputs
@@ -1251,7 +1251,7 @@ class TestDatasetRasterAccessorErrors:
         "method,options,message",
         [
             ("reproject", {"res": 2, "inplace": True}, "inplace=True"),
-            ("filter", {"method": "mean", "size": 3, "as_array": True}, "as_array=True"),
+            ("filter", {"method": "mean", "window": 3, "as_array": True}, "as_array=True"),
             ("interp_at_points", {"as_array": True}, "as_array=True"),
             ("stats", {"values": ["dem"]}, "Use 'variables'"),
         ],
@@ -1276,7 +1276,7 @@ class TestDatasetRasterAccessorErrors:
             ("reproject", {"res": 2}, [], "nonempty"),
             ("variogram", {}, ["missing"], "Unknown"),
             ("interp_points", {}, ["point_z"], "incompatible"),
-            ("filter", {"method": "mean", "size": 3}, ["dem", "dem"], "distinct"),
+            ("filter", {"method": "mean", "window": 3}, ["dem", "dem"], "distinct"),
         ],
     )
     def test_methods__error_variables(

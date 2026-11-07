@@ -28,6 +28,7 @@ from scipy.spatial import cKDTree
 from scipy.spatial.distance import pdist
 
 from geoutils._typing import NDArrayBool, NDArrayNum
+from geoutils.exceptions import InvalidResamplingError
 from geoutils.operators.base import LinearCoefficients, LocalData
 from geoutils.operators.neighbours import GridNeighbours, PointNeighbours, _grid_radius_scipy
 from geoutils.operators.nodata import NodataHandling
@@ -285,7 +286,9 @@ class Reducer:
         if engine == "numba":
             # Average point spacing needs complete neighborhood membership retained by the SciPy engine
             if method == "average_distance_pts":
-                raise ValueError("The Numba gridding engine does not support resampling='average_distance_pts'.")
+                raise InvalidResamplingError(
+                    "The Numba gridding engine does not support resampling='average_distance_pts'."
+                )
 
             x_coords, y_coords = grid_coords
             return _grid_radius_statistic_numba(

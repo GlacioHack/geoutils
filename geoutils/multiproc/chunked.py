@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 import rasterio as rio
 
+from geoutils._dispatch import _check_same_shape
 from geoutils.projtools import _affine_matmul, _get_bounds_projected, _get_footprint_projected
 
 # We define a GeoGrid and GeoTiling class (which composes GeoGrid) to consistently deal with georeferenced footprints
@@ -284,8 +285,11 @@ def normalize_chunks(chunks: ChunkSpec, shape: tuple[int, int]) -> tuple[tuple[i
     normalized_chunks = cast(tuple[tuple[int, ...], tuple[int, ...]], chunks)
     if any(any(chunk <= 0 for chunk in axis_chunks) for axis_chunks in normalized_chunks):
         raise ValueError("Argument 'chunks' must contain strictly positive integers.")
-    if tuple(sum(axis_chunks) for axis_chunks in normalized_chunks) != shape:
-        raise ValueError("Explicit chunks must sum to the array shape.")
+    _check_same_shape(
+        tuple(sum(axis_chunks) for axis_chunks in normalized_chunks),
+        shape,
+        "Explicit chunks must sum to the array shape.",
+    )
 
     return normalized_chunks
 

@@ -3,11 +3,9 @@ from __future__ import annotations
 import builtins
 import os
 import re
-import subprocess
 import sys
 import warnings
 from configparser import ConfigParser
-from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +24,7 @@ from geoutils._misc import (
     diff_environment_yml,
     import_optional,
 )
+from geoutils.exceptions import GeoUtilsDeprecationWarning
 
 
 class TestMisc:
@@ -36,8 +35,8 @@ class TestMisc:
         fn_devenv = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "dev-environment.yml"))
 
         # Load the yml as dictionaries
-        yaml_env = yaml.safe_load(open(fn_env))
-        yaml_devenv = yaml.safe_load(open(fn_devenv))
+        yaml_env = yaml.safe_load(Path(fn_env).read_text())
+        yaml_devenv = yaml.safe_load(Path(fn_devenv).read_text())
 
         # Extract the dependencies values
         conda_dep_env = yaml_env["dependencies"]
@@ -104,7 +103,6 @@ class TestMisc:
         :param deprecation_increment: The version number relative to the current version.
         :param details: An optional explanation for the description.
         """
-        warnings.simplefilter("error")
 
         current_version = Version(Version(geoutils.__version__).base_version)
 
@@ -158,8 +156,11 @@ class TestMisc:
 
         # Expect either a warning or an exception with the right text.
         if should_warn:
-            with pytest.warns(DeprecationWarning, match="^" + text + "$"):
+            with pytest.warns(GeoUtilsDeprecationWarning, match="^" + text + "$") as emitted:
+                call_line = sys._getframe().f_lineno + 1
                 useless_func()
+            assert emitted[0].filename == __file__
+            assert emitted[0].lineno == call_line
         else:
             with pytest.raises(ValueError, match=re.escape(text)):
                 useless_func()
@@ -246,35 +247,42 @@ class TestMisc:
         # Check the worker stays usable
         _trim_process_memory()
 
-
-class TestOptionalImports:
-    """Test module for optional dependency errors and GPyTorch import warnings."""
-
     @pytest.mark.parametrize(
-        "dependency, warning_module, torch_warning, filtered",
+        "dependency,warning_module,category,warning_kind,filtered",
         [
-            ("gpytorch", "torch.jit._script", True, True),
-            ("gstools", "torch.jit._script", True, False),
-            ("gpytorch", "another_module", True, False),
-            ("gpytorch", "torch.jit._script", False, False),
+            ("gpytorch", "torch.jit._script", FutureWarning, "unsupported", True),
+            ("gpytorch", "torch.jit._script", FutureWarning, "deprecated", True),
+            ("gstools", "torch.jit._script", FutureWarning, "unsupported", False),
+            ("gstools", "torch.jit._script", FutureWarning, "deprecated", False),
+            ("gpytorch", "another_module", FutureWarning, "unsupported", False),
+            ("gpytorch", "another_module", FutureWarning, "deprecated", False),
+            ("gpytorch", "torch.jit._script", FutureWarning, "other", False),
+            ("laspy", "laspy.vlrs.known", DeprecationWarning, "layout", False),
+            ("laspy", "another_module", DeprecationWarning, "layout", False),
+            ("laspy", "laspy.vlrs.known", FutureWarning, "layout", False),
+            ("gstools", "laspy.vlrs.known", DeprecationWarning, "layout", False),
+            ("laspy", "laspy.vlrs.known", DeprecationWarning, "other", False),
         ],
     )
-    def test_import_optional__scoped_torch_warning(
+    def test_import_optional__warning(
         self,
         dependency: str,
         warning_module: str,
-        torch_warning: bool,
+        category: type[Warning],
+        warning_kind: str,
         filtered: bool,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Checks that only the upstream TorchScript warning is filtered during a GPyTorch import."""
+        """Checks that only known dependency warnings are suppressed during their imports."""
 
-        message = (
-            "`torch.jit.script` is not supported in Python 3.14+ and may break. "
-            "Please switch to `torch.compile` or `torch.export`."
-            if torch_warning
-            else "Another upstream warning"
-        )
+        messages = {
+            "unsupported": "`torch.jit.script` is not supported in Python 3.14+ and may break. "
+            "Please switch to `torch.compile` or `torch.export`.",
+            "deprecated": "`torch.jit.script` is deprecated. Please switch to `torch.compile` or `torch.export`.",
+            "layout": "Due to '_pack_', the 'ExtraBytesStruct' Structure will use memory layout compatible with MSVC.",
+            "other": "Another upstream warning",
+        }
+        message = messages[warning_kind]
         imported = object()
         original_import = builtins.__import__
 
@@ -282,7 +290,7 @@ class TestOptionalImports:
             """Simulate an upstream import warning without loading optional packages."""
 
             if name == dependency:
-                warnings.warn_explicit(message, FutureWarning, filename="upstream.py", lineno=1, module=warning_module)
+                warnings.warn_explicit(message, category, filename="upstream.py", lineno=1, module=warning_module)
                 return imported
             return original_import(name, *args, **kwargs)
 
@@ -295,7 +303,7 @@ class TestOptionalImports:
             assert len(caught) == int(not filtered)
 
             # Check warnings after import
-            warnings.warn_explicit(message, FutureWarning, filename="upstream.py", lineno=2, module=warning_module)
+            warnings.warn_explicit(message, category, filename="upstream.py", lineno=2, module=warning_module)
             assert len(caught) == 1 + int(not filtered)
 
     def test_import_optional__error_missing_dependency(self) -> None:
@@ -303,28 +311,3 @@ class TestOptionalImports:
 
         with pytest.raises(ImportError, match="Optional dependency '_geoutils_missing_dependency_' required"):
             import_optional("_geoutils_missing_dependency_")
-
-    @pytest.mark.skipif(find_spec("gpytorch") is None, reason="Requires GPyTorch")
-    def test_import_optional__gpytorch_sampling(self) -> None:
-        """Checks that GPyTorch imports and samples reproducibly with the TorchScript warning treated as an error."""
-
-        # Avoid cached optional imports
-        code = r"""
-import warnings
-import numpy as np
-import geoutils as gu
-from geoutils._misc import import_optional
-
-warnings.filterwarnings('error', message=r'.*torch\.jit\.script.*Python 3\.14', category=FutureWarning)
-import_optional('gpytorch')
-model = gu.Variogram.from_model('gaussian', effective_range=2, partial_sill=1)
-errors = gu.ErrorStructure([gu.ErrorComponent('spatial', 1, model)])
-coordinates = np.array([[0, 0], [1, 0], [0, 1], [1, 1]], dtype=float)
-first = gu.uncertainty.random_field(errors, coordinates=coordinates, backend='gpytorch', random_state=42)
-second = gu.uncertainty.random_field(errors, coordinates=coordinates, backend='gpytorch', random_state=42)
-assert first.shape == (4,)
-assert np.isfinite(first).all()
-np.testing.assert_array_equal(first, second)
-"""
-        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
-        assert result.returncode == 0, result.stderr

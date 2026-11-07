@@ -20,7 +20,6 @@
 
 from __future__ import annotations
 
-import warnings
 from typing import Any, Callable
 
 import numpy as np
@@ -30,6 +29,7 @@ from packaging.version import Version
 
 from geoutils._misc import deprecate
 from geoutils._typing import NDArrayNum
+from geoutils.exceptions import _warn
 from geoutils.projtools import _get_bounds_projected, align_bounds, merge_bounds
 from geoutils.raster.raster import Raster, _default_nodata
 
@@ -84,7 +84,7 @@ def load_multiple_rasters(
     if crop:
         # Check that intersection is not void (changed to NaN instead of empty tuple end 2022)
         if intersection == () or all(np.isnan(i) for i in intersection):
-            warnings.warn("Intersection is void, returning unloaded rasters.")
+            _warn("Intersection is void, returning unloaded rasters.")
             return output_rst
 
         for i, rst in enumerate(output_rst):
@@ -182,12 +182,13 @@ def stack(
             else _default_nodata(reference_raster.data.dtype)
         )
         # Reproject to reference grid
+        # Omit an unset reference nodata so unchanged grids can be copied below
         reprojected_raster = raster.reproject(
             bounds=dst_bounds,
             res=reference_raster.res,
             crs=reference_raster.crs,
             dtype=reference_raster.data.dtype,
-            nodata=nodata,
+            nodata=reference_raster.nodata,
             resampling=resampling_method,
             silent=True,
         )
