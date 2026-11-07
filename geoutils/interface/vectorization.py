@@ -148,7 +148,12 @@ def _polygonize_base(
         return gpd.GeoDataFrame({data_name: [], value_column: []}, geometry=[], crs=crs)
 
     # Now, we let rasterio.features.shapes yield (geometry, value) pairs
-    with silence_rasterio_message(param_name="MEM", warn_code="CPLE_AppDefined", ignore_georeferencing=True):
+    with silence_rasterio_message(
+        param_name="MEM",
+        warn_code="CPLE_AppDefined",
+        ignore_georeferencing=True,
+        ignore_memory_driver_deprecation=True,
+    ):
         # We canonicalize values for float32 input (override Rasterio internal behaviour that is not exposed),
         # to ensure similar grouping behaviour in full-array or chunks
         v_arr = _canon_values(values, atol=float_tol)
@@ -1281,7 +1286,12 @@ def _chunked_polygonize_block_labels(
     feats: list[dict[str, Any]] = []
     lab_raster = np.asarray(labels, dtype=np.int32, order="C")
 
-    with silence_rasterio_message(param_name="MEM", warn_code="CPLE_AppDefined", ignore_georeferencing=True):
+    with silence_rasterio_message(
+        param_name="MEM",
+        warn_code="CPLE_AppDefined",
+        ignore_georeferencing=True,
+        ignore_memory_driver_deprecation=True,
+    ):
         for geom, lab in features.shapes(lab_raster, mask=mm, transform=transform, connectivity=connectivity):
             lab_i = int(lab)
             if lab_i == 0:

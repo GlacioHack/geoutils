@@ -78,14 +78,19 @@ def _validate_downsample(downsample: Number) -> float:
 
 @contextmanager
 def silence_rasterio_message(
-    param_name: str | None = None, warn_code: str = "CPLE_NotSupported", *, ignore_georeferencing: bool = False
+    param_name: str | None = None,
+    warn_code: str = "CPLE_NotSupported",
+    *,
+    ignore_georeferencing: bool = False,
+    ignore_memory_driver_deprecation: bool = False,
 ) -> Iterator[None]:
     """
-    Suppress selected Rasterio log messages and temporary georeferencing warnings.
+    Suppress selected Rasterio log messages and temporary dataset warnings.
 
     :param param_name: Parameter or text to match in Rasterio log messages, or None to leave logging unchanged.
     :param warn_code: Warning start code within rasterio._env.
     :param ignore_georeferencing: Suppress NotGeoreferencedWarning while Rasterio uses temporary datasets.
+    :param ignore_memory_driver_deprecation: Suppress GDAL's Memory driver deprecation from older Rasterio versions.
     """
     logger = logging.getLogger("rasterio._env")
 
@@ -99,14 +104,25 @@ def silence_rasterio_message(
             )
 
     with ExitStack() as stack:
-        if ignore_georeferencing:
+        if ignore_georeferencing or ignore_memory_driver_deprecation:
             import rasterio as rio
 
             # Serialize Rasterio filter changes when Python uses global warning filters
             if not getattr(sys.flags, "context_aware_warnings", False):
                 stack.enter_context(_warning_filter_lock)
             stack.enter_context(warnings.catch_warnings())
-            warnings.filterwarnings("ignore", category=rio.errors.NotGeoreferencedWarning)
+            if ignore_georeferencing:
+                warnings.filterwarnings("ignore", category=rio.errors.NotGeoreferencedWarning)
+            if ignore_memory_driver_deprecation:
+                # Older Rasterio versions request Memory, which GDAL now maps to MEM
+                warnings.filterwarnings(
+                    "ignore",
+                    message=(
+                        r"^DeprecationWarning: 'Memory' driver is deprecated since GDAL 3\.11\. "
+                        r"Use 'MEM' onwards\. Further messages of this type will be suppressed\.$"
+                    ),
+                    category=RuntimeWarning,
+                )
 
         if param_name is not None:
             flt = _Filter()
