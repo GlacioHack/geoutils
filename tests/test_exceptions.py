@@ -107,6 +107,18 @@ class TestWarnings:
             ("geoutils.projtools", DeprecationWarning, "scalar_conversion", False),
             ("pyproj.transformer", FutureWarning, "scalar_conversion", False),
             ("pyproj.transformer", DeprecationWarning, "other", False),
+            ("shapely.constructive", RuntimeWarning, "oriented_envelope", True),
+            ("/site-packages/shapely/constructive", RuntimeWarning, "oriented_envelope", True),
+            (r"C:\site-packages\shapely\constructive", RuntimeWarning, "oriented_envelope", True),
+            ("geoutils.vector.vector", RuntimeWarning, "oriented_envelope", False),
+            ("shapely.constructive", UserWarning, "oriented_envelope", False),
+            ("shapely.constructive", RuntimeWarning, "other", False),
+            ("shapely.linear", RuntimeWarning, "shared_paths", True),
+            ("/site-packages/shapely/linear", RuntimeWarning, "shared_paths", True),
+            (r"C:\site-packages\shapely\linear", RuntimeWarning, "shared_paths", True),
+            ("geoutils.vector.vector", RuntimeWarning, "shared_paths", False),
+            ("shapely.linear", UserWarning, "shared_paths", False),
+            ("shapely.linear", RuntimeWarning, "other", False),
         ],
     )
     def test_warning_filters__known_dependency_warnings(
@@ -122,6 +134,8 @@ class TestWarnings:
                 "Ensure you extract a single element from your array before performing this operation. "
                 "(Deprecated NumPy 1.25.)"
             ),
+            "oriented_envelope": "divide by zero encountered in oriented_envelope",
+            "shared_paths": "invalid value encountered in shared_paths",
             "other": "Unexpected dependency warning",
         }
         message = messages[warning_kind]

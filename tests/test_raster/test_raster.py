@@ -1546,9 +1546,11 @@ class TestRaster:
             with pytest.warns(UserWarning, match="Converting from .* may alter values.*"):
                 rout = r.astype(target_dtype2)  # type: ignore
 
-            assert np.array_equal(
-                r.data.data.astype(target_dtype2), rout.data.data
-            )  # Not the same array anymore with conversion
+            # Masked NaNs can warn when NumPy casts the reference array to integers
+            with np.errstate(invalid="ignore"):
+                assert np.array_equal(
+                    r.data.data.astype(target_dtype2), rout.data.data
+                )  # Not the same array anymore with conversion
 
             assert np.dtype(rout.dtype) == target_dtype2
             assert rout.data.dtype == target_dtype2
