@@ -30,7 +30,7 @@ disable_error_code = ["untyped-decorator"]
 [tool.pytest.ini_options]
 addopts = "-p no:doctest --import-mode=importlib"
 filterwarnings = [
-    "error",  # Raise errors for unexpected warnings
+    "error",  # Raise errors for unexpected warnings, silence those below
     # Ignore Affine's multiplication deprecation in Rasterio and Rioxarray
     'ignore:^Use `@` matmul instead of `\*` mul operator for matrix multiplication$:PendingDeprecationWarning',
     # Rasterio's NumPy 2.5 shape assignment warning can be attributed to its caller
@@ -39,6 +39,8 @@ filterwarnings = [
     "ignore:^Due to '_pack_'.*:DeprecationWarning:^laspy\\.vlrs\\.known$",
     # Ignore NumPy's scalar conversion deprecation inside Pyproj
     'ignore:^Conversion of an array with ndim > 0 to a scalar:DeprecationWarning:(.*[/\\])?pyproj[./\\]transformer$',
+    # Dask's Parquet reader resets and restores the GeoDataFrame index in place
+    'ignore:^The inplace keyword in GeoDataFrame\.(reset_index|set_index) is deprecated and will be removed in a future version \(PDEP-8\)\.:DeprecationWarning:(.*[/\\])?dask[./\\]dataframe[./\\]io[./\\]parquet[./\\]arrow$',
     # Ignore floating point warnings from Shapely's GEOS calls on macOS
     'ignore:^divide by zero encountered in oriented_envelope$:RuntimeWarning:(.*[/\\])?shapely[./\\]constructive$',
     'ignore:^invalid value encountered in oriented_envelope$:RuntimeWarning:(.*[/\\])?shapely[./\\]constructive$',

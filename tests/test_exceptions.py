@@ -128,6 +128,19 @@ class TestWarnings:
                 ),
                 None,
             ),
+            *[
+                (
+                    f"inplace_{method}",
+                    DeprecationWarning,
+                    (
+                        "dask.dataframe.io.parquet.arrow",
+                        "/site-packages/dask/dataframe/io/parquet/arrow",
+                        r"C:\site-packages\dask\dataframe\io\parquet\arrow",
+                    ),
+                    "geoutils.pointcloud.parquet",
+                )
+                for method in ("reset_index", "set_index")
+            ],
             (
                 "oriented_envelope",
                 RuntimeWarning,
@@ -178,6 +191,15 @@ class TestWarnings:
                 "Setting the shape on a NumPy array has been deprecated in NumPy 2.5.\n"
                 "As an alternative, you can create a new view using np.reshape (with copy=False if needed)."
             ),
+            **{
+                f"inplace_{method}": (
+                    f"The inplace keyword in GeoDataFrame.{method} is deprecated and will be removed in a future "
+                    "version (PDEP-8).\nSee "
+                    "https://pandas.pydata.org/docs/dev/whatsnew/v3.1.0.html#deprecation-inplace "
+                    "for more details."
+                )
+                for method in ("reset_index", "set_index")
+            },
             "oriented_envelope_invalid": "invalid value encountered in oriented_envelope",
             "shared_paths": "invalid value encountered in shared_paths",
         }
