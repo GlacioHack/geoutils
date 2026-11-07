@@ -385,7 +385,22 @@ class TestArraySubsampleChunked:
             assert np.array_equal(np.asarray(vals_from_indices), np.asarray(vals_raster_np))
 
     @pytest.mark.parametrize("strategy", subsample_strategies)
-    @pytest.mark.parametrize("mask_form", ["array", "masked", "raster", "vector"])
+    @pytest.mark.parametrize(
+        "mask_form",
+        [
+            "array",
+            "masked",
+            "raster",
+            # Concurrent Pandas/Dask warning contexts can restore Rasterio's temporary dataset warning
+            pytest.param(
+                "vector",
+                marks=pytest.mark.filterwarnings(
+                    r"ignore:^Dataset has no geotransform, gcps, or rpcs\. The identity matrix will be returned\.$"
+                    ":rasterio.errors.NotGeoreferencedWarning"
+                ),
+            ),
+        ],
+    )
     def test_subsample__masked_backends(
         self,
         strategy: Literal["sequential", "topk"],
