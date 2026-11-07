@@ -39,6 +39,7 @@ filterwarnings = [
     'ignore:^Conversion of an array with ndim > 0 to a scalar:DeprecationWarning:(.*[/\\])?pyproj[./\\]transformer$',
     # Ignore floating point warnings from Shapely's GEOS calls on macOS
     'ignore:^divide by zero encountered in oriented_envelope$:RuntimeWarning:(.*[/\\])?shapely[./\\]constructive$',
+    'ignore:^invalid value encountered in oriented_envelope$:RuntimeWarning:(.*[/\\])?shapely[./\\]constructive$',
     'ignore:^invalid value encountered in shared_paths$:RuntimeWarning:(.*[/\\])?shapely[./\\]linear$',
 ]
 log_level = "WARNING"

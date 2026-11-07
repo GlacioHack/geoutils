@@ -113,6 +113,11 @@ class TestWarnings:
             ("geoutils.vector.vector", RuntimeWarning, "oriented_envelope", False),
             ("shapely.constructive", UserWarning, "oriented_envelope", False),
             ("shapely.constructive", RuntimeWarning, "other", False),
+            ("shapely.constructive", RuntimeWarning, "oriented_envelope_invalid", True),
+            ("/site-packages/shapely/constructive", RuntimeWarning, "oriented_envelope_invalid", True),
+            (r"C:\site-packages\shapely\constructive", RuntimeWarning, "oriented_envelope_invalid", True),
+            ("geoutils.vector.vector", RuntimeWarning, "oriented_envelope_invalid", False),
+            ("shapely.constructive", UserWarning, "oriented_envelope_invalid", False),
             ("shapely.linear", RuntimeWarning, "shared_paths", True),
             ("/site-packages/shapely/linear", RuntimeWarning, "shared_paths", True),
             (r"C:\site-packages\shapely\linear", RuntimeWarning, "shared_paths", True),
@@ -135,6 +140,7 @@ class TestWarnings:
                 "(Deprecated NumPy 1.25.)"
             ),
             "oriented_envelope": "divide by zero encountered in oriented_envelope",
+            "oriented_envelope_invalid": "invalid value encountered in oriented_envelope",
             "shared_paths": "invalid value encountered in shared_paths",
             "other": "Unexpected dependency warning",
         }
