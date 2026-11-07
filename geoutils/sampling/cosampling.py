@@ -33,6 +33,8 @@ import numpy as np
 import xarray as xr
 
 from geoutils._dispatch import (
+    _check_same_shape,
+    _check_valid_data,
     _get_pointcloud_interface,
     _get_raster_interface,
     _is_raster,
@@ -43,6 +45,7 @@ from geoutils._dispatch import (
 )
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, NDArrayBool, NDArrayNum
+from geoutils.exceptions import NoValidDataError
 from geoutils.interface.gridding import GriddingMethod
 from geoutils.projtools import _affine_matmul
 from geoutils.raster.array import _selected_raster_data
@@ -124,8 +127,11 @@ def _prepare_cosample_input(
         if kind == "raster":
             if value.ndim == 3 and value.shape[0] == 1:
                 value = value[0]
-            if value.ndim != 2 or tuple(value.shape) != tuple(cast("RasterBase", input_support).shape):
-                raise ValueError(f"Array {name!r} must match the shape of its native raster input.")
+            _check_same_shape(
+                value.shape,
+                cast("RasterBase", input_support).shape,
+                f"Array {name!r} must match the shape of its native raster input.",
+            )
         elif value.ndim != 1:
             raise ValueError(f"Raw point value {name!r} must contain one value per native point.")
 
@@ -457,15 +463,15 @@ def _cosample_raster_in_memory(
     # Use all valid cells when no smaller sample was requested
     if subsample == 1:
         selected = common_validity
-        if not np.any(common_validity):
-            raise ValueError("There is no finite data common to all cosampled values.")
+        _check_valid_data(
+            int(np.any(common_validity)), message="There is no finite data common to all cosampled values."
+        )
     else:
         # Subsample pixel locations randomly for all output bands
         rows, columns = _sample_valid_indices(
             common_validity, subsample=subsample, random_state=random_state, strategy=strategy
         )
-        if rows.size == 0:
-            raise ValueError("There is no finite data common to all cosampled values.")
+        _check_valid_data(rows.size, message="There is no finite data common to all cosampled values.")
         selected = np.zeros(common_validity.shape, dtype=bool)
         selected[rows, columns] = True
 
@@ -494,15 +500,15 @@ def _cosample_raster_dask(
         selected = common_validity
 
         # Check that at least one cell is valid without computing the complete Dask output
-        if not bool(common_validity.any().compute()):
-            raise ValueError("There is no finite data common to all cosampled values.")
+        _check_valid_data(
+            int(common_validity.any().compute()), message="There is no finite data common to all cosampled values."
+        )
     else:
         # Randomly choose one set of cell positions for every output band
         rows, columns = _sample_valid_indices(
             common_validity, subsample=subsample, random_state=random_state, strategy=strategy
         )
-        if rows.size == 0:
-            raise ValueError("There is no finite data common to all cosampled values.")
+        _check_valid_data(rows.size, message="There is no finite data common to all cosampled values.")
 
         # Give each cell a unique number using row * width + column
         # Mark sampled cell numbers within each Dask chunk instead of loading the full mask into memory
@@ -639,8 +645,7 @@ def _cosample_raster_mp(
         # Sort sampled cells by row so each tile can find its cells without scanning the full sample
         order = np.argsort(indices[0], kind="stable")
         indices = indices[0][order], indices[1][order]
-    if not has_valid:
-        raise ValueError("There is no finite data common to all cosampled values.")
+    _check_valid_data(int(has_valid), message="There is no finite data common to all cosampled values.")
 
     # Read each tile again to write the selected values from all inputs to the final output file
     return map_overlap(
@@ -838,8 +843,7 @@ def _cosample_array_points(
                 strategy=strategy,
             )[0]
         )
-    if positions.size == 0:
-        raise ValueError("There is no finite data common to all cosampled values.")
+    _check_valid_data(positions.size, message="There is no finite data common to all cosampled values.")
     locations = support._select_rows(positions).pc
 
     # Apply interpolation's final nodata rule to the selected rows, without replacing excluded points
@@ -859,8 +863,7 @@ def _cosample_array_points(
         if is_dask_array(final_validity):
             final_validity = final_validity.compute()
         positions = positions[final_validity]
-        if positions.size == 0:
-            raise ValueError("No common finite values are available for cosampling.")
+        _check_valid_data(positions.size, message="No common finite values are available for cosampling.")
         locations = support._select_rows(positions).pc
 
     # Defer value interpolation until the selected result is computed
@@ -990,13 +993,12 @@ def _cosample_on_points(
         (indices,) = _sample_valid_indices(
             common_validity, subsample=subsample, random_state=random_state, strategy=strategy
         )
-        if indices.size == 0:
-            raise ValueError("There is no finite data common to all cosampled values.")
+        _check_valid_data(indices.size, message="There is no finite data common to all cosampled values.")
 
         # Sort the selected row numbers so the output follows the original point order
         selected_rows = np.sort(indices)
     elif is_dask_points and not bool(common_validity.any().compute()):
-        raise ValueError("There is no finite data common to all cosampled values.")
+        raise NoValidDataError("There is no finite data common to all cosampled values.")
 
     # Create a table with only geometry and the requested point columns, then keep the selected rows
     geometry = dataframe[[dataframe.geometry.name]]
@@ -1005,7 +1007,7 @@ def _cosample_on_points(
     point_columns = _assign_point_values(geometry, point_values, partition_lengths=partition_lengths)
     output = _select_point_rows(point_columns, selected_rows, partition_lengths=partition_lengths)
     if not is_dask_dataframe(output) and output.empty:
-        raise ValueError("There is no finite data common to all cosampled values.")
+        raise NoValidDataError("There is no finite data common to all cosampled values.")
 
     # 3/ Interpolate each raster at the selected coordinates and add its values as a new column
     if aligned_rasters:
@@ -1040,7 +1042,7 @@ def _cosample_on_points(
 
     # Check for empty results only when loaded, so Dask does not run the final interpolation yet
     if not is_dask_dataframe(result) and get_geo_attr(result, "point_count", ("pc",)) == 0:
-        raise ValueError("There is no finite data common to all cosampled values.")
+        raise NoValidDataError("There is no finite data common to all cosampled values.")
     return result
 
 

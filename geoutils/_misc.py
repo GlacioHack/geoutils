@@ -23,8 +23,11 @@ from __future__ import annotations
 import copy
 import functools
 import logging
+import sys
+import threading
 import warnings
-from contextlib import contextmanager
+from collections.abc import Iterator
+from contextlib import ExitStack, contextmanager
 from typing import Any, Callable, TypeVar, cast
 
 import numpy as np
@@ -32,8 +35,10 @@ from packaging.version import Version
 
 from geoutils._typing import Number
 from geoutils._version import __version__
+from geoutils.exceptions import GeoUtilsDeprecationWarning, _warn
 
 FunctionType = TypeVar("FunctionType", bound=Callable[..., Any])
+_warning_filter_lock = threading.RLock()
 
 
 def _deprecate_keyword(old_name: str, new_name: str) -> Callable[[FunctionType], FunctionType]:
@@ -49,10 +54,9 @@ def _deprecate_keyword(old_name: str, new_name: str) -> Callable[[FunctionType],
             if old_name in kwargs:
                 if new_name in kwargs:
                     raise TypeError(f"Use only '{new_name}'; '{old_name}' and '{new_name}' were both passed.")
-                warnings.warn(
+                _warn(
                     f"Argument '{old_name}' is deprecated; use '{new_name}' instead.",
-                    DeprecationWarning,
-                    stacklevel=2,
+                    GeoUtilsDeprecationWarning,
                 )
                 kwargs[new_name] = kwargs.pop(old_name)
             return function(*args, **kwargs)
@@ -73,30 +77,58 @@ def _validate_downsample(downsample: Number) -> float:
 
 
 @contextmanager
-def silence_rasterio_message(param_name: str, warn_code: str = "CPLE_NotSupported") -> Any:
+def silence_rasterio_message(
+    param_name: str | None = None,
+    warn_code: str = "CPLE_NotSupported",
+    *,
+    ignore_georeferencing: bool = False,
+    ignore_memory_driver_deprecation: bool = False,
+) -> Iterator[None]:
     """
-    Helper to silence logging warnings for parameters that were already supported (such as XSCALE/YSCALE) but not
-    yet exposed officially through the API.
+    Suppress selected Rasterio log messages and temporary dataset warnings.
 
-    :param param_name: Name of Rasterio parameter.
+    :param param_name: Parameter or text to match in Rasterio log messages, or None to leave logging unchanged.
     :param warn_code: Warning start code within rasterio._env.
+    :param ignore_georeferencing: Suppress NotGeoreferencedWarning while Rasterio uses temporary datasets.
+    :param ignore_memory_driver_deprecation: Suppress GDAL's Memory driver deprecation from older Rasterio versions.
     """
     logger = logging.getLogger("rasterio._env")
 
     class _Filter(logging.Filter):
         def filter(self, record: Any) -> bool:
             return not (
-                record.name == "rasterio._env"
+                param_name is not None
+                and record.name == "rasterio._env"
                 and warn_code in record.getMessage()
                 and param_name in record.getMessage()
             )
 
-    flt = _Filter()
-    logger.addFilter(flt)
-    try:
+    with ExitStack() as stack:
+        if ignore_georeferencing or ignore_memory_driver_deprecation:
+            import rasterio as rio
+
+            # Serialize Rasterio filter changes when Python uses global warning filters
+            if not getattr(sys.flags, "context_aware_warnings", False):
+                stack.enter_context(_warning_filter_lock)
+            stack.enter_context(warnings.catch_warnings())
+            if ignore_georeferencing:
+                warnings.filterwarnings("ignore", category=rio.errors.NotGeoreferencedWarning)
+            if ignore_memory_driver_deprecation:
+                # Older Rasterio versions request Memory, which GDAL now maps to MEM
+                warnings.filterwarnings(
+                    "ignore",
+                    message=(
+                        r"^DeprecationWarning: 'Memory' driver is deprecated since GDAL 3\.11\. "
+                        r"Use 'MEM' onwards\. Further messages of this type will be suppressed\.$"
+                    ),
+                    category=RuntimeWarning,
+                )
+
+        if param_name is not None:
+            flt = _Filter()
+            logger.addFilter(flt)
+            stack.callback(logger.removeFilter, flt)
         yield
-    finally:
-        logger.removeFilter(flt)
 
 
 def import_optional(import_name: str, package_name: str | None = None, extra_name: str = "opt") -> Any:
@@ -113,12 +145,24 @@ def import_optional(import_name: str, package_name: str | None = None, extra_nam
         package_name = import_name
 
     try:
-        # Silence GPyTorch import of linear_operator TorchScript
+        # Silence known dependency import warnings
         if import_name == "gpytorch":
-            with warnings.catch_warnings():
+            with ExitStack() as stack:
+                if not getattr(sys.flags, "context_aware_warnings", False):
+                    stack.enter_context(_warning_filter_lock)
+                stack.enter_context(warnings.catch_warnings())
                 warnings.filterwarnings(
                     "ignore",
                     message=r"^`torch\.jit\.script` is not supported in Python 3\.14\+ and may break\.",
+                    category=FutureWarning,
+                    module=r"^torch\.jit\._script$",
+                )
+                warnings.filterwarnings(
+                    "ignore",
+                    message=(
+                        r"^`torch\.jit\.script` is deprecated\. "
+                        r"Please switch to `torch\.compile` or `torch\.export`\.$"
+                    ),
                     category=FutureWarning,
                     module=r"^torch\.jit\._script$",
                 )
@@ -222,7 +266,7 @@ def deprecate(removal_version: Version | None = None, details: str | None = None
                 text += f" Current version: {__version__}."
 
             if should_warn:
-                warnings.warn(text, category=DeprecationWarning, stacklevel=2)
+                _warn(text, category=GeoUtilsDeprecationWarning)
             else:
                 raise ValueError(text)
 

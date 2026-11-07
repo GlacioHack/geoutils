@@ -411,7 +411,7 @@ class TestMultiRaster:
         # - Test that with crop=False and ref_grid=0, rasters all have the same grid as the reference - #
         # For the landsat test case, a warning will be raised because nodata is None
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=UserWarning)
+            warnings.filterwarnings("ignore", message="For reprojection, nodata must be set", category=UserWarning)
             output_rst = gu.raster.load_multiple_rasters(raster_paths, crop=False, ref_grid=0)
 
         ref_rst = gu.Raster(raster_paths[0], load_data=False)
@@ -450,7 +450,7 @@ class TestMultiRaster:
         # - Should work with crop=False and ref_grid=0 - #
         # For the landsat test case, a warning will be raised because nodata is None
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=UserWarning)
+            warnings.filterwarnings("ignore", message="For reprojection, nodata must be set", category=UserWarning)
             output_rst = gu.raster.load_multiple_rasters(raster_paths, crop=False, ref_grid=0)
 
         ref_rst = gu.Raster(raster_paths[0], load_data=False)

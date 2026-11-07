@@ -23,7 +23,6 @@ from __future__ import annotations
 import math
 import pathlib
 import struct
-import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
 from typing import (
@@ -49,7 +48,7 @@ from rasterio.enums import Resampling
 
 from geoutils import profiler
 from geoutils._config import config
-from geoutils._dispatch import _check_match_grid, is_dask_dataframe
+from geoutils._dispatch import _check_crs, _check_match_grid, _check_nodata, is_dask_dataframe
 from geoutils._misc import _deprecate_keyword, deprecate
 from geoutils._typing import (
     ArrayLike,
@@ -59,6 +58,7 @@ from geoutils._typing import (
     NDArrayNum,
     Number,
 )
+from geoutils.exceptions import GeoUtilsDeprecationWarning, InvalidResamplingError, _warn
 from geoutils.filters.regular import _filter, _sieve
 from geoutils.gapfill import _fill_nodata
 from geoutils.interface.distance import _proximity_from_vector_or_raster
@@ -89,6 +89,7 @@ from geoutils.operators.overlap import OverlapBackend, RasterOverlapBackend
 from geoutils.operators.reducer import Reducer
 from geoutils.operators.weighting import _with_error_structure
 from geoutils.projtools import (
+    _affine_matmul,
     _get_bounds_projected,
     _get_custom_crs,
     _get_footprint_projected,
@@ -371,6 +372,7 @@ class RasterBase(ABC):
         """
         # Using sub-abstractmethod to allow for consistent input check here
         if new_crs is not None:
+            _check_crs(new_crs)
             new_crs = CRS.from_user_input(value=new_crs)
         self._set_crs(new_crs=new_crs)
 
@@ -439,15 +441,7 @@ class RasterBase(ABC):
         :param update_mask: Update the old mask by unmasking old nodata and masking new nodata (if array is updated,
             old nodata are changed to new nodata and thus stay masked).
         """
-        if new_nodata is not None and not isinstance(new_nodata, (int, float, np.integer, np.floating)):
-            raise ValueError("Type of nodata not understood, must be float or int.")
-
-        if new_nodata is not None and not self._is_xr:
-            # Rasterio may probe an invalid cast before rejecting incompatible nodata
-            with np.errstate(invalid="ignore", over="ignore"):
-                compatible = rio.dtypes.can_cast_dtype(new_nodata, self.dtype)
-            if not compatible:
-                raise ValueError(f"Nodata value {new_nodata} incompatible with self.dtype {self.dtype}.")
+        _check_nodata(new_nodata, dtype=None if self._is_xr else self.dtype)
 
         if self._is_xr:
             # For Mypy, always verified
@@ -484,24 +478,21 @@ class RasterBase(ABC):
 
                 if np.count_nonzero(index_new_nodatas) > 0:
                     if update_array and update_mask:
-                        warnings.warn(
+                        _warn(
                             message="New nodata value cells already exist in the data array. These cells will now be "
                             "masked, and the old nodata value cells will update to the same new value. "
                             "Use set_nodata() with update_array=False or update_mask=False to change "
                             "this behaviour.",
-                            category=UserWarning,
                         )
                     elif update_array:
-                        warnings.warn(
+                        _warn(
                             "New nodata value cells already exist in the data array. The old nodata cells will update "
                             "to the same new value. Use set_nodata() with update_array=False to change this behaviour.",
-                            category=UserWarning,
                         )
                     elif update_mask:
-                        warnings.warn(
+                        _warn(
                             "New nodata value cells already exist in the data array. These cells will now be masked. "
                             "Use set_nodata() with update_mask=False to change this behaviour.",
-                            category=UserWarning,
                         )
 
                 if update_array:
@@ -626,7 +617,7 @@ class RasterBase(ABC):
                 yoff = -0.5
             # Apply the shift in pixel coordinates, including any rotation
             _check_affine_georeferencing(self, "set_area_or_point()")
-            self.set_transform(self.transform * rio.transform.Affine.translation(xoff, yoff))
+            self.set_transform(_affine_matmul(self.transform, rio.transform.Affine.translation(xoff, yoff)))
 
     def edit(
         self: RasterType,
@@ -1190,10 +1181,9 @@ class RasterBase(ABC):
     ) -> Any:
         """Call stats() with the legacy argument names; deprecated in favor of stats()."""
 
-        warnings.warn(
+        _warn(
             "get_stats() is deprecated; use stats() with values and mask instead.",
-            DeprecationWarning,
-            stacklevel=2,
+            GeoUtilsDeprecationWarning,
         )
         return _stats(self, statistics=stats_name, mask=inlier_mask, values=band)
 
@@ -1304,9 +1294,7 @@ class RasterBase(ABC):
 
         if not complete_equality and warn_failure_reason:
             where_fail = np.nonzero(~np.array(equalities))[0]
-            warnings.warn(
-                category=UserWarning, message=f"Equality failed for: {', '.join([names[w] for w in where_fail])}."
-            )
+            _warn(message=f"Equality failed for: {', '.join([names[w] for w in where_fail])}.")
 
         return complete_equality
 
@@ -1401,10 +1389,9 @@ class RasterBase(ABC):
 
         # Report a vertical difference without treating it as a different horizontal grid
         if same_grid and self_crs is not None and other_crs is not None and self_crs != other_crs and warn_3d_crs:
-            warnings.warn(
+            _warn(
                 "The two rasters have the same 2D CRS but a different vertical CRS: "
                 f"{self_crs.name} and {other_crs.name}.",
-                category=UserWarning,
             )
 
         return same_grid
@@ -1511,7 +1498,7 @@ class RasterBase(ABC):
 
         # Check that intersection is not void (changed to NaN instead of empty tuple end 2022)
         if intersection == () or all(math.isnan(i) for i in intersection):
-            warnings.warn("Intersection is void")
+            _warn("Intersection is void")
             return (0.0, 0.0, 0.0, 0.0)
 
         # If required, ensure the intersection is aligned with self's georeferences
@@ -1612,25 +1599,25 @@ class RasterBase(ABC):
             raster = cast("Raster", self)
             output = cast(RasterType, raster._crop_deferred(bbox=bbox, distance_unit="georeferenced"))
             if inplace:
-                warnings.warn(
+                _warn(
                     message="Argument 'inplace' is deprecated, and will be removed in future releases. "
                     "Use 'rast = rast.crop()' instead.",
-                    category=DeprecationWarning,
+                    category=GeoUtilsDeprecationWarning,
                 )
                 self.__dict__.update(output.__dict__)
                 return None
             return output
 
         cropped_arr, new_transform = _crop(source_raster=self, bbox=bbox)
-        col_off, row_off = (~self.transform) * (new_transform.c, new_transform.f)
+        col_off, row_off = _affine_matmul(~self.transform, (new_transform.c, new_transform.f))
         gcps, rpcs = _shift_gcps_rpcs(self.gcps, self.rpcs, row_off=row_off, col_off=col_off)
 
         # Keep in-place for a bit with deprecation warning
         if inplace:
-            warnings.warn(
+            _warn(
                 message="Argument 'inplace' is deprecated, and will be removed in future releases. "
                 "Use 'rast = rast.crop()' instead.",
-                category=DeprecationWarning,
+                category=GeoUtilsDeprecationWarning,
             )
 
             if self._is_xr:
@@ -1703,25 +1690,25 @@ class RasterBase(ABC):
             raster = cast("Raster", self)
             output = cast(RasterType, raster._crop_deferred(bbox=bbox, distance_unit="pixel"))
             if inplace:
-                warnings.warn(
+                _warn(
                     message="Argument 'inplace' is deprecated, and will be removed in future releases. "
                     "Use 'rast = rast.icrop()' instead.",
-                    category=DeprecationWarning,
+                    category=GeoUtilsDeprecationWarning,
                 )
                 self.__dict__.update(output.__dict__)
                 return None
             return output
 
         cropped_arr, new_transform = _crop(source_raster=self, bbox=bbox, distance_unit="pixel")
-        col_off, row_off = (~self.transform) * (new_transform.c, new_transform.f)
+        col_off, row_off = _affine_matmul(~self.transform, (new_transform.c, new_transform.f))
         gcps, rpcs = _shift_gcps_rpcs(self.gcps, self.rpcs, row_off=row_off, col_off=col_off)
 
         # Keep in-place for a bit with deprecation warning
         if inplace:
-            warnings.warn(
+            _warn(
                 message="Argument 'inplace' is deprecated, and will be removed in future releases. "
                 "Use 'rast = rast.icrop()' instead.",
-                category=DeprecationWarning,
+                category=GeoUtilsDeprecationWarning,
             )
 
             if self._is_xr:
@@ -1888,7 +1875,7 @@ class RasterBase(ABC):
             if needs_operator:
                 raise ValueError("The GDAL backend accepts string methods without operator or window options.")
             if gdal_name not in Resampling.__members__:
-                raise ValueError(f"The GDAL backend does not support resampling={name!r}.")
+                raise InvalidResamplingError(f"The GDAL backend does not support resampling={name!r}.")
             assert isinstance(gdal_name, str)
             resampling = Resampling[gdal_name]
         else:
@@ -1934,10 +1921,10 @@ class RasterBase(ABC):
 
         # Keep in-place for a bit with deprecation warning
         if inplace:
-            warnings.warn(
+            _warn(
                 message="Argument 'inplace' is deprecated, and will be removed in future releases. "
                 "Use 'rast = rast.reproject()' instead.",
-                category=DeprecationWarning,
+                category=GeoUtilsDeprecationWarning,
             )
 
             if self._is_xr or mp_config:
@@ -2177,7 +2164,7 @@ class RasterBase(ABC):
 
         :param x: X coordinates.
         :param y: Y coordinates.
-        :param op: Operator to compute index.
+        :param op: Floating point type used to calculate indices: float, np.float32 or np.float64.
         :param precision: Precision passed to :func:`rasterio.transform.rowcol`.
 
         :returns i, j: Indices of (x,y) in the image.
@@ -2461,9 +2448,7 @@ class RasterBase(ABC):
         .. deprecated:: 1.1
             Use interp_at_points() instead.
         """
-        warnings.warn(
-            "interp_points() is deprecated; use interp_at_points() instead.", DeprecationWarning, stacklevel=2
-        )
+        _warn("interp_points() is deprecated; use interp_at_points() instead.", GeoUtilsDeprecationWarning)
         return self.interp_at_points(
             points,
             method=method,
@@ -2537,7 +2522,7 @@ class RasterBase(ABC):
             operator_backend: ResamplingBackend = "auto" if backend == "auto" else selected_backend
             method = _resampling_operator(method, backend=operator_backend, options=resampling_kwargs)
         elif resampling_kwargs or selected_backend != "scipy":
-            raise ValueError("A reduction callable uses the SciPy backend without resampling_kwargs.")
+            raise InvalidResamplingError("A reduction callable uses the SciPy backend without resampling_kwargs.")
 
         return _resample_at_points(
             self,
@@ -2610,9 +2595,9 @@ class RasterBase(ABC):
         if isinstance(selected_method, (str, Reducer)):
             selected_method = _resampling_operator(selected_method, options=resampling_kwargs)
             if not isinstance(selected_method, Reducer):
-                raise ValueError("Point reduction requires a reducer resampling method.")
+                raise InvalidResamplingError("Point reduction requires a reducer resampling method.")
         elif resampling_kwargs:
-            raise ValueError("Configure a reduction callable directly instead of using resampling_kwargs.")
+            raise InvalidResamplingError("Configure a reduction callable directly instead of using resampling_kwargs.")
         # Preserve the legacy one-cell default when no window is configured
         selected_window = window
         if selected_window is None and (
@@ -2660,9 +2645,7 @@ class RasterBase(ABC):
         .. deprecated:: 1.1
             Use reduce_at_points() instead.
         """
-        warnings.warn(
-            "reduce_points() is deprecated; use reduce_at_points() instead.", DeprecationWarning, stacklevel=2
-        )
+        _warn("reduce_points() is deprecated; use reduce_at_points() instead.", GeoUtilsDeprecationWarning)
         return self.reduce_at_points(
             points,
             reducer_function=reducer_function,
@@ -2723,15 +2706,15 @@ class RasterBase(ABC):
             Only used when `method="distance"`.
         :param kwargs: Additional keyword arguments passed to the underlying filter implementation.
 
-        :returns: A new Raster instance with the filtered data (or None if inplace).
+        :returns: A new Raster instance with the filtered data.
 
         :raises ValueError: If the filter name is not one of the predefined options.
-        :raises TypeError: If `method` is neither a string nor a callable.
+        :raises TypeError: If `method` is neither a string nor a callable, or `inplace` is supplied.
 
         """
 
         if "inplace" in kwargs:
-            raise DeprecationWarning("Argument 'inplace' is deprecated, use rst = rst.filter() instead.")
+            raise TypeError("filter() does not accept 'inplace'; assign the result with rst = rst.filter(...).")
 
         # Preserve optimized filters while resolving other statistics and area-weighted windows
         selected_method: str | Reducer | Callable[..., NDArrayNum] = method
@@ -2821,7 +2804,7 @@ class RasterBase(ABC):
             "idw" if interpolation == "inv_dist" else interpolation, resampling, default="idw"
         )
         if selected_interpolation not in ("idw", "inv_dist", "nearest"):
-            raise ValueError("Gap filling supports resampling='idw' or 'nearest' with the GDAL backend.")
+            raise InvalidResamplingError("Gap filling supports resampling='idw' or 'nearest' with the GDAL backend.")
         interpolation = "nearest" if selected_interpolation == "nearest" else "inv_dist"
         output = _fill_nodata(
             source_raster=self,

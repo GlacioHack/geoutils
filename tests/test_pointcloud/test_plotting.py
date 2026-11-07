@@ -68,7 +68,7 @@ class TestPlot:
             geometry=gpd.points_from_xy([0, 1], [0, 1]),
             crs=32632,
         )
-        pointcloud = gu.PointCloud(dataframe, data_column="mask")
+        pointcloud = gu.PointCloud(dataframe, data_name="mask")
 
         # Plot the mask through the normal point cloud colorbar path
         _, colorbar_ax = pointcloud.plot(cbar_title="Intersects vector", return_axes=True)
@@ -83,7 +83,7 @@ class TestPlot:
         """Checks that an explicit color overrides the default data column without creating a colorbar."""
 
         # Create a point cloud whose main data column would otherwise control marker colors
-        pointcloud = gu.PointCloud(_point_grid(3), data_column="value")
+        pointcloud = gu.PointCloud(_point_grid(3), data_name="value")
         if as_object_type == "dataarray":
             source = pointcloud.to_xarray().pc
         elif as_object_type == "geodataframe":
@@ -169,7 +169,7 @@ class TestPlot:
             geometry=gpd.points_from_xy([0, 100], [0, 1]),
             crs=3857,
         )
-        pointcloud = gu.PointCloud(dataframe, data_column="value")
+        pointcloud = gu.PointCloud(dataframe, data_name="value")
         if as_object_type == "dataarray":
             source = pointcloud.to_xarray().pc
         elif as_object_type == "geodataframe":

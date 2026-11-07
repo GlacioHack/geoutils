@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os.path
-import tempfile
 from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, Literal
@@ -163,17 +162,16 @@ class TestPointCloudAccessor:
         raster = ds.pc.grid(
             grid_coords=(np.array([0, 1]), np.array([0, 1])),
             resampling="nearest",
-            dist_nodata_pixel=10,
+            radius=10,
         )
 
         assert isinstance(raster, xr.DataArray)
 
-    def test_open_pointcloud(self) -> None:
+    def test_open_pointcloud(self, tmp_path: Path) -> None:
         """Open a vector file as a GeoDataFrame carrying the point-cloud accessor."""
 
         # Write a small independent source file for the public open helper
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.gpkg")
+        temp_file = os.path.join(tmp_path, "test.gpkg")
         self.gdf.to_file(temp_file)
 
         # The in-memory path should reproduce the original point cloud
@@ -201,14 +199,13 @@ class TestPointCloudAccessor:
         with pytest.raises(ValueError, match="point geometries"):
             lazy_polygons.pc.load()
 
-    def test_reproject_pointcloud__dask_geopandas(self) -> None:
+    def test_reproject_pointcloud__dask_geopandas(self, tmp_path: Path) -> None:
         """Reproject point partitions lazily and match in-memory GeoPandas output."""
 
         dgpd = pytest.importorskip("dask_geopandas")
 
         # Open a partitioned source before requesting a new projected CRS
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.gpkg")
+        temp_file = os.path.join(tmp_path, "test.gpkg")
         self.gdf.to_file(temp_file)
 
         ds = gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_object_type="geodataframe")
@@ -230,15 +227,14 @@ class TestPointCloudAccessor:
             ("translate", {"xoff": 1, "yoff": 2}),
         ],
     )
-    def test_geometric_methods__dask_geopandas(self, method: str, kwargs: dict[str, object]) -> None:
+    def test_geometric_methods__dask_geopandas(self, tmp_path: Path, method: str, kwargs: dict[str, object]) -> None:
         """Checks that copy() keeps bounds and point count while crop(), clip() and translate() update them."""
 
         dgpd = pytest.importorskip("dask_geopandas")
         from dask.callbacks import Callback
 
         # Open one on-disk source lazily and build the expected result through the in-memory accessor
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.gpkg")
+        temp_file = os.path.join(tmp_path, "test.gpkg")
         self.gdf.to_file(temp_file)
         ds = gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_object_type="geodataframe")
         expected = getattr(self.gdf.pc, method)(**kwargs)
@@ -278,21 +274,20 @@ class TestPointCloudAccessor:
             expected_values["z"] *= 2
             assert_geodataframe_equal(value_copy.compute(), expected_values)
 
-    def test_to_file__dask_geopandas(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_to_file__dask_geopandas(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Checks that GeoPackage writing computes separate Dask partitions and matches in-memory point output."""
 
         pytest.importorskip("dask_geopandas")
 
         # Reproject lazily so writing must evaluate transformed partitions
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.gpkg")
+        temp_file = os.path.join(tmp_path, "test.gpkg")
         self.gdf.to_file(temp_file)
 
         ds = gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_object_type="geodataframe").pc.reproject(
             crs=3857
         )
         assert not ds.pc.is_loaded
-        output_file = os.path.join(temp_dir.name, "output.gpkg")
+        output_file = os.path.join(tmp_path, "output.gpkg")
 
         # Write each partition without computing the complete Dask GeoDataFrame
         monkeypatch.setattr(
@@ -305,20 +300,19 @@ class TestPointCloudAccessor:
         assert gu.PointCloud(output_file, data_name="z").pointcloud_equal(gu.PointCloud(self.gdf.to_crs(3857), "z"))
         assert not ds.pc.is_loaded
 
-    def test_to_file__dask_geopandas_parquet(self) -> None:
+    def test_to_file__dask_geopandas_parquet(self, tmp_path: Path) -> None:
         """Write Dask point partitions to one GeoParquet dataset without changing rows."""
 
         pytest.importorskip("dask_geopandas")
         pytest.importorskip("pyarrow")
 
         # Create a partitioned point cloud from a portable vector source
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.gpkg")
+        temp_file = os.path.join(tmp_path, "test.gpkg")
         self.gdf.to_file(temp_file)
 
         ds = gu.open_pointcloud(temp_file, data_name="z", chunks=5, as_object_type="geodataframe")
         assert not ds.pc.is_loaded
-        output_file = os.path.join(temp_dir.name, "output.parquet")
+        output_file = os.path.join(tmp_path, "output.parquet")
         ds.pc.to_file(output_file)
 
         # Normalize indexes because dataset writers may rebuild them across partitions
@@ -328,12 +322,11 @@ class TestPointCloudAccessor:
         assert_geodataframe_equal(output, expected)
         assert not ds.pc.is_loaded
 
-    def test_open_pointcloud__dask_missing_dep(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_open_pointcloud__dask_missing_dep(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Explain the missing optional dependency when chunked opening requests Dask."""
 
         # Prepare a valid input so the simulated dependency failure is the only error
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.gpkg")
+        temp_file = os.path.join(tmp_path, "test.gpkg")
         self.gdf.to_file(temp_file)
         import_optional = vector_io.import_optional
 

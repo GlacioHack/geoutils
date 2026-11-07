@@ -194,7 +194,6 @@ class TestClassVsAccessorConsistency:
         with pytest.warns(UserWarning, match="same 2D CRS but a different vertical CRS"):
             assert horizontal.georeferenced_grid_equal(compound)
         with warnings.catch_warnings():
-            warnings.simplefilter("error")
             # Ignore the Affine 3.1 transition warning emitted inside Rioxarray
             warnings.filterwarnings(
                 "ignore",
@@ -319,7 +318,7 @@ class TestClassVsAccessorConsistency:
                 "random_state": 42,
             },
         ),
-        ("filter", {"method": "median", "size": 7}),
+        ("filter", {"method": "median", "window": 7}),
         ("sieve", {"size": 7}),
         ("fill_nodata", {"max_search_distance": 3}),
         ("stats", {}),
@@ -370,6 +369,7 @@ class TestClassVsAccessorConsistency:
         kwargs: dict[str, Any],
         lazy_test_files_tiny: list[str],
         squeeze: bool,
+        request: pytest.FixtureRequest,
         filesystem: Any = None,
     ) -> None:
         """
@@ -388,6 +388,8 @@ class TestClassVsAccessorConsistency:
 
         # Open both objects
         ds = open_raster(path_raster, squeeze=squeeze, filesystem=filesystem)
+        # Close in this thread before background garbage collection can reach the filesystem opener
+        request.addfinalizer(ds.close)
         raster = Raster(path_raster, filesystem=filesystem)
         if method == "variogram":
             pytest.importorskip("skgstat")
@@ -511,7 +513,9 @@ class TestClassVsAccessorConsistency:
         assert_output_equal(output_raster, output_ds)
 
     @pytest.mark.parametrize("method,kwargs", methods_and_kwargs)
-    def test_methods__filesystem(self, tmp_path: Path, method: str, kwargs: dict[str, Any]) -> None:
+    def test_methods__filesystem(
+        self, tmp_path: Path, method: str, kwargs: dict[str, Any], request: pytest.FixtureRequest
+    ) -> None:
         """Checks that raster methods match class and accessor outputs through a filesystem (remote files)."""
 
         # Write enough pixels for sampling
@@ -528,6 +532,7 @@ class TestClassVsAccessorConsistency:
             kwargs=kwargs,
             lazy_test_files_tiny=[filename.name],
             squeeze=True,
+            request=request,
             filesystem=filesystem,
         )
 

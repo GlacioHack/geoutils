@@ -21,7 +21,6 @@
 from __future__ import annotations
 
 import inspect
-import warnings
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Iterable, Literal
 
@@ -34,9 +33,23 @@ from pyproj import CRS, Transformer
 from rasterio.coords import BoundingBox
 
 from geoutils._config import config
-from geoutils._dispatch import _clip_geometry, _get_reproject_crs, get_geo_attr, has_geo_attr, is_dask_array
+from geoutils._dispatch import (
+    _check_same_crs,
+    _clip_geometry,
+    _get_reproject_crs,
+    get_geo_attr,
+    has_geo_attr,
+    is_dask_array,
+)
 from geoutils._misc import _deprecate_keyword, import_optional
 from geoutils._xarray import _rebuild_dataset, _same_coordinate, _select_dataset_variables
+from geoutils.exceptions import (
+    GeoUtilsDeprecationWarning,
+    InvalidCRSError,
+    InvalidGridError,
+    PointsMismatchError,
+    _warn,
+)
 from geoutils.pointcloud.base import PointCloudBase
 from geoutils.pointcloud.referencing import _point_coordinates, _point_crs
 from geoutils.sampling.subsampling import _subsample_numpy
@@ -388,7 +401,7 @@ class DataArrayPointCloudAccessor(PointCloudBase):
             raise ValueError("Array point clouds use Dask chunks rather than mp_config for reprojection.")
         target = CRS.from_user_input(_get_reproject_crs(ref, crs))
         if self.crs is None:
-            raise ValueError("Point reprojection requires a source CRS.")
+            raise InvalidCRSError("Point reprojection requires a source CRS.")
 
         # Equivalent X/Y systems need no new coordinates, metadata or Dask transformation tasks
         if self.crs.equals(target, ignore_axis_order=True):
@@ -449,7 +462,7 @@ class DataArrayPointCloudAccessor(PointCloudBase):
         :returns: DataArray containing the selected point rows.
         """
         if crop_geom is not None:
-            warnings.warn("Argument 'crop_geom' is deprecated, use 'bbox' instead.", DeprecationWarning, stacklevel=2)
+            _warn("Argument 'crop_geom' is deprecated, use 'bbox' instead.", GeoUtilsDeprecationWarning)
             bbox = crop_geom
         if bbox is None:
             raise ValueError("Argument 'bbox' must be passed.")
@@ -660,8 +673,13 @@ def _point_dataset_support(dataset: xr.Dataset, variables: Sequence[str]) -> xr.
     for name in compatible:
         crs = _point_crs(source[name])
         if crs is not None:
-            if reference is not None and not reference.equals(crs, ignore_axis_order=True):
-                raise ValueError("Point variables on a common dimension must have the same CRS.")
+            if reference is not None:
+                _check_same_crs(
+                    reference,
+                    crs,
+                    "Point variables on a common dimension must have the same CRS.",
+                    ignore_axis_order=True,
+                )
             reference = crs
     if reference is None:
         value = dataset.attrs.get("point_crs", dataset.attrs.get("crs"))
@@ -712,12 +730,15 @@ def _subsample_point_rows(
                     not _same_coordinate(mask.coords[left].variable, support.ds.coords[right].variable)
                     for left, right in pairs
                 ):
-                    raise ValueError("Point mask coordinates differ from the shared point support.")
+                    raise PointsMismatchError("Point mask coordinates differ from the shared point support.")
                 mask_crs = _point_crs(mask)
-                if mask_crs is not None and (
-                    support.crs is None or not mask_crs.equals(support.crs, ignore_axis_order=True)
-                ):
-                    raise ValueError("Point mask and value variables must have the same CRS.")
+                if mask_crs is not None:
+                    _check_same_crs(
+                        mask_crs,
+                        support.crs,
+                        "Point mask and value variables must have the same CRS.",
+                        ignore_axis_order=True,
+                    )
             # Check stored row labels before interpreting mask entries as positions
             dimension = support.ds.dims[0]
             if dimension in mask.coords and dimension in support.ds.coords:
@@ -1011,7 +1032,7 @@ class DatasetPointCloudAccessor:
         if any(is_dask_array(axis) for axis in support.pc.to_xyz()[:2]):
             # A known destination grid avoids scanning coordinates just to discover its output shape
             if not raster_reference and options.get("bounds") is None and options.get("grid_coords") is None:
-                raise ValueError(
+                raise InvalidGridError(
                     "Gridding lazy point coordinates requires a raster ref, grid_coords or explicit bounds."
                 )
 

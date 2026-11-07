@@ -21,7 +21,6 @@
 from __future__ import annotations
 
 import copy
-import warnings
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, Union, cast, overload
 
@@ -44,6 +43,7 @@ from geoutils._dispatch import (
 )
 from geoutils._misc import deprecate, import_optional
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
+from geoutils.exceptions import GeoUtilsDeprecationWarning, InvalidBoundsError, _warn
 from geoutils.interface.distance import _proximity_from_vector_or_raster
 from geoutils.interface.rasterization import _create_mask, _rasterize
 from geoutils.multiproc import MultiprocConfig
@@ -353,10 +353,9 @@ class VectorBase(ABC):
             if ref is not None:
                 raise TypeError("plot() received both 'ref' and deprecated 'ref_crs'; use only 'ref'.")
             deprecated_ref = kwargs.pop("ref_crs")
-            warnings.warn(
+            _warn(
                 "Argument 'ref_crs' is deprecated; use 'ref' instead.",
-                DeprecationWarning,
-                stacklevel=2,
+                GeoUtilsDeprecationWarning,
             )
             # Preserve the old behavior, which matched only the CRS and did not use reference bounds
             if deprecated_ref is not None:
@@ -502,14 +501,13 @@ class VectorBase(ABC):
             unexpected = next(iter(kwargs))
             raise TypeError(f"crop() got an unexpected keyword argument {unexpected!r}")
         if deprecated_clip is not _UNSET:
-            warnings.warn(
+            _warn(
                 "Argument 'clip' is deprecated; use crop() without it or call clip() separately.",
-                DeprecationWarning,
-                stacklevel=2,
+                GeoUtilsDeprecationWarning,
             )
 
         if crop_geom is not None:
-            warnings.warn(DeprecationWarning("Argument 'crop_geom' is deprecated, use 'bbox' instead."))
+            _warn("Argument 'crop_geom' is deprecated, use 'bbox' instead.", GeoUtilsDeprecationWarning)
             bbox = crop_geom
         if bbox is None:
             raise ValueError("Argument 'bbox' must be passed.")
@@ -835,9 +833,9 @@ class VectorBase(ABC):
         """
 
         if "xres" in kwargs.keys() or "yres" in kwargs.keys():
-            warnings.warn(
+            _warn(
                 message="Argument 'xres' and 'yres' are deprecrated in favour of 'res'.",
-                category=DeprecationWarning,
+                category=GeoUtilsDeprecationWarning,
             )
         xres = kwargs.get("xres", None)
         yres = kwargs.get("yres", None)
@@ -847,7 +845,7 @@ class VectorBase(ABC):
             else:
                 res = xres
         if "raster" in kwargs.keys():
-            warnings.warn(message="Argument 'raster' is deprecrated in favour of 'ref'.", category=DeprecationWarning)
+            _warn(message="Argument 'raster' is deprecrated in favour of 'ref'.", category=GeoUtilsDeprecationWarning)
             ref = kwargs.get("raster", None)
 
         # Run the common implementation and cast its Raster output for accessors
@@ -946,7 +944,7 @@ class VectorBase(ABC):
 
         if raster is None:
             if self.bbox is None:
-                raise ValueError("To automatically rasterize on the vector, bounds need to be defined.")
+                raise InvalidBoundsError("To automatically rasterize on the vector, bounds need to be defined.")
 
             left, bottom, right, top = self.bbox
             transform = rio.transform.from_bounds(left, bottom, right, top, size[0], size[1])

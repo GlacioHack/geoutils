@@ -22,9 +22,9 @@ Module for Vector class.
 
 from __future__ import annotations
 
+import inspect
 import os
 import pathlib
-import warnings
 from os import PathLike
 from typing import (
     TYPE_CHECKING,
@@ -48,6 +48,7 @@ from shapely.geometry.base import BaseGeometry
 from geoutils import profiler
 from geoutils._io import _resolve_filesystem
 from geoutils._misc import copy_doc
+from geoutils.exceptions import GeoUtilsDeprecationWarning, _warn
 from geoutils.vector.base import VectorBase
 from geoutils.vector.base import VectorLike as VectorLike  # noqa: F401
 from geoutils.vector.io import _read_vector_file, _read_vector_info, _write_vector_file
@@ -188,12 +189,12 @@ class Vector(VectorBase):
     def ds(self) -> gpd.GeoDataFrame:
         """Deprecated alias of gdf, the object's GeoDataFrame."""
 
-        warnings.warn("The 'ds' property is deprecated; use 'gdf' instead.", DeprecationWarning, stacklevel=2)
+        _warn("The 'ds' property is deprecated; use 'gdf' instead.", GeoUtilsDeprecationWarning)
         return self.gdf
 
     @ds.setter
     def ds(self, new_ds: gpd.GeoDataFrame | gpd.GeoSeries) -> None:
-        warnings.warn("The 'ds' property is deprecated; use 'gdf' instead.", DeprecationWarning, stacklevel=2)
+        _warn("The 'ds' property is deprecated; use 'gdf' instead.", GeoUtilsDeprecationWarning)
         self.gdf = new_ds
 
     def _set_metadata_from_file(self, filename: str, layer: str | int | None = None) -> None:
@@ -577,10 +578,14 @@ class Vector(VectorBase):
         single_sided: bool = False,
         **kwargs: Any,
     ) -> VectorType:
+        # GeoPandas 1.2 renamed resolution to quad_segs
+        resolution_name = (
+            "quad_segs" if "quad_segs" in inspect.signature(gpd.GeoSeries.buffer).parameters else "resolution"
+        )
+        kwargs[resolution_name] = kwargs.pop("quad_segs", resolution)
         return self._override_gdf_output(
             self.gdf.buffer(
                 distance=distance,
-                resolution=resolution,
                 cap_style=cap_style,
                 join_style=join_style,
                 mitre_limit=mitre_limit,

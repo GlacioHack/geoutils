@@ -33,9 +33,10 @@ import xarray as xr
 from scipy.optimize import curve_fit
 from scipy.special import gamma, kv
 
-from geoutils._dispatch import _get_raster_interface, is_dask_array
+from geoutils._dispatch import _check_valid_data, _get_raster_interface, is_dask_array
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, NDArrayNum
+from geoutils.exceptions import NoValidDataError
 from geoutils.stats.reduction import (
     _check_input_flox_engine,
     _check_input_reduction_method,
@@ -673,8 +674,11 @@ class Variogram:
 
         # Remove rows with missing coordinates or values before creating the SciKit-GStat object
         valid = np.isfinite(values_array) & np.all(np.isfinite(coordinates_array), axis=1)
-        if np.count_nonzero(valid) < 2:
-            raise ValueError("At least two finite observations are required to estimate a variogram.")
+        _check_valid_data(
+            np.count_nonzero(valid),
+            minimum=2,
+            message="At least two finite observations are required to estimate a variogram.",
+        )
         backend_variogram = skgstat.Variogram(coordinates_array[valid], values_array[valid], model=model, **kwargs)
 
         # Copy the small distance bin result and discard the larger SciKit-GStat object by default
@@ -825,8 +829,9 @@ class Variogram:
             mp_config,
         )
 
-        if pairs.sizes["pair"] == 0:
-            raise ValueError("Argument ``pairs`` contains no finite observations with positive distance.")
+        _check_valid_data(
+            pairs.sizes["pair"], message="Argument ``pairs`` contains no finite observations with positive distance."
+        )
 
         # 2/ Prepare pair differences and distance bins
         distances = pairs["distance"].data.astype(np.float64)
@@ -883,8 +888,9 @@ class Variogram:
         if is_dask_array(distances) or is_dask_array(differences):
             distances, differences, valid = import_optional("dask").compute(distances, differences, valid)
         distances, differences = distances[valid], differences[valid]
-        if distances.size == 0:
-            raise ValueError("Argument ``pairs`` contains no finite observations with positive distance.")
+        _check_valid_data(
+            distances.size, message="Argument ``pairs`` contains no finite observations with positive distance."
+        )
 
         # Choose semivariance, or use custom function
         if callable(estimator):
@@ -1010,7 +1016,7 @@ class Variogram:
             model_bounds: list[tuple[float, float]] = []
             for definition in definitions:
                 count = definition.parameter_count
-                model_bounds.extend(((float(np.finfo(float).eps), maximum_lag), (0.0, np.inf)))
+                model_bounds.extend(((float(np.finfo(float).eps), 2 * maximum_lag), (0.0, np.inf)))
                 if definition.custom:
                     extra_bounds = (-np.inf, np.inf)
                 elif definition.name == "stable":
@@ -1739,7 +1745,7 @@ def _variogram_bin_edges(
         minimum = pending.get("minimum", minimum)
         maximum = pending.get("maximum", maximum)
         if minimum == np.inf or maximum == -np.inf:
-            raise ValueError("Argument ``pairs`` contains no finite observations with positive distance.")
+            raise NoValidDataError("Argument ``pairs`` contains no finite observations with positive distance.")
     minimum, maximum = float(minimum), float(maximum)
     if not 0 < minimum < maximum:
         raise ValueError("Require 0 < ``min_lag`` < ``max_lag``.")
@@ -1834,8 +1840,9 @@ def _reduce_variogram_pairs(
 
     # 4/ Calculate pair counts and mean distances in each bin
 
-    if not sizes.sum():
-        raise ValueError("Argument ``pairs`` contains no finite observations with positive distance.")
+    _check_valid_data(
+        int(sizes.sum()), message="Argument ``pairs`` contains no finite observations with positive distance."
+    )
 
     # We count pairs using distances (so numerical overflow errors in sums do not affect the result)
     counts = state["count"][0, :n_bins]

@@ -42,10 +42,11 @@ from xarray.core.utils import dict_equiv
 
 from geoutils import projtools
 from geoutils._config import config
-from geoutils._dispatch import _check_resolution
+from geoutils._dispatch import _check_nodata, _check_resolution, _check_shape
 from geoutils._io import _filesystem_file_options, _FilesystemOpener, _is_remote_path, _resolve_filesystem
 from geoutils._misc import _validate_downsample, import_optional, silence_rasterio_message
 from geoutils._typing import DTypeLike, MArrayNum, NDArrayNum, Number
+from geoutils.exceptions import InvalidCRSError, InvalidGridError, _warn
 from geoutils.raster.referencing import _cast_nodata, _default_nodata
 
 if TYPE_CHECKING:
@@ -121,13 +122,7 @@ def _downsample_grid(
 
     # Shape performs nearest match over the full extent
     if "shape" in options:
-        shape = options["shape"]
-        if (
-            not isinstance(shape, (tuple, list))
-            or len(shape) != 2
-            or any(isinstance(size, bool) or not isinstance(size, (int, np.integer)) or size < 1 for size in shape)
-        ):
-            raise ValueError("downsample shape must contain two positive integers (height, width).")
+        shape = _check_shape(options["shape"], allow_empty=False)
         height, width = shape
         x_factor, y_factor = source.width / width, source.height / height
     # Resolution uses CRS units and column/row order to get exact spacing, trimming the end
@@ -378,11 +373,9 @@ def open_raster(
     if downsample != 1 and kwargs.get("overview_level") is not None:
         raise ValueError("downsample and overview_level cannot be used together.")
     if not masked:
-        warnings.warn(
+        _warn(
             "masked=False allows numeric nodata values in the data. GeoUtils operations that expect NaNs "
             "may return incorrect results.",
-            UserWarning,
-            stacklevel=2,
         )
 
     # 2/ Prepare filesystem access
@@ -542,7 +535,7 @@ def _load_rio(
 
             window = rio.windows.Window(col_off, row_off, *shape[::-1])
         elif sum(param is None for param in [shape, transform]) == 1:
-            raise ValueError("If 'shape' or 'transform' is provided, BOTH must be given.")
+            raise InvalidGridError("If 'shape' or 'transform' is provided, BOTH must be given.")
 
     if indexes is None:
         if only_mask:
@@ -613,10 +606,7 @@ def _set_raster_encoding(
 
     # Check the stored dtype (without reading array value)
     storage_dtype = np.dtype(output_encoding.get("dtype") or array.dtype)
-    with np.errstate(invalid="ignore", over="ignore"):
-        compatible = nodata is None or rio.dtypes.can_cast_dtype(nodata, storage_dtype)
-    if not compatible and not cast_nodata:
-        raise ValueError(f"Nodata value {nodata} incompatible with self.dtype {storage_dtype}.")
+    compatible = _check_nodata(nodata, storage_dtype, allow_cast=cast_nodata)
     missing_without_fill = nodata is None and array.dtype.kind == "f" and storage_dtype.kind in "biu"
     if not compatible or missing_without_fill:
         for key in ("dtype", "rasterio_dtype", "_Unsigned"):
@@ -703,11 +693,10 @@ def _write_rio(
     ]
     gcps_crs = gcps_crs or source_raster.gcps[1] or source_raster.crs
     if rio_gcps and gcps_crs is None:
-        raise ValueError("gcps_crs is required when saving GCPs without a raster CRS.")
+        raise InvalidCRSError("gcps_crs is required when saving GCPs without a raster CRS.")
     if explicit_gcps and rio_gcps and source_raster.transform != rio.Affine.identity():
-        warnings.warn(
+        _warn(
             "A geotransform previously set is going to be cleared due to the setting of GCPs.",
-            category=UserWarning,
         )
 
     # Use nodata set by user, otherwise default to self's
@@ -742,7 +731,7 @@ def _write_rio(
         # In this case, nodata=None is not compatible, so revert to default values, only if masked values exist
         if (nodata is None) & (np.count_nonzero(save_data.mask) > 0):
             nodata = _default_nodata(output_dtype)
-            warnings.warn(f"No nodata set, will use default value of {nodata}", category=UserWarning)
+            _warn(f"No nodata set, will use default value of {nodata}")
         # Convert masked data before filling so nodata is represented in the requested output type
         save_data = save_data.astype(output_dtype, copy=False).filled(nodata)
     else:

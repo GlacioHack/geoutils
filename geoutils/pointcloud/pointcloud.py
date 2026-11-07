@@ -40,7 +40,7 @@ from rasterio.coords import BoundingBox
 from shapely.geometry.base import BaseGeometry
 
 from geoutils import profiler
-from geoutils._dispatch import is_dask_array, is_dask_dataframe
+from geoutils._dispatch import _check_same_points, is_dask_array, is_dask_dataframe
 from geoutils._misc import _deprecate_keyword
 from geoutils._typing import DTypeLike, NDArrayBool, NDArrayNum, Number
 from geoutils.multiproc import MultiprocConfig
@@ -141,10 +141,9 @@ def _cast_numeric_array_pointcloud(
     """Cast point-cloud arithmetic inputs to compatible arrays or scalar values."""
 
     if isinstance(other, PointCloud):
-        if not pc.georeferenced_coords_equal(other):
-            raise ValueError(
-                "Both point clouds must have the same points X/Y coordinates and CRS for " + operation_name + "."
-            )
+        _check_same_points(
+            pc, other, "Both point clouds must have the same points X/Y coordinates and CRS for " + operation_name + "."
+        )
         return other.data
 
     try:
@@ -152,10 +151,11 @@ def _cast_numeric_array_pointcloud(
     except AttributeError:
         other_pc = None
     if isinstance(other_pc, PointCloudBase):
-        if not pc.georeferenced_coords_equal(other_pc):
-            raise ValueError(
-                "Both point clouds must have the same points X/Y coordinates and CRS for " + operation_name + "."
-            )
+        _check_same_points(
+            pc,
+            other_pc,
+            "Both point clouds must have the same points X/Y coordinates and CRS for " + operation_name + ".",
+        )
         return other_pc.data
 
     if isinstance(other, (np.ndarray, pd.Series)):

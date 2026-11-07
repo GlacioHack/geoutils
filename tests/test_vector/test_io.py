@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os.path
 import pathlib
-import tempfile
 from collections.abc import Callable
 from importlib.util import find_spec
 from pathlib import Path
@@ -133,6 +132,11 @@ class TestVectorOpening:
         assert_geodataframe_equal(result, frame)
 
 
+# Fiona warns that slicing filtered filesystem reads may be slower
+@pytest.mark.filterwarnings(
+    "ignore:Layer does not support OLC_FASTFEATURECOUNT, negative slices or start values other than zero may be slow:"
+    r"RuntimeWarning:fiona\.collection$"
+)
 class TestVectorOpeningChunked:
     """Test module for vector opening, respecting Dask lazyiness."""
 
@@ -186,6 +190,10 @@ class TestVectorOpeningChunked:
         assert_geodataframe_equal(computed, expected)
 
     @pytest.mark.parametrize("filesystem_access", [False, True])
+    # Pyogrio's timezone offsets trigger Pandas' NumPy timedelta deprecation
+    @pytest.mark.filterwarnings(
+        r"ignore:The 'generic' unit for NumPy timedelta is deprecated:DeprecationWarning:pyogrio\.geopandas$"
+    )
     def test_open_vector__timezone(self, filesystem_access: bool, tmp_path: pathlib.Path) -> None:
         """Checks that lazy vector dates preserve their timezone across empty partitions."""
         pytest.importorskip("dask_geopandas")
@@ -408,15 +416,14 @@ class TestVectorWritingChunked:
     aster_outlines_path = gu.examples.get_path_test("exploradores_rgi_outlines")
 
     @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
-    def test_to_file__dask_geopandas_gpkg(self) -> None:
+    def test_to_file__dask_geopandas_gpkg(self, tmp_path: Path) -> None:
         """Compute lazy vector partitions while writing a single GeoPackage."""
 
         # Include a lazy reprojection so writing evaluates the complete task graph
         ds = gu.open_vector(self.aster_outlines_path, chunks=1).vct.reproject(crs=CRS.from_epsg(3857))
         assert not ds.vct.is_loaded
 
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.gpkg")
+        temp_file = os.path.join(tmp_path, "test.gpkg")
         ds.vct.to_file(temp_file)
 
         # Reopen the file eagerly and compare it with the projected source
@@ -427,7 +434,7 @@ class TestVectorWritingChunked:
         assert not ds.vct.is_loaded
 
     @pytest.mark.skipif(find_spec("dask_geopandas") is None, reason="Only runs if dask-geopandas is installed.")
-    def test_to_file__dask_geopandas_parquet(self) -> None:
+    def test_to_file__dask_geopandas_parquet(self, tmp_path: Path) -> None:
         """Write lazy vector partitions to GeoParquet without changing features."""
 
         pytest.importorskip("pyarrow")
@@ -436,8 +443,7 @@ class TestVectorWritingChunked:
         ds = gu.open_vector(self.aster_outlines_path, chunks=1)
         assert not ds.vct.is_loaded
 
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.parquet")
+        temp_file = os.path.join(tmp_path, "test.parquet")
         ds.vct.to_file(temp_file)
 
         # Read through GeoPandas to validate the complete written dataset

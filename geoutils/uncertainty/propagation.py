@@ -31,11 +31,12 @@ import pandas as pd
 from numpy.typing import ArrayLike, NDArray
 from scipy.stats import norm
 
+from geoutils._dispatch import _get_pointcloud_interface, _get_raster_interface
+from geoutils.exceptions import _warn
 from geoutils.operators.base import LocalData
 from geoutils.operators.interpolator import Interpolator
 from geoutils.operators.nodata import NodataHandling
 from geoutils.operators.reducer import Reducer
-from geoutils.pointcloud.base import PointCloudBase
 from geoutils.raster.base import RasterBase
 from geoutils.uncertainty.error_structure import (
     ErrorComponent,
@@ -331,8 +332,10 @@ class PropagationSummary:
 def _numeric_values(value: Any) -> NDArray[np.float64]:
     """Read numeric values from an output."""
 
-    if isinstance(value, (RasterBase, PointCloudBase)):
-        value = value.data
+    raster = _get_raster_interface(value)
+    interface = raster if raster is not None else _get_pointcloud_interface(value)
+    if interface is not None:
+        value = interface.data
     if isinstance(value, (pd.Series, pd.DataFrame)):
         value = value.to_numpy()
     return np.ma.asarray(value, dtype=float).filled(np.nan)
@@ -341,8 +344,10 @@ def _numeric_values(value: Any) -> NDArray[np.float64]:
 def _wrap_like(template: Any, values: NDArray[Any]) -> Any:
     """Wrap calculated values into the same data structure as the template."""
 
-    if isinstance(template, (RasterBase, PointCloudBase)):
-        return template.copy(new_array=np.ma.masked_invalid(values))
+    raster = _get_raster_interface(template)
+    interface = raster if raster is not None else _get_pointcloud_interface(template)
+    if interface is not None:
+        return interface.copy(new_array=np.ma.masked_invalid(values))
     if isinstance(template, pd.Series):
         return pd.Series(values, index=template.index, name=template.name)
     if isinstance(template, pd.DataFrame):
@@ -1111,7 +1116,7 @@ def simulate(
             if on_error == "raise" or isinstance(exception, fatal_exceptions):
                 raise
             failures[number] = str(exception)
-            warnings.warn(f"Simulation {number} of {n_simulations} failed and was skipped: {exception}", stacklevel=2)
+            _warn(f"Simulation {number} of {n_simulations} failed and was skipped: {exception}")
             continue
 
         valid = np.isfinite(values)

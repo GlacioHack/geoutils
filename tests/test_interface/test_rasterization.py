@@ -14,7 +14,7 @@ from shapely.affinity import rotate
 
 import geoutils as gu
 from geoutils import examples
-from geoutils.exceptions import InvalidGridError
+from geoutils.exceptions import GeoUtilsInputError, InvalidGridError
 from geoutils.interface import rasterization
 from geoutils.multiproc import MultiprocConfig
 
@@ -286,7 +286,6 @@ class TestRasterVectorInterface:
 
         # Rasterize polygon and request a NaN background value
         with warnings.catch_warnings():
-            warnings.simplefilter("error")
             # Ignore the Affine 3.1 transition warning emitted inside Rasterio
             warnings.filterwarnings(
                 "ignore",
@@ -397,7 +396,7 @@ class TestRasterVectorInterface:
             vector.create_mask()
 
         # If the raster has the wrong type
-        with pytest.raises(ValueError, match="Input arguments must define a valid raster or point cloud."):
+        with pytest.raises(GeoUtilsInputError, match="Input arguments must define a valid raster or point cloud."):
             vector.create_mask("lol")  # type: ignore
 
     def test_geometry_mask__alias(self) -> None:

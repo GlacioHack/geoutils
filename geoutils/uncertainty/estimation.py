@@ -20,7 +20,6 @@
 
 from __future__ import annotations
 
-import warnings
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
@@ -30,6 +29,7 @@ import numpy as np
 import xarray as xr
 
 from geoutils._dispatch import (
+    _check_valid_data,
     _get_pointcloud_interface,
     _get_raster_interface,
     _is_pointcloud,
@@ -37,6 +37,7 @@ from geoutils._dispatch import (
     is_dask_array,
 )
 from geoutils._typing import NDArrayNum
+from geoutils.exceptions import _warn
 from geoutils.stats.variography import Variogram, VariogramModel
 from geoutils.uncertainty.error_structure import (
     ErrorComponent,
@@ -293,8 +294,7 @@ def _estimate_total_magnitude(
     sampled_interface = raster_interface if raster else _get_pointcloud_interface(sampled)
     value_selector = 1 if raster else "self"
     valid_count = int(sampled_interface.stats("validcount", values=value_selector, mp_config=mp_config))
-    if valid_count < 2:
-        raise ValueError("At least two finite error proxy observations are required.")
+    _check_valid_data(valid_count, minimum=2, message="At least two finite error proxy observations are required.")
     grouped_subsample = 1 if isinstance(subsample, (int, np.integer)) and subsample >= valid_count else subsample
 
     # Use the direct spread when no variable magnitude was requested
@@ -627,9 +627,8 @@ def _build_error_components(
         for first, second in zip(significant_positions[:-1], significant_positions[1:])
     )
     if crossed_forms:
-        warnings.warn(
+        _warn(
             "Fitted nested variogram ranges crossed; assigning their contributions from short to long range.",
-            UserWarning,
         )
     ordered_ranges = fitted_ranges[fitted_order]
     ordered_sills = fitted_sills[fitted_order]
@@ -673,8 +672,9 @@ def _build_error_components(
 
         # Reserve five percent of variance for the variable component in every supported bin
         magnitudes = _magnitude_bin_values(total_magnitude)
-        if magnitudes.size == 0:
-            raise ValueError("Variable magnitude contains no finite values at supported bin centers.")
+        _check_valid_data(
+            magnitudes.size, message="Variable magnitude contains no finite values at supported bin centers."
+        )
         maximum_fixed = 0.95 * float(np.min(magnitudes)) ** 2
         if fixed_variance > maximum_fixed:
             factor = maximum_fixed / fixed_variance
@@ -779,20 +779,26 @@ def _estimate_correlation(
     if len(ranges) > 1 and any(second / first < 1.5 for first, second in zip(ranges[:-1], ranges[1:])):
         messages.append("Some fitted correlation ranges overlap and their contributions may be weakly identified.")
 
-    # Finally, we flag a long correlation range near the sampled extent, where it may be difficult to distinguish from
-    # an actual trend in the data
+    # Finally, we flag a long correlation range near twice the sampled extent, where it may be difficult to distinguish
+    # from an actual trend in the data
     # Use the bins that entered fitting, excluding sparse or missing tail bins
     valid = np.isfinite(empirical.lags) & np.isfinite(empirical.semivariance)
     valid &= empirical.counts >= fit_options["min_count"]
     sampled_maximum = float(np.max(empirical.lags[valid])) if np.any(valid) else np.nan
-    # Warn within 2% of the usable limit to detect ranges pinned at the fit boundary
-    if ranges and np.isfinite(sampled_maximum) and ranges[-1] >= 0.98 * sampled_maximum:
+    # Warn when the correlation range reaches twice the largest lag used for fitting
+    # Allow numerical tolerance because the optimizer fits strictly inside its bounds
+    range_limit = 2 * sampled_maximum
+    if (
+        ranges
+        and np.isfinite(sampled_maximum)
+        and (ranges[-1] >= range_limit or np.isclose(ranges[-1], range_limit, rtol=1e-6, atol=0))
+    ):
         messages.append(
-            "The longest correlation range reaches the usable lag limit; "
-            "sample longer distances to distinguish correlation from a trend."
+            "The longest correlation range is near or beyond twice the distance of the last variogram bin "
+            "used for fitting; sample pairs at longer distances to distinguish correlation from a trend."
         )
     for message in messages:
-        warnings.warn(message, UserWarning)
+        _warn(message)
 
     return fitted_components, empirical, messages
 

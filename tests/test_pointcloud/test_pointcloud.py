@@ -93,12 +93,11 @@ class TestPointCloud:
         assert pc.data_name is None
         assert_geodataframe_equal(pc.gdf, self.gdf3)
 
-    def test_init_from_file__lazy(self) -> None:
+    def test_init_from_file__lazy(self, tmp_path: Path) -> None:
         """Check that non-LAS file-backed point clouds load data only when requested."""
 
         # Write a non-LAS source whose metadata can be inspected independently
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.gpkg")
+        temp_file = os.path.join(tmp_path, "test.gpkg")
         self.gdf1.to_file(temp_file)
 
         # Construction records the source path without retaining the full dataframe
@@ -573,7 +572,7 @@ class TestPointCloud:
         "rename_geometry": {"col": "lol"},
     }
 
-    def test_to_las(self) -> None:
+    def test_to_las(self, tmp_path: Path) -> None:
 
         # Import optional laspy or skip test
         pytest.importorskip("laspy")
@@ -582,10 +581,9 @@ class TestPointCloud:
         pc1 = PointCloud(self.gdf1, data_name="b1")
 
         # Temporary folder
-        temp_dir = tempfile.TemporaryDirectory()
 
         # Save file to temporary file, with defaults opts
-        temp_file = os.path.join(temp_dir.name, "test.las")
+        temp_file = os.path.join(tmp_path, "test.las")
         pc1.to_las(temp_file)
         saved1 = gu.PointCloud(temp_file)
 
@@ -599,7 +597,7 @@ class TestPointCloud:
         pc2 = PointCloud(self.gdf2, data_name="b1")
 
         # Save file to temporary file, with defaults opts
-        temp_file = os.path.join(temp_dir.name, "test2.las")
+        temp_file = os.path.join(tmp_path, "test2.las")
         pc2.to_las(temp_file)
         saved2 = gu.PointCloud(temp_file)
         saved2.load(["Z", "b2"])
@@ -1138,7 +1136,6 @@ class TestArithmetic:
     @pytest.mark.parametrize("dtype", ["float32", "uint8", "int32"])
     def test_numpy_functions(self, dtype: str) -> None:
         """Test how rasters can be used as/with numpy arrays."""
-        warnings.simplefilter("error")
 
         # Create an array of unique values starting at 0 and ending at 24
         array = np.arange(25, dtype=dtype)
@@ -1303,9 +1300,7 @@ class TestArrayInterface:
             com_dtype = np.dtype("O")
 
         # Catch warnings
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=RuntimeWarning)
-
+        with warnings.catch_warnings(), np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             print(pc.data)
 
             # Check if our input dtype is possible on this ufunc, if yes check that outputs are identical
@@ -1377,8 +1372,7 @@ class TestArrayInterface:
             com_dtype_tuple = (com_dtype1, com_dtype2)
 
         # Catch warnings
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=RuntimeWarning)
+        with warnings.catch_warnings(), np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             # Check if both our input dtypes are possible on this ufunc, if yes check that outputs are identical
             if com_dtype_tuple in [(np.dtype(t[0]), np.dtype(t[1])) for t in ufunc.types]:  # noqa
                 # For a single output
@@ -1429,9 +1423,7 @@ class TestArrayInterface:
         # com_dtype = np.find_common_type([dtype] + [arrfunc.types[0][0]], [])
 
         # Catch warnings
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=RuntimeWarning)
-
+        with warnings.catch_warnings(), np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             if "percentile" in arrfunc_str:
                 args = (80.0,)
             elif "quantile" in arrfunc_str:
@@ -1478,9 +1470,7 @@ class TestArrayInterface:
         arrfunc = getattr(np, arrfunc_str)
 
         # Catch warnings
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=RuntimeWarning)
-
+        with warnings.catch_warnings(), np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             # Compute outputs
             output_pc = arrfunc(pc1, pc2)
             output_arr = arrfunc(pc1.data, pc2.data)

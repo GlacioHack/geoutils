@@ -8,8 +8,8 @@ import datetime
 import datetime as dt
 import os
 import sys
-import tempfile
 from io import StringIO
+from pathlib import Path
 
 import pytest
 
@@ -70,16 +70,13 @@ class TestSatImg:
         assert len(output2) == 0
 
     @pytest.mark.parametrize("example", [landsat_b4, aster_dem])
-    def test_save_tags(self, example: str) -> None:
+    def test_save_tags(self, tmp_path: Path, example: str) -> None:
         """Check that the metadata read is saved in tags of raster metadata."""
 
         rast = gu.Raster(example, parse_sensor_metadata=True)
 
-        # Temporary folder
-        temp_dir = tempfile.TemporaryDirectory()
-
         # Save file to temporary file, with defaults opts
-        temp_file = os.path.join(temp_dir.name, "test.tif")
+        temp_file = os.path.join(tmp_path, "test.tif")
         rast.to_file(temp_file)
         saved = gu.Raster(temp_file)
         saved_tags = saved.tags

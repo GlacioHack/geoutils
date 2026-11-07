@@ -359,9 +359,7 @@ class TestDataArrayPointCloudAccessor:
         )
 
         # We grid the points
-        raster = ds.pc.grid(
-            grid_coords=(np.array([0, 1]), np.array([0, 1])), resampling="nearest", dist_nodata_pixel=10
-        )
+        raster = ds.pc.grid(grid_coords=(np.array([0, 1]), np.array([0, 1])), resampling="nearest", radius=10)
 
         # And check raster output is a DataArray (that converts to a Raster)
         assert isinstance(raster, xr.DataArray)

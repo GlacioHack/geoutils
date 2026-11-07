@@ -26,6 +26,7 @@ import numpy as np
 from scipy.ndimage import zoom
 
 from geoutils._typing import NDArrayNum
+from geoutils.exceptions import InvalidShapeError
 
 
 def _get_closest_rectangle(size: int) -> tuple[int, int]:
@@ -90,7 +91,7 @@ def subdivide_array(shape: tuple[int, ...], count: int) -> NDArrayNum:
         raise ValueError(f"Shape '{shape}' size ({size}) is smaller than 'count' ({count}).")
 
     if len(shape) != 2:
-        raise ValueError(f"Expected a 2D shape, got {len(shape)}D shape: {shape}")
+        raise InvalidShapeError(f"Expected a 2D shape, got {len(shape)}D shape: {shape}")
 
     # Generate a small grid of indices, with the same unique count as 'count'
     rect = _get_closest_rectangle(count)

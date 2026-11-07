@@ -3,7 +3,6 @@ from __future__ import annotations
 import os.path
 import re
 import sys
-import tempfile
 import warnings
 from importlib.util import find_spec
 from pathlib import Path
@@ -36,7 +35,7 @@ from geoutils.operators.interpolator import (
 )
 from geoutils.operators.nodata import NodataChoice
 from geoutils.operators.reducer import Mean, Median, Sum
-from geoutils.projtools import reproject_to_latlon
+from geoutils.projtools import _affine_matmul, reproject_to_latlon
 from geoutils.stats.variography import VariogramModel
 from tests.operator_helpers import (
     LocalMeanInterpolator,
@@ -141,7 +140,7 @@ class TestResampling:
         # Query centers and fractional positions using GDAL's corner-based pixel coordinates
         pixel_x = np.array([1.5, 3.25, 5.8, 7.5])
         pixel_y = np.array([1.5, 2.7, 4.2, 5.5])
-        x, y = transform * (pixel_x, pixel_y)
+        x, y = _affine_matmul(transform, (pixel_x, pixel_y))
         raster = gu.Raster(filename)
         actual = raster.interp_at_points((x, y), method=method, as_array=True)
         with gdal.ExceptionMgr():
@@ -907,6 +906,68 @@ class TestInterpPointsChunked:
         assert gu._dispatch.is_dask_array(chunked.data)
         assert gu._dispatch.is_dask_array(actual)
 
+    @pytest.mark.parametrize("chunks", [(7, 9), (11, 6), (40, 44)])
+    @pytest.mark.parametrize("offset", [(0, 0), (0.123, 0.789), (-0.2, -0.3)])
+    def test_interp_at_points__rotated_grid_exact_edges(
+        self, chunks: tuple[int, int], offset: tuple[float, float]
+    ) -> None:
+        """Checks that Dask and in-memory linear interpolation match exactly on a rotated grid."""
+
+        # Create a rotated raster
+        rows, columns = np.mgrid[:40, :44]
+        values = 5 * np.sin(columns / 7) + 3 * np.cos(rows / 6) + 2 * np.sin((columns + rows) / 11)
+        transform = Affine(2, 0, 500000, 0, -2, 7000000) @ Affine.rotation(10)
+        raster = gu.Raster.from_array(values, transform, 32632, nodata=np.nan)
+        points = raster.ij2xy(rows.ravel() + offset[0], columns.ravel() + offset[1])
+
+        # Include shorter edge chunks
+        source = raster.to_xarray().chunk({"y": chunks[0], "x": chunks[1]})
+        graph = source.data
+
+        # Interpolate in memory and with Dask
+        expected = raster.interp_at_points(points, method="linear", as_array=True)
+        actual = source.rst.interp_at_points(points, method="linear", as_array=True)
+
+        # Check exact values and laziness
+        assert not source.rst.is_loaded and gu._dispatch.is_dask_array(actual)
+        np.testing.assert_array_equal(actual.compute(), expected)
+        assert source.data is graph and not source.rst.is_loaded
+        assert gu._dispatch.is_dask_array(actual)
+
+    @pytest.mark.parametrize("load_data", [False, True])
+    @pytest.mark.parametrize("band", [1, 2])
+    @pytest.mark.parametrize("method", ["nearest", "linear"])
+    def test_interp_at_points__multiprocessing_split_band(
+        self, tmp_path: Path, mp_cluster: MpCluster, load_data: bool, band: int, method: str
+    ) -> None:
+        """Checks that multiprocessing samples the correct split band and preserves its loading and metadata."""
+
+        # Write distinct band values
+        values = np.arange(42, dtype=float).reshape(6, 7)
+        raster = gu.Raster.from_array(np.stack((values, values + 100)), Affine(2, 0, 100, 0, -3, 200), 32632)
+        filename = tmp_path / "split-bands.tif"
+        raster.to_file(filename)
+
+        source = gu.Raster(filename, load_data=load_data)
+        selected = source.split_bands(bands=band, deep=False)[0]
+        original_bands = selected.bands
+
+        # Calculate the in-memory reference
+        points = raster.ij2xy(np.array([0.2, 2.7, 4.3]), np.array([1.2, 3.4, 5.1]))
+        expected = raster.split_bands(bands=band, deep=False)[0].interp_at_points(points, method=method, as_array=True)
+
+        # Run with shorter edge tiles
+        assert source.is_loaded == selected.is_loaded == load_data
+        actual = selected.interp_at_points(
+            points, method=method, as_array=True, mp_config=MultiprocConfig(chunks=(3, 4), cluster=mp_cluster)
+        )
+
+        # Check values, loading and metadata
+        np.testing.assert_array_equal(actual, expected)
+        assert source.is_loaded == selected.is_loaded == load_data
+        assert source.bands == (1, 2) and selected.bands == original_bands
+        assert selected.transform == raster.transform and selected.crs == raster.crs
+
     @pytest.mark.parametrize("backend", ["eager", "dask", "multiprocessing"])
     @pytest.mark.parametrize("dtype", ["int16", "float64"])
     @pytest.mark.parametrize(
@@ -1451,6 +1512,7 @@ class TestInterpPointsChunked:
     @pytest.mark.parametrize("as_object_type", ["dataarray", "geodataframe"])
     def test_interp_points__dask_pointcloud_input(
         self,
+        tmp_path: Path,
         as_object_type: Literal["dataarray", "geodataframe"],
         lazy_test_files_tiny: list[str],
         monkeypatch: pytest.MonkeyPatch,
@@ -1474,8 +1536,7 @@ class TestInterpPointsChunked:
         points = gpd.GeoDataFrame({"id": [1, 2, 3]}, geometry=gpd.points_from_xy(x, y), crs=raster.crs)
 
         # Open the points in two lazy partitions through the public helper
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "points.gpkg")
+        temp_file = os.path.join(tmp_path, "points.gpkg")
         points.to_file(temp_file)
         dask_points = gu.open_pointcloud(temp_file, data_name="id", chunks=2, as_object_type=as_object_type)
 

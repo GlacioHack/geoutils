@@ -21,7 +21,6 @@
 from __future__ import annotations
 
 import math
-import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
@@ -37,6 +36,7 @@ from scipy.stats.mstats import mquantiles
 from geoutils._dispatch import is_dask_array
 from geoutils._misc import import_optional
 from geoutils._typing import NDArrayNum
+from geoutils.exceptions import _warn
 from geoutils.multiproc.readers import _ValueReader
 from geoutils.operators.base import LocalData
 from geoutils.operators.reducer import (
@@ -329,7 +329,7 @@ def _normalize_statistics(
     if unknown and grouped:
         raise ValueError(f"Unknown statistic names: {unknown!r}.")
     for statistic in unknown:
-        warnings.warn(f"Statistic name {statistic} is not recognized", category=UserWarning)
+        _warn(f"Statistic name {statistic} is not recognized")
     single = (
         isinstance(statistics, Reducer) or callable(statistics) or isinstance(statistics, str) and statistics != "all"
     )
@@ -535,7 +535,7 @@ def _reduce_complete_values(data: NDArrayNum, aliases: set[str]) -> tuple[dict[s
 
     # Report empty inputs consistently and avoid calling estimators that require at least one valid value
     if final_count == 0:
-        warnings.warn("Empty raster, returns NaN for all stats", category=UserWarning)
+        _warn("Empty raster, returns NaN for all stats")
     result = {alias: functions[alias](data) if final_count else np.nan for alias in aliases}
     return result, final_count
 
@@ -1560,7 +1560,12 @@ def _groupby_reduce_flox(
     # Use one implicit group for global statistics and preserve the prepared IDs for grouped statistics
     global_reduction = group_ids is None
     labels = np.arange(total_groups, dtype=np.int64)
-    codes = module.zeros_like(values[0], dtype=np.int64) if global_reduction else group_ids
+    if global_reduction and use_dask:
+        # Integer group IDs do not use a masked array's NaN fill value
+        chunks = getattr(values[0], "chunks", "auto")
+        codes = module.zeros(values[0].shape, chunks=chunks, dtype=np.int64)
+    else:
+        codes = module.zeros_like(values[0], dtype=np.int64) if global_reduction else group_ids
     assert codes is not None
     if global_reduction and method in {"blockwise", "cohorts"}:
         codes = np.broadcast_to(np.int64(0), values[0].shape)

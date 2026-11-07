@@ -20,7 +20,6 @@
 
 from __future__ import annotations
 
-import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
@@ -33,6 +32,7 @@ from scipy.spatial.distance import cdist
 from scipy.special import ndtri
 
 from geoutils._misc import import_optional
+from geoutils.exceptions import _warn
 from geoutils.stats.variography import Variogram, VariogramModel
 from geoutils.uncertainty.predictors import _grouped_interpolator
 
@@ -244,11 +244,9 @@ class ErrorMagnitude:
                     )
                 statistic = available[0]
                 if len(available) > 1:
-                    warnings.warn(
+                    _warn(
                         "Both 'std' and 'nmad' are defined for the selected variable; using 'std'. "
                         "Pass statistic explicitly to choose the spread estimate.",
-                        UserWarning,
-                        stacklevel=3,
                     )
                 object.__setattr__(self, "statistic", statistic)
 

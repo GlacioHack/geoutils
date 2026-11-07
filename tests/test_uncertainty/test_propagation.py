@@ -6,12 +6,14 @@ from collections.abc import Callable
 from typing import Any, Literal
 from unittest.mock import Mock
 
+import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pytest
 import rasterio as rio
 
 import geoutils as gu
+from geoutils._dispatch import _get_pointcloud_interface, _get_raster_interface
 from geoutils.operators import Interpolator, LinearCoefficients, LocalData, Reducer
 from geoutils.operators.neighbours import GridNeighbours, PointNeighbours
 from geoutils.operators.reducer import Mean, Sum
@@ -577,7 +579,7 @@ class TestSpatialPropagation:
         points = gu.PointCloud.from_xyz([0.0, 4.0], [1.0, 0.0], [10.0, 20.0], crs=32631)
         reference = gu.Raster.from_array(np.zeros((1, 1)), rio.transform.from_origin(-5, 0.5, 10, 1), crs=32631)
         errors = gu.ErrorStructure([gu.ErrorComponent("uncorrelated", 0.5)])
-        kwargs = {"ref": reference, "resampling": method, "dist_nodata_pixel": 2, "engine": engine}
+        kwargs = {"ref": reference, "resampling": method, "radius": 2, "engine": engine}
 
         # We grid
         expected = points.grid(**kwargs)
@@ -726,7 +728,7 @@ class TestSpatialPropagation:
             points = gu.PointCloud.from_xyz(x.ravel(), y.ravel(), values.ravel(), crs=32632)
             operator = operator_type(neighborhood=PointNeighbours(max_points=9))
             spatial_method = points.grid
-            kwargs: dict[str, Any] = {"ref": reference, "resampling": operator, "dist_nodata_pixel": 0}
+            kwargs: dict[str, Any] = {"ref": reference, "resampling": operator, "radius": 0}
         else:
             operator = operator_type(neighborhood=GridNeighbours(size=3))
             spatial_method = getattr(raster, operation)
@@ -901,6 +903,82 @@ class TestPropagationSummary:
         assert ("..." in text) == (size > 0)
         np.testing.assert_array_equal(summary.estimate, np.arange(size))
         assert np.all(np.isnan(summary.std))
+
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            "raster",
+            "raster_array",
+            "point_column",
+            "point_geometry",
+            "dataframe_column",
+            "dataframe_geometry",
+            "point_array",
+        ],
+    )
+    def test_summary__spatial_families(self, kind: str) -> None:
+        """Checks that bias and variance preserve spatial objects and normal marginals use selected elevations."""
+
+        # Create rasters or selected point elevations
+        if kind.startswith("raster"):
+            raster = gu.Raster.from_array(np.arange(4.0).reshape(2, 2), rio.Affine(2, 0, 0, 0, -2, 4), 32632)
+            source: Any = raster.to_xarray() if kind == "raster_array" else raster
+            interface = _get_raster_interface(source)
+        else:
+            frame = gpd.GeoDataFrame(
+                {"height": [1.0, 2.0, 3.0, 4.0], "quality": [8, 6, 4, 2]},
+                geometry=gpd.points_from_xy([0, 1, 2, 3], [4, 3, 2, 1], [101, 102, 103, 104]),
+                index=["c", "a", "d", "b"],
+                crs=32632,
+            )
+            points = gu.PointCloud(frame, data_name=None if kind.endswith("geometry") else "height")
+            source = points
+            if kind.startswith("dataframe"):
+                source = points.gdf
+            elif kind == "point_array":
+                source = points.to_xarray()
+            interface = _get_pointcloud_interface(source)
+        values = np.asarray(interface.data, dtype=float)
+        labels = pd.Index(["first", "last"], name="output")
+        selection = pd.DataFrame({"flat_index": [0, 3], "estimate": values.ravel()[[0, 3]]}, index=labels)
+        summary = gu.PropagationSummary(
+            estimate=source,
+            mean=interface.copy(new_array=values + 1),
+            std=interface.copy(new_array=np.full_like(values, 2)),
+            error_structure=gu.ErrorStructure([gu.ErrorComponent("measurement", 2)]),
+            method="analytical",
+            selection=selection,
+            metadata={"output_distribution": "normal"},
+        )
+
+        # Check descriptors and spatial metadata
+        for result, expected in ((summary.bias, 1), (summary.variance, 4)):
+            assert type(result) is type(source)
+            raster_result = _get_raster_interface(result)
+            result_interface = raster_result if raster_result is not None else _get_pointcloud_interface(result)
+            np.testing.assert_array_equal(result_interface.data, np.full_like(values, expected))
+            assert result_interface.crs == interface.crs
+            if raster_result is not None:
+                assert result_interface.transform == interface.transform
+            else:
+                np.testing.assert_array_equal(result_interface.to_xyz()[:2], interface.to_xyz()[:2])
+                np.testing.assert_array_equal(result_interface._get_column_values("quality"), [8, 6, 4, 2])
+                assert result_interface.data_name == interface.data_name
+                original = interface._dataset
+                calculated = result_interface._dataset
+                if interface._is_xr:
+                    dimension = next(iter(original.dims))
+                    pd.testing.assert_index_equal(calculated.get_index(dimension), original.get_index(dimension))
+                else:
+                    pd.testing.assert_index_equal(calculated.index, original.index)
+
+        # Check selected normal marginals
+        expected_mean = values.ravel()[[0, 3]] + 1
+        np.testing.assert_array_equal(summary.quantile(0.5), expected_mean)
+        interval = summary.interval(0.95)
+        np.testing.assert_allclose(interval["lower"], expected_mean - 1.96 * 2, atol=0.001)
+        np.testing.assert_allclose(interval["upper"], expected_mean + 1.96 * 2, atol=0.001)
+        assert summary.marginal("first") == {"family": "normal", "mean": expected_mean[0], "std": 2, "status": "exact"}
 
     def test_propagsummary__interval(self) -> None:
         """Checks the confidence interval method of PropagationSummary."""

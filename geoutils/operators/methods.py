@@ -24,7 +24,9 @@ from collections import OrderedDict
 from copy import copy
 from typing import Any, Callable, Literal, cast, get_args
 
+from geoutils._dispatch import _check_resampling
 from geoutils._typing import ResamplingMethod
+from geoutils.exceptions import InvalidResamplingError
 from geoutils.operators.interpolator import (
     Interpolator,
     InverseDistance,
@@ -82,7 +84,7 @@ def _resampling_keyword(method: Any, resampling: Any, *, default: Any = None) ->
 
     if method is not None and resampling is not None:
         if method is not resampling and method != resampling:
-            raise ValueError("Pass only one of 'resampling' and the legacy method argument.")
+            raise InvalidResamplingError("Pass only one of 'resampling' and the legacy method argument.")
     selected = resampling if resampling is not None else method
     return default if selected is None else selected
 
@@ -96,10 +98,9 @@ def _resampling_backend(
 ) -> ResamplingBackend:
     """Select an available backend and check its legacy engine alias before calculating values."""
 
-    if backend not in get_args(ResamplingBackend):
-        raise ValueError(f"Unknown resampling backend: {backend!r}.")
+    _check_resampling(backend, get_args(ResamplingBackend), name="resampling backend")
     if engine is not None and backend != "auto" and backend != engine:
-        raise ValueError("Pass only one of 'backend' and the legacy 'engine' argument.")
+        raise InvalidResamplingError("Pass only one of 'backend' and the legacy 'engine' argument.")
     if engine is not None:
         selected = engine
     elif backend == "auto":
@@ -108,7 +109,7 @@ def _resampling_backend(
         selected = backend
     if selected not in allowed:
         choices = ", ".join(repr(name) for name in allowed)
-        raise ValueError(f"Backend {selected!r} is unavailable for this operation. Choose {choices}.")
+        raise InvalidResamplingError(f"Backend {selected!r} is unavailable for this operation. Choose {choices}.")
     return cast(ResamplingBackend, selected)
 
 
@@ -128,36 +129,37 @@ def _resampling_operator(
 
     # Kriging has its own solvers, including when an advanced object was supplied
     if (isinstance(method, Kriging) or method == "kriging") and backend not in ("auto", "gstools", "gpytorch"):
-        raise ValueError("Kriging requires backend='gstools', 'gpytorch' or 'auto'.")
+        raise InvalidResamplingError("Kriging requires backend='gstools', 'gpytorch' or 'auto'.")
 
     # Preserve advanced operators and reject constructor options that would change their configuration
     if isinstance(method, (Interpolator, Reducer)):
         if options:
-            raise ValueError("Method settings apply to a string method; configure an operator object directly.")
+            raise InvalidResamplingError(
+                "Method settings apply to a string method; configure an operator object directly."
+            )
         if isinstance(method, Kriging) and backend in ("gstools", "gpytorch") and backend != method.backend:
             configured = copy(method)
             configured.backend = cast(Literal["gstools", "gpytorch"], backend)
             configured._coefficient_cache = OrderedDict()
             return configured
         if backend in ("gstools", "gpytorch") and not isinstance(method, Kriging):
-            raise ValueError(f"Backend {backend!r} requires resampling='kriging'.")
+            raise InvalidResamplingError(f"Backend {backend!r} requires resampling='kriging'.")
         return method
 
     # Normalize equivalent names before selecting an interpolation or reduction calculation
-    if method not in get_args(ResamplingMethod):
-        raise ValueError(f"Unknown resampling method: {method!r}.")
+    _check_resampling(method)
     name = _METHOD_ALIASES.get(method, method)
     parameters = {} if options is None else options.copy()
     if backend in ("gstools", "gpytorch") and name != "kriging":
-        raise ValueError(f"Backend {backend!r} requires resampling='kriging'.")
+        raise InvalidResamplingError(f"Backend {backend!r} requires resampling='kriging'.")
 
     # Kriging needs an explicit model; IDW and quantiles use their existing constructor options
     if name == "kriging":
         if "model" not in parameters:
-            raise ValueError("resampling='kriging' requires a fitted model in resampling_kwargs['model'].")
+            raise InvalidResamplingError("resampling='kriging' requires a fitted model in resampling_kwargs['model'].")
         if backend in ("gstools", "gpytorch"):
             if "backend" in parameters and parameters["backend"] != backend:
-                raise ValueError("The kriging backend conflicts with resampling_kwargs['backend'].")
+                raise InvalidResamplingError("The kriging backend conflicts with resampling_kwargs['backend'].")
             parameters["backend"] = backend
         return Kriging(**parameters)
     if name == "idw":
@@ -167,14 +169,14 @@ def _resampling_operator(
         if name in ("q1", "q3"):
             parameters.setdefault("q", 0.25 if name == "q1" else 0.75)
         if name == "quantile" and "q" not in parameters:
-            raise ValueError("The quantile method requires q in its method settings.")
+            raise InvalidResamplingError("The quantile method requires q in its method settings.")
         constructor: Callable[..., Reducer] = _REDUCER_TYPES[name]
         return constructor(**parameters)
 
     # Raster convolution names and SciPy spline names describe distinct calculations
     if name in ("cubic_convolution", "cubic_spline", "lanczos"):
         if parameters:
-            raise ValueError("Raster convolution does not accept resampling_kwargs.")
+            raise InvalidResamplingError("Raster convolution does not accept resampling_kwargs.")
         kernel = "cubic" if name == "cubic_convolution" else name
         return RasterConvolution(cast(Literal["cubic", "cubic_spline", "lanczos"], kernel))
     operator = _resolve_interpolator(cast(ScipyInterpolationMethod, name))

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os.path
-import tempfile
+from pathlib import Path
 from typing import Any
 
 import geopandas as gpd
@@ -154,7 +154,7 @@ class TestVectorAccessor:
         proximity = ds.vct.proximity(size=(5, 5))
         assert isinstance(proximity, xr.DataArray)
 
-    def test_create_mask_points__dask_geopandas(self) -> None:
+    def test_create_mask_points__dask_geopandas(self, tmp_path: Path) -> None:
         """Checks that create_mask() creates lazy Dask-GeoPandas and Dask array point masks."""
 
         dgpd = pytest.importorskip("dask_geopandas")
@@ -169,8 +169,7 @@ class TestVectorAccessor:
         )
 
         # Open the points in two partitions to exercise the Dask mask path
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "points.gpkg")
+        temp_file = os.path.join(tmp_path, "points.gpkg")
         points.to_file(temp_file)
         dask_points = gu.open_pointcloud(temp_file, data_name="id", chunks=2, as_object_type="geodataframe")
 

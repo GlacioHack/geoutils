@@ -13,6 +13,7 @@ from geoutils.multiproc.chunked import (
     iter_chunk_slices,
     normalize_chunks,
 )
+from geoutils.projtools import _affine_matmul
 
 
 class TestArrayChunks:
@@ -90,7 +91,9 @@ class TestChunkedGeoGrid:
         """Checks that each block origin follows both axes of a rotated raster grid."""
 
         # Uneven final chunks expose the pixel offsets of the right and bottom blocks
-        transform = Affine.translation(500_000, 5_100_000) * Affine.rotation(17) * Affine.scale(100, -150)
+        transform = _affine_matmul(
+            _affine_matmul(Affine.translation(500_000, 5_100_000), Affine.rotation(17)), Affine.scale(100, -150)
+        )
         grid = GeoGrid(transform=transform, shape=(5, 7), crs=CRS.from_epsg(32633))
         chunked = ChunkedGeoGrid(grid, chunks=((2, 3), (3, 3, 1)))
         blocks = chunked.get_blocks_as_geogrids()
@@ -98,7 +101,7 @@ class TestChunkedGeoGrid:
         # Translate in pixel coordinates so rotation changes both X and Y at each block origin
         locations = chunked.get_block_locations()
         for block, location in zip(blocks, locations):
-            expected_transform = transform * Affine.translation(location["xs"], location["ys"])
+            expected_transform = _affine_matmul(transform, Affine.translation(location["xs"], location["ys"]))
             expected_shape = (location["ye"] - location["ys"], location["xe"] - location["xs"])
             assert block.transform == expected_transform
             assert block.shape == expected_shape

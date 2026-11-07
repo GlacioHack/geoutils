@@ -20,7 +20,6 @@
 
 from __future__ import annotations
 
-import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -50,6 +49,7 @@ from geoutils._dispatch import (
 )
 from geoutils._misc import _deprecate_keyword, import_optional
 from geoutils._typing import ArrayLike, DTypeLike, NDArrayBool, NDArrayNum, Number
+from geoutils.exceptions import GeoUtilsDeprecationWarning, InvalidShapeError, _warn
 from geoutils.interface.gridding import (
     GriddingEngine,
     GriddingMethod,
@@ -145,16 +145,12 @@ class PointCloudBase(ABC):
     def data_column(self) -> str | None:
         """Deprecated alias of data_name."""
 
-        warnings.warn(
-            "The 'data_column' property is deprecated; use 'data_name' instead.", DeprecationWarning, stacklevel=2
-        )
+        _warn("The 'data_column' property is deprecated; use 'data_name' instead.", GeoUtilsDeprecationWarning)
         return self.data_name
 
     @data_column.setter
     def data_column(self, new_data_column: str | None) -> None:
-        warnings.warn(
-            "The 'data_column' property is deprecated; use 'data_name' instead.", DeprecationWarning, stacklevel=2
-        )
+        _warn("The 'data_column' property is deprecated; use 'data_name' instead.", GeoUtilsDeprecationWarning)
         self.data_name = new_data_column  # type: ignore[misc]
 
     @abstractmethod
@@ -170,10 +166,9 @@ class PointCloudBase(ABC):
     def set_data_column(self, new_data_column: str | None) -> Any:
         """Deprecated alias of set_data_name()."""
 
-        warnings.warn(
+        _warn(
             "The 'set_data_column()' method is deprecated; use 'set_data_name()' instead.",
-            DeprecationWarning,
-            stacklevel=2,
+            GeoUtilsDeprecationWarning,
         )
         return self.set_data_name(new_data_name=new_data_column)
 
@@ -269,7 +264,7 @@ class PointCloudBase(ABC):
         """
 
         if data.ndim != 2 or (data.shape[0] != 3 and data.shape[1] != 3):
-            raise ValueError("Array must be of shape 3xN or Nx3.")
+            raise InvalidShapeError("Array must be of shape 3xN or Nx3.")
 
         if data.shape[0] != 3:
             data = data.T
@@ -508,7 +503,7 @@ class PointCloudBase(ABC):
     ) -> Any:
         """Call stats() with the legacy argument names; deprecated in favor of stats()."""
 
-        warnings.warn("get_stats() is deprecated; use stats() instead.", DeprecationWarning, stacklevel=2)
+        _warn("get_stats() is deprecated; use stats() instead.", GeoUtilsDeprecationWarning)
         return _stats(self, statistics=stats_name)
 
     @overload
@@ -1470,10 +1465,9 @@ class GeometryPointCloudBase(PointCloudBase, VectorBase):
             if ref is not None:
                 raise TypeError("plot() received both 'ref' and deprecated 'ref_crs'; use only 'ref'.")
             deprecated_ref = kwargs.pop("ref_crs")
-            warnings.warn(
+            _warn(
                 "Argument 'ref_crs' is deprecated; use 'ref' instead.",
-                DeprecationWarning,
-                stacklevel=2,
+                GeoUtilsDeprecationWarning,
             )
             # Preserve the old behavior, which matched only the CRS and did not use reference bounds
             if deprecated_ref is not None:

@@ -70,13 +70,10 @@ def from_array(
         raise ValueError("Argument 'as_object_type' must be 'dataarray' or 'dataset'.")
     if not isinstance(transform, Affine):
         transform = Affine(*transform)
-    raster_crs = None if crs is None else CRS.from_user_input(crs)
     metadata = {} if tags is None else tags.copy()
 
     # We dispatch to accessor construction
-    raster = DataArrayRasterAccessor.from_array(
-        data, transform, raster_crs, nodata, area_or_point, metadata, cast_nodata
-    )
+    raster = DataArrayRasterAccessor.from_array(data, transform, crs, nodata, area_or_point, metadata, cast_nodata)
     if data_name is not None:
         raster = raster.rename(data_name)
     if as_object_type == "dataset":

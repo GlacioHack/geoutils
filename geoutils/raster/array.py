@@ -20,14 +20,14 @@
 
 from __future__ import annotations
 
-import warnings
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import xarray as xr
 
-from geoutils._dispatch import get_geo_attr, has_geo_attr
+from geoutils._dispatch import _check_same_shape, get_geo_attr, has_geo_attr
 from geoutils._typing import MArrayNum, NDArrayBool, NDArrayNum
+from geoutils.exceptions import InvalidShapeError, _warn
 
 if TYPE_CHECKING:
     from geoutils.raster.base import RasterLike, RasterType
@@ -58,7 +58,7 @@ def _selected_raster_data(raster: Any, band: int = 1, *, fill_value: float | boo
             raise ValueError("band exceeds the number of raster bands.")
         selected = data[band - 1]
     else:
-        raise ValueError("Raster values must have two spatial dimensions and an optional band dimension.")
+        raise InvalidShapeError("Raster values must have two spatial dimensions and an optional band dimension.")
 
     # Preserve unmasked integer data and promote only when missing values require NaN
     if np.ma.isMaskedArray(selected):
@@ -100,8 +100,9 @@ def _processing_mask(mask: RasterLike | NDArrayBool | None, shape: tuple[int, ..
     if isinstance(mask_data, xr.DataArray):
         mask_data = mask_data.to_numpy()
     mask_array = np.asarray(mask_data).squeeze()
-    if mask_array.shape != shape[-2:]:
-        raise ValueError(f"Mask shape {mask_array.shape} does not match raster shape {shape[-2:]}.")
+    _check_same_shape(
+        mask_array.shape, shape[-2:], f"Mask shape {mask_array.shape} does not match raster shape {shape[-2:]}."
+    )
     return mask_array.astype(bool)
 
 
@@ -112,7 +113,7 @@ def _as_bands(array: MArrayNum) -> tuple[MArrayNum, bool]:
         return array[np.newaxis, ...], True
     if array.ndim == 3:
         return array, False
-    raise ValueError("Raster processing expects a two-dimensional or multiband array.")
+    raise InvalidShapeError("Raster processing expects a two-dimensional or multiband array.")
 
 
 ##############################
@@ -159,13 +160,13 @@ def get_array_and_mask(
 
     if check_shape:
         if array.ndim > 2 and array.shape[0] > 1:
-            raise ValueError(
+            raise InvalidShapeError(
                 f"Invalid array shape given: {array.shape}.Expected 2D array or 3D array where arr.shape[0] == 1"
             )
 
     # If an occupied mask exists and a view was requested, trigger a warning.
     if not copy and np.any(getattr(array, "mask", False)):
-        warnings.warn("Copying is required to respect the mask. Returning copy. Set 'copy=True' to hide this message.")
+        _warn("Copying is required to respect the mask. Returning copy. Set 'copy=True' to hide this message.")
         copy = True
 
     # If array is of type integer and has a mask, it needs to be converted to float (to assign nans)

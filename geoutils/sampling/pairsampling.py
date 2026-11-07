@@ -21,7 +21,6 @@
 from __future__ import annotations
 
 import sqlite3
-import warnings
 import weakref
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
@@ -42,6 +41,9 @@ import xarray as xr
 from scipy.spatial import cKDTree
 
 from geoutils._dispatch import (
+    _check_same_crs,
+    _check_same_points,
+    _check_valid_data,
     _get_pointcloud_interface,
     _get_raster_interface,
     get_geo_attr,
@@ -50,6 +52,7 @@ from geoutils._dispatch import (
 )
 from geoutils._misc import import_optional
 from geoutils._typing import ArrayLike, NDArrayBool, NDArrayNum
+from geoutils.exceptions import InvalidPointsError, NoValidDataError, PointsMismatchError, _warn
 from geoutils.multiproc.chunked import iter_chunk_slices, normalize_chunks
 from geoutils.multiproc.cluster import _map_bounded
 from geoutils.multiproc.readers import (
@@ -537,12 +540,12 @@ def _point_pair_mask(
             )
 
         # Require the same coordinate system and ordered X/Y locations as ordinary point masks
-        if mask_pointcloud.crs != pointcloud.crs:
-            raise ValueError("Point value 'mask' does not share the support CRS.")
-        from geoutils.pointcloud.testing import _point_coords_equal
-
-        if not _point_coords_equal(dataframe, mask_dataframe):
-            raise ValueError("Point value 'mask' does not share the ordered support coordinates.")
+        _check_same_crs(mask_pointcloud.crs, pointcloud.crs, "Point value 'mask' does not share the support CRS.")
+        _check_same_points(
+            (dataframe.geometry.x.to_numpy(), dataframe.geometry.y.to_numpy()),
+            (mask_dataframe.geometry.x.to_numpy(), mask_dataframe.geometry.y.to_numpy()),
+            "Point value 'mask' does not share the ordered support coordinates.",
+        )
         column = mask_pointcloud.data_name
         values = np.asarray(mask_dataframe.geometry.z if column is None else mask_dataframe[column])
         if not np.issubdtype(values.dtype, np.bool_):
@@ -575,24 +578,26 @@ def _point_partition_mask(
 
     # Compare the matching rows of a Dask point mask with the source coordinates
     if isinstance(mask, _PointPairMaskData):
-        if mask.crs != pointcloud.crs:
-            raise ValueError("Point value 'mask' does not share the support CRS.")
+        _check_same_crs(mask.crs, pointcloud.crs, "Point value 'mask' does not share the support CRS.")
         mask_coordinates = mask.coordinates[rows]
-        if len(mask_coordinates) != len(dataframe) or not np.array_equal(coordinates, mask_coordinates):
-            raise ValueError("Point value 'mask' does not share the ordered support coordinates.")
+        _check_same_points(
+            coordinates, mask_coordinates, "Point value 'mask' does not share the ordered support coordinates."
+        )
         return _normalize_mask_array(mask.values[rows], (len(dataframe),))
 
     # Read ordered point masks over the same row range and check their coordinates locally
     normalized_mask = _normalize_sampling_input(mask)
     mask_pointcloud = _get_pointcloud_interface(normalized_mask)
     if mask_pointcloud is not None:
-        if mask_pointcloud.crs != pointcloud.crs:
-            raise ValueError("Point value 'mask' does not share the support CRS.")
+        _check_same_crs(mask_pointcloud.crs, pointcloud.crs, "Point value 'mask' does not share the support CRS.")
 
         if mask_pointcloud._is_xr:
             selected = mask_pointcloud._dataset.isel({mask_pointcloud._dataset.dims[0]: rows}).compute().pc
-            if not np.array_equal(np.column_stack(selected.to_xyz()[:2]), coordinates):
-                raise ValueError("Point value 'mask' does not share the ordered support coordinates.")
+            _check_same_points(
+                np.column_stack(selected.to_xyz()[:2]),
+                coordinates,
+                "Point value 'mask' does not share the ordered support coordinates.",
+            )
             return _normalize_mask_array(selected.data, (len(dataframe),))
 
         mask_reader = _reader_from_source(mask_pointcloud, None, pointcloud, mp_config)
@@ -604,8 +609,9 @@ def _point_partition_mask(
             mask_dataframe = mask_pointcloud._dataset.iloc[rows]
 
         mask_coordinates = np.column_stack((mask_dataframe.geometry.x, mask_dataframe.geometry.y))
-        if not np.array_equal(coordinates, mask_coordinates):
-            raise ValueError("Point value 'mask' does not share the ordered support coordinates.")
+        _check_same_points(
+            coordinates, mask_coordinates, "Point value 'mask' does not share the ordered support coordinates."
+        )
         column = mask_pointcloud.data_name
         values = np.asarray(mask_dataframe.geometry.z if column is None else mask_dataframe[column])
         if not np.issubdtype(values.dtype, np.bool_):
@@ -746,12 +752,12 @@ def _prepare_dask_point_pair_data(pointcloud: PointCloudBase, mask: Any | None) 
         mask_size = source_size
     if mask_size != source_size:
         if mask_pointcloud is not None:
-            raise ValueError("Point value 'mask' does not share the ordered support coordinates.")
+            raise PointsMismatchError("Point value 'mask' does not share the ordered support coordinates.")
         raise ValueError("Argument ``mask`` must be boolean and contain one value per input location.")
 
     # Join finite rows for the existing global point searches
     if not value_parts or sum(len(values) for values in value_parts) < 2:
-        raise ValueError("At least two finite points are required to sample pairs.")
+        raise NoValidDataError("At least two finite points are required to sample pairs.")
     return _PointPairData(
         np.concatenate(coordinates_parts), np.concatenate(value_parts), np.concatenate(index_parts), source_size
     )
@@ -838,8 +844,7 @@ def _prepare_point_pair_data(
 
         # Allocate compact disk-backed arrays after partition counts reveal the finite point total
         valid_count = sum(count for _, count in parts)
-        if valid_count < 2:
-            raise ValueError("At least two finite points are required to sample pairs.")
+        _check_valid_data(valid_count, minimum=2, message="At least two finite points are required to sample pairs.")
         coordinates = np.memmap(directory / "coordinates.dat", mode="w+", dtype=np.float64, shape=(valid_count, 2))
         with np.load(parts[0][0]) as first_part:
             value_dtype = first_part["values"].dtype
@@ -1358,12 +1363,10 @@ class _RasterPairSampler:
         maximum_unique = n_valid * (n_valid - 1) // 2
         target = min(self.n_pairs, maximum_unique)
         if target < self.n_pairs:
-            warnings.warn(
+            _warn(
                 f"Argument ``n_pairs`` exceeds the {maximum_unique} possible finite pairs; using that maximum.",
-                UserWarning,
             )
-        if target == 0:
-            raise ValueError("At least two finite raster cells are required to sample pairs.")
+        _check_valid_data(target, message="At least two finite raster cells are required to sample pairs.")
 
         # We loop on temporary arrays by batch limit/oversampling
         count = min(self.batch_pairs, max(1, int(np.ceil(target * self.max_oversample))))
@@ -1411,14 +1414,13 @@ class _RasterPairSampler:
 
         # Report when no round found a pair with two finite values
         if remaining == target:
-            raise ValueError("No finite raster pairs could be sampled.")
+            raise NoValidDataError("No finite raster pairs could be sampled.")
 
         # Global duplicates are removed by the disk writer (if output is set)
         if output is not None:
             if output.count < target:
-                warnings.warn(
+                _warn(
                     f"Sampled {output.count} finite pairs out of {target} requested after {self.max_rounds} rounds.",
-                    UserWarning,
                 )
             return None
 
@@ -1437,9 +1439,8 @@ class _RasterPairSampler:
             assert values is not None
             pair_values[:] = [values]
         if first.size < target:
-            warnings.warn(
+            _warn(
                 f"Sampled {first.size} finite pairs out of {target} requested after {self.max_rounds} rounds.",
-                UserWarning,
             )
 
         # Calculate exact map distances for the selected pairs
@@ -1523,10 +1524,9 @@ def _random_raster_pairs(
 
     # Distinguish finding no pair from finding fewer unique pairs than requested
     count = first.size if output is None else output.count
-    if count == 0:
-        raise ValueError("No finite raster pairs could be sampled.")
+    _check_valid_data(count, message="No finite raster pairs could be sampled.")
     if count < n_pairs:
-        warnings.warn(f"Sampled {count} unique raster pairs out of {n_pairs} requested.", UserWarning)
+        _warn(f"Sampled {count} unique raster pairs out of {n_pairs} requested.")
     if output is not None:
         return None
     if pair_values is not None:
@@ -1647,7 +1647,7 @@ class _PointPairSampler:
 
         # Check coordinates and batch options before starting repeated searches
         if self.coordinates.ndim != 2 or self.coordinates.shape[1] != 2 or self.size < 2:
-            raise ValueError("Argument ``coordinates`` must contain at least two X/Y points.")
+            raise InvalidPointsError("Argument ``coordinates`` must contain at least two X/Y points.")
 
     ########################
     # NEARBY POINT SEARCH
@@ -1801,7 +1801,7 @@ class _PointPairSampler:
 
         # Distinguish finding no pair from finding fewer pairs than requested
         if remaining == self.n_pairs:
-            raise ValueError("No point pairs could be sampled within the requested distances.")
+            raise NoValidDataError("No point pairs could be sampled within the requested distances.")
         if output is not None:
             return None
         return np.concatenate(first_parts), np.concatenate(second_parts), np.concatenate(distance_parts)
@@ -1828,7 +1828,7 @@ class _PointPairSampler:
             result = self._sample_nearest_pairs(output)
             if output is not None:
                 if output.count < self.n_pairs:
-                    warnings.warn(f"Sampled {output.count} point pairs out of {self.n_pairs} requested.", UserWarning)
+                    _warn(f"Sampled {output.count} point pairs out of {self.n_pairs} requested.")
                 return None
             assert result is not None
             first, second, distances = result
@@ -1869,13 +1869,12 @@ class _PointPairSampler:
                         break
 
             # Convert the collected Python lists to numeric arrays
-            if not collected:
-                raise ValueError("No point pairs could be sampled within the requested distances.")
+            _check_valid_data(collected, message="No point pairs could be sampled within the requested distances.")
             if output is not None:
                 if first_values:
                     output.append(np.asarray(first_values), np.asarray(second_values), np.asarray(distance_values))
                 if output.count < self.n_pairs:
-                    warnings.warn(f"Sampled {output.count} point pairs out of {self.n_pairs} requested.", UserWarning)
+                    _warn(f"Sampled {output.count} point pairs out of {self.n_pairs} requested.")
                 return None
             first = np.asarray(first_values)
             second = np.asarray(second_values)
@@ -1883,7 +1882,7 @@ class _PointPairSampler:
 
         # Warn when fewer pairs were found, but return every successful pair
         if first.size < self.n_pairs:
-            warnings.warn(f"Sampled {first.size} point pairs out of {self.n_pairs} requested.", UserWarning)
+            _warn(f"Sampled {first.size} point pairs out of {self.n_pairs} requested.")
         return first, second, distances
 
 
@@ -1933,10 +1932,9 @@ def _random_point_pairs(
 
     # Return a smaller sample with a warning, but fail when no matching pair exists
     count = first.size if output is None else output.count
-    if count == 0:
-        raise ValueError("No point pairs could be sampled within the requested distances.")
+    _check_valid_data(count, message="No point pairs could be sampled within the requested distances.")
     if count < n_pairs:
-        warnings.warn(f"Sampled {count} unique point pairs out of {n_pairs} requested.", UserWarning)
+        _warn(f"Sampled {count} unique point pairs out of {n_pairs} requested.")
     if output is not None:
         return None
     distances = np.linalg.norm(coordinates[first] - coordinates[second], axis=1)
@@ -2681,8 +2679,9 @@ def _sample_point_pairs(
     with _prepare_point_pair_data(pointcloud, mask, mp_config) as pair_data:
         coordinates_valid = pair_data.coordinates
         values_valid = pair_data.values
-        if len(values_valid) < 2:
-            raise ValueError("At least two finite points are required to sample pairs.")
+        _check_valid_data(
+            len(values_valid), minimum=2, message="At least two finite points are required to sample pairs."
+        )
 
         # Check index range after discovering the original point count
         if pair_data.source_size - 1 > np.iinfo(index_type).max:

@@ -5,7 +5,6 @@ from __future__ import annotations
 import inspect
 import os.path
 import pathlib
-import tempfile
 import warnings
 
 import geopandas as gpd
@@ -69,6 +68,19 @@ class TestVector:
         vector2.gdf = vector2.gdf.query("RGIId == 'RGI60-17.08409'")
         assert vector2.gdf.shape[0] < vector.gdf.shape[0]
 
+    @pytest.mark.parametrize("options,resolution", [({}, 16), ({"resolution": 4}, 4), ({"quad_segs": 4}, 4)])
+    def test_buffer__resolution(self, options: dict[str, int], resolution: int) -> None:
+        """Checks that buffer() preserves its resolution with either GeoPandas keyword."""
+
+        point = Point(0, 0)
+        vector = gu.Vector(gpd.GeoDataFrame(geometry=[point], crs=32631))
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            result = vector.buffer(1, **options)
+        expected = point.buffer(1, quad_segs=resolution)
+        assert result.gdf.geometry.iloc[0].equals_exact(expected, tolerance=0)
+
     def test_info(self) -> None:
 
         v = gu.Vector(self.aster_outlines_path)
@@ -103,7 +115,7 @@ class TestVector:
         assert isinstance(footprint, gu.Vector)
         assert footprint.vector_equal(vector.get_footprint_projected(vector.crs))
 
-    def test_plot(self) -> None:
+    def test_plot(self, tmp_path: pathlib.Path) -> None:
         """Test the vector plot."""
 
         # Load vector example
@@ -137,8 +149,7 @@ class TestVector:
         assert True
 
         # Test save fig
-        temp_dir = tempfile.TemporaryDirectory()
-        temp_file = os.path.join(temp_dir.name, "test.png")
+        temp_file = str(tmp_path / "test.png")
         vector.plot(savefig_fname=temp_file)
         if DO_PLOT:
             plt.show()
@@ -382,9 +393,9 @@ class TestGeoPandasMethods:
     def test_nongeo_properties(self, vector: gu.Vector, method: str) -> None:
         """Check non-geometric properties are consistent with GeoPandas."""
 
-        # Remove warnings about operations in a non-projected system, and future changes
-        warnings.simplefilter("ignore", category=UserWarning)
-        warnings.simplefilter("ignore", category=FutureWarning)
+        # Allow expected CRS and geometry warnings
+        warnings.filterwarnings("ignore", message="Geometry is in a geographic CRS", category=UserWarning)
+        warnings.filterwarnings("ignore", message="Only Polygon objects have interior rings", category=UserWarning)
 
         # Get method for each class
         output_geoutils = getattr(vector, method)
@@ -402,9 +413,11 @@ class TestGeoPandasMethods:
         Many of these methods require two inputs ("other", "df", or "right" argument), except a few.
         """
 
-        # Remove warnings about operations in a non-projected system, and future changes
-        warnings.simplefilter("ignore", category=UserWarning)
-        warnings.simplefilter("ignore", category=FutureWarning)
+        # Allow expected CRS and index warnings
+        warnings.filterwarnings("ignore", message="Geometry is in a geographic CRS", category=UserWarning)
+        warnings.filterwarnings(
+            "ignore", message="The indices of the .* GeoSeries.* are not equal", category=UserWarning
+        )
 
         # Get method for each class
 
@@ -442,9 +455,8 @@ class TestGeoPandasMethods:
     def test_geo_properties(self, vector: gu.Vector, method: str) -> None:
         """Check geometric properties are consistent with GeoPandas."""
 
-        # Remove warnings about operations in a non-projected system, and future changes
-        warnings.simplefilter("ignore", category=UserWarning)
-        warnings.simplefilter("ignore", category=FutureWarning)
+        # Allow expected CRS warnings
+        warnings.filterwarnings("ignore", message="Geometry is in a geographic CRS", category=UserWarning)
 
         # Get method for each class
         output_geoutils = getattr(vector, method)
@@ -498,9 +510,12 @@ class TestGeoPandasMethods:
     def test_geo_methods(self, vector1: gu.Vector, vector2: gu.Vector, method: str) -> None:
         """Check geometric methods are consistent with GeoPandas."""
 
-        # Remove warnings about operations in a non-projected system, and future changes
-        warnings.simplefilter("ignore", category=UserWarning)
-        warnings.simplefilter("ignore", category=FutureWarning)
+        # Allow expected CRS, index and overlay warnings
+        warnings.filterwarnings("ignore", message="Geometry is in a geographic CRS", category=UserWarning)
+        warnings.filterwarnings(
+            "ignore", message="The indices of the .* GeoSeries.* are not equal", category=UserWarning
+        )
+        warnings.filterwarnings("ignore", message="`keep_geom_type=True` in overlay resulted in", category=UserWarning)
 
         # Methods that require two inputs
         if method in [

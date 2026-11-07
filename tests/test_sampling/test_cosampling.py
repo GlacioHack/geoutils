@@ -18,6 +18,7 @@ from shapely.geometry import box
 
 import geoutils as gu
 from geoutils._typing import NDArrayNum
+from geoutils.exceptions import CRSMismatchError, GridMismatchError, NoValidDataError, PointsMismatchError
 from geoutils.multiproc import MultiprocConfig
 
 
@@ -104,7 +105,7 @@ class TestCosample:
             second,
             **target,
             grid_method="mean",
-            grid_kwargs={"dist_nodata_pixel": 0.4, "min_points": 2},
+            grid_kwargs={"radius": 0.4, "min_points": 2},
             auxiliary={"offset": point_values + 10},
             auxiliary_at="other" if caller == "raster" else "self",
             mask=keep,
@@ -1581,7 +1582,7 @@ class TestCosampleErrors:
 
         monkeypatch.setattr(gu.Raster, "reproject", unexpected_raster_operation)
         monkeypatch.setattr(gu.Raster, "interp_at_points", unexpected_raster_operation)
-        with pytest.raises(ValueError, match="ordered support coordinates"):
+        with pytest.raises(PointsMismatchError, match="ordered support coordinates"):
             raster.cosample(points, auxiliary={"extra": auxiliary}, align="reproject")
 
     @pytest.mark.parametrize("lazy_input", ["self", "other", "auxiliary", "mask", "at"])
@@ -1651,9 +1652,9 @@ class TestCosampleErrors:
         # Remove every available raster pixel or point through the user mask
         raster = _raster(np.arange(12, dtype=float).reshape(3, 4))
         points = raster.to_pointcloud()
-        with pytest.raises(ValueError, match="no finite data common"):
+        with pytest.raises(NoValidDataError, match="no finite data common"):
             raster.cosample(raster, mask=np.zeros(raster.shape, dtype=bool))
-        with pytest.raises(ValueError, match="no finite data common"):
+        with pytest.raises(NoValidDataError, match="no finite data common"):
             points.cosample(points, mask=np.zeros(len(points.gdf), dtype=bool))
 
     def test_cosample__error_grid_crs_alignment(self) -> None:
@@ -1664,7 +1665,7 @@ class TestCosampleErrors:
         points = raster.to_pointcloud().reproject(crs=4326)
 
         # Require an explicit request before moving the points back onto the raster grid
-        with pytest.raises(ValueError, match="support CRS"):
+        with pytest.raises(CRSMismatchError, match="support CRS"):
             raster.cosample(points, raster_point_mode="grid_points", grid_method="nearest")
 
     @pytest.mark.parametrize("at", ["self", "other", "explicit"])
@@ -1677,5 +1678,5 @@ class TestCosampleErrors:
         selected_at = second if at == "explicit" else at
 
         # Reject the mismatched grids while alignment is disabled
-        with pytest.raises(ValueError, match="does not share"):
+        with pytest.raises(GridMismatchError, match="does not share"):
             first.cosample(second, at=selected_at)
