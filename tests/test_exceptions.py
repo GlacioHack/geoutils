@@ -88,46 +88,80 @@ class TestWarnings:
             warnings.warn("Unexpected warning", category)
 
     @pytest.mark.parametrize(
-        "module,category,warning_kind,ignored",
+        "warning_kind,category,modules,unexpected_module",
         [
-            ("rasterio.transform", PendingDeprecationWarning, "affine", True),
-            ("rioxarray.rioxarray", PendingDeprecationWarning, "affine", True),
-            ("laspy.vlrs.known", DeprecationWarning, "layout", True),
-            # Pytest re-emits captured warnings without the package name
-            ("transform", PendingDeprecationWarning, "affine", True),
-            ("rasterio.transform", FutureWarning, "affine", False),
-            ("rasterio.transform", PendingDeprecationWarning, "other", False),
-            ("laspy.another_module", DeprecationWarning, "layout", False),
-            ("laspy.vlrs.known", FutureWarning, "layout", False),
-            ("laspy.vlrs.known", DeprecationWarning, "other", False),
-            ("pyproj.transformer", DeprecationWarning, "scalar_conversion", True),
-            # Pytest uses the source filename when it re-emits a captured warning
-            ("/site-packages/pyproj/transformer", DeprecationWarning, "scalar_conversion", True),
-            (r"C:\site-packages\pyproj\transformer", DeprecationWarning, "scalar_conversion", True),
-            ("geoutils.projtools", DeprecationWarning, "scalar_conversion", False),
-            ("pyproj.transformer", FutureWarning, "scalar_conversion", False),
-            ("pyproj.transformer", DeprecationWarning, "other", False),
-            ("shapely.constructive", RuntimeWarning, "oriented_envelope", True),
-            ("/site-packages/shapely/constructive", RuntimeWarning, "oriented_envelope", True),
-            (r"C:\site-packages\shapely\constructive", RuntimeWarning, "oriented_envelope", True),
-            ("geoutils.vector.vector", RuntimeWarning, "oriented_envelope", False),
-            ("shapely.constructive", UserWarning, "oriented_envelope", False),
-            ("shapely.constructive", RuntimeWarning, "other", False),
-            ("shapely.constructive", RuntimeWarning, "oriented_envelope_invalid", True),
-            ("/site-packages/shapely/constructive", RuntimeWarning, "oriented_envelope_invalid", True),
-            (r"C:\site-packages\shapely\constructive", RuntimeWarning, "oriented_envelope_invalid", True),
-            ("geoutils.vector.vector", RuntimeWarning, "oriented_envelope_invalid", False),
-            ("shapely.constructive", UserWarning, "oriented_envelope_invalid", False),
-            ("shapely.linear", RuntimeWarning, "shared_paths", True),
-            ("/site-packages/shapely/linear", RuntimeWarning, "shared_paths", True),
-            (r"C:\site-packages\shapely\linear", RuntimeWarning, "shared_paths", True),
-            ("geoutils.vector.vector", RuntimeWarning, "shared_paths", False),
-            ("shapely.linear", UserWarning, "shared_paths", False),
-            ("shapely.linear", RuntimeWarning, "other", False),
+            (
+                "affine",
+                PendingDeprecationWarning,
+                (
+                    "rasterio.transform",
+                    "rioxarray.rioxarray",
+                    # Pytest re-emits captured warnings without the package name
+                    "transform",
+                ),
+                None,
+            ),
+            ("layout", DeprecationWarning, ("laspy.vlrs.known",), "laspy.another_module"),
+            (
+                "scalar_conversion",
+                DeprecationWarning,
+                (
+                    "pyproj.transformer",
+                    # Pytest uses the source filename when it re-emits a captured warning
+                    "/site-packages/pyproj/transformer",
+                    r"C:\site-packages\pyproj\transformer",
+                ),
+                "geoutils.projtools",
+            ),
+            (
+                "array_shape",
+                DeprecationWarning,
+                (
+                    "rasterio._io",
+                    "rasterio/_io",
+                    r"rasterio\_io",
+                    "numpy.ma.core",
+                    "/site-packages/numpy/ma/core",
+                    r"C:\site-packages\numpy\ma\core",
+                    "geoutils.raster.raster",
+                    "benchmarks.workflows.io",
+                ),
+                None,
+            ),
+            (
+                "oriented_envelope",
+                RuntimeWarning,
+                (
+                    "shapely.constructive",
+                    "/site-packages/shapely/constructive",
+                    r"C:\site-packages\shapely\constructive",
+                ),
+                "geoutils.vector.vector",
+            ),
+            (
+                "oriented_envelope_invalid",
+                RuntimeWarning,
+                (
+                    "shapely.constructive",
+                    "/site-packages/shapely/constructive",
+                    r"C:\site-packages\shapely\constructive",
+                ),
+                "geoutils.vector.vector",
+            ),
+            (
+                "shared_paths",
+                RuntimeWarning,
+                ("shapely.linear", "/site-packages/shapely/linear", r"C:\site-packages\shapely\linear"),
+                "geoutils.vector.vector",
+            ),
         ],
     )
     def test_warning_filters__known_dependency_warnings(
-        self, module: str, category: type[Warning], warning_kind: str, ignored: bool
+        self,
+        warning_kind: str,
+        category: type[Warning],
+        modules: tuple[str, ...],
+        unexpected_module: str | None,
     ) -> None:
         """Checks that pytest ignores known dependency warnings while other messages and categories remain errors."""
 
@@ -140,19 +174,36 @@ class TestWarnings:
                 "(Deprecated NumPy 1.25.)"
             ),
             "oriented_envelope": "divide by zero encountered in oriented_envelope",
+            "array_shape": (
+                "Setting the shape on a NumPy array has been deprecated in NumPy 2.5.\n"
+                "As an alternative, you can create a new view using np.reshape (with copy=False if needed)."
+            ),
             "oriented_envelope_invalid": "invalid value encountered in oriented_envelope",
             "shared_paths": "invalid value encountered in shared_paths",
-            "other": "Unexpected dependency warning",
         }
         message = messages[warning_kind]
 
-        if ignored:
+        # Check the known warning and unrelated warnings for each module spelling
+        for module in modules:
             with warnings.catch_warnings(record=True) as emitted:
                 warnings.warn_explicit(message, category, filename="dependency.py", lineno=1, module=module)
             assert not emitted
-        else:
+
+            for unexpected_category in (UserWarning, FutureWarning):
+                with pytest.raises(unexpected_category):
+                    warnings.warn_explicit(
+                        message, unexpected_category, filename="dependency.py", lineno=1, module=module
+                    )
+
             with pytest.raises(category):
-                warnings.warn_explicit(message, category, filename="dependency.py", lineno=1, module=module)
+                warnings.warn_explicit(
+                    "Unexpected dependency warning", category, filename="dependency.py", lineno=1, module=module
+                )
+
+        # Check module restrictions where the filter defines one
+        if unexpected_module is not None:
+            with pytest.raises(category):
+                warnings.warn_explicit(message, category, filename="dependency.py", lineno=1, module=unexpected_module)
 
     @pytest.mark.parametrize(
         "category, standard_category",

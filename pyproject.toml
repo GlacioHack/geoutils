@@ -33,6 +33,8 @@ filterwarnings = [
     "error",  # Raise errors for unexpected warnings
     # Ignore Affine's multiplication deprecation in Rasterio and Rioxarray
     'ignore:^Use `@` matmul instead of `\*` mul operator for matrix multiplication$:PendingDeprecationWarning',
+    # Rasterio's NumPy 2.5 shape assignment warning can be attributed to its caller
+    'ignore:^Setting the shape on a NumPy array has been deprecated in NumPy 2\.5\.:DeprecationWarning',
     # Ignore Laspy's ctypes layout deprecation on Python 3.14+
     "ignore:^Due to '_pack_'.*:DeprecationWarning:^laspy\\.vlrs\\.known$",
     # Ignore NumPy's scalar conversion deprecation inside Pyproj
