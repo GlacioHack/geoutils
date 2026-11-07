@@ -100,6 +100,13 @@ class TestWarnings:
             ("laspy.another_module", DeprecationWarning, "layout", False),
             ("laspy.vlrs.known", FutureWarning, "layout", False),
             ("laspy.vlrs.known", DeprecationWarning, "other", False),
+            ("pyproj.transformer", DeprecationWarning, "scalar_conversion", True),
+            # Pytest uses the source filename when it re-emits a captured warning
+            ("/site-packages/pyproj/transformer", DeprecationWarning, "scalar_conversion", True),
+            (r"C:\site-packages\pyproj\transformer", DeprecationWarning, "scalar_conversion", True),
+            ("geoutils.projtools", DeprecationWarning, "scalar_conversion", False),
+            ("pyproj.transformer", FutureWarning, "scalar_conversion", False),
+            ("pyproj.transformer", DeprecationWarning, "other", False),
         ],
     )
     def test_warning_filters__known_dependency_warnings(
@@ -110,6 +117,11 @@ class TestWarnings:
         messages = {
             "affine": "Use `@` matmul instead of `*` mul operator for matrix multiplication",
             "layout": "Due to '_pack_', the 'ExtraBytesStruct' Structure will use memory layout compatible with MSVC.",
+            "scalar_conversion": (
+                "Conversion of an array with ndim > 0 to a scalar is deprecated, and will error in future. "
+                "Ensure you extract a single element from your array before performing this operation. "
+                "(Deprecated NumPy 1.25.)"
+            ),
             "other": "Unexpected dependency warning",
         }
         message = messages[warning_kind]

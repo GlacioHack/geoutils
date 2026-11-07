@@ -181,7 +181,17 @@ class TestProjTools:
         assert np.all(x == randx)
         assert np.all(y == randy)
 
-    @pytest.mark.parametrize("points", [(1.0, 2.0), (np.array([1.0]), np.array([2.0])), (np.array([]), np.array([]))])
+    @pytest.mark.parametrize(
+        "points",
+        [
+            (1.0, 2.0),
+            (np.array([1.0]), np.array([2.0])),
+            (np.array([[1.0]]), np.array([[2.0]])),
+            (np.array([[1.0, 3.0]]), np.array([[2.0, 4.0]])),
+            (np.array([]), np.array([])),
+            (np.empty((0, 2)), np.empty((0, 2))),
+        ],
+    )
     def test_reproject_points__shape(self, points: Any) -> None:
         """Checks that reprojection preserves scalars, single-point arrays and empty coordinate arrays."""
 

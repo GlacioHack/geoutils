@@ -344,9 +344,12 @@ def reproject_points(
     x, y = _check_point_coordinates(points)
     transformer = pyproj.Transformer.from_crs(_check_crs(in_crs), _check_crs(out_crs), always_xy=True)
 
-    # Preserve scalar output while passing normalized arrays to Pyproj for vector inputs
-    if x.ndim == 0:
+    # Pass single points as scalars to avoid Pyproj's implicit array conversion
+    if x.size == 1:
         xout, yout = transformer.transform(x.item(), y.item())
+        if x.ndim > 0:
+            xout = np.asarray(xout).reshape(x.shape)
+            yout = np.asarray(yout).reshape(y.shape)
     else:
         xout, yout = transformer.transform(x, y)
     return xout, yout
