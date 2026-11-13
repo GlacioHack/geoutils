@@ -780,6 +780,73 @@ class TestVariogramEstimation:
         assert result.attrs["percentile"] == 90
         assert result.attrs["n_runs"] == 2
 
+    @pytest.mark.parametrize("distance_scale", [0.001, 1, 1000])
+    @pytest.mark.parametrize("bounds_kind", ["default", "separate", "unbounded"])
+    @pytest.mark.parametrize("supplied_start", [False, True])
+    def test_fit__ordered_ranges(self, distance_scale: float, bounds_kind: str, supplied_start: bool) -> None:
+        """Checks that ordered fitting preserves model identities, physical coefficients and their covariance."""
+
+        pytest.importorskip("skgstat")
+
+        # Create two known correlation models
+        lags = np.geomspace(0.05, 50, 60) * distance_scale
+        model = VariogramModel.sum(
+            [
+                VariogramModel("stable", effective_range=distance_scale, partial_sill=1.2, shape=1.3),
+                VariogramModel("gaussian", effective_range=14 * distance_scale, partial_sill=0.5),
+            ],
+            nugget=0.1,
+        )
+        empirical = gu.Variogram(
+            lags=lags,
+            semivariance=model.variogram(lags),
+            counts=np.full(lags.size, 200),
+            semivariance_error=np.full(lags.size, 0.05),
+        )
+
+        # Try different range bounds
+        options: dict[str, Any] = {"use_nugget": True, "maxfev": 5000}
+        if bounds_kind == "separate":
+            options["bounds"] = [
+                (0.2 * distance_scale, 2 * distance_scale),
+                (0, 3),
+                (0.1, 2),
+                (5 * distance_scale, 30 * distance_scale),
+                (0, 3),
+                (0, 1),
+            ]
+        elif bounds_kind == "unbounded":
+            options["bounds"] = [
+                (np.finfo(float).eps, np.inf),
+                (0, np.inf),
+                (0.1, 2),
+                (np.finfo(float).eps, np.inf),
+                (0, np.inf),
+                (0, np.inf),
+            ]
+        if supplied_start:
+            # An initially crossed pair must not exchange the stable and Gaussian models
+            ranges = [1.5, 10] if bounds_kind == "separate" else [4, 3]
+            options["p0"] = [ranges[0] * distance_scale, 1, 1, ranges[1] * distance_scale, 0.4, 0.1]
+
+        # Fit with and without ordering
+        fitted = empirical.fit(["stable", "gaussian"], ordered_ranges=True, **options)
+        expected = empirical.fit(
+            ["stable", "gaussian"],
+            use_nugget=True,
+            p0=[distance_scale, 1.2, 1.3, 14 * distance_scale, 0.5, 0.1],
+        )
+
+        # Compare models and fit results
+        assert fitted.model is not None
+        assert fitted.model.components[0].model_name == "stable"
+        assert fitted.model.components[1].model_name == "gaussian"
+        np.testing.assert_allclose(fitted.fit_result["coefficients"], expected.fit_result["coefficients"], rtol=1e-5)
+        np.testing.assert_allclose(fitted.variogram(lags), model.variogram(lags), rtol=1e-6)
+        np.testing.assert_allclose(
+            fitted.fit_result["covariance"], expected.fit_result["covariance"], rtol=2e-3, atol=1e-8
+        )
+
 
 class TestVariogramReduction:
     """Test module for variogram reduction."""
@@ -1256,6 +1323,49 @@ class TestVariogramConversion:
         assert converted.active_dims == (0, 1)
         assert converted.model.var == pytest.approx(5)
         assert converted.model.nugget == pytest.approx(0.1)
+
+    @pytest.mark.parametrize("distance_scale", [0.001, 1, 1000])
+    @pytest.mark.parametrize("decorrelation_level", [None, 0.001, 0.1, 0.5, 0.9, 0.999])
+    @pytest.mark.parametrize(
+        "name,parameters",
+        [
+            ("gaussian", {}),
+            ("exponential", {}),
+            ("spherical", {}),
+            ("cubic", {}),
+            ("stable", {"shape": 0.44}),
+            ("matern", {"smoothness": 1.5}),
+        ],
+    )
+    def test_practical_correlation_range__common_threshold(
+        self,
+        distance_scale: float,
+        decorrelation_level: float | None,
+        name: str,
+        parameters: dict[str, float],
+    ) -> None:
+        """Checks that correlation ranges use the same threshold across model forms, distance units and nuggets."""
+
+        # Use a model with a nugget
+        model = VariogramModel(
+            name,
+            effective_range=distance_scale,
+            partial_sill=2,
+            nugget=0.8,
+            shape=parameters.get("shape"),
+            smoothness=parameters.get("smoothness"),
+        )
+
+        # Find the decorrelation distance
+        if decorrelation_level is None:
+            distance = model.practical_correlation_range()
+            decorrelation_level = 0.9
+        else:
+            distance = model.practical_correlation_range(decorrelation_level=decorrelation_level)
+
+        # Check correlation without the nugget
+        assert distance > 0
+        assert float(model.covariance(distance)) / 2 == pytest.approx(1 - decorrelation_level, rel=1e-9)
 
 
 class TestVariogramReductionChunked:
@@ -1818,6 +1928,21 @@ class TestVariogramErrors:
         with pytest.raises(RuntimeError, match="maximum number of function evaluations"):
             empirical.fit(["gaussian", "stable"], maxfev=1)
 
+    def test_fit__error_range_bounds(self) -> None:
+        """Checks an error is raised for range bounds incompatible with increasing correlation ranges."""
+
+        pytest.importorskip("skgstat")
+        lags = np.linspace(1, 20, 20)
+        empirical = gu.Variogram(lags=lags, semivariance=np.ones(lags.size), counts=np.full(lags.size, 200))
+
+        # Try incompatible range bounds
+        with pytest.raises(ValueError, match="Range bounds must allow increasing"):
+            empirical.fit(
+                ["gaussian", "stable"],
+                ordered_ranges=True,
+                bounds=[(10, 20), (0, 2), (1, 5), (0, 2), (0.1, 2)],
+            )
+
     @pytest.mark.parametrize(
         "kind,model,message",
         [
@@ -2109,6 +2234,46 @@ class TestVariogramErrors:
         result = gu.Variogram.from_model("gaussian", effective_range=2, partial_sill=0)
         with pytest.raises(ValueError, match="zero sill"):
             result.correlation(1)
+
+    @pytest.mark.parametrize("decorrelation_level", [-1, 0, 1, 2, np.nan])
+    def test_practical_correlation_range__error_threshold(self, decorrelation_level: float) -> None:
+        """Checks an error is raised for a correlation threshold beyond 0-1."""
+
+        # Only change the decorrelation level
+        model = VariogramModel("gaussian", effective_range=2, partial_sill=1)
+        with pytest.raises(ValueError, match="strictly between zero and one"):
+            model.practical_correlation_range(decorrelation_level)
+
+    def test_practical_correlation_range__error_zerosill(self) -> None:
+        """Checks an error is raised when a model has no structured variance."""
+
+        # Use only nugget variance
+        model = VariogramModel("gaussian", effective_range=2, partial_sill=0, nugget=1)
+        with pytest.raises(ValueError, match="zero structured sill"):
+            model.practical_correlation_range()
+
+    @pytest.mark.parametrize("kind", ["sum", "product", "custom"])
+    def test_practical_correlation_range__error_unsupported_model(self, kind: str) -> None:
+        """Checks an error is raised for practical ranges of composite or custom models."""
+
+        # Try custom and composite models
+        if kind == "custom":
+            model = VariogramModel(
+                "stretched_variogram",
+                effective_range=8,
+                partial_sill=2,
+                function=stretched_variogram,
+                parameters=(1.3,),
+            )
+        else:
+            terms = [
+                VariogramModel("gaussian", effective_range=2, partial_sill=1),
+                VariogramModel("exponential", effective_range=20, partial_sill=3),
+            ]
+            model = VariogramModel.combine(terms, combination=kind, nugget=0.4)
+
+        with pytest.raises(ValueError, match="built-in base models"):
+            model.practical_correlation_range()
 
     @pytest.mark.skipif(
         find_spec("flox") is not None or find_spec("crick") is not None,

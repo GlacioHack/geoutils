@@ -72,7 +72,9 @@ def _correlation_info(model: VariogramModel, distance_units: str, indent: str = 
     # Describe base parameters in the same units as the empirical distances
     lines: list[str] = []
     if model.effective_range is not None:
-        lines.append(f"{indent}Effective range: {model.effective_range:.4g} {distance_units}")
+        lines.append(f"{indent}Range parameter: {model.effective_range:.4g} {distance_units}")
+        if model.partial_sill and model.function is None:
+            lines.append(f"{indent}90% decorrelation range: {model.practical_correlation_range():.4g} {distance_units}")
     lines.append(f"{indent}Functional form: {model.model_name}")
     if model.smoothness is not None:
         lines.append(f"{indent}Smoothness: {model.smoothness:.4g}")
@@ -1262,6 +1264,7 @@ class ErrorStructure:
         :param predictors: Named variables controlling a heteroscedastic magnitude.
         :param components: Ordered named component specifications with ``magnitude`` and ``correlation`` entries.
             A correlation can be a model name, a custom variogram callable, or None.
+            Components are assumed to be ordered from short to long range during fitting.
         :param mask: Spatial or Boolean mask identifying values used for estimation.
         :param bins: Continuous group definitions, or one bin count applied to every continuous predictor.
         :param categories: Declared values for categorical predictors, using numeric codes for spatial inputs.
@@ -1939,7 +1942,7 @@ def _normalize_predictors(
     normalized: dict[str, NDArray[np.float64]] = {}
     for name in required:
         # A scalar predictor applies to every observation; arrays must match the observation count
-        values = np.asarray(supplied[name], dtype=float)
+        values = np.ma.asarray(supplied[name], dtype=float).filled(np.nan)
         try:
             aligned = np.broadcast_to(values, (size,)).astype(float, copy=True)
         except ValueError as exception:
@@ -2147,6 +2150,7 @@ def _component_magnitudes(
     size: int,
     coordinates: NDArray[np.float64] | None,
     predictors: Mapping[str, NDArray[np.float64]],
+    allow_nan: bool = False,
 ) -> tuple[tuple[ErrorComponent, NDArray[np.float64]], ...]:
     """Calculate each component's error magnitude at the selected observations."""
 
@@ -2163,7 +2167,10 @@ def _component_magnitudes(
             raise ValueError(
                 f"Component {component.name!r} magnitude shape {predicted.shape} cannot match the source observations."
             ) from exception
-        if np.any(~np.isfinite(magnitude)) or np.any(magnitude < 0):
+        invalid = np.isinf(magnitude) | (magnitude < 0)
+        if not allow_nan:
+            invalid |= np.isnan(magnitude)
+        if np.any(invalid):
             raise ValueError(f"Component {component.name!r} has non-finite or negative magnitudes.")
         magnitude.setflags(write=False)
         component_data.append((component, magnitude))
@@ -2181,6 +2188,8 @@ def _prepare_source_errors(
     size: int,
     coordinates: ArrayLike | None = None,
     predictors: Mapping[str, Any] | None = None,
+    *,
+    allow_nan: bool = False,
 ) -> tuple[NDArray[np.float64] | None, tuple[tuple[ErrorComponent, NDArray[np.float64]], ...]]:
     """Check source coordinates and predictors, then calculate component error magnitudes.
 
@@ -2197,5 +2206,6 @@ def _prepare_source_errors(
         size=size,
         coordinates=normalized_coordinates,
         predictors=normalized_predictors,
+        allow_nan=allow_nan,
     )
     return normalized_coordinates, component_data

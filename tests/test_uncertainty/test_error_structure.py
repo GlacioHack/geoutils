@@ -609,11 +609,12 @@ class TestErrorStructure:
     @pytest.mark.parametrize(
         "case, keywords",
         [
-            ("constant", ("Constant", "uncorrelated", "gaussian")),
+            ("constant", ("Constant", "uncorrelated", "gaussian", "90% decorrelation range")),
             ("variable", ("Error range", "slope", "piecewise_linear")),
             ("linear", ("Error range", "linear")),
             ("linear_categorical", ("cover", "slope", "linear")),
             ("custom", ("quadratic_spread", "Parameters")),
+            ("custom_correlation", ("Functional form: custom", "Range parameter: 100")),
             ("estimation_missing", ("Magnitude sample size", "nmad", "matheron", "Warning")),
             ("estimation_partial", ("Magnitude sample size", "nmad", "matheron", "Warning")),
             ("estimation_all", ("Magnitude sample size", "nmad", "matheron", "Warning")),
@@ -634,7 +635,16 @@ class TestErrorStructure:
         metadata: dict[str, Any] = {"plot_attrs": {"value": {"units": "m"}}}
         diagnostics: dict[str, Any] = {}
         empirical: gu.Variogram | None = None
-        if case == "variable":
+        if case == "custom_correlation":
+            # Use a custom correlation
+            def custom_variogram(distance: Any, effective_range: float, partial_sill: float) -> Any:
+                """Calculate exponential semivariance with a custom range convention."""
+
+                return partial_sill * (1 - np.exp(-distance / effective_range))
+
+            model = VariogramModel("custom", effective_range=100, partial_sill=1, function=custom_variogram)
+            components = [gu.ErrorComponent("spatial", 4, model)]
+        elif case == "variable":
             statistics = pd.DataFrame(
                 {"std": [3.0, 5.0, np.nan, 100.0], "count": [20, 40, 80, 2]},
                 index=pd.Index([0.0, 10.0, 20.0, 30.0], name="slope"),

@@ -530,6 +530,13 @@ class TestErrorStructureEstimation:
         assert short.correlation.effective_range < long.correlation.effective_range
         assert predicted[1] > predicted[0]
 
+        # Leave ranges free during refitting
+        assert structure.empirical_variogram is not None
+        assert not structure.empirical_variogram.fit_result["ordered_ranges"]
+        refitted = structure.refit()
+        assert refitted.empirical_variogram is not None
+        assert not refitted.empirical_variogram.fit_result["ordered_ranges"]
+
     @pytest.mark.parametrize("model", ["piecewise_linear", "linear"])
     @pytest.mark.parametrize("fixed_fraction", [0.05, 0.9])
     @pytest.mark.parametrize("with_nugget", [False, True])
@@ -839,6 +846,48 @@ class TestErrorStructureEstimation:
         assert source.estimate_error_structure(**options) is result
         assert received["source"] is source
         assert received["options"] == options
+
+    @pytest.mark.parametrize("model_name", ["gaussian", "stable", "matern"])
+    def test_estimate__crossed_ranges_preserve_models(self, model_name: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Checks that range order preserves complete fitted models and their summed correlation."""
+
+        pytest.importorskip("skgstat")
+
+        # Create models with crossed ranges
+        proxy = gu.Raster.from_array(np.arange(144).reshape(12, 12), Affine(10, 0, 0, 0, -10, 120), 32631)
+        model = VariogramModel.sum(
+            [
+                VariogramModel(
+                    model_name,
+                    effective_range=60,
+                    partial_sill=0.4,
+                    shape=0.5 if model_name == "stable" else None,
+                    smoothness=1.5 if model_name == "matern" else None,
+                ),
+                VariogramModel("spherical", effective_range=20, partial_sill=0.6),
+            ]
+        )
+
+        def fit(empirical: gu.Variogram, *args: Any, **kwargs: Any) -> gu.Variogram:
+            """Supply different model forms in descending range order."""
+
+            return replace(empirical, model=model, counts=np.maximum(empirical.counts, 100))
+
+        # Run estimation with fixed models
+        monkeypatch.setattr(gu.Variogram, "fit", fit)
+        components = {"short": {"correlation": model_name}, "long": {"correlation": "spherical"}}
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", UserWarning)
+            result = gu.ErrorStructure.estimate(
+                proxy, components=components, n_pairs=100, n_lags=6, max_lag=100, random_state=42
+            )
+
+        # Check model identities and correlation
+        assert not caught
+        assert result.components["short"].correlation == replace(model.components[0], partial_sill=1.0)
+        assert result.components["long"].correlation == replace(model.components[1], partial_sill=1.0)
+        distances = np.linspace(0, 100, 101)
+        np.testing.assert_allclose(result.predict_correlation(distances), model.correlation(distances))
 
 
 class TestErrorStructureRefitting:
@@ -1329,10 +1378,10 @@ class TestErrorStructureEstimationWarnings:
         [
             ((20, 60), []),
             ((20, 95), []),
-            ((70, 95), ["ranges overlap"]),
+            ((70, 95), []),
             ((20, 200), ["longest correlation range"]),
-            ((150, 200), ["ranges overlap", "longest correlation range"]),
-            ((60, 20), ["ranges crossed"]),
+            ((150, 200), ["longest correlation range"]),
+            ((60, 20), []),
         ],
     )
     def test_estimate__range_warnings_follow_variance_fraction(
@@ -1463,6 +1512,106 @@ class TestErrorStructureEstimationWarnings:
             assert caught[0].category is GeoUtilsUserWarning
             assert "twice the distance of the last variogram bin used for fitting" in str(caught[0].message)
             assert "sample pairs at longer distances" in str(caught[0].message)
+
+    @pytest.mark.parametrize("fraction", [0.029, 0.03])
+    @pytest.mark.parametrize(
+        "model_name,second_range,shapes,collapse",
+        [
+            ("gaussian", 20, (None, None), True),
+            ("gaussian", 20.01, (None, None), True),
+            ("gaussian", 22, (None, None), False),
+            ("stable", 20, (0.5, 0.5), True),
+            ("stable", 20, (0.5, 1.5), False),
+            ("matern", 20, (1.5, 1.5), True),
+            ("matern", 20, (1.5, 2.5), False),
+        ],
+    )
+    def test_estimate__collapsed_components(
+        self,
+        fraction: float,
+        model_name: str,
+        second_range: float,
+        shapes: tuple[float | None, float | None],
+        collapse: bool,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Checks that only significant components of the same form and nearly identical curves warn about collapse."""
+
+        pytest.importorskip("skgstat")
+
+        # Create two correlation components
+        proxy = gu.Raster.from_array(np.arange(144).reshape(12, 12), Affine(10, 0, 0, 0, -10, 120), 32631)
+        terms = [
+            VariogramModel(
+                model_name,
+                effective_range=distance,
+                partial_sill=share,
+                shape=shape if model_name == "stable" else None,
+                smoothness=shape if model_name == "matern" else None,
+            )
+            for distance, share, shape in zip((20, second_range), (1 - fraction, fraction), shapes)
+        ]
+
+        def fit(empirical: gu.Variogram, *args: Any, **kwargs: Any) -> gu.Variogram:
+            """Set correlation forms and variance fractions."""
+
+            # Include lags that distinguish shapes
+            lags = np.array([1, 5, 10, 20, 50, 100])
+            model = VariogramModel.sum(terms)
+            return gu.Variogram(lags=lags, semivariance=model.variogram(lags), counts=np.full(6, 100), model=model)
+
+        # Run estimation with fixed models
+        monkeypatch.setattr(gu.Variogram, "fit", fit)
+        components = {name: {"correlation": model_name} for name in ("first", "second")}
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", UserWarning)
+            gu.ErrorStructure.estimate(
+                proxy, components=components, n_pairs=100, n_lags=6, max_lag=100, random_state=42
+            )
+
+        # Ignore contributions below 3%
+        assert len(caught) == int(collapse and fraction >= 0.03)
+        if caught:
+            assert "collapse into a single model" in str(caught[0].message)
+
+    @pytest.mark.parametrize(
+        "first_count,first_semivariance,collapse", [(99, 0.3, True), (100, np.nan, True), (100, 0.3, False)]
+    )
+    def test_estimate__collapse_uses_supported_lags(
+        self, first_count: int, first_semivariance: float, collapse: bool, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Checks that collapse warnings compare curves only at lags with finite semivariance and enough pairs."""
+
+        pytest.importorskip("skgstat")
+        proxy = gu.Raster.from_array(np.arange(144).reshape(12, 12), Affine(10, 0, 0, 0, -10, 120), 32631)
+
+        # Curves differ only at 10 m
+        terms = [VariogramModel("gaussian", effective_range=distance, partial_sill=0.5) for distance in (20, 40)]
+        model = VariogramModel.sum(terms)
+
+        def fit(empirical: gu.Variogram, *args: Any, **kwargs: Any) -> gu.Variogram:
+            """Set pair counts and missing semivariance at the first lag."""
+
+            lags = np.array([10, 100, 120, 140, 160, 180])
+            semivariance = model.variogram(lags)
+            semivariance[0] = first_semivariance
+            return gu.Variogram(
+                lags=lags, semivariance=semivariance, counts=np.array([first_count] + [100] * 5), model=model
+            )
+
+        # Run estimation with fixed models
+        monkeypatch.setattr(gu.Variogram, "fit", fit)
+        components = {name: {"correlation": "gaussian"} for name in ("first", "second")}
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", UserWarning)
+            gu.ErrorStructure.estimate(
+                proxy, components=components, n_pairs=100, n_lags=6, max_lag=180, random_state=42
+            )
+
+        # Check warnings on supported lags
+        assert len(caught) == int(collapse)
+        if caught:
+            assert "collapse into a single model" in str(caught[0].message)
 
 
 class TestErrorStructureEstimationErrors:

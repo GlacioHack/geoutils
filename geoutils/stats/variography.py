@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import numpy as np
 import pandas as pd
 import xarray as xr
-from scipy.optimize import curve_fit
+from scipy.optimize import approx_fprime, brentq, curve_fit
 from scipy.special import gamma, kv
 
 from geoutils._dispatch import _check_valid_data, _get_raster_interface, is_dask_array
@@ -286,6 +286,48 @@ class VariogramModel:
         if self.sill == 0:
             raise ValueError("A variogram with zero sill does not define correlation.")
         return self.covariance(distance) / self.sill
+
+    def practical_correlation_range(self, decorrelation_level: float = 0.9) -> float:
+        """
+        Calculate the distance at which a given fraction of structured correlation is lost.
+
+        The default is 90% decorrelation, or 90% of the structured variogram sill. Unlike effective_range,
+        this distance uses the same threshold for every model form. The nugget is excluded.
+
+        :param decorrelation_level: Fraction of correlation lost, strictly between zero and one.
+        :returns: Distance in the units of effective_range.
+        """
+
+        if not np.isfinite(decorrelation_level) or not 0 < decorrelation_level < 1:
+            raise ValueError("decorrelation_level must be strictly between zero and one.")
+        if self.function is not None or self.components:
+            raise ValueError("Practical correlation ranges are only defined for built-in base models.")
+        if self.partial_sill == 0:
+            raise ValueError("A model with zero structured sill does not define a correlation range.")
+
+        # We solve Gaussian, exponential, stable and spherical forms analytically
+        assert self.effective_range is not None
+        if self.model_name in {"gaussian", "exponential", "stable"}:
+            decay = -np.log1p(-decorrelation_level)
+            if self.model_name == "gaussian":
+                return float(self.effective_range * np.sqrt(decay) / 2)
+            exponent = self.shape if self.model_name == "stable" else 1
+            assert exponent is not None
+            return float(self.effective_range * (decay / 3) ** (1 / exponent))
+        if self.model_name == "spherical":
+            return float(self.effective_range * 2 * np.sin(np.arcsin(decorrelation_level) / 3))
+
+        # Cubic and Matérn forms have no simple general inverse, so we solve them numerically
+        # We have to work in relative distance, independently of units and sill
+        structured = replace(self, effective_range=1.0, partial_sill=1.0, nugget=0.0)
+
+        def residual(distance: float) -> float:
+            return float(structured.variogram(distance)) - decorrelation_level
+
+        upper = 1.0
+        while residual(upper) < 0:
+            upper *= 2
+        return float(self.effective_range * brentq(residual, 0, upper))
 
     ###################
     # MODEL COMPOSITION
@@ -950,6 +992,7 @@ class Variogram:
         bounds: Sequence[tuple[float, float]] | None = None,
         p0: Sequence[float] | None = None,
         maxfev: int | None = None,
+        ordered_ranges: bool = False,
     ) -> Variogram:
         """
         Fit one or more summed theoretical models to the measured bins.
@@ -969,6 +1012,7 @@ class Variogram:
         :param p0: Initial parameter values in range/sill order, followed by optional model shape and nugget.
             None selects automatic starting values and tries several range combinations for summed models.
         :param maxfev: Maximum number of model evaluations for each initial parameter set.
+        :param ordered_ranges: Whether to constrain range parameters to increasing values.
         :returns: New variogram containing fitted model parameters in the shared form.
         """
 
@@ -979,6 +1023,8 @@ class Variogram:
         # Turn short names, model functions, or a sequence into standard model names
         definitions = _prepare_variogram_fit_models(models, p0, use_nugget)
         parameter_counts = [definition.parameter_count for definition in definitions]
+        range_positions = np.cumsum([0, *parameter_counts[:-1]])
+        constrain_ranges = ordered_ranges and len(definitions) > 1
 
         # Fit only bins with measured values and require more bins than fitted parameters
         valid = np.isfinite(self.lags) & np.isfinite(self.semivariance) & (self.counts >= min_count)
@@ -989,14 +1035,15 @@ class Variogram:
 
         def summed_model(distance: NDArrayNum, *parameters: float) -> NDArrayNum:
             # Add each component's parameters in the order expected by SciPy's curve fit
+            model_parameters = ordered_parameters(parameters) if constrain_ranges else parameters
             values = np.zeros_like(np.asarray(distance, dtype=float))
             position = 0
             for definition in definitions:
                 count = definition.parameter_count
-                values += definition.function(distance, *parameters[position : position + count])
+                values += definition.function(distance, *model_parameters[position : position + count])
                 position += count
             if use_nugget:
-                values += np.where(np.asarray(distance) > 0, parameters[position], 0.0)
+                values += np.where(np.asarray(distance) > 0, model_parameters[position], 0.0)
             return values
 
         # Choose initial values from the usable bins unless the caller supplies them
@@ -1034,6 +1081,41 @@ class Variogram:
         # Automatic starts must also respect narrower caller-supplied bounds
         if p0 is None:
             starting_values = [np.clip(start, lower, upper) for start in starting_values]
+
+        # Each range lies between the previous range and its allowed upper bound
+        # Fractions of these intervals prevent a model from exchanging places with another
+        range_lower = np.maximum.accumulate(lower[range_positions])
+        range_upper = np.minimum.accumulate(upper[range_positions][::-1])[::-1]
+
+        def ordered_parameters(parameters: ArrayLike) -> NDArrayNum:
+            values = np.array(parameters, dtype=float, copy=True)
+            previous = -np.inf
+            for position, minimum, maximum in zip(range_positions, range_lower, range_upper):
+                minimum = max(minimum, previous)
+                width = maximum - minimum if np.isfinite(maximum) else maximum_lag
+                values[position] = minimum + values[position] * width
+                previous = values[position]
+            return values
+
+        if constrain_ranges:
+            if np.any(range_lower >= range_upper):
+                raise ValueError("Range bounds must allow increasing correlation ranges.")
+            fraction_starts = []
+            for start in starting_values:
+                if np.any(start < lower) or np.any(start > upper):
+                    raise ValueError("Initial guess is outside of provided bounds.")
+                fractions = start.copy()
+                previous = -np.inf
+                for position, minimum, maximum in zip(range_positions, range_lower, range_upper):
+                    minimum = max(minimum, previous)
+                    distance = np.clip(start[position], minimum, maximum)
+                    width = maximum - minimum if np.isfinite(maximum) else maximum_lag
+                    fractions[position] = (distance - minimum) / width if width > 0 else 0.5
+                    previous = distance
+                fraction_starts.append(fractions)
+            starting_values = fraction_starts
+            lower[range_positions] = 0
+            upper[range_positions] = np.where(np.isfinite(range_upper), 1, np.inf)
 
         # Give bins with smaller measured errors more influence when usable errors exist
         errors = None
@@ -1082,6 +1164,16 @@ class Variogram:
             raise RuntimeError("Variogram fitting did not find finite residuals.")
         coefficients, covariance = best_fit
 
+        # Report coefficients and their covariance in physical range units
+        if constrain_ranges:
+            steps = np.sqrt(np.finfo(float).eps) * np.maximum(np.abs(coefficients), 1)
+            jacobian = approx_fprime(coefficients, ordered_parameters, steps)
+            if np.all(np.isfinite(covariance)):
+                covariance = jacobian @ covariance @ jacobian.T
+            else:
+                covariance = np.full_like(covariance, np.inf)
+            coefficients = ordered_parameters(coefficients)
+
         # Split SciPy's fitted numbers back into the shared component model objects
         components: list[VariogramModel] = []
         position = 0
@@ -1121,6 +1213,7 @@ class Variogram:
                 "coefficients": coefficients.tolist(),
                 "covariance": covariance.tolist(),
                 "min_count": int(min_count),
+                "ordered_ranges": bool(ordered_ranges),
             },
         )
 

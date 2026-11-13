@@ -45,6 +45,8 @@ filterwarnings = [
     'ignore:^divide by zero encountered in oriented_envelope$:RuntimeWarning:(.*[/\\])?shapely[./\\]constructive$',
     'ignore:^invalid value encountered in oriented_envelope$:RuntimeWarning:(.*[/\\])?shapely[./\\]constructive$',
     'ignore:^invalid value encountered in shared_paths$:RuntimeWarning:(.*[/\\])?shapely[./\\]linear$',
+    # Ignore Dask's slow scratch dir creation warning (which is common on Windows CI)
+    "ignore:^Creating scratch directories is taking a surprisingly long time.*:UserWarning",
 ]
 log_level = "WARNING"
 testpaths = ["tests", "geoutils", "benchmarks/test_large_data.py"]
