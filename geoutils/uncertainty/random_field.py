@@ -177,6 +177,7 @@ def _wrap_spatial_field(like: RasterBase | PointCloudBase, values: NDArray[np.fl
 
     if isinstance(like, RasterBase):
         array = np.ma.masked_array(values.reshape(like.shape), mask=_raster_spatial_mask(like))
+        array = np.ma.masked_invalid(array)
         return like.from_array(
             data=array,
             transform=like.transform,
@@ -322,7 +323,7 @@ def _draw_error_chunk(
         raise ValueError("Chunked GPyTorch fields require a shared inducing grid.")
     from geoutils.uncertainty.error_structure import _draw_source_errors, _prepare_source_errors
 
-    locations, component_data = _prepare_source_errors(model, len(indexes), coordinates, predictors)
+    locations, component_data = _prepare_source_errors(model, len(indexes), coordinates, predictors, allow_nan=True)
     return _draw_source_errors(
         len(indexes),
         locations,
@@ -381,7 +382,9 @@ def _random_fields_in_memory(
 
     from geoutils.uncertainty.error_structure import _draw_source_errors, _prepare_source_errors
 
-    locations, component_data = _prepare_source_errors(error_structure, len(source_ids), coordinates, predictors)
+    locations, component_data = _prepare_source_errors(
+        error_structure, len(source_ids), coordinates, predictors, allow_nan=True
+    )
 
     # When using GPyTorch, we need to induce a grid for the in-memory field to match chunked output
     if backend == "gpytorch" and gpytorch_inducing_points is not None:

@@ -530,6 +530,44 @@ class TestErrorStructureEstimation:
         assert short.correlation.effective_range < long.correlation.effective_range
         assert predicted[1] > predicted[0]
 
+    @pytest.mark.parametrize("model_name", ["gaussian", "stable", "matern"])
+    def test_estimate__crossed_ranges_preserve_models(self, model_name: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Checks that range order preserves complete fitted models and their summed correlation."""
+
+        pytest.importorskip("skgstat")
+        proxy = gu.Raster.from_array(np.arange(144).reshape(12, 12), Affine(10, 0, 0, 0, -10, 120), 32631)
+        model = VariogramModel.sum(
+            [
+                VariogramModel(
+                    model_name,
+                    effective_range=60,
+                    partial_sill=0.4,
+                    shape=0.5 if model_name == "stable" else None,
+                    smoothness=1.5 if model_name == "matern" else None,
+                ),
+                VariogramModel("spherical", effective_range=20, partial_sill=0.6),
+            ]
+        )
+
+        def fit(empirical: gu.Variogram, *args: Any, **kwargs: Any) -> gu.Variogram:
+            """Supply different model forms in descending range order."""
+
+            return replace(empirical, model=model, counts=np.maximum(empirical.counts, 100))
+
+        monkeypatch.setattr(gu.Variogram, "fit", fit)
+        components = {"short": {"correlation": model_name}, "long": {"correlation": "spherical"}}
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", UserWarning)
+            result = gu.ErrorStructure.estimate(
+                proxy, components=components, n_pairs=100, n_lags=6, max_lag=100, random_state=42
+            )
+
+        assert not caught
+        assert result.components["short"].correlation == replace(model.components[1], partial_sill=1.0)
+        assert result.components["long"].correlation == replace(model.components[0], partial_sill=1.0)
+        distances = np.linspace(0, 100, 101)
+        np.testing.assert_allclose(result.predict_correlation(distances), model.correlation(distances))
+
     @pytest.mark.parametrize("model", ["piecewise_linear", "linear"])
     @pytest.mark.parametrize("fixed_fraction", [0.05, 0.9])
     @pytest.mark.parametrize("with_nugget", [False, True])
@@ -1332,7 +1370,7 @@ class TestErrorStructureEstimationWarnings:
             ((70, 95), ["ranges overlap"]),
             ((20, 200), ["longest correlation range"]),
             ((150, 200), ["ranges overlap", "longest correlation range"]),
-            ((60, 20), ["ranges crossed"]),
+            ((60, 20), []),
         ],
     )
     def test_estimate__range_warnings_follow_variance_fraction(

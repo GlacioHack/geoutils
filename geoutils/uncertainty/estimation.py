@@ -411,7 +411,7 @@ def _standardized_point_values(
         out=np.full(values.shape, np.nan, dtype=float),
         where=np.isfinite(local_magnitude) & (local_magnitude > 0),
     )
-    result = dataframe["self"].copy()
+    result = dataframe["self"].astype(float)
     result.iloc[:] = values
     return result
 
@@ -610,28 +610,10 @@ def _build_error_components(
     if len(uncorrelated) > 1:
         raise ValueError("Only one spatially uncorrelated component can be identified from a shared variogram nugget.")
 
-    # Sort ranges with their sills; requested model forms follow short-to-long order
+    # Sort complete fitted models so their forms, shapes, ranges and sills remain together
     if any(model.effective_range is None for model in structured_models):
         raise ValueError("Each fitted correlation model needs a finite effective range.")
-    fitted_ranges = np.array([float(cast(float, model.effective_range)) for model in structured_models])
-    fitted_sills = np.array([float(model.partial_sill or 0.0) for model in structured_models])
-    fitted_order = np.argsort(fitted_ranges)
-
-    # Warn about crossed ranges only when both components contribute at least 3%
-    include_in_warnings = fitted_sills >= _MIN_RANGE_WARNING_VARIANCE_FRACTION * fitted_model.sill
-    # Identical model forms can exchange their order without changing the fitted sum
-    significant_positions = np.flatnonzero(include_in_warnings)
-    model_forms = [replace(model, effective_range=1.0, partial_sill=1.0, nugget=0.0) for model in structured_models]
-    crossed_forms = any(
-        fitted_ranges[first] > fitted_ranges[second] and model_forms[first] != model_forms[second]
-        for first, second in zip(significant_positions[:-1], significant_positions[1:])
-    )
-    if crossed_forms:
-        _warn(
-            "Fitted nested variogram ranges crossed; assigning their contributions from short to long range.",
-        )
-    ordered_ranges = fitted_ranges[fitted_order]
-    ordered_sills = fitted_sills[fitted_order]
+    structured_models.sort(key=lambda model: float(cast(float, model.effective_range)))
 
     # Assign each ordered term to a correlated component and the nugget to uncorrelated errors
     model_by_name: dict[str, VariogramModel | None] = {}
@@ -642,11 +624,7 @@ def _build_error_components(
             model_by_name[item["name"]] = None
             sill_by_name[item["name"]] = float(fitted_model.nugget)
         else:
-            model = replace(
-                structured_models[model_position],
-                effective_range=float(ordered_ranges[model_position]),
-                partial_sill=float(ordered_sills[model_position]),
-            )
+            model = structured_models[model_position]
             model_position += 1
 
             # Correlated components exclude the shared nugget
