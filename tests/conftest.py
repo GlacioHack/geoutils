@@ -76,7 +76,7 @@ def fail_on_logging_warnings(request: Any) -> Any:
     root = logging.getLogger()
     root.addHandler(collector)
 
-    # Collect cycles only after event loop shutdown, rather than during every numerical test
+    # We only need to check for delayed errors after a test closes an event loop
     loop_closed = False
     close_loop = asyncio.BaseEventLoop.close
 
@@ -94,14 +94,14 @@ def fail_on_logging_warnings(request: Any) -> Any:
             yield
     finally:
         try:
-            # Synchronous Dask clusters can also leave Tornado wrappers around closed asyncio loops
+            # Finish Tornado's cleanup for asyncio loops that the test has already closed
             tornado = sys.modules.get("tornado.ioloop")
             if tornado is not None:
                 for loop, wrapper in tuple(tornado.IOLoop._ioloop_for_asyncio.items()):
                     if loop.is_closed():
                         wrapper.close(all_fds=True)
 
-            # Failed futures in reference cycles must report errors before the next test starts
+            # Free unused objects now so delayed asyncio errors are reported for this test
             if loop_closed:
                 gc.collect()
         finally:

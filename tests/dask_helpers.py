@@ -37,6 +37,6 @@ def run_with_dask_client(
     try:
         return asyncio_run(run_cluster(), loop_factory=get_loop_factory())
     finally:
-        # asyncio.run() closes asyncio, but Tornado also owns a wrapper and a Windows selector thread
+        # We need to close Tornado too, especially on Windows where it can leave a background thread running
         if tornado_loop is not None:
             tornado_loop.close(all_fds=True)
