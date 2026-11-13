@@ -1264,7 +1264,7 @@ class ErrorStructure:
         :param predictors: Named variables controlling a heteroscedastic magnitude.
         :param components: Ordered named component specifications with ``magnitude`` and ``correlation`` entries.
             A correlation can be a model name, a custom variogram callable, or None.
-            Each component preserves its requested model form. Identical forms are assigned in increasing range order.
+            Components are assumed to be ordered from short to long range during fitting.
         :param mask: Spatial or Boolean mask identifying values used for estimation.
         :param bins: Continuous group definitions, or one bin count applied to every continuous predictor.
         :param categories: Declared values for categorical predictors, using numeric codes for spatial inputs.
