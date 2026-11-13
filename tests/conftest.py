@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import gc
 import logging
 import os
+import sys
 from collections.abc import Iterator
 from importlib.util import find_spec
 from typing import Any
@@ -73,12 +76,37 @@ def fail_on_logging_warnings(request: Any) -> Any:
     root = logging.getLogger()
     root.addHandler(collector)
 
+    # We only need to check for delayed errors after a test closes an event loop
+    loop_closed = False
+    close_loop = asyncio.BaseEventLoop.close
+
+    def record_loop_close(loop: asyncio.BaseEventLoop) -> None:
+        """Close an asyncio loop and record that its remaining futures need collection."""
+
+        nonlocal loop_closed
+        close_loop(loop)
+        loop_closed = True
+
     # Run test
     try:
-        yield
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(asyncio.BaseEventLoop, "close", record_loop_close)
+            yield
     finally:
-        root.removeHandler(collector)
-        collector.close()
+        try:
+            # Finish Tornado's cleanup for asyncio loops that the test has already closed
+            tornado = sys.modules.get("tornado.ioloop")
+            if tornado is not None:
+                for loop, wrapper in tuple(tornado.IOLoop._ioloop_for_asyncio.items()):
+                    if loop.is_closed():
+                        wrapper.close(all_fds=True)
+
+            # Free unused objects now so delayed asyncio errors are reported for this test
+            if loop_closed:
+                gc.collect()
+        finally:
+            root.removeHandler(collector)
+            collector.close()
 
     # Allow opt-out
     if request.node.get_closest_marker("allow_logging_warnings"):
