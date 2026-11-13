@@ -23,6 +23,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
+from itertools import combinations
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
@@ -610,10 +611,12 @@ def _build_error_components(
     if len(uncorrelated) > 1:
         raise ValueError("Only one spatially uncorrelated component can be identified from a shared variogram nugget.")
 
-    # Sort complete fitted models so their forms, shapes, ranges and sills remain together
+    # Only identical model forms can exchange ranges without changing component definitions
     if any(model.effective_range is None for model in structured_models):
         raise ValueError("Each fitted correlation model needs a finite effective range.")
-    structured_models.sort(key=lambda model: float(cast(float, model.effective_range)))
+    model_forms = [replace(model, effective_range=1.0, partial_sill=1.0, nugget=0.0) for model in structured_models]
+    if all(model == model_forms[0] for model in model_forms):
+        structured_models.sort(key=lambda model: cast(float, model.effective_range))
 
     # Assign each ordered term to a correlated component and the nugget to uncorrelated errors
     model_by_name: dict[str, VariogramModel | None] = {}
@@ -746,23 +749,36 @@ def _estimate_correlation(
     # Now, we inspect output components to warn if something looks fishy
     fitted_components = _build_error_components(configuration, total_magnitude, empirical)
 
-    # Assess range separation only for components with at least 3% of the fitted variance
+    # Use the bins that entered fitting, excluding sparse or missing tail bins
+    valid = np.isfinite(empirical.lags) & np.isfinite(empirical.semivariance)
+    valid &= empirical.counts >= fit_options["min_count"]
+    observed_lags = empirical.lags[valid]
+
+    # Warn when significant components of the same form describe nearly identical correlation curves
     messages: list[str] = []
-    ranges = [
-        float(cast(float, cast(VariogramModel, component.correlation).effective_range))
+    correlations = [
+        cast(VariogramModel, component.correlation)
         for component in fitted_components
         if component.correlation is not None
         and component.metadata["initial_variance_fraction"] >= _MIN_RANGE_WARNING_VARIANCE_FRACTION
     ]
-    if len(ranges) > 1 and any(second / first < 1.5 for first, second in zip(ranges[:-1], ranges[1:])):
-        messages.append("Some fitted correlation ranges overlap and their contributions may be weakly identified.")
+    for first, second in combinations(correlations, 2):
+        if (first.model_name, first.function, first.active_dims) != (
+            second.model_name,
+            second.function,
+            second.active_dims,
+        ):
+            continue
+        curves = [replace(model, nugget=0).correlation(observed_lags) for model in (first, second)]
+        if observed_lags.size and np.max(np.abs(curves[0] - curves[1])) <= 0.01:
+            messages.append("Fitted correlation components of the same form nearly collapse into a single model.")
+            break
+
+    ranges = sorted(float(cast(float, model.effective_range)) for model in correlations)
 
     # Finally, we flag a long correlation range near twice the sampled extent, where it may be difficult to distinguish
     # from an actual trend in the data
-    # Use the bins that entered fitting, excluding sparse or missing tail bins
-    valid = np.isfinite(empirical.lags) & np.isfinite(empirical.semivariance)
-    valid &= empirical.counts >= fit_options["min_count"]
-    sampled_maximum = float(np.max(empirical.lags[valid])) if np.any(valid) else np.nan
+    sampled_maximum = float(np.max(observed_lags)) if observed_lags.size else np.nan
     # Warn when the correlation range reaches twice the largest lag used for fitting
     # Allow numerical tolerance because the optimizer fits strictly inside its bounds
     range_limit = 2 * sampled_maximum

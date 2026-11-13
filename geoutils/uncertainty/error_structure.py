@@ -72,7 +72,9 @@ def _correlation_info(model: VariogramModel, distance_units: str, indent: str = 
     # Describe base parameters in the same units as the empirical distances
     lines: list[str] = []
     if model.effective_range is not None:
-        lines.append(f"{indent}Effective range: {model.effective_range:.4g} {distance_units}")
+        lines.append(f"{indent}Range parameter: {model.effective_range:.4g} {distance_units}")
+        if model.partial_sill and model.function is None:
+            lines.append(f"{indent}90% decorrelation range: {model.practical_correlation_range():.4g} {distance_units}")
     lines.append(f"{indent}Functional form: {model.model_name}")
     if model.smoothness is not None:
         lines.append(f"{indent}Smoothness: {model.smoothness:.4g}")
@@ -1262,7 +1264,7 @@ class ErrorStructure:
         :param predictors: Named variables controlling a heteroscedastic magnitude.
         :param components: Ordered named component specifications with ``magnitude`` and ``correlation`` entries.
             A correlation can be a model name, a custom variogram callable, or None.
-            Fitted correlation models are assigned from short to long range, preserving each model's form and shape.
+            Each component preserves its requested model form. Identical forms are assigned in increasing range order.
         :param mask: Spatial or Boolean mask identifying values used for estimation.
         :param bins: Continuous group definitions, or one bin count applied to every continuous predictor.
         :param categories: Declared values for categorical predictors, using numeric codes for spatial inputs.

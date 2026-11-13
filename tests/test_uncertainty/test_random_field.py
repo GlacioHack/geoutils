@@ -178,51 +178,6 @@ class TestRandomField:
         expected = reference.to_nanarray() * np.array([[1.0, 1.5], [2.0, 1.5]])
         np.testing.assert_allclose(result.to_nanarray(), expected)
 
-    @pytest.mark.parametrize("backend", ["gstools", "gpytorch"])
-    @pytest.mark.parametrize("support", ["raster", "pointcloud", "array"])
-    @pytest.mark.parametrize("missing", ["nan", "masked", "all_nan"])
-    def test_random_field__nan_predictors(self, backend: str, support: str, missing: str) -> None:
-        """Checks that predictors with NaNs work and only propagate NaNs at the same locations."""
-
-        pytest.importorskip(backend)
-        # Create small data, mask, predictor and error structure
-        values = np.array([0.0, 0.25, 0.75, 1.0])
-        mask = np.ones(4, dtype=bool) if missing == "all_nan" else np.array([False, True, False, False])
-        predictor: Any = np.ma.array(values, mask=mask) if missing == "masked" else np.where(mask, np.nan, values)
-        statistics = pd.DataFrame({"nmad": [1.0, 2.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="slope"))
-        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
-        correlation = VariogramModel("gaussian", effective_range=3, partial_sill=1)
-        structure = gu.ErrorStructure(
-            [gu.ErrorComponent("noise", 0.5), gu.ErrorComponent("spatial", magnitude, correlation)]
-        )
-
-        # We keep the grid + seed identical so missing predictors cannot change other draws
-        options: dict[str, Any] = {"backend": backend, "random_state": 5, "n_fields": 2}
-        if support == "raster":
-            raster = gu.Raster.from_array(np.ones((2, 2)), transform=from_origin(0, 2, 1, 1), crs=32606)
-            options["like"] = raster
-            predictor = gu.Raster.from_array(predictor.reshape(2, 2), raster.transform, raster.crs, nodata=np.nan)
-            reference_predictor = values.reshape(2, 2)
-        else:
-            options["coordinates"] = np.column_stack((np.arange(4), np.zeros(4)))
-            if support == "pointcloud":
-                options["like"] = gu.PointCloud.from_xyz(np.arange(4), np.zeros(4), np.ones(4), crs=32606)
-                options.pop("coordinates")
-            reference_predictor = values
-
-        # Derive random error field
-        result = gu.uncertainty.random_field(structure, predictors={"slope": predictor}, **options)
-        reference = gu.uncertainty.random_field(structure, predictors={"slope": reference_predictor}, **options)
-
-        # Check NaN locations are NaNs in output, and equality otherwise
-        for field, complete in zip(result, reference):
-            actual = field if support == "array" else field.data
-            expected = complete if support == "array" else complete.data
-            actual = np.ma.asarray(actual).filled(np.nan).reshape(-1)
-            expected = np.ma.asarray(expected).filled(np.nan).reshape(-1)
-            np.testing.assert_array_equal(np.isnan(actual), mask)
-            np.testing.assert_array_equal(actual[~mask], expected[~mask])
-
     def test_random_field__scalar_predictor(self) -> None:
         """Checks that a scalar predictor value scales error magnitude everywhere (without correlation yet)."""
 
@@ -339,6 +294,51 @@ class TestRandomField:
         assert first.shape == raster.shape and first.transform == raster.transform and first.crs == raster.crs
         np.testing.assert_array_equal(first.get_mask(), raster.get_mask())
         np.testing.assert_array_equal(first.data, second.data)
+
+    @pytest.mark.parametrize("backend", ["gstools", "gpytorch"])
+    @pytest.mark.parametrize("support", ["raster", "pointcloud", "array"])
+    @pytest.mark.parametrize("missing", ["nan", "masked", "all_nan"])
+    def test_random_field__nan_predictors(self, backend: str, support: str, missing: str) -> None:
+        """Checks that predictors with NaNs work and only propagate NaNs at the same locations."""
+
+        pytest.importorskip(backend)
+        # Create small data, mask, predictor and error structure
+        values = np.array([0.0, 0.25, 0.75, 1.0])
+        mask = np.ones(4, dtype=bool) if missing == "all_nan" else np.array([False, True, False, False])
+        predictor: Any = np.ma.array(values, mask=mask) if missing == "masked" else np.where(mask, np.nan, values)
+        statistics = pd.DataFrame({"nmad": [1.0, 2.0], "count": [10, 10]}, index=pd.Index([0.0, 1.0], name="slope"))
+        magnitude = gu.ErrorMagnitude.variable_from_grouped_stats(statistics)
+        correlation = VariogramModel("gaussian", effective_range=3, partial_sill=1)
+        structure = gu.ErrorStructure(
+            [gu.ErrorComponent("noise", 0.5), gu.ErrorComponent("spatial", magnitude, correlation)]
+        )
+
+        # We keep the grid + seed identical so missing predictors cannot change other draws
+        options: dict[str, Any] = {"backend": backend, "random_state": 5, "n_fields": 2}
+        if support == "raster":
+            raster = gu.Raster.from_array(np.ones((2, 2)), transform=from_origin(0, 2, 1, 1), crs=32606)
+            options["like"] = raster
+            predictor = gu.Raster.from_array(predictor.reshape(2, 2), raster.transform, raster.crs, nodata=np.nan)
+            reference_predictor = values.reshape(2, 2)
+        else:
+            options["coordinates"] = np.column_stack((np.arange(4), np.zeros(4)))
+            if support == "pointcloud":
+                options["like"] = gu.PointCloud.from_xyz(np.arange(4), np.zeros(4), np.ones(4), crs=32606)
+                options.pop("coordinates")
+            reference_predictor = values
+
+        # Derive random error field
+        result = gu.uncertainty.random_field(structure, predictors={"slope": predictor}, **options)
+        reference = gu.uncertainty.random_field(structure, predictors={"slope": reference_predictor}, **options)
+
+        # Check NaN locations are NaNs in output, and equality otherwise
+        for field, complete in zip(result, reference):
+            actual = field if support == "array" else field.data
+            expected = complete if support == "array" else complete.data
+            actual = np.ma.asarray(actual).filled(np.nan).reshape(-1)
+            expected = np.ma.asarray(expected).filled(np.nan).reshape(-1)
+            np.testing.assert_array_equal(np.isnan(actual), mask)
+            np.testing.assert_array_equal(actual[~mask], expected[~mask])
 
 
 class TestRandomFieldChunked:
