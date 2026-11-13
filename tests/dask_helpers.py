@@ -20,11 +20,23 @@ def run_with_dask_client(
     from distributed import Client, LocalCluster
     from distributed.compatibility import asyncio_run
     from distributed.config import get_loop_factory
+    from tornado.ioloop import IOLoop
+
+    tornado_loop: IOLoop | None = None
 
     async def run_cluster() -> Result:
+        """Run the calculation and await client and cluster shutdown on their event loop."""
+
+        nonlocal tornado_loop
+        tornado_loop = IOLoop.current()
         async with LocalCluster(asynchronous=True, **cluster_options) as cluster:
             async with Client(cluster, asynchronous=True, **(client_options or {})) as client:
                 return await asyncio.to_thread(function, client)
 
     # Let Dask choose a compatible event loop, including for Windows (avoid CI issues)
-    return asyncio_run(run_cluster(), loop_factory=get_loop_factory())
+    try:
+        return asyncio_run(run_cluster(), loop_factory=get_loop_factory())
+    finally:
+        # asyncio.run() closes asyncio, but Tornado also owns a wrapper and a Windows selector thread
+        if tornado_loop is not None:
+            tornado_loop.close(all_fds=True)
