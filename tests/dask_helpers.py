@@ -38,6 +38,10 @@ def run_with_dask_client(
                     return await asyncio.to_thread(function, client)
         finally:
             # Dask can close its client connection before the message sender has stopped
+            # test_close_closed() and test_close_twice() cover this extra close:
+            # https://github.com/dask/distributed/blob/2026.8.0/distributed/tests/test_batched.py#L125-L155
+            # close() wakes the sender and waits for it to stop:
+            # https://github.com/dask/distributed/blob/2026.8.0/distributed/batched.py#L164-L175
             if client is not None and client.scheduler_comm is not None:
                 await client.scheduler_comm.close()
 
@@ -52,5 +56,7 @@ def run_with_dask_client(
         return asyncio_run(run_cluster(), loop_factory=get_loop_factory())
     finally:
         # We need to close Tornado too, especially on Windows where it can leave a background thread running
+        # Follow Dask's _run_and_close_tornado() test helper:
+        # https://github.com/dask/distributed/blob/2026.8.0/distributed/utils_test.py#L371-L382
         if tornado_loop is not None:
             tornado_loop.close(all_fds=True)
